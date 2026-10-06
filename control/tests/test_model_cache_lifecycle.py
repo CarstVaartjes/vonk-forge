@@ -211,6 +211,7 @@ def test_an_unadopted_lapsed_legacy_row_still_heals(cache, tmp_path):
     assert "claim" not in healed.payload  # the legacy claim retired with the decision
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_corrupt_document_never_raises_out_of_the_core(cache, tmp_path):
     service, sessions = cache
     operation, _artifact_document = _queue(

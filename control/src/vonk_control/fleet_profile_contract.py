@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .endpoint_contract import EndpointResponse
+from .model_cache_contract import CachedResourceEstimate
 from .operation_blockers import OperationBlocker
 from .preparation_contract import (
     CompatibilityIdentity,
@@ -365,6 +366,41 @@ class FleetProfileAssignment(StoredFleetProfileAssignment):
     ) = None
 
 
+class FleetAssignmentModelView(StrictModel):
+    """The model an assignment runs, as the operator reads it."""
+
+    selector: str | None = None
+    name: str | None = None
+    variant: str | None = None
+    state: str
+    content_sha256: str | None = None
+
+
+class FleetAssignmentRecipeView(StrictModel):
+    """The recipe revision an assignment runs, as the operator reads it."""
+
+    selector: str
+    name: str | None = None
+    state: str
+    revision_id: str | None = None
+
+
+class FleetCacheSummary(StrictModel):
+    """How many assignments of a profile are cached, missing or unknown."""
+
+    cached: int = Field(default=0, ge=0)
+    missing: int = Field(default=0, ge=0)
+    unknown: int = Field(default=0, ge=0)
+
+
+class FleetNodeView(StrictModel):
+    """One Spark of the fleet and whether the profile assigns it."""
+
+    selector: str
+    display_name: str
+    state: str
+
+
 class FleetProfileAssignmentView(StrictModel):
     """Canonical read projection of one logical profile assignment."""
 
@@ -375,9 +411,9 @@ class FleetProfileAssignmentView(StrictModel):
     spark_ids: list[NodeId] = Field(min_length=1, max_length=32)
     required_sparks: int | None = Field(default=None, ge=1, le=32)
     assigned_sparks: int = Field(ge=1, le=32)
-    model: dict[str, object] = Field(default_factory=dict)
-    recipe: dict[str, object] = Field(default_factory=dict)
-    resources: dict[str, object] = Field(default_factory=dict)
+    model: FleetAssignmentModelView
+    recipe: FleetAssignmentRecipeView
+    resources: CachedResourceEstimate = Field(default_factory=CachedResourceEstimate)
     # The effective choice for every option of the recipe (defaults included).
     option_choices: OptionChoices = Field(default_factory=dict)
     observed_state: str = "Not loaded"
@@ -464,10 +500,10 @@ class FleetProfileView(StrictModel):
     favorite: bool
     definition: FleetProfileDefinition
     assignments: list[FleetProfileAssignmentView]
-    fleet: list[dict[str, object]] = Field(default_factory=list)
+    fleet: list[FleetNodeView] = Field(default_factory=list)
     status: str = "draft"
     loaded_revision: int | None = Field(default=None, ge=1)
-    cache_summary: dict[str, object] = Field(default_factory=dict)
+    cache_summary: FleetCacheSummary = Field(default_factory=FleetCacheSummary)
     warnings: list[str] = Field(default_factory=list, max_length=MAX_PROFILE_WARNINGS)
     next_actions: list[str] = Field(default_factory=list, max_length=32)
     profile_digest: Digest

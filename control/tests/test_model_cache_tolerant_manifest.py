@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import CatalogDocumentRevision
 
@@ -33,6 +34,7 @@ def _unreadable(revision: CatalogDocumentRevision) -> str:
     return revision.content_digest
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_unreadable_recipe_revision_resolves_from_newest_readable(tmp_path: Path):
     sessions = _sessions()
     file_digest = hashlib.sha256(b"model bytes!").hexdigest()
@@ -84,6 +86,7 @@ def test_unreadable_recipe_revision_resolves_from_newest_readable(tmp_path: Path
     assert manifest.artifacts[0].expected_bytes == 12
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_unreadable_model_revision_resolves_from_newest_readable(tmp_path: Path):
     sessions = _sessions()
     file_digest = hashlib.sha256(b"model bytes!").hexdigest()
@@ -135,6 +138,7 @@ def test_unreadable_model_revision_resolves_from_newest_readable(tmp_path: Path)
     assert manifest.artifacts[0].path == "weights/new.safetensors"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
     tmp_path: Path,
 ):

@@ -18,6 +18,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .pki import (
     CertificateAuthority,
@@ -34,6 +35,68 @@ _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}\Z")
 _KID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _DEFAULT_CERTIFICATE_LIFETIME_SECONDS = 30 * 24 * 60 * 60
 _MAX_CRL_WINDOW = timedelta(hours=1)
+
+
+class _StepWire(BaseModel):
+    """A document the Controller sends to step-ca, or step-ca's strict answer."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class _TokenClaims(_StepWire):
+    """The claims of the one-time token that authorizes one step-ca request."""
+
+    iss: str
+    sub: str
+    aud: str
+    iat: int
+    nbf: int
+    exp: int
+    jti: str
+    sans: list[str] | None = None
+
+
+class _SignRequest(_StepWire):
+    csr: str
+    ott: str
+    notBefore: str
+    notAfter: str
+
+
+class _RevokeRequest(_StepWire):
+    serial: str
+    ott: str
+    reasonCode: int = 4
+    reason: str = "superseded by Vonk Forge"
+    passive: bool = True
+
+
+class _StatusReply(_StepWire):
+    status: str
+
+
+class _TlsOptions(BaseModel):
+    """step-ca's own TLS hints; Vonk Forge reads none of them."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class _SignReply(_StepWire):
+    crt: str
+    ca: str
+    certChain: list[str]
+    tlsOptions: _TlsOptions | None = None
+
+
+class _PublicJwk(BaseModel):
+    """The public EC key fields an RFC 7638 thumbprint is built from."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    crv: str
+    kty: str
+    x: str
+    y: str
 
 
 class StepCAError(RuntimeError):
@@ -175,7 +238,7 @@ class StepCertificateAuthority(CertificateAuthority):
         return self._sign(node_id, csr_pem, now)
 
     def check_health(self) -> None:
-        if self._json_request("GET", "/health", None) != {"status": "ok"}:
+        if not _is_ok(self._json_request("GET", "/health", None)):
             raise StepCAError("step-ca health response is invalid")
 
     def renew_node(
@@ -195,17 +258,12 @@ class StepCertificateAuthority(CertificateAuthority):
         timestamp = _utc_timestamp(now)
         if _SERIAL.fullmatch(serial) is None:
             raise ValueError("certificate serial must be a positive decimal integer")
-        body = {
-            "serial": serial,
-            "ott": self._token(
-                serial, f"{self._ca_url}/1.0/revoke", timestamp, sans=None
-            ),
-            "reasonCode": 4,
-            "reason": "superseded by Vonk Forge",
-            "passive": True,
-        }
+        body = _RevokeRequest(
+            serial=serial,
+            ott=self._token(serial, f"{self._ca_url}/1.0/revoke", timestamp, sans=None),
+        )
         response = self._json_request("POST", "/1.0/revoke", body)
-        if response != {"status": "ok"}:
+        if not _is_ok(response):
             raise StepCAError("step-ca returned an invalid revocation response")
 
     def revocation_bundle(self, now: datetime) -> bytes:
@@ -246,44 +304,35 @@ class StepCertificateAuthority(CertificateAuthority):
         request = _load_node_csr(node_id, csr_pem)
         normalized_csr = request.public_bytes(serialization.Encoding.PEM)
         endpoint = f"{self._ca_url}/1.0/sign"
-        response = self._json_request(
+        raw_response = self._json_request(
             "POST",
             "/1.0/sign",
-            {
-                "csr": normalized_csr.decode("ascii"),
-                "ott": self._token(
+            _SignRequest(
+                csr=normalized_csr.decode("ascii"),
+                ott=self._token(
                     node_id,
                     endpoint,
                     timestamp,
                     sans=[f"spiffe://vonk-forge.local/node/{node_id}"],
                     request_id=request_id,
                 ),
-                "notBefore": _rfc3339(timestamp),
-                "notAfter": _rfc3339(timestamp + self._certificate_lifetime),
-            },
+                notBefore=_rfc3339(timestamp),
+                notAfter=_rfc3339(timestamp + self._certificate_lifetime),
+            ),
         )
-        if not isinstance(response, dict) or not {"crt", "ca", "certChain"} <= set(
-            response
-        ):
-            raise StepCAError("step-ca returned an invalid sign response")
-        if set(response) - {"crt", "ca", "certChain", "tlsOptions"}:
-            raise StepCAError("step-ca returned unexpected sign response fields")
-        if not isinstance(response["crt"], str) or not isinstance(response["ca"], str):
-            raise StepCAError("step-ca returned invalid certificate PEM")
-        chain = response["certChain"]
-        if (
-            not isinstance(chain, list)
-            or len(chain) != 2
-            or not all(isinstance(value, str) for value in chain)
-        ):
+        try:
+            response = _SignReply.model_validate(raw_response)
+        except ValidationError as error:
+            raise StepCAError("step-ca returned an invalid sign response") from error
+        if len(response.certChain) != 2:
             raise StepCAError("step-ca returned an invalid certificate chain")
-        if chain != [response["crt"], response["ca"]]:
+        if response.certChain != [response.crt, response.ca]:
             raise StepCAError("step-ca returned inconsistent certificate chain fields")
         leaf = _one_certificate(
-            response["crt"].encode("ascii"), "leaf", provider_error=True
+            response.crt.encode("ascii"), "leaf", provider_error=True
         )
         intermediate = _one_certificate(
-            response["ca"].encode("ascii"), "intermediate", provider_error=True
+            response.ca.encode("ascii"), "intermediate", provider_error=True
         )
         if intermediate.fingerprint(hashes.SHA256()) != self._intermediate.fingerprint(
             hashes.SHA256()
@@ -440,27 +489,24 @@ class StepCertificateAuthority(CertificateAuthority):
         request_id: str | None = None,
     ) -> str:
         timestamp = int(now.timestamp())
-        claims: dict[str, object] = {
-            "iss": self._provisioner_name,
-            "sub": subject,
-            "aud": audience,
-            "iat": timestamp,
-            "nbf": timestamp - int(self._clock_skew.total_seconds()),
-            "exp": timestamp + 60,
-            "jti": request_id or secrets.token_urlsafe(32),
-        }
-        if sans is not None:
-            claims["sans"] = sans
+        claims = _TokenClaims(
+            iss=self._provisioner_name,
+            sub=subject,
+            aud=audience,
+            iat=timestamp,
+            nbf=timestamp - int(self._clock_skew.total_seconds()),
+            exp=timestamp + 60,
+            jti=request_id or secrets.token_urlsafe(32),
+            sans=sans,
+        )
         return jwt.encode(
-            claims,
+            claims.model_dump(exclude_none=True),
             self._credential,
             algorithm="ES256",
             headers={"kid": self._provisioner_kid, "typ": "JWT"},
         )
 
-    def _json_request(
-        self, method: str, path: str, body: dict[str, object] | None
-    ) -> object:
+    def _json_request(self, method: str, path: str, body: _StepWire | None) -> object:
         raw = self._request(method, path, body, accept="application/json")
         try:
             return json.loads(raw)
@@ -468,11 +514,14 @@ class StepCertificateAuthority(CertificateAuthority):
             raise StepCAError("step-ca returned malformed JSON") from error
 
     def _request(
-        self, method: str, path: str, body: dict[str, object] | None, *, accept: str
+        self, method: str, path: str, body: _StepWire | None, *, accept: str
     ) -> bytes:
         try:
             with self._client.stream(
-                method, f"{self._ca_url}{path}", json=body, headers={"accept": accept}
+                method,
+                f"{self._ca_url}{path}",
+                json=None if body is None else body.model_dump(exclude_none=True),
+                headers={"accept": accept},
             ) as response:
                 if response.is_redirect:
                     raise StepCAError("step-ca redirects are forbidden")
@@ -602,15 +651,23 @@ def _rfc3339(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _jwk_thumbprint(value: dict[str, object]) -> str:
+def _is_ok(value: object) -> bool:
     try:
+        return _StatusReply.model_validate(value).status == "ok"
+    except ValidationError:
+        return False
+
+
+def _jwk_thumbprint(value: object) -> str:
+    try:
+        jwk = _PublicJwk.model_validate(value)
         canonical = json.dumps(
-            {name: value[name] for name in ("crv", "kty", "x", "y")},
+            {"crv": jwk.crv, "kty": jwk.kty, "x": jwk.x, "y": jwk.y},
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=True,
         ).encode("ascii")
-    except (KeyError, UnicodeEncodeError) as error:
+    except (ValidationError, UnicodeEncodeError) as error:
         raise ValueError(
             "provisioner public metadata is missing thumbprint fields"
         ) from error

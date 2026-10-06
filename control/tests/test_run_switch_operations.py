@@ -71,6 +71,7 @@ from vonk_control.recipe_operations import (
 from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
+    split_option_choices,
 )
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract import (
@@ -1043,6 +1044,7 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
 
 
 @pytest.mark.parametrize("damage", ["plan", "result"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_malformed_operation_is_rejected_without_aborting_the_batch(
     tmp_path: Path,
     damage: str,
@@ -1488,11 +1490,11 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
 
     def resolve_runtime_image(document, requested_digest, runtime_spec):
         assert requested_digest == image_digest
-        runtime = runtime_spec["runtime"]
+        runtime = runtime_spec.runtime
         receipt = controller_storage.find_verified(
             requested_digest,
-            expected_architecture=runtime["architecture"],
-            expected_runtime_interface=runtime["interface"],
+            expected_architecture=runtime.architecture,
+            expected_runtime_interface=runtime.interface,
         )
         if receipt is None:
             raise RuntimeError("verified runtime image receipt is unavailable")
@@ -1562,14 +1564,15 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     build = session.get(RecipeBuild, build_id)
                     assert revision is not None and build is not None
                     entities = resolve_recipe_entities(session, revision.document)
+                    option_choices, settings = split_option_choices(
+                        plan.mapping.parameters if plan.mapping is not None else None
+                    )
                     runtime_spec = compile_runtime_spec(
-                        revision.document,
-                        resolved_entities=entities,
-                        parameters=(
-                            dict(plan.mapping.parameters)
-                            if plan.mapping is not None
-                            else {}
-                        ),
+                        entities.recipe,
+                        recipe_digest=entities.recipe_digest,
+                        models=entities.models,
+                        parameters=settings,
+                        option_choices=option_choices,
                         role=plan.spark_group.nodes[0].role,
                         rank=plan.spark_group.nodes[0].rank,
                         package_handle={
@@ -1581,7 +1584,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     )
                     receipt = prepare_runtime_image(
                         revision.document,
-                        runtime=runtime_spec["runtime"],
+                        runtime=runtime_spec.runtime.document(),
                         storage=controller_storage,
                         transport=transport,
                         build_receipt={
@@ -2316,6 +2319,7 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
     assert switch.executor.events.count("runtime-install") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     tmp_path: Path,
 ) -> None:
@@ -2487,6 +2491,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert executor.receipts == [receipt]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_first_profile_preparation_preview_replans_a_missing_build_archive(
     tmp_path: Path,
 ) -> None:
@@ -2580,6 +2585,7 @@ def test_first_profile_preparation_preview_replans_a_missing_build_archive(
     ]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) -> None:
     """A notes-only successor reuses the identical prepared build.
 
@@ -2854,6 +2860,7 @@ def test_a_spark_whose_agent_cannot_pull_images_asks_for_an_upgrade(
     assert [reason.node_ids for reason in upgrade] == [[nodes[0]]]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     tmp_path: Path,
 ) -> None:
@@ -2944,6 +2951,7 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     }
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_container_phase_delegates_to_existing_recipe_build_child(
     tmp_path: Path,
 ) -> None:
@@ -4047,6 +4055,7 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     tmp_path: Path,
 ) -> None:
@@ -5108,6 +5117,7 @@ def _record_successful_reconcile_member(
     return {}
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuilds_its_ranks(
     tmp_path: Path,
 ) -> None:
@@ -5157,6 +5167,7 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuild
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
     tmp_path: Path,
 ) -> None:
@@ -5265,6 +5276,7 @@ def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
     assert cleanup_result.final_verified is True
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
     tmp_path: Path,
 ) -> None:
@@ -5989,6 +6001,7 @@ def test_shared_admission_contention_preserves_operation_for_retry(
         pytest.fail("shared admission contention did not schedule a durable retry")
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_stored_run_switch_with_retired_fields_stays_readable_and_new_work_proceeds(
     tmp_path: Path,
 ) -> None:

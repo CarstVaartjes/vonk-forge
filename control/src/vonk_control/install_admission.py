@@ -24,6 +24,9 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
 
 from .admission_locking import (
     AdmissionLockBusy,
@@ -40,10 +43,6 @@ from .categorized_errors import (
     MissingRecord,
 )
 from .cluster_mappings import validate_mapping_parameters
-from .compiled_execution_plan import (
-    CompiledExecutionPlanError,
-    validate_compiled_launch_payload,
-)
 from .content_identity import same_image, same_model_object
 from .disk_reservations import (
     describe_disk_charges,
@@ -135,13 +134,11 @@ class InstallPlan:
     # One strict Controller-issued launch document per mapped node.  It is
     # appended to preserve the positional shape used by older in-process
     # callers; production admission populates it before accepting an install.
-    compiled_execution_plans: tuple[tuple[str, dict[str, object]], ...] = ()
+    compiled_execution_plans: tuple[tuple[str, WireCompiledExecutionPlan], ...] = ()
 
     @property
-    def compiled_plan_by_node(self) -> dict[str, dict[str, object]]:
-        return {
-            node_id: dict(value) for node_id, value in self.compiled_execution_plans
-        }
+    def compiled_plan_by_node(self) -> dict[str, WireCompiledExecutionPlan]:
+        return dict(self.compiled_execution_plans)
 
 
 class InstallPlanConflict(RuntimeError):
@@ -278,7 +275,7 @@ class InstallAdmissionService:
         *,
         inventory_max_age: int = 300,
         disk_floor_bytes: int = 10_000_000_000,
-        compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]]
+        compiled_plan_provider: Callable[..., Mapping[str, WireCompiledExecutionPlan]]
         | None = None,
     ) -> None:
         self._sessions = sessions
@@ -294,7 +291,7 @@ class InstallAdmissionService:
         *,
         now: datetime,
         _session: Session | None = None,
-        compiled_execution_plans: Mapping[str, Mapping[str, object]] | None = None,
+        compiled_execution_plans: Mapping[str, WireCompiledExecutionPlan] | None = None,
         profile_application_id: str | None = None,
     ) -> InstallPlan:
         with (
@@ -396,12 +393,8 @@ class InstallAdmissionService:
                     "exact recipe dependencies are unavailable",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
-            models = resolved_entities.get("models")
-            model_document = (
-                getattr(models[0], "document", None)
-                if isinstance(models, Sequence) and models
-                else None
-            )
+            models = resolved_entities.model_revisions
+            model_document = models[0].document if models else None
             if not isinstance(model_document, Mapping):
                 raise BookkeepingUnknown(
                     "exact model license authority is unavailable",
@@ -437,25 +430,7 @@ class InstallAdmissionService:
                 except Exception as error:  # noqa: BLE001 - provider errors become typed admission evidence
                     compiled_plan_error = str(error)[:512]
                     compiled_execution_plans = {}
-            if compiled_execution_plans is not None:
-                try:
-                    if not isinstance(compiled_execution_plans, Mapping):
-                        raise InvalidType(
-                            "compiled execution plan mapping is invalid",
-                            reason=InvalidRequestReason.MALFORMED,
-                        )
-                    compiled_execution_plans = {
-                        str(node_id): validate_compiled_launch_payload(value)
-                        for node_id, value in compiled_execution_plans.items()
-                    }
-                except (CompiledExecutionPlanError, TypeError, ValueError) as error:
-                    compiled_plan_error = str(error)[:512]
-                    compiled_execution_plans = {}
-            compiled_plan_by_node = {
-                str(node_id): dict(value)
-                for node_id, value in (compiled_execution_plans or {}).items()
-                if isinstance(node_id, str) and isinstance(value, Mapping)
-            }
+            compiled_plan_by_node = dict(compiled_execution_plans or {})
             # Build input identity belongs to build resolution; current-revision
             # authorization and present verified bytes belong to the compiler's
             # runtime-image resolver. The recipe that originally produced an
@@ -553,13 +528,9 @@ class InstallAdmissionService:
             disk = role.resources.disk
             compiled_plan = compiled_plan_by_node.get(mapping_node.node_id)
             compiled_artifacts = (
-                compiled_plan.get("artifacts")
-                if isinstance(compiled_plan, Mapping)
-                else None
+                compiled_plan.artifacts if compiled_plan is not None else None
             )
-            if not isinstance(compiled_artifacts, Sequence) or isinstance(
-                compiled_artifacts, (str, bytes)
-            ):
+            if compiled_artifacts is None:
                 blockers.append(
                     AdmissionReason(
                         InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
@@ -571,22 +542,17 @@ class InstallAdmissionService:
             artifact_sizes: dict[str, int] = {}
             models_by_artifact: dict[str, object] = {}
             for artifact in compiled_artifacts:
-                if not isinstance(artifact, Mapping):
-                    continue
-                digest = artifact.get("sha256")
-                size = artifact.get("size_bytes")
-                if isinstance(digest, str) and type(size) is int and size >= 0:
-                    model = artifact.get("model")
-                    if isinstance(model, Mapping):
-                        models_by_artifact[digest] = model.get("content_sha256")
-                    previous = artifact_sizes.setdefault(digest, size)
-                    if previous != size:
-                        blockers.append(
-                            AdmissionReason(
-                                InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
-                                "Compiled model receipts disagree about an object size.",
-                            )
+                digest = artifact.sha256
+                size = artifact.size_bytes
+                models_by_artifact[digest] = artifact.model.content_sha256
+                previous = artifact_sizes.setdefault(digest, size)
+                if previous != size:
+                    blockers.append(
+                        AdmissionReason(
+                            InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
+                            "Compiled model receipts disagree about an object size.",
                         )
+                    )
             actual_artifact_bytes = sum(artifact_sizes.values())
             if image_bytes is None:
                 blockers.append(
@@ -746,7 +712,7 @@ class InstallAdmissionService:
             recipe_revision_id=revision.id,
             recipe_content_sha256=recipe_digest,
             compiled_execution_plans={
-                node_id: compiled_plan_by_node[node_id]
+                node_id: compiled_plan_by_node[node_id].model_dump(mode="json")
                 for node_id in sorted(compiled_plan_by_node)
             },
             nodes=plans,
@@ -993,7 +959,10 @@ class InstallAdmissionService:
                     "recipe_content_sha256": plan.recipe_content_sha256,
                     "allowed": plan.allowed,
                     "plan_digest": plan.plan_digest,
-                    "compiled_execution_plans": plan.compiled_plan_by_node,
+                    "compiled_execution_plans": {
+                        node_id: compiled.model_dump(mode="json")
+                        for node_id, compiled in plan.compiled_plan_by_node.items()
+                    },
                     "nodes": [_node_document(item) for item in plan.nodes],
                 }
             )
@@ -1108,16 +1077,12 @@ def _primary_model_sha256(document: Mapping[str, object]) -> str:
 
 
 def _compiled_build_matches(
-    payload: Mapping[str, object], build: RecipeBuild, recipe_digest: str
+    payload: WireCompiledExecutionPlan, build: RecipeBuild, recipe_digest: str
 ) -> bool:
-    identity = payload.get("identity")
-    image = payload.get("runtime_image")
     return (
-        isinstance(identity, Mapping)
-        and identity.get("recipe_revision_sha256") == recipe_digest
-        and isinstance(image, Mapping)
+        payload.identity.recipe_revision_sha256 == recipe_digest
         and build.image_bytes is not None
-        and same_image(image, build)
+        and same_image(payload.runtime_image, build)
     )
 
 

@@ -90,6 +90,7 @@ def test_store_rejects_expected_digest_mismatch(tmp_path) -> None:
     assert error.value.code == "bundle.digest_mismatch"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_postgres_source_bundle_metadata_roundtrip_and_strict_reads(postgres_engine):
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import canonical_message

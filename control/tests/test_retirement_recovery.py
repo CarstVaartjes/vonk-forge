@@ -270,6 +270,7 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
         assert "exact cleanup confirmed" in (retired.status_reason or "")
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_retirement_refuses_expired_lease_inside_issued_launch_budget(
     tmp_path: Path, postgres_engine
 ) -> None:

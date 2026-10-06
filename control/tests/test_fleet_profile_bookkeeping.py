@@ -110,7 +110,7 @@ def test_a_failing_cache_resolver_reads_the_profile_with_unknown_cache() -> None
     # The resolver is evidence about what is prepared, never a gate: the profile
     # reads (and saves) without it and nothing claims the recipe is cached.
     assert service.get(created.id).assignments
-    assert all(not item.recipe.get("cached") for item in created.assignments)
+    assert all(item.recipe.state != "Cached" for item in created.assignments)
 
 
 def test_a_saved_recipe_without_an_active_revision_waits_for_the_catalog() -> None:
@@ -185,6 +185,7 @@ def test_damaged_progress_is_rebuilt_from_the_row_receipt() -> None:
     assert rebuilt.completed_steps == row.current_step
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_damaged_plan_and_result_are_retired_or_rebuilt_never_raised() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)

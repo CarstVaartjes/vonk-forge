@@ -47,6 +47,9 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolAgentOperation,
 )
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
 from vonk_forge_contracts import read_model, read_recipe
 
 from . import agent_operation_states, artifact_job_states, job_states
@@ -1721,7 +1724,7 @@ class RecipeOperationService:
         node_ids: Collection[str],
         *,
         now: datetime,
-    ) -> dict[str, dict[str, object]] | Residue:
+    ) -> dict[str, WireCompiledExecutionPlan] | Residue:
         """The compiled launch documents an installation was accepted with.
 
         A stored plan that does not parse (or does not cover the ranks) is
@@ -1733,18 +1736,15 @@ class RecipeOperationService:
 
         wanted = set(node_ids)
 
-        def read() -> dict[str, dict[str, object]] | Damaged:
+        def read() -> dict[str, WireCompiledExecutionPlan] | Damaged:
             plans = parse_stored_installation_plan(
                 installation.plan
             ).compiled_execution_plans
             if not plans or not wanted <= set(plans):
                 return Damaged("stored installation plan lacks compiled documents")
-            return {
-                node_id: value.model_dump(mode="json")
-                for node_id, value in plans.items()
-            }
+            return dict(plans)
 
-        def rebuild() -> dict[str, dict[str, object]] | None:
+        def rebuild() -> dict[str, WireCompiledExecutionPlan] | None:
             try:
                 fresh = self._install_admission.plan_install(
                     installation.mapping_id,
@@ -1905,7 +1905,9 @@ class RecipeOperationService:
                             "installation_id": installation_id,
                             "plan_digest": installation.plan_digest,
                             "expected_bytes": node.required_bytes,
-                            "compiled_execution_plan": raw_plans[node.node_id],
+                            "compiled_execution_plan": raw_plans[
+                                node.node_id
+                            ].model_dump(mode="json"),
                         },
                     )
                     for node in nodes
@@ -2242,7 +2244,9 @@ class RecipeOperationService:
                             "installation_id": installation_id,
                             "plan_digest": plan.plan_digest,
                             "expected_bytes": node.required_bytes,
-                            "compiled_execution_plan": compiled_plans[node.node_id],
+                            "compiled_execution_plan": compiled_plans[
+                                node.node_id
+                            ].model_dump(mode="json"),
                         },
                     )
                     for node in plan.nodes
@@ -4606,7 +4610,9 @@ class RecipeOperationService:
                         "installation_id": owner_id,
                         "plan_digest": previous_plan_digest,
                         "expected_bytes": node.required_bytes,
-                        "compiled_execution_plan": compiled_plans[node.node_id],
+                        "compiled_execution_plan": compiled_plans[
+                            node.node_id
+                        ].model_dump(mode="json"),
                     },
                 )
                 for node in nodes

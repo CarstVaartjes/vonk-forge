@@ -57,6 +57,7 @@ def _availability(sessions, storage, now, revision, plan):
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_build_cancellation_preserves_each_accepted_availability_consumer(
     tmp_path, postgres_engine
 ):
@@ -101,6 +102,7 @@ def test_build_cancellation_preserves_each_accepted_availability_consumer(
     assert cancelled.state == "cancelled"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_recipe_parent_cancellation_detaches_one_shared_build_consumer(
     tmp_path, postgres_engine
 ):
@@ -244,6 +246,7 @@ def test_accepted_profile_consumer_protects_build_until_its_intent_is_cancelled(
 
 
 @pytest.mark.parametrize("change", ["none", "superseded", "invalid-progress"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_protects_its_build_before_the_execution_child_exists(
     tmp_path, postgres_engine, change
 ):
@@ -386,6 +389,7 @@ def test_profile_holds_build_dependency_until_its_acceptance_commits(
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_availability_acceptance_cannot_pass_a_busy_build_cancellation_boundary(
     tmp_path, postgres_engine
 ):
@@ -409,6 +413,7 @@ def test_availability_acceptance_cannot_pass_a_busy_build_cancellation_boundary(
     assert accepted.state == "queued"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_new_availability_consumer_committing_before_cancellation_keeps_shared_build(
     tmp_path, postgres_engine, monkeypatch
 ):
@@ -490,6 +495,7 @@ def test_new_availability_consumer_committing_before_cancellation_keeps_shared_b
 
 
 @pytest.mark.parametrize("linked", [True, False])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_new_availability_consumer_cannot_join_after_cancellation_fences_shared_build(
     tmp_path, postgres_engine, monkeypatch, linked
 ):
@@ -602,6 +608,7 @@ def test_existing_build_identity_mismatch_cannot_be_treated_as_an_unbound_consum
         assert caught.value.code == "build.consumer_invalid"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_invalid_cleanup_evidence_refuses_consumer_acceptance_with_a_typed_error(
     tmp_path, postgres_engine
 ):

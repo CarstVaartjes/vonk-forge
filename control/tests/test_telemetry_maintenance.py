@@ -89,6 +89,7 @@ def test_run_once_captures_one_aware_clock_value_and_rejects_unbounded_limits(
         ).run_once()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_retention_boundaries_are_strict_ordered_and_repeatedly_bounded(
     sessions,
 ) -> None:

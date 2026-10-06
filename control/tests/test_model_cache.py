@@ -1005,10 +1005,10 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     resolved = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )
-    assert resolved["recipe"]["recipe_revision_id"] == old_revision.id
-    assert resolved["recipe"]["update_available"] is True
-    assert resolved["model"]["content_sha256"] == model_digest
-    assert resolved["resources"] == {
+    assert resolved.recipe.recipe_revision_id == old_revision.id
+    assert resolved.recipe.update_available is True
+    assert resolved.model.content_sha256 == model_digest
+    assert resolved.resources.model_dump() == {
         "per_spark_memory_bytes": None,
         "additional_disk_bytes": 20,
         "model_bytes": 3,
@@ -1023,11 +1023,11 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         model_variant="fp16",
         exact_revision_id=new_revision.id,
     )
-    assert exact["recipe"]["recipe_revision_id"] == new_revision.id
-    assert exact["recipe"]["cached"] is False
-    assert exact["recipe"]["cache_state"] == "missing"
-    assert exact["recipe"]["content_sha256"] == new_digest
-    assert "recipe-not-cached" in exact["blockers"]
+    assert exact.recipe.recipe_revision_id == new_revision.id
+    assert exact.recipe.cached is False
+    assert exact.recipe.cache_state == "missing"
+    assert exact.recipe.content_sha256 == new_digest
+    assert "recipe-not-cached" in exact.blockers
 
     real_open = os.open
 
@@ -1060,18 +1060,18 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     missing_model_bytes = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )
-    assert missing_model_bytes["recipe"]["cached"] is True
-    assert missing_model_bytes["model"]["cached"] is False
-    assert "model-not-cached" in missing_model_bytes["blockers"]
+    assert missing_model_bytes.recipe.cached is True
+    assert missing_model_bytes.model.cached is False
+    assert "model-not-cached" in missing_model_bytes.blockers
     model_object.write_bytes(b"one")
 
     image_object.unlink()
     missing_image_bytes = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )
-    assert missing_image_bytes["recipe"]["recipe_revision_id"] == new_revision.id
-    assert missing_image_bytes["recipe"]["cached"] is False
-    assert "recipe-not-cached" in missing_image_bytes["blockers"]
+    assert missing_image_bytes.recipe.recipe_revision_id == new_revision.id
+    assert missing_image_bytes.recipe.cached is False
+    assert "recipe-not-cached" in missing_image_bytes.blockers
     image_object.write_bytes(b"x" * build.image_bytes)
 
     with sessions.begin() as session:
@@ -1079,20 +1079,20 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     image_only = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )
-    assert image_only["recipe"]["recipe_revision_id"] == old_revision.id
-    assert image_only["recipe"]["cached"] is True
-    assert image_only["model"]["cached"] is False
-    assert image_only["resources"]["additional_disk_bytes"] is None
+    assert image_only.recipe.recipe_revision_id == old_revision.id
+    assert image_only.recipe.cached is True
+    assert image_only.model.cached is False
+    assert image_only.resources.additional_disk_bytes is None
 
     with sessions.begin() as session:
         session.delete(build)
     missing = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )
-    assert missing["recipe"]["recipe_revision_id"] == new_revision.id
-    assert missing["recipe"]["expected_bytes"] is None
-    assert missing["model"]["expected_bytes"] is None
-    assert missing["resources"]["additional_disk_bytes"] is None
+    assert missing.recipe.recipe_revision_id == new_revision.id
+    assert missing.recipe.expected_bytes is None
+    assert missing.model.expected_bytes is None
+    assert missing.resources.additional_disk_bytes is None
 
 
 @pytest.mark.parametrize("shared_object", [False, True])
@@ -1411,6 +1411,7 @@ def test_upstream_revision_downloads_only_new_files_and_reuses_the_rest(
         "not a result document",
     ],
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cache_operation_reads_rebuild_malformed_or_wrong_kind_results(
     cache,
     tmp_path: Path,

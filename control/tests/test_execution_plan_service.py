@@ -9,7 +9,6 @@ the installed plan binds instead of silently rebinding the job.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -60,7 +59,7 @@ def installation(tmp_path):
     installed = CompiledExecutionPlan.model_validate_json(
         INSTALLED_PLAN.read_text(encoding="utf-8")
     )
-    return sessions, revision, installed.model_dump(mode="json"), installed
+    return sessions, revision, installed, installed
 
 
 def _build(installed, image_digest: str) -> RecipeBuild:
@@ -95,14 +94,14 @@ def _invoke(
             installed=installed,
             build=build,
             parameters={},
-            timeout_seconds=installed["job"]["timeout_seconds"],
+            timeout_seconds=installed.job.timeout_seconds,
             memory_floor_bytes=(
-                installed["runtime"]["placement"]["memory_floor_bytes"]
+                installed.runtime.placement.memory_floor_bytes
                 if memory_floor_bytes is None
                 else memory_floor_bytes
             ),
             reserved_memory_bytes=(
-                installed["runtime"]["placement"]["reserved_memory_bytes"]
+                installed.runtime.placement.reserved_memory_bytes
                 if reserved_memory_bytes is None
                 else reserved_memory_bytes
             ),
@@ -111,16 +110,14 @@ def _invoke(
 
 def test_job_apply_compiles_against_the_installed_build(installation):
     sessions, revision, installed, plan = installation
-    assert revision.content_digest == installed["identity"]["recipe_revision_sha256"]
+    assert revision.content_digest == installed.identity.recipe_revision_sha256
     compiled = _invoke(
         sessions,
         revision,
         installed,
         _build(installed, plan.runtime_image.image_digest),
     )
-    compiled_identity = compiled["identity"]
-    assert isinstance(compiled_identity, Mapping)
-    assert compiled_identity["recipe_revision_sha256"] == (
+    assert compiled.identity.recipe_revision_sha256 == (
         plan.identity.recipe_revision_sha256
     )
 
@@ -128,7 +125,7 @@ def test_job_apply_compiles_against_the_installed_build(installation):
 def test_job_apply_rejects_a_build_that_drifted_from_the_installed_plan(installation):
     sessions, revision, installed, _plan = installation
     repaired = "sha256:" + "c" * 64
-    assert repaired != installed["runtime_image"]["image_digest"]
+    assert repaired != installed.runtime_image.image_digest
     with pytest.raises(
         ExecutionPlanCompilationError,
         match="job build differs from the installed workload",
@@ -177,11 +174,7 @@ def test_job_invocation_binds_the_accepted_reservation_instead_of_recipe_peak(
         _build(installed, plan.runtime_image.image_digest),
         reserved_memory_bytes=reservation,
     )
-    runtime = compiled["runtime"]
-    assert isinstance(runtime, Mapping)
-    placement = runtime["placement"]
-    assert isinstance(placement, Mapping)
-    assert placement["reserved_memory_bytes"] == reservation
+    assert compiled.runtime.placement.reserved_memory_bytes == reservation
 
 
 def test_unconfirmed_model_cache_evidence_keeps_its_type(installation):

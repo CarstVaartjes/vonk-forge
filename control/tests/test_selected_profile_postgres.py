@@ -219,8 +219,8 @@ def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edi
         assert view.revision == 2
         assert view.status == "loaded"
         assert view.loaded_revision == 1
-        joined = next(item for item in view.fleet if item["selector"] == joined_node)
-        assert joined["state"] == "Idle"
+        joined = next(item for item in view.fleet if item.selector == joined_node)
+        assert joined.state == "Idle"
         assert view.assignments[0].spark_ids == [joined_node]
     finally:
         restarted_engine.dispose()
@@ -288,6 +288,7 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
 
 
 @pytest.mark.parametrize("authority_change", ["disabled", "demoted"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recovers(
     postgres_engine: Engine, authority_change: str
 ) -> None:

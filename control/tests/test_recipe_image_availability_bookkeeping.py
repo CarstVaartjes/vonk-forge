@@ -79,6 +79,7 @@ def test_a_malformed_stored_retry_time_makes_the_removal_due_instead_of_failing(
     assert _removal_retry_is_due(future, now) is False
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_damaged_cancellation_evidence_reads_as_none_and_a_fresh_cancel_heals_it(
     tmp_path: Path,
 ) -> None:
@@ -102,6 +103,7 @@ def test_damaged_cancellation_evidence_reads_as_none_and_a_fresh_cancel_heals_it
     engine.dispose()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_damaged_stored_request_reads_as_a_key_used_by_another_operation(
     tmp_path: Path,
 ) -> None:

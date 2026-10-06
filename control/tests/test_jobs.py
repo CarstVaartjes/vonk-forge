@@ -12,6 +12,7 @@ from vonk_control.auth import TokenCodec
 from vonk_control.jobs import JobService, StaleAttempt
 from vonk_control.models import Base, Job
 from vonk_control.operation_api import JobProgress, OperationPage, job_response
+from vonk_control.stored_json import write_guard_mode
 
 
 class Clock:
@@ -183,7 +184,7 @@ def test_job_targets_reject_non_string_json_members_on_enqueue(
 def test_job_targets_reject_malformed_persisted_json_on_read(service) -> None:
     jobs, _ = service
     job = jobs.enqueue("probe", "admin", "abc", ["target"], {})
-    with jobs._sessions.begin() as session:
+    with write_guard_mode(strict=False), jobs._sessions.begin() as session:
         row = session.get(Job, job.id)
         assert row is not None
         row.targets = [1]
@@ -266,6 +267,7 @@ def test_matching_fence_can_heartbeat_and_fail(service) -> None:
         "recipe.stop.v2",
     ],
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> None:
     jobs, _ = service
     upgrade = jobs.enqueue(

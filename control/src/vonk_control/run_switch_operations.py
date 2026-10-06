@@ -52,6 +52,7 @@ from vonk_agent_protocol import (
     canonical_message,
     run_switch_code,
 )
+from vonk_forge_contracts.recipe import Scalar
 
 from . import job_states
 from .admission_locking import AdmissionLockBusy, busy_detail, patient_admission
@@ -299,6 +300,7 @@ from .unused_storage_collection import spark_eviction_capacity
 # Persisted progress and catalog documents arrive as decoded JSON, so the
 # contract's closed value sets are read back through the declared alias instead
 # of a hand-written membership test that could drift from it.
+_KNOBS_ADAPTER: TypeAdapter[dict[str, Scalar]] = TypeAdapter(dict[str, Scalar])
 _CHANGE_EFFECTS_ADAPTER = TypeAdapter(dict[str, RunSwitchChangeEffect])
 _CONTAINER_BUILD_STATE_ADAPTER = TypeAdapter(RunSwitchContainerBuildState)
 _BUILD_EVIDENCE_STATE_ADAPTER = TypeAdapter(RunSwitchBuildEvidenceState)
@@ -867,7 +869,7 @@ def _settings_view(settings: object) -> EffectiveSettingsSelection:
             data=resolved.parallelism.data,
             backend=resolved.parallelism.backend,
         ),
-        knobs=dict(resolved.knobs),
+        knobs=_KNOBS_ADAPTER.validate_python(dict(resolved.knobs), strict=True),
         change_effects=_CHANGE_EFFECTS_ADAPTER.validate_python(
             dict(resolved.change_effects), strict=True
         ),
@@ -4474,13 +4476,7 @@ class RunSwitchOperationService:
             )
         try:
             resolved = resolve_recipe_entities(session, revision.document)
-            resolved_models = resolved.get("models")
-            resolved_model_items = (
-                tuple(resolved_models)
-                if isinstance(resolved_models, Sequence)
-                and not isinstance(resolved_models, (str, bytes))
-                else ()
-            )
+            resolved_model_items = resolved.model_revisions
             resolved_model = resolved_model_items[0] if resolved_model_items else None
             for resolved_item in resolved_model_items:
                 candidate_item = getattr(resolved_item, "document", None)

@@ -120,12 +120,26 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/artifact_blob_store.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
       "module": "control/src/vonk_control/artifact_job_api.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/artifact_job_evidence.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/artifact_jobs.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/artifact_maintenance.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -205,6 +219,10 @@
       "module": "control/src/vonk_control/harnesses/canonical_metadata.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/job_documents.py",
+      "kind": "controller-contract"
     },
     {
       "module": "control/src/vonk_control/library_contract.py",
@@ -301,6 +319,19 @@
       "module": "control/src/vonk_control/runtime_image_preparation.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/runtime_spec_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/step_ca.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/stored_documents.py",
+      "kind": "controller-contract"
     },
     {
       "module": "control/src/vonk_control/strict_json.py",

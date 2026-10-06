@@ -247,6 +247,7 @@ def test_profile_switch_state_rebuilds_malformed_persisted_progress() -> None:
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_application_read_degrades_for_malformed_persisted_plan_and_result() -> (
     None
 ):
@@ -288,6 +289,7 @@ def test_profile_application_read_degrades_for_malformed_persisted_plan_and_resu
     assert service.application(application.id).result is None
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_worker_retires_malformed_persisted_plan_as_unknown() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -894,6 +896,7 @@ def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
     assert service.get(profile.id).assignments[0].observed_state == "Not loaded"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -1241,6 +1244,7 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
 
 
 @pytest.mark.parametrize("old_state", ["failed", "queued", "running"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) -> None:
     """A history parser failure must not veto a fresh authorized workload."""
 
@@ -1307,6 +1311,7 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
     assert replay.id == first.id
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_preview_isolates_an_unreadable_pending_plan() -> None:
     """A damaged pending step list must not veto a fresh authorized preview."""
 
@@ -1370,6 +1375,7 @@ def test_named_assignment_keeps_authoring_name_without_inventing_an_endpoint(
     assert assignment.alias == ("studio-chat" if desired_state == "running" else None)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_preview_skips_an_unreadable_pending_plan_without_a_scope() -> None:
     """A record that cannot be read at all never blocks new profile work."""
 
@@ -1511,6 +1517,7 @@ def test_preview_treats_a_preparation_blocker_as_not_allowed() -> None:
     assert preview.allowed is False
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_activity_projection_keeps_valid_records_when_one_is_unreadable() -> None:
     """One damaged profile application must not fail the whole Activity page."""
 
@@ -1568,6 +1575,7 @@ def test_activity_projection_keeps_valid_records_when_one_is_unreadable() -> Non
     assert unreadable["result"] is None
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_activity_lists_a_record_with_retired_fields_and_new_work_proceeds() -> None:
     """Fields a newer Controller retired never make stored history unreadable."""
 
@@ -1600,6 +1608,7 @@ def test_activity_lists_a_record_with_retired_fields_and_new_work_proceeds() -> 
     assert service.preview(idle.id).allowed is True
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
     """Damaged history must not deny a valid receipt its retry authority."""
 
@@ -2030,6 +2039,7 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
     }
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_all_idle_profile_supersedes_a_queued_load_without_a_run() -> None:
     sessions = _database()
     _seed(sessions)
@@ -2972,7 +2982,7 @@ def test_profile_create_is_server_owned_validated_and_digest_stable() -> None:
     assert created == loaded
     assert listed.profiles == [created]
     assert created.name == "Studio ready"
-    assert created.assignments[0].recipe["name"] == "Synthetic Tiny build"
+    assert created.assignments[0].recipe.name == "Synthetic Tiny build"
     assert created.assignments[0].spark_ids == [_node_id(1)]
     assert len(created.profile_digest) == 64
     assert created.profile_digest == loaded.profile_digest

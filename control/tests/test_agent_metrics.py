@@ -1,6 +1,7 @@
 import re
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
@@ -142,6 +143,7 @@ def _sessions(tmp_path):
     return sessions
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_operational_metrics_project_existing_agent_state_with_bounded_labels(
     tmp_path,
 ) -> None:
@@ -206,6 +208,7 @@ def test_operational_metrics_project_existing_agent_state_with_bounded_labels(
         assert secret not in rendered
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_operational_metrics_refresh_replaces_stale_node_series(tmp_path) -> None:
     sessions = _sessions(tmp_path)
     metrics = MetricsRegistry()

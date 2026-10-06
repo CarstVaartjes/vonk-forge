@@ -25,9 +25,11 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
+from vonk_forge_contracts.recipe import Scalar
 
 from .distribution_assignment import NodeDistributionAssignment
 from .lifecycle_preflight import LifecyclePreflightCheckpoint
+from .mapping_parameters import MappingParameters
 from .model_cache_contract import ModelCacheDownloadResult
 from .operation_blockers import OperationBlocker
 from .preparation_contract import RolloutPreparation
@@ -387,7 +389,7 @@ class EffectiveSettingsSelection(StrictModel):
     concurrency: int | None = Field(default=None, ge=1)
     max_batch_tokens: int | None = Field(default=None, ge=1)
     parallelism: EffectiveParallelism
-    knobs: dict[str, object] = Field(default_factory=dict, max_length=64)
+    knobs: dict[str, Scalar] = Field(default_factory=dict, max_length=64)
     change_effects: dict[str, RunSwitchChangeEffect] = Field(max_length=64)
     identity_sha256: Digest
 
@@ -511,7 +513,7 @@ class MappingSelection(StrictModel):
     mapping_id: UuidId | None
     mapping_generation: int | None = Field(default=None, ge=1)
     topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
-    parameters: dict[str, object] = Field(default_factory=dict, max_length=128)
+    parameters: MappingParameters = Field(default_factory=dict, max_length=128)
     # The effective recipe-option choices this mapping runs with (also inside
     # ``parameters``); empty for a recipe without options.
     option_choices: dict[str, str] = Field(default_factory=dict, max_length=16)

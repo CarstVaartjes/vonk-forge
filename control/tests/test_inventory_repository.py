@@ -8,6 +8,7 @@ from vonk_control.inventory_repository import (
     InventorySnapshotInput,
 )
 from vonk_control.models import AgentNode, Base, NodeInventorySnapshot
+from vonk_control.stored_json import write_guard_mode
 
 
 def repository(tmp_path):
@@ -109,7 +110,7 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
             memory_pool="separate",
         )
     )
-    with repo._sessions.begin() as session:
+    with write_guard_mode(strict=False), repo._sessions.begin() as session:
         snapshot = session.get(NodeInventorySnapshot, stored.id)
         assert snapshot is not None
         # Persist a JSON object where the array contract requires a list, so

@@ -439,6 +439,7 @@ def test_installation_a_saved_profile_points_to_goes_after_the_unpointed(
     assert pointed in lifecycle.removed
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_of_the_loaded_profile_is_never_evicted(
     world: Catalog,
 ) -> None:
@@ -684,6 +685,7 @@ def _hard_linked_models(world: Catalog) -> tuple[list[str], list[str]]:
     return first, second
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_shared_model_files_free_only_with_the_last_installation_that_links_them(
     world: Catalog,
 ) -> None:
@@ -710,6 +712,7 @@ def test_shared_model_files_free_only_with_the_last_installation_that_links_them
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_shared_file_a_staying_installation_links_is_not_counted_as_freed(
     world: Catalog,
 ) -> None:
@@ -745,6 +748,7 @@ def test_a_shared_file_a_staying_installation_links_is_not_counted_as_freed(
     assert _scope(result, spark_scope(NODE))["outcome"] == "insufficient_after_eviction"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_model_that_only_shares_files_with_one_that_stays_is_not_offered(
     world: Catalog,
 ) -> None:
@@ -764,6 +768,7 @@ def test_a_model_that_only_shares_files_with_one_that_stays_is_not_offered(
     assert _kept(result, "shares its files with one that stays") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_admission_relief_removes_the_installations_of_a_model_together_and_frees_real_bytes(
     world: Catalog,
 ) -> None:
@@ -794,6 +799,7 @@ def test_admission_relief_removes_the_installations_of_a_model_together_and_free
             )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_load_waiting_to_be_admitted_does_not_keep_what_it_waits_for_space_from(
     world: Catalog,
 ) -> None:
@@ -829,6 +835,7 @@ def test_a_load_waiting_to_be_admitted_does_not_keep_what_it_waits_for_space_fro
     assert lifecycle.removed == [installation]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_load_that_issued_something_still_keeps_the_installations_it_uses(
     world: Catalog,
 ) -> None:
@@ -849,6 +856,7 @@ def test_a_load_that_issued_something_still_keeps_the_installations_it_uses(
     assert _kept(result, "live operation") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_a_live_operation_names_is_kept(world: Catalog) -> None:
     """Catches ignoring a parked load that plans to reuse the installation."""
 
@@ -910,6 +918,7 @@ def _application(
             )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_a_profile_load_in_flight_on_its_sparks_is_kept(
     world: Catalog,
 ) -> None:
@@ -927,6 +936,7 @@ def test_installation_a_profile_load_in_flight_on_its_sparks_is_kept(
     assert _kept(result, "live operation") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_the_selected_profile_application_names_is_kept(
     world: Catalog,
 ) -> None:
@@ -965,6 +975,7 @@ def test_a_load_accepted_before_the_removal_is_queued_stops_the_removal(
     assert _kept(result, "live operation") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_profile_saved_before_the_removal_is_queued_stops_the_removal(
     world: Catalog,
 ) -> None:
@@ -985,6 +996,7 @@ def test_a_profile_saved_before_the_removal_is_queued_stops_the_removal(
     assert _kept(result, "profile") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_is_kept_while_a_profile_cannot_be_read(world: Catalog) -> None:
     """Nothing is proven unused when a profile is unreadable (fail closed)."""
 
@@ -1390,6 +1402,7 @@ def test_receipt_of_a_superseded_revision_goes_but_a_shared_one_stays(
     assert shared.exists()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_receipt_a_live_operation_names_is_kept_and_a_recent_transfer_only_goes_last(
     world: Catalog, tmp_path: Path
 ) -> None:
@@ -1435,6 +1448,7 @@ def test_receipt_a_live_operation_names_is_kept_and_a_recent_transfer_only_goes_
     assert named.exists() and not pulled.exists()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_receipt_an_installation_still_uses_is_kept(
     world: Catalog, tmp_path: Path
 ) -> None:
@@ -1454,6 +1468,7 @@ def test_receipt_an_installation_still_uses_is_kept(
     assert path.exists()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_receipt_a_load_references_after_the_sweep_looked_is_kept(
     world: Catalog, tmp_path: Path
 ) -> None:
@@ -1649,6 +1664,7 @@ def test_model_a_profile_points_to_is_kept(world: Catalog, cached) -> None:
     assert _set_exists(world, set_digest)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_model_an_installation_or_a_live_operation_uses_is_kept(
     world: Catalog, cached
 ) -> None:
@@ -1701,6 +1717,7 @@ def test_model_a_recent_transfer_to_a_spark_only_makes_it_the_last_to_go(
     assert result.models == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_model_a_load_reaches_after_the_sweep_looked_is_not_fenced(
     world: Catalog, cached
 ) -> None:
@@ -1959,6 +1976,7 @@ def test_removals_that_free_what_they_promised_do_not_pause_eviction(
 # -- what keeps an installation when disk is short -------------------------------
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_an_operation_that_just_finished_makes_an_installation_recent_not_kept(
     world: Catalog,
 ) -> None:
@@ -1982,6 +2000,7 @@ def test_an_operation_that_just_finished_makes_an_installation_recent_not_kept(
     assert lifecycle.removed == [used]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_load_waiting_for_this_disk_does_not_keep_the_installations_it_needs_gone(
     world: Catalog,
 ) -> None:
@@ -2015,6 +2034,7 @@ def test_a_load_waiting_for_this_disk_does_not_keep_the_installations_it_needs_g
     assert lifecycle.removed == [installation]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_refusal_says_what_stays_and_why(world: Catalog) -> None:
     """Catches 'only N bytes can be removed' with no word on what is kept."""
 

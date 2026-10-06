@@ -21,6 +21,7 @@ from .test_build_consumer_ownership import _availability
 from .test_recipe_builds import _write_controller_build_receipt
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
     tmp_path, postgres_engine, monkeypatch
 ):

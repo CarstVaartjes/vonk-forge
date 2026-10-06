@@ -7,7 +7,28 @@ import os
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from vonk_control.artifact_jobs import StorageReconciliation
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
+
+
+def _report(**counts: int) -> StorageReconciliation:
+    return StorageReconciliation.model_validate(
+        {
+            "max_stored_bytes": 0,
+            "used_bytes": 0,
+            "reserved_bytes": 0,
+            "in_flight_uploads": 0,
+            "remaining_bytes": 0,
+            "removed_temporary_files": 0,
+            "removed_reservation_files": 0,
+            "removed_orphan_blobs": 0,
+            "missing_referenced_blobs": [],
+            "remaining_work": False,
+            "expired_jobs": 0,
+            "removed_blob_records": 0,
+            **counts,
+        }
+    )
 
 
 def test_artifact_maintenance_cadence_is_durable_across_process_instances(
@@ -18,7 +39,7 @@ def test_artifact_maintenance_cadence_is_durable_across_process_instances(
 
     def reconcile(*, batch_limit: int):
         calls.append(batch_limit)
-        return {"expired_jobs": 2, "removed_orphan_blobs": 1}
+        return _report(expired_jobs=2, removed_orphan_blobs=1)
 
     first = ArtifactMaintenanceCadence(
         reconcile,
@@ -91,7 +112,7 @@ def test_artifact_maintenance_never_waits_for_another_process(tmp_path) -> None:
         nonlocal calls
         assert batch_limit == 1
         calls += 1
-        return {}
+        return _report()
 
     cadence = ArtifactMaintenanceCadence(
         reconcile,
@@ -118,7 +139,7 @@ def test_artifact_maintenance_never_waits_for_another_process(tmp_path) -> None:
 
 def test_artifact_maintenance_rejects_unaware_clock(tmp_path) -> None:
     cadence = ArtifactMaintenanceCadence(
-        lambda **_kwargs: {},
+        lambda **_kwargs: _report(),
         state_root=tmp_path,
         interval_seconds=60,
         batch_limit=1,

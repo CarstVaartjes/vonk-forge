@@ -678,6 +678,7 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
     ],
     ids=["no-reason", "error-code-only", "unlisted-reason", "success-mismatch"],
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_operator_resume_always_sets_fresh_install_safety_fence(
     tmp_path, stored_result
 ) -> None:
@@ -1545,6 +1546,7 @@ def test_a_release_that_is_mid_publication_is_fetched_again(
 @pytest.mark.parametrize(
     "damage", ["node-order", "payload-digest", "sources", "extra-key"]
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_resume_of_a_damaged_stored_plan_ends_the_rollout_instead_of_raising(
     tmp_path, damage
 ) -> None:
@@ -1992,6 +1994,7 @@ def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_fleet_upgrade_all_treats_an_already_current_spark_as_a_no_op(
     tmp_path,
 ) -> None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -211,9 +210,8 @@ class RecipeOperationRequest(_StrictPayload):
         return getattr(self.payload, "run_id", None)
 
     @property
-    def compiled_execution_plan(self) -> Mapping[str, Any] | None:
-        plan = getattr(self.payload, "compiled_execution_plan", None)
-        return None if plan is None else plan.to_mapping()
+    def compiled_execution_plan(self) -> CompiledExecutionPlan | None:
+        return getattr(self.payload, "compiled_execution_plan", None)
 
     @property
     def cleanup_model_content_sha256(self) -> str | None:

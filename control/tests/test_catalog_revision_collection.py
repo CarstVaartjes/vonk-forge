@@ -472,6 +472,7 @@ def test_an_unreadable_old_contract_revision_is_removed_without_being_read(
     assert not catalog.exists(bad_projection)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_payload_naming_the_revision_keeps_it_whatever_contract_wrote_it(
     catalog: Catalog,
 ) -> None:
@@ -495,6 +496,7 @@ def test_a_payload_naming_the_revision_keeps_it_whatever_contract_wrote_it(
     assert not catalog.exists(finished_long_ago)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_the_selected_profile_application_keeps_the_revision_it_loaded(
     catalog: Catalog,
 ) -> None:
@@ -680,6 +682,7 @@ def test_one_refused_removal_does_not_stop_the_rest(catalog: Catalog) -> None:
     assert result.revisions == 3
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_source_bundles_nothing_names_are_removed_after_the_grace_period(
     catalog: Catalog,
 ) -> None:
