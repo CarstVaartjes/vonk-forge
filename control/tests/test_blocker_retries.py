@@ -6,6 +6,7 @@ import ast
 import copy
 import textwrap
 from collections.abc import Mapping
+from typing import cast
 
 import pytest
 
@@ -815,18 +816,28 @@ def test_the_allowlist_credits_exactly_what_the_proof_proves(
     assert promote_proven(document) == 0
 
 
-def test_a_retry_reached_through_a_loop_on_some_paths_only_stays_debt(
+def test_admission_proof_requires_the_result_retry_on_every_path(
     retry_proof_graph: object,
 ) -> None:
-    document = load_allowlist()
+    document = copy.deepcopy(load_allowlist())
     path = "control/src/vonk_control/recipe_operations.py"
     for cls, function in (
         ("InstallAdmissionBusy", "RecipeOperationService._queue_in_session"),
         ("InstallAdmissionBusy", "RecipeOperationService._admit_workload_intent"),
     ):
-        proof = proof_of(document, path, cls, function)
+        assert proven(document, path, cls, function) is not None
+    document["retry_loops"] = [
+        loop
+        for loop in cast(list[dict[str, object]], document["retry_loops"])
+        if loop["function"] not in {"AgentJobService.succeed", "AgentJobService.fail"}
+    ]
+    for function in (
+        "RecipeOperationService._queue_in_session",
+        "RecipeOperationService._admit_workload_intent",
+    ):
+        proof = proof_of(document, path, "InstallAdmissionBusy", function)
         assert proof.reached_by_a_loop and not proof.proven
-        assert proven(document, path, cls, function) is None
+        assert proven(document, path, "InstallAdmissionBusy", function) is None
 
 
 def test_a_callback_through_an_injected_service_has_its_caller(

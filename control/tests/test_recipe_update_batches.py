@@ -134,6 +134,79 @@ def _start(service, selectors):
     )
 
 
+@pytest.mark.parametrize("when", ["before_pass", "after_child_commit"])
+def test_stale_batch_invocation_ends_without_overwriting_replacement(
+    update_env, monkeypatch, when
+):
+    """Catches a stale claim fault escaping, or overwriting the new parent's link."""
+    sessions, recipes, now, fresh = update_env
+    service = fresh()
+    parent = _start(service, [next(iter(recipes))])
+    stale = service.claim_update(owner="old-worker")
+    actual = service._start_request
+    replacement_views = []
+
+    def replace_owner():
+        now[0] += timedelta(seconds=11)
+        replacement = fresh()
+        claim = replacement.claim_update(owner="new-worker")
+        assert claim is not None
+        replacement.run_update_claim(claim)
+        replacement_views.append(replacement.get_operator_operation(parent.id))
+
+    def accepted_then_replaced(*args, **kwargs):
+        observed = actual(*args, **kwargs)
+        replace_owner()
+        return observed
+
+    if when == "before_pass":
+        replace_owner()
+    else:
+        monkeypatch.setattr(service, "_start_request", accepted_then_replaced)
+    service.run_update_claim(stale)
+    assert fresh().get_operator_operation(parent.id) == replacement_views[0]
+    with sessions() as session:
+        assert len(list(session.scalars(select(Job)))) == 2
+
+
+def test_unknown_child_admission_retries_even_without_retryable_hint(
+    update_env, monkeypatch
+):
+    """Unknown evidence cannot permanently fail an exact frozen child."""
+    from vonk_agent_protocol import RecipeUpdateCode, WaitReason
+    from vonk_control.recipe_image_availability import RecipeImageAvailabilityUnknown
+
+    _, recipes, now, fresh = update_env
+    service = fresh()
+    parent = _start(service, [next(iter(recipes))])
+    actual = service._start_request
+    calls = []
+
+    def start(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise RecipeImageAvailabilityUnknown(
+                RecipeUpdateCode.OBSERVATION_INVALID,
+                "receipt cannot be observed",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                retryable=False,
+            )
+        return actual(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_start_request", start)
+    service.run_update_claim(service.claim_update(owner="worker"))
+    waiting = service.get_operator_operation(parent.id)
+    assert waiting.children[0].state == "pending"
+    assert waiting.children[0].failure.retryable
+    assert service.claim_update(owner="worker") is None
+    now[0] += timedelta(seconds=3)
+    service.run_update_claim(service.claim_update(owner="worker"))
+    assert (
+        service.get_operator_operation(parent.id).children[0].operation_id is not None
+    )
+    assert len(calls) == 2
+
+
 def test_changed_frozen_revision_is_refused_before_child_commit(update_env):
     sessions, recipes, _, fresh = update_env
     service = fresh()
@@ -303,8 +376,7 @@ def test_stale_parent_cannot_admit_or_replace_new_claim(update_env):
     stale = service.claim_update(owner="first")
     now[0] += timedelta(seconds=11)
     current = fresh().claim_update(owner="second")
-    with pytest.raises(RecipeImageAvailabilityError, match="no longer owns"):
-        service.run_update_claim(stale)
+    service.run_update_claim(stale)
     fresh().run_update_claim(current)
     assert (
         fresh().get_operator_operation(parent.id).children[0].operation_id is not None
@@ -1039,11 +1111,7 @@ def test_postgres_takeover_fences_old_parent_admission_and_result(
             accepted = replacement.get_operator_operation(parent.id)
         finally:
             release.set()
-        if pause_after_commit:
-            with pytest.raises(RecipeImageAvailabilityError, match="no longer owns"):
-                old_future.result(timeout=5)
-        else:
-            old_future.result(timeout=5)
+        old_future.result(timeout=5)
     assert fresh().get_operator_operation(parent.id) == accepted
     with sessions() as session:
         assert len(list(session.scalars(select(Job)))) == 2
