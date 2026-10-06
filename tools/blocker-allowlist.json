@@ -53,7 +53,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 198,
-    "unaudited": 606,
+    "unaudited": 603,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -1310,8 +1310,7 @@
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_trigger_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_in_progress", 2],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_repository_changed", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "_result", "catalog.sync_result_invalid", 1]
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_repository_changed", 1]
       ]
     },
     {
@@ -2237,7 +2236,6 @@
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "accepted-profile-does-not-own-this-exact-stop", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-identity-is-stale", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-owner-is-unavailable", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-plan-is-invalid", 2],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-progress-is-inconsistent", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-fleet-intent-changed", 2],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-has-no-saved-profile-owner", 1],
@@ -2942,7 +2940,8 @@
       "sites": [
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._intended_profile", "persisted-application-intent-digest-is-inconsistent", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._intended_profile", "persisted-application-review-digest-is-inconsistent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileRecoveryBindingConflict", "_require_recovery_preparation", "profile.recovery_cache_pending", 1]
+        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileRecoveryBindingConflict", "_require_recovery_preparation", "profile.recovery_cache_pending", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-plan-is-invalid", 2]
       ]
     },
     {
