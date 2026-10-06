@@ -35,9 +35,10 @@ from vonk_control.artifact_jobs import (
     ArtifactJobService,
     CompiledArtifactContract,
     _effective_parameters,
-    _validate_parameter_definition,
 )
 from vonk_control.bounded_json import require_mapping
+from vonk_control.categorized_errors import MissingRecord
+from vonk_control.compiled_artifact_contract import validate_parameter_definition
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -129,6 +130,10 @@ def _mapping(value: object) -> dict[str, object]:
     return value
 
 
+def _validate_parameter_definition(raw: dict[str, object]) -> dict[str, object]:
+    return validate_parameter_definition(raw).model_dump(mode="json")
+
+
 def _sequence(value: object) -> list[object]:
     assert isinstance(value, list)
     return value
@@ -136,7 +141,7 @@ def _sequence(value: object) -> list[object]:
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 def test_artifact_float_settings_require_finite_values(value: float) -> None:
-    with pytest.raises(ArtifactJobError, match="contract"):
+    with pytest.raises((TypeError, ValueError)):
         _validate_parameter_definition(
             {
                 "name": "guidance",
@@ -166,7 +171,7 @@ def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> No
             {"parameters": [definition]}, {"guidance_scale": float("nan")}
         )
 
-    with pytest.raises(ArtifactJobError, match="contract"):
+    with pytest.raises((TypeError, ValueError)):
         _validate_parameter_definition(
             {
                 "name": "a" * 65,
@@ -184,7 +189,7 @@ def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> No
         "hf_token",
         "github_token",
     ):
-        with pytest.raises(ArtifactJobError, match="contract"):
+        with pytest.raises((TypeError, ValueError)):
             _validate_parameter_definition(
                 {"name": name, "type": "string", "default": "secret"}
             )
@@ -595,7 +600,7 @@ def test_artifact_job_persisted_parameters_are_validated_before_compilation(
         assert row is not None
         row.parameters = {"prompt": "fox", "seed": "0"}
 
-    with pytest.raises(ArtifactJobError, match="stored artifact job parameters"):
+    with pytest.raises(ArtifactJobError, match="recipe run is not accepting jobs"):
         service.submit(
             created.id,
             actor="operator",
@@ -884,7 +889,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         "null-request-id",
     ),
 )
-def test_artifact_submission_receipt_fails_closed_on_corrupt_owner(
+def test_artifact_submission_receipt_degrades_on_corrupt_owner(
     tmp_path, corruption: str
 ) -> None:
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
@@ -899,8 +904,11 @@ def test_artifact_submission_receipt_fails_closed_on_corrupt_owner(
             parent = session.get(Job, submitted.operation_id)
             assert artifact_job is not None and parent is not None
             object.__setattr__(parent, "request_id", None)
-            with pytest.raises(ArtifactJobError, match="submission request identity"):
-                service._view_in_session(session, artifact_job)
+            # The submission's identity is damaged bookkeeping: the job is shown
+            # without it instead of being refused.
+            with session.no_autoflush:
+                view = service._view_in_session(session, artifact_job)
+            assert (view.operation_id, view.submit_request_id) == (None, None)
         return
 
     with sessions.begin() as session:
@@ -928,8 +936,8 @@ def test_artifact_submission_receipt_fails_closed_on_corrupt_owner(
         else:
             raise AssertionError(f"unexpected corruption: {corruption}")
 
-    with pytest.raises(ArtifactJobError):
-        service.get(submitted.id)
+    view = service.get(submitted.id)
+    assert (view.operation_id, view.submit_request_id) == (None, None)
 
 
 def test_artifact_job_rejects_unsafe_names_and_timeout(tmp_path) -> None:
@@ -1895,10 +1903,37 @@ def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
         else:
             manifest["undeclared"] = None
         row.input_manifest = manifest
-    with pytest.raises(ArtifactJobError, match="stored artifact input manifest"):
+    # Nothing re-derives the declared inputs of a draft with no uploads: the job
+    # reads as not found and cannot be finalized, with the damage recorded.
+    with pytest.raises(MissingRecord):
         service.get(created.id)
-    with pytest.raises(ArtifactJobError, match="stored artifact input manifest"):
+    with pytest.raises(ArtifactJobError, match="inputs are incomplete"):
         service.finalize(created.id)
+
+
+def test_artifact_input_manifest_is_rebuilt_from_the_uploaded_inputs(tmp_path):
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path
+    )
+    created = service.create(
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000154")
+    )
+    content = b"png"
+    service.put_input(
+        created.id,
+        name="input.png",
+        media_type="image/png",
+        expected_sha256=hashlib.sha256(content).hexdigest(),
+        content=content,
+    )
+    with sessions.begin() as session:
+        row = session.get(ArtifactJob, created.id)
+        assert row is not None
+        row.input_manifest = {"schema_version": 1}
+    # The uploaded rows reproduce the digest the job was created under, so the
+    # declared inputs are rebuilt from them and the job stays readable.
+    assert service.get(created.id).input_declarations == created.input_declarations
+    assert service.finalize(created.id).preparation == "ready"
 
 
 @pytest.mark.parametrize("evidence", [[], "invalid", {"elapsed_milliseconds": "1"}])

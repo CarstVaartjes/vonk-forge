@@ -57,11 +57,6 @@ class ArtifactBlobBusy(UnknownOutcomeError, ArtifactBlobStoreError):
     """The reference fence is held by a reconciliation: the caller retries."""
 
 
-class ArtifactBlobUnavailable(UnknownOutcomeError, FileNotFoundError):
-    """Stored bytes are absent or of another size: unknown, replaced by the next
-    identical upload."""
-
-
 @dataclass(frozen=True, slots=True)
 class StoredArtifactBlob:
     sha256: str
@@ -252,7 +247,13 @@ class ArtifactBlobStore:
                 temporary.unlink()
             self._release_reservation(reservation)
 
-    def resolve(self, storage_key: str, sha256: str, size_bytes: int) -> Path:
+    def resolve(self, storage_key: str, sha256: str, size_bytes: int) -> Path | None:
+        """The stored object, or ``None`` when its bytes are absent or damaged.
+
+        Absent or damaged bytes are unknown, not a refusal: the caller reads
+        ``None`` as "not found" and the next identical upload replaces them.
+        """
+
         self._digest(sha256)
         expected_key = f"{sha256[:2]}/{sha256}"
         if storage_key != expected_key:
@@ -262,12 +263,7 @@ class ArtifactBlobStore:
             )
         path = self._root / sha256[:2] / sha256
         if path.is_symlink() or not path.is_file() or path.stat().st_size != size_bytes:
-            # Absent or damaged bytes are unknown, not a refusal: the reader
-            # sees "not found" and the next identical upload replaces them.
-            raise ArtifactBlobUnavailable(
-                "stored artifact is unavailable",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+            return None
         # Bytes are hashed once, on upload; the file is named by that digest.
         return path
 
@@ -493,16 +489,15 @@ class ArtifactBlobStore:
     def _intact(self, storage_key: str, sha256: str, size_bytes: int) -> Path | None:
         """The stored object when it is present and of the recorded size."""
 
-        try:
-            return self.resolve(storage_key, sha256, size_bytes)
-        except FileNotFoundError:
+        path = self.resolve(storage_key, sha256, size_bytes)
+        if path is None:
             retire_as_unknown(
                 "artifact-blob.object",
                 sha256,
                 BookkeepingReason.PERSISTED_STATE_DAMAGED,
                 "stored object is absent or of another size",
             )
-            return None
+        return path
 
     def _prepare_root(self) -> None:
         self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -666,7 +661,6 @@ __all__ = [
     "ArtifactBlobQuotaExhausted",
     "ArtifactBlobStore",
     "ArtifactBlobStoreError",
-    "ArtifactBlobUnavailable",
     "ArtifactBlobUnsafePath",
     "StoredArtifactBlob",
 ]

@@ -58,11 +58,9 @@ from .auth import MUTATION_ROLES, Actor
 from .bounded_json import integer, require_mapping, sequence
 from .catalog_revision_contract import read_catalog_document
 from .categorized_errors import (
-    BookkeepingUnknown,
     InvalidType,
     InvalidValue,
     MissingRecord,
-    UnsettledOutcome,
 )
 from .cluster_mappings import mapping_option_choices
 from .failure_classification import error_code, is_security_failure
@@ -124,6 +122,7 @@ from .fleet_profile_contract import (
 from .lifecycle.core import RECOVERY
 from .lifecycle.evidence import (
     BookkeepingReason,
+    Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
@@ -444,21 +443,32 @@ class _PlanStepDraft(_PlanStepDraftRequired, total=False):
     node_ids: list[str]
 
 
-def _without_values[T](read: Callable[[], T]) -> Callable[[], T]:
+def _without_values[T](read: Callable[[], T]) -> Callable[[], T | Damaged]:
     """Make a reader's failure name the failing field, never the stored value.
 
     A pydantic error stringifies the offending value; the note of a residue is
     logged and may be shown, so only the field path and the error type survive.
     """
 
-    def run() -> T:
+    def run() -> T | Damaged:
         try:
             return read()
         except ValidationError as error:
-            raise BookkeepingUnknown(
-                stored_document_detail(error) or "stored document is invalid",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from None
+            return Damaged(
+                stored_document_detail(error) or "stored document is invalid"
+            )
+
+    return run
+
+
+def _rebuild_without_values[T](rebuild: Callable[[], T]) -> Callable[[], T | None]:
+    """A rebuild that finds no evidence when the stored document is invalid."""
+
+    def run() -> T | None:
+        try:
+            return rebuild()
+        except ValidationError:
+            return None
 
     return run
 
@@ -480,7 +490,7 @@ def _persisted_profile_plan(
     row and carries on.
     """
 
-    def read() -> FleetProfilePreview:
+    def read() -> FleetProfilePreview | Damaged:
         plan = read_stored_document(
             lambda value: FleetProfilePreview.model_validate_json(
                 json.dumps(value), strict=True
@@ -492,10 +502,7 @@ def _persisted_profile_plan(
             or plan.profile_digest != row.profile_digest
             or plan.plan_digest != row.plan_digest
         ):
-            raise BookkeepingUnknown(
-                "stored plan identity differs from its row",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+            return Damaged("stored plan identity differs from its row")
         return plan
 
     return read_or_rebuild(
@@ -531,13 +538,10 @@ def _persisted_profile_result(
     that evidence; a damaged result of any other row is retired (``None``).
     """
 
-    def read() -> FleetProfileApplicationResult | None:
+    def read() -> FleetProfileApplicationResult | Damaged | None:
         if row.result is None:
             if row.state == _LifecycleState.SUCCEEDED:
-                raise BookkeepingUnknown(
-                    "a succeeded application has no result",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
+                return Damaged("a succeeded application has no result")
             return None
         return read_stored_document(
             lambda value: FleetProfileApplicationResult.model_validate_json(
@@ -1557,15 +1561,11 @@ class RunSwitchFleetProfileAdapter:
             if state is None:
                 raise MissingRecord(operation_id, reason=InvalidRequestReason.NOT_FOUND)
             active = state.get("active_operation_id")
-            if isinstance(active, str):
-                try:
-                    child = self._run_switch.get(active)
-                except KeyError as error:
-                    raise UnsettledOutcome(
-                        "Run/Switch child is unavailable",
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    ) from error
+            child = self._observed_child(active) if isinstance(active, str) else None
+            if child is not None:
                 return self._view_from_child(operation_id, state, child)
+            # No child, or one that is gone (recorded): the mirror the
+            # application itself holds is what is shown, until a tick re-enters it.
             return self._view_from_state(application, state)
 
     def advance(
@@ -1866,7 +1866,8 @@ class RunSwitchFleetProfileAdapter:
             current_item.get("kind") if isinstance(current_item, Mapping) else None
         )
         expected_partial_failure = False
-        if isinstance(active, str) and not self._child_exists(active):
+        child = self._observed_child(active) if isinstance(active, str) else None
+        if isinstance(active, str) and child is None:
             # Bookkeeping, not a verdict: the child's record is gone (pruned, or
             # lost with a database restore).  Its identity is deterministic from
             # the application and the step, so the step is entered again and the
@@ -1884,14 +1885,7 @@ class RunSwitchFleetProfileAdapter:
             state["active_kind"] = None
             self._write_state(session, application, state)
             active = None
-        if isinstance(active, str):
-            try:
-                child = self._run_switch.get(active)
-            except KeyError as error:
-                raise UnsettledOutcome(
-                    "Run/Switch child is unavailable",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                ) from error
+        if isinstance(active, str) and child is not None:
             # ``waiting`` is an automatically observed Run/Switch state (for
             # example background runtime-image preparation or an overdue start
             # observation); the child resumes on its own, so it is in progress.
@@ -2196,12 +2190,19 @@ class RunSwitchFleetProfileAdapter:
         session.flush()
         return self._view_from_child(application_id, state, operation)
 
-    def _child_exists(self, operation_id: str) -> bool:
+    def _observed_child(self, operation_id: str) -> RunSwitchOperation | None:
+        """The Run/Switch child, or ``None`` when its record is gone (recorded)."""
+
         try:
-            self._run_switch.get(operation_id)
+            return self._run_switch.get(operation_id)
         except KeyError:
-            return False
-        return True
+            retire_as_unknown(
+                "profile-child",
+                operation_id,
+                BookkeepingReason.ROW_INCOMPLETE,
+                "the Run/Switch child is not stored",
+            )
+            return None
 
     def _observe_superseded_agent_effects(
         self,
@@ -3243,13 +3244,7 @@ def _set_selected_profile(
             "updated_at": statement.excluded.updated_at,
         },
     ).returning(table.c.generation)
-    generation = session.execute(statement).scalar_one()
-    if type(generation) is not int:
-        raise FleetProfileUnavailable(
-            "Selected Fleet profile generation is invalid",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        )
-    return generation
+    return int(session.execute(statement).scalar_one())
 
 
 def _replace_selected_profile_roster(
@@ -3549,54 +3544,52 @@ class FleetProfileService:
 
     def _selected_profile_snapshot(
         self, session: Session
-    ) -> _SelectedProfileSnapshot | None:
+    ) -> _SelectedProfileSnapshot | Residue | None:
+        """The selected profile's application and plan, ``None`` when nothing is
+        selected, or a :class:`Residue` when the selection's receipt is damaged
+        (recorded as unknown; the application worker fails that receipt)."""
+
         selection = session.get(FleetProfileSelection, 1)
         if selection is None:
             return None
-        try:
+
+        def read() -> _SelectedProfileSnapshot | Damaged:
             application = session.get(FleetProfileApplication, selection.application_id)
             if application is None or application.profile_id != selection.profile_id:
-                raise BookkeepingUnknown(
-                    "selected profile application is unavailable",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
+                return Damaged("selected profile application is unavailable")
             if application.selection_generation != selection.generation:
-                raise BookkeepingUnknown(
-                    "selected profile generation is inconsistent",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            intended = self._intended_profile(application, session=session)
+                return Damaged("selected profile generation is inconsistent")
+            try:
+                intended = self._intended_profile(application, session=session)
+            except FleetProfileConflict as error:
+                # The reviewed intent's integrity check refused it.
+                return Damaged(str(error))
             plan = _persisted_profile_plan(application)
             if isinstance(intended, Residue) or isinstance(plan, Residue):
-                raise InvalidType(
-                    "selected profile evidence is unavailable",
-                    reason=InvalidRequestReason.NOT_READY,
-                )
+                return Damaged("selected profile evidence is unavailable")
             if (
                 application.profile_digest != intended.profile_digest
                 or tuple(intended.scope.node_ids) != tuple(plan.scope.node_ids)
                 or selection.roster_digest != _roster_digest(intended.scope.node_ids)
                 or plan.profile_revision != selection.profile_revision
             ):
-                raise BookkeepingUnknown(
-                    "selected profile snapshot is inconsistent",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-        except (FleetProfileConflict, TypeError, ValueError, ValidationError) as error:
-            raise FleetProfileUnavailable(
-                "Persisted selected Fleet profile is invalid",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
-        return _SelectedProfileSnapshot(
-            generation=selection.generation,
-            profile_id=selection.profile_id,
-            profile_revision=selection.profile_revision,
-            application_id=selection.application_id,
-            roster_node_ids=tuple(intended.scope.node_ids),
-            roster_digest=selection.roster_digest,
-            actor=application.actor,
-            intended=intended,
-            plan=plan,
+                return Damaged("selected profile snapshot is inconsistent")
+            return _SelectedProfileSnapshot(
+                generation=selection.generation,
+                profile_id=selection.profile_id,
+                profile_revision=selection.profile_revision,
+                application_id=selection.application_id,
+                roster_node_ids=tuple(intended.scope.node_ids),
+                roster_digest=selection.roster_digest,
+                actor=application.actor,
+                intended=intended,
+                plan=plan,
+            )
+
+        return read_or_rebuild(
+            kind="profile-selection",
+            subject=str(selection.application_id),
+            read=read,
         )
 
     @staticmethod
@@ -4190,7 +4183,7 @@ class FleetProfileService:
             kind="profile-definition",
             subject=str(row.id),
             read=_without_values(read),
-            rebuild=_without_values(rebuild),
+            rebuild=_rebuild_without_values(rebuild),
         )
         return FleetProfileDefinition() if isinstance(value, Residue) else value
 
@@ -4384,9 +4377,24 @@ class FleetProfileService:
             )
         application = session.get(FleetProfileApplication, selection.application_id)
         if application is None or application.profile_id != profile.id:
-            raise FleetProfileUnavailable(
-                "Selected profile application is unavailable",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            # The selection names an application that is not stored: it is shown
+            # as an unreadable intent (as a damaged plan is below), never refused.
+            retire_as_unknown(
+                "profile-selection",
+                str(selection.application_id),
+                BookkeepingReason.ROW_INCOMPLETE,
+                "the selected profile application is not stored",
+            )
+            return FleetProfileEndpointIntent(
+                number=number,
+                profile_id=profile.id,
+                application_id=None,
+                application_state=None,
+                assignments=None,
+                projection_issue=FleetProfileEndpointProjectionIssue(
+                    code=ProfileReasonCode.APPLICATION_INTENT_INVALID,
+                    detail="The selected profile application is unavailable.",
+                ),
             )
 
         application_state = _OPERATION_STATE_ADAPTER.validate_python(
@@ -5542,6 +5550,7 @@ class FleetProfileService:
                 if (
                     not select_profile
                     or current is None
+                    or isinstance(current, Residue)
                     or current.generation != selection_precondition.generation
                     or current.application_id != selection_precondition.application_id
                     or current.roster_digest != selection_precondition.roster_digest
@@ -5967,8 +5976,13 @@ class FleetProfileService:
                         else timedelta(0),
                         code=_deferral_code(error),
                     )
-            raise FleetProfileAdmissionBusy(
-                "Profile admission retry schedule was exhausted"
+            # The last attempt (no delay left) defers and returns above; a spent
+            # schedule is deferred the same way, to be retried automatically.
+            assert pending is not None
+            return self._defer_pending_application(
+                pending.id,
+                "Profile admission is busy; the Controller will retry automatically.",
+                retry_delay=timedelta(0),
             )
         except (
             FleetProfileConflict,
@@ -7994,13 +8008,10 @@ class FleetProfileService:
     def _reconcile_selected_roster(self, now: datetime) -> bool:
         drift_signature: tuple[tuple[str, str], ...] = ()
         with self._sessions() as session:
-            try:
-                selected = self._selected_profile_snapshot(session)
-            except FleetProfileConflict:
-                # Let the ordinary application worker record malformed
-                # selected receipts as failed without blocking unrelated work.
-                return False
-            if selected is None:
+            selected = self._selected_profile_snapshot(session)
+            if selected is None or isinstance(selected, Residue):
+                # A damaged selected receipt is recorded; the ordinary
+                # application worker fails it without blocking unrelated work.
                 return False
             roster = tuple(
                 session.scalars(
@@ -9796,9 +9807,8 @@ class FleetProfileService:
                 f"{unreadable} saved choice(s) cannot be read and are left out; "
                 "save the profile again"
             )
-        try:
-            selection = self._selected_profile_snapshot(session)
-        except FleetProfileConflict:
+        selection = self._selected_profile_snapshot(session)
+        if isinstance(selection, Residue):
             # Preserve draft reads even if the selected receipt is damaged.
             # The application worker owns failing that receipt explicitly.
             selection = None

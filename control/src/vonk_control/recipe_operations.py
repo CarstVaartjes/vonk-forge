@@ -49,6 +49,7 @@ from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     acquire_admission_keys,
+    admission_attempts,
     is_admission_contention,
     job_request_key,
     lock_admission_rows,
@@ -61,11 +62,9 @@ from .agent_jobs import (
     superseded_cancellation_deadline,
 )
 from .categorized_errors import (
-    BookkeepingUnknown,
     InvalidValue,
     MissingRecord,
 )
-from .categorized_faults import StoredStateTypeDamaged
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -98,6 +97,7 @@ from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
 from .lifecycle.artifact_job import ArtifactJobAdapter
 from .lifecycle.evidence import (
     BookkeepingReason,
+    Damaged,
     Residue,
     read_or_rebuild,
     retire_as_unknown,
@@ -403,11 +403,9 @@ def _recorded_result(
     if value is None:
         return None
 
-    def read() -> dict[str, object]:
+    def read() -> dict[str, object] | Damaged:
         if not isinstance(value, Mapping):
-            raise StoredStateTypeDamaged(
-                "stored recipe operation result is not an object"
-            )
+            return Damaged("stored recipe operation result is not an object")
         parse_recipe_lifecycle_result(kind, value)
         return dict(value)
 
@@ -470,12 +468,12 @@ def _ranks_from_mapping(
 
 def _plan_ranks(
     document: Mapping[str, object],
-) -> tuple[frozenset[tuple[str, int, str]], int]:
+) -> tuple[frozenset[tuple[str, int, str]], int] | Damaged:
     nodes = document.get("nodes")
     if not isinstance(nodes, list) or not all(
         isinstance(item, Mapping) for item in nodes
     ):
-        raise StoredStateTypeDamaged("stored plan has no node list")
+        return Damaged("stored plan has no node list")
     ranks = frozenset(
         (item["node_id"], item["rank"], item["role"])
         for item in nodes
@@ -494,9 +492,12 @@ def _run_accepted_ranks(
     membership as unproven (it never refuses on the damaged document itself).
     """
 
-    def read() -> _AcceptedRanks:
+    def read() -> _AcceptedRanks | Damaged:
         document = run_plan_document(run.plan)
-        ranks, count = _plan_ranks(document)
+        planned = _plan_ranks(document)
+        if isinstance(planned, Damaged):
+            return planned
+        ranks, count = planned
         return ranks, (
             len(ranks) == count
             and document.get("installation_id") == run.installation_id
@@ -577,9 +578,12 @@ def _installation_accepted_ranks(
 ) -> _AcceptedRanks | Residue:
     """The ranks an installation was accepted with; rebuilt from its mapping."""
 
-    def read() -> _AcceptedRanks:
+    def read() -> _AcceptedRanks | Damaged:
         document = installation_plan_document(installation.plan, for_uninstall=True)
-        ranks, count = _plan_ranks(document)
+        planned = _plan_ranks(document)
+        if isinstance(planned, Damaged):
+            return planned
+        ranks, count = planned
         return ranks, (
             len(ranks) == count
             and document.get("mapping_id") == installation.mapping_id
@@ -764,10 +768,10 @@ def _job_workload_intent(session: Session, job: Job) -> int | None:
     own payload lost it; ``None`` when nothing proves it (the caller then treats
     the job as no longer current, never as the newest intent)."""
 
-    def read() -> int:
+    def read() -> int | Damaged:
         ordinal = job.payload.get("workload_intent_ordinal")
         if type(ordinal) is not int or ordinal < 1:
-            raise BookkeepingUnknown("job payload carries no workload intent")
+            return Damaged("job payload carries no workload intent")
         return ordinal
 
     def rebuild() -> int | None:
@@ -1020,7 +1024,11 @@ class RecipeOperationService:
         self._route_withdrawer = route_withdrawer or (lambda _run_id: None)
         self._route_publications = route_publications
         self._builds = builds
-        self._mappings = mappings
+        # The mapping service holds nothing but the sessions, so a process that
+        # was not handed one builds its own instead of refusing mapping requests.
+        self._mappings = (
+            mappings if mappings is not None else ClusterMappingService(sessions)
+        )
         self._build_cleanup_cursor: str | None = None
         self._run_health_maximum_age = timedelta(seconds=run_health_maximum_age_seconds)
 
@@ -1063,13 +1071,9 @@ class RecipeOperationService:
         parameters: Mapping[str, object],
         actor: str,
     ) -> ClusterMappingPlan:
-        if self._mappings is None:
-            raise RecipeRetryLater("cluster mapping service is unavailable")
         return self._mappings.preview(recipe_revision_id, node_ids, parameters, actor)
 
     def create_mapping(self, plan: ClusterMappingPlan, *, actor: str) -> str:
-        if self._mappings is None:
-            raise RecipeRetryLater("cluster mapping service is unavailable")
         try:
             return self._mappings.materialize(plan, actor=actor, now=self._clock())
         except (RuntimeError, ValueError) as error:
@@ -1092,7 +1096,7 @@ class RecipeOperationService:
             raise RecipeRetryLater("recipe build service is unavailable")
         return self._builds.check_source(recipe_revision_id)
 
-    def build(
+    def _build_once(
         self,
         plan: RecipeBuildPlan,
         *,
@@ -1388,6 +1392,32 @@ class RecipeOperationService:
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
+    def build(
+        self,
+        plan: RecipeBuildPlan,
+        *,
+        build_input_sha256: str,
+        actor: str,
+        request_id: str,
+        force: bool = False,
+        admission_guard: Callable[[Session], None] | None = None,
+    ) -> RecipeOperationView:
+        refused: RecipeBuildAdmissionBusy | None = None
+        for _attempt in admission_attempts():
+            try:
+                return self._build_once(
+                    plan,
+                    build_input_sha256=build_input_sha256,
+                    actor=actor,
+                    request_id=request_id,
+                    force=force,
+                    admission_guard=admission_guard,
+                )
+            except RecipeBuildAdmissionBusy as error:
+                refused = error
+        assert refused is not None
+        raise refused
+
     def _start_build_in_session(
         self,
         session: Session,
@@ -1653,10 +1683,10 @@ class RecipeOperationService:
         )
         for existing in candidates:
 
-            def read(candidate: RecipeInstallation = existing) -> bool:
+            def read(candidate: RecipeInstallation = existing) -> bool | Damaged:
                 stored = parse_stored_installation_plan(candidate.plan)
                 if not stored.compiled_execution_plans:
-                    raise BookkeepingUnknown("stored installation has no compiled plan")
+                    return Damaged("stored installation has no compiled plan")
                 return True
 
             if (
@@ -1687,14 +1717,12 @@ class RecipeOperationService:
 
         wanted = set(node_ids)
 
-        def read() -> dict[str, dict[str, object]]:
+        def read() -> dict[str, dict[str, object]] | Damaged:
             plans = parse_stored_installation_plan(
                 installation.plan
             ).compiled_execution_plans
             if not plans or not wanted <= set(plans):
-                raise BookkeepingUnknown(
-                    "stored installation plan lacks compiled documents"
-                )
+                return Damaged("stored installation plan lacks compiled documents")
             return {
                 node_id: value.model_dump(mode="json")
                 for node_id, value in plans.items()
@@ -2111,7 +2139,7 @@ class RecipeOperationService:
                 recovery_owners=tuple(recovery_owners),
             )
 
-    def install(
+    def _install_once(
         self,
         plan: InstallPlan,
         *,
@@ -2210,7 +2238,34 @@ class RecipeOperationService:
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
-    def start(
+    def install(
+        self,
+        plan: InstallPlan,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None = None,
+    ) -> RecipeOperationView:
+        refused: InstallAdmissionBusy | RunAdmissionBusy | None = None
+        for _attempt in admission_attempts():
+            try:
+                return self._install_once(
+                    plan,
+                    plan_digest=plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                )
+            except (
+                InstallAdmissionBusy,
+                RunAdmissionBusy,
+            ) as error:
+                refused = error
+        assert refused is not None
+        raise refused
+
+    def _start_once(
         self,
         plan: RunPlan,
         *,
@@ -2442,6 +2497,35 @@ class RecipeOperationService:
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
+    def start(
+        self,
+        plan: RunPlan,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None = None,
+        profile_application_id: str | None = None,
+    ) -> RecipeOperationView:
+        refused: InstallAdmissionBusy | RunAdmissionBusy | None = None
+        for _attempt in admission_attempts():
+            try:
+                return self._start_once(
+                    plan,
+                    plan_digest=plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    profile_application_id=profile_application_id,
+                )
+            except (
+                InstallAdmissionBusy,
+                RunAdmissionBusy,
+            ) as error:
+                refused = error
+        assert refused is not None
+        raise refused
+
     def enqueue_one_shot_job_in_session(
         self,
         session: Session,
@@ -2485,7 +2569,7 @@ class RecipeOperationService:
     def notify_agents(self) -> None:
         self._agent_jobs.notify_available()
 
-    def activate_job_run(
+    def _activate_job_run_once(
         self,
         plan: RunPlan,
         *,
@@ -2493,7 +2577,6 @@ class RecipeOperationService:
         actor: str,
         request_id: str,
     ) -> RecipeOperationView:
-        """Reserve an installed artifact recipe without starting a service container."""
         existing = self._idempotent(
             request_id,
             "recipe.job.activate.v1",
@@ -2630,6 +2713,29 @@ class RecipeOperationService:
             session.add(job)
             session.flush()
             return self._view(job)
+
+    def activate_job_run(
+        self,
+        plan: RunPlan,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+    ) -> RecipeOperationView:
+        """Reserve an installed artifact recipe without starting a service container."""
+        refused: RunAdmissionBusy | None = None
+        for _attempt in admission_attempts():
+            try:
+                return self._activate_job_run_once(
+                    plan,
+                    plan_digest=plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                )
+            except RunAdmissionBusy as error:
+                refused = error
+        assert refused is not None
+        raise refused
 
     def assess_superseded_unissued(self, kind: str, owner_id: str) -> bool:
         """Read-only: can an exact older operation be retired before a new intent?"""
@@ -4042,7 +4148,7 @@ class RecipeOperationService:
             targets=tuple(targets),
         )
 
-    def reconcile_installation(
+    def _reconcile_installation_once(
         self,
         installation_id: str,
         *,
@@ -4052,8 +4158,6 @@ class RecipeOperationService:
         request_id: str,
         workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
-        """Queue exact managed cleanup under a current Run/Switch review."""
-
         existing = self._idempotent(
             request_id,
             "recipe.reconcile",
@@ -4160,6 +4264,33 @@ class RecipeOperationService:
             ) from error
         self._agent_jobs.notify_available()
         return self.get(job.id)
+
+    def reconcile_installation(
+        self,
+        installation_id: str,
+        *,
+        expected_authority: Mapping[str, object],
+        run_switch_plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None = None,
+    ) -> RecipeOperationView:
+        """Queue exact managed cleanup under a current Run/Switch review."""
+        refused: InstallAdmissionBusy | None = None
+        for _attempt in admission_attempts():
+            try:
+                return self._reconcile_installation_once(
+                    installation_id,
+                    expected_authority=expected_authority,
+                    run_switch_plan_digest=run_switch_plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                )
+            except InstallAdmissionBusy as error:
+                refused = error
+        assert refused is not None
+        raise refused
 
     def uninstall(
         self,
@@ -4493,14 +4624,14 @@ class RecipeOperationService:
             # A retry is already in flight: this request adopts it.
             return active
 
-        def plan_from(document: object) -> RecipeBuildPlan:
+        def plan_from(document: object) -> RecipeBuildPlan | Damaged:
             payload = build_plan_document(document)
             parsed_payload = parse_stored_build_plan(payload)
             if (
                 payload.get("build_id") != owner_id
                 or payload.get("build_input_sha256") != build.build_input_sha256
             ):
-                raise BookkeepingUnknown("stored build plan names another build")
+                return Damaged("stored build plan names another build")
             return RecipeBuildPlan(
                 build_id=owner_id,
                 recipe_revision_id=parsed_payload.recipe_revision_id,
@@ -4522,6 +4653,8 @@ class RecipeOperationService:
             if child is None:
                 return None
             recovered = plan_from(child.payload)
+            if isinstance(recovered, Damaged):
+                return None
             build.plan = recovered.agent_payload
             return recovered
 
@@ -6306,8 +6439,34 @@ class RecipeOperationService:
         reason: str,
         only_if_unneeded: bool = False,
     ) -> bool:
+        refused: RecipeRetryLater | None = None
+        for _attempt in admission_attempts():
+            try:
+                return self._cancel_current_build(
+                    job_id,
+                    actor=actor,
+                    request_id=request_id,
+                    reason=reason,
+                    only_if_unneeded=only_if_unneeded,
+                )
+            except RecipeRetryLater as error:
+                refused = error
+        assert refused is not None
+        raise refused
+
+    def _cancel_current_build(
+        self,
+        job_id: str,
+        *,
+        actor: str,
+        request_id: str,
+        reason: str,
+        only_if_unneeded: bool,
+    ) -> bool:
+        """One cancellation attempt; a lock held by another writer is retried."""
+
         try:
-            return self._cancel_current_build(
+            return self._cancel_current_build_locked(
                 job_id,
                 actor=actor,
                 request_id=request_id,
@@ -6413,7 +6572,7 @@ class RecipeOperationService:
             )
             return True
 
-    def _cancel_current_build(
+    def _cancel_current_build_locked(
         self,
         job_id: str,
         *,
@@ -6486,21 +6645,13 @@ class RecipeOperationService:
                 return False
             child = children[0]
             build_owner = _payload_string(job.payload, "owner_id")
-            try:
-                build = (
-                    session.get(
-                        RecipeBuild, build_owner, with_for_update={"nowait": True}
-                    )
-                    if build_owner is not None
-                    else None
-                )
-            except DBAPIError as error:
-                if getattr(error.orig, "sqlstate", None) != "55P03":
-                    raise
-                raise RecipeRetryLater(
-                    f"{RecipeBuildCode.CONSUMER_BUSY}: build ownership is changing; retry cancellation",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                ) from error
+            # A lock held by another writer (SQLSTATE 55P03) reaches
+            # ``_cancel_current_build``, which reports it for a bounded retry.
+            build = (
+                session.get(RecipeBuild, build_owner, with_for_update={"nowait": True})
+                if build_owner is not None
+                else None
+            )
             if build is None or build.builder_node_id != node_id:
                 retire_as_unknown(
                     "recipe.build-cancel",
@@ -8336,12 +8487,11 @@ class RecipeOperationService:
         if kind in {"recipe.install", "recipe.start"}:
             try:
                 for _node_id, payload in flattened:
-                    compiled_plan = payload.get("compiled_execution_plan")
-                    if not isinstance(compiled_plan, Mapping):
-                        raise StoredStateTypeDamaged(
-                            "compiled execution plan is missing"
-                        )
-                    validate_compiled_launch_payload(compiled_plan)
+                    # A missing or non-mapping plan is refused by the validator
+                    # itself (``CompiledExecutionPlanError``).
+                    validate_compiled_launch_payload(
+                        payload.get("compiled_execution_plan")
+                    )
             except (CompiledExecutionPlanError, TypeError, ValueError) as error:
                 raise RecipeRequestInvalid(
                     f"compiled execution plan is invalid: {error}"
@@ -8666,30 +8816,32 @@ def _stored_phases(
     advancing it blind.
     """
 
-    def read() -> _PhaseGroups:
+    invalid = "stored operation phases are invalid"
+
+    def read() -> _PhaseGroups | Damaged:
         raw_phases = payload.get("phases")
         if raw_phases is None:
             return ()
         if not isinstance(raw_phases, list) or not raw_phases:
-            raise BookkeepingUnknown("stored operation phases are invalid")
+            return Damaged(invalid)
         phases: list[tuple[tuple[str, str, Mapping[str, object]], ...]] = []
         seen_operations: set[str] = set()
         for raw_phase in raw_phases:
             if not isinstance(raw_phase, list) or not raw_phase:
-                raise BookkeepingUnknown("stored operation phases are invalid")
+                return Damaged(invalid)
             group: list[tuple[str, str, Mapping[str, object]]] = []
             for raw_item in raw_phase:
                 if not isinstance(raw_item, Mapping):
-                    raise StoredStateTypeDamaged("stored operation phases are invalid")
+                    return Damaged(invalid)
                 operation_id = raw_item.get("operation_id")
                 node_id = raw_item.get("node_id")
                 item_payload = raw_item.get("payload")
                 if not isinstance(node_id, str) or not isinstance(
                     item_payload, Mapping
                 ):
-                    raise StoredStateTypeDamaged("stored operation phases are invalid")
+                    return Damaged(invalid)
                 if not isinstance(operation_id, str) or operation_id in seen_operations:
-                    raise BookkeepingUnknown("stored operation phases are invalid")
+                    return Damaged(invalid)
                 uuid.UUID(operation_id)
                 seen_operations.add(operation_id)
                 group.append((operation_id, node_id, dict(item_payload)))

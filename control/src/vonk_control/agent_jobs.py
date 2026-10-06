@@ -27,7 +27,6 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
     FailureCode,
-    InstallAdmissionCode,
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
@@ -85,15 +84,12 @@ from .agent_upgrade_status import (
 )
 from .auth import AgentSource
 from .categorized_errors import (
-    BookkeepingUnknown,
     InvalidType,
     InvalidValue,
     MissingRecord,
-    UnsettledOutcome,
 )
 from .distribution import record_distributed_runtime_image
 from .failure_evidence import safe_text, sanitize_diagnostics
-from .install_admission import InstallAdmissionBusy
 from .lifecycle import (
     CancelRequested,
     LeaseLapsed,
@@ -116,6 +112,7 @@ from .lifecycle.agent_operation import (
     set_parent_state,
 )
 from .lifecycle.artifact_job import ArtifactJobAdapter
+from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .lifecycle.types import State as _LifecycleState
 from .logging import redact_text
 from .models import (
@@ -148,7 +145,6 @@ from .recovery_policy import (
     classify,
     kind_for_agent_error,
 )
-from .run_admission import RunAdmissionBusy
 from .strict_json import read_stored_model
 
 _LOGGER = logging.getLogger(__name__)
@@ -548,10 +544,6 @@ class StaleAgentAttempt(RuntimeError):
 
     Raise one of the categorized subclasses.
     """
-
-
-class AgentRunAdmissionBusy(RunAdmissionBusy):
-    """The run capacity writer is busy: the enqueue is retried by its owner."""
 
 
 class StaleAgentFence(SecurityRefusalError, StaleAgentAttempt):
@@ -1719,27 +1711,21 @@ class AgentJobService:
                 reason=InvalidRequestReason.CONFLICT,
             )
         uses_workload_admission = protocol_operation.value in _RECIPE_CAPABILITIES
-        try:
-            if uses_workload_admission:
-                acquire_admission_keys(
-                    session,
-                    tuple(node_admission_key(target) for target in scope),
-                    holder="agent-job",
-                )
-            scopes_locked = self._lock_target_scopes(
+        # A busy admission lock is an unknown outcome the owner of this
+        # transaction already translates and retries (``AdmissionLockBusy`` is
+        # what every caller catches); it is not translated a second time here.
+        if uses_workload_admission:
+            acquire_admission_keys(
                 session,
-                {"enqueue": (parent_job_id, scope)},
-                node_id,
-                nowait=uses_workload_admission,
+                tuple(node_admission_key(target) for target in scope),
+                holder="agent-job",
             )
-        except AdmissionLockBusy as error:
-            if protocol_operation.value == AgentOperation.RECIPE_INSTALL.value:
-                raise InstallAdmissionBusy(
-                    InstallAdmissionCode.CAPACITY_BUSY
-                ) from error
-            if uses_workload_admission:
-                raise AgentRunAdmissionBusy("run capacity writer is busy") from error
-            raise
+        scopes_locked = self._lock_target_scopes(
+            session,
+            {"enqueue": (parent_job_id, scope)},
+            node_id,
+            nowait=uses_workload_admission,
+        )
         if not scopes_locked:
             raise InvalidValue(
                 "agent operation parent target scope changed",
@@ -2110,10 +2096,18 @@ class AgentJobService:
                     for child in children
                 )
             ):
-                raise BookkeepingUnknown(
-                    "superseded workload order identity is invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                # The order's identity does not prove it is older than this
+                # intent: it is left alone and recorded.  Its issued effects
+                # are still found by ``assess_superseded_agent_effects`` (which
+                # reads the operations, not the parent) and its agent is told
+                # to stop by the heartbeat, so nothing waits on this parent.
+                retire_as_unknown(
+                    "agent-job.superseded-order",
+                    parent.id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the order's workload identity does not match its children",
                 )
+                continue
             for child in children:
                 # Superseded work is never retried: withdraw any schedule.  An
                 # order that never ran ends now; one that did stays until its
@@ -2282,26 +2276,35 @@ class AgentJobService:
                 or operation.node_id not in parent.targets
                 or AgentJobService._target_scope(parent.targets) is None
             ):
-                raise BookkeepingUnknown(
-                    "superseded agent effect identity is invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                # The effect is real but its order's identity is damaged: it is
+                # still an issued effect awaiting its stop receipt, observed
+                # until a bounded deadline from what the operation itself
+                # carries, never refused (rule 5).
+                retire_as_unknown(
+                    "agent-job.superseded-effect",
+                    operation.id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the effect's order identity is damaged; observing it",
                 )
+            lease_deadline = (
+                _aware(attempt.lease_deadline) if attempt is not None else _aware(now)
+            )
             observation_deadline = max(
-                deadline, _aware(attempt.lease_deadline)
+                deadline if deadline is not None else _aware(now), lease_deadline
             ) + timedelta(seconds=960)
             observe_due_at = min(
                 observation_deadline,
                 max(
                     _aware(now) + timedelta(seconds=2),
                     min(
-                        _aware(attempt.lease_deadline),
+                        lease_deadline,
                         _aware(now) + timedelta(seconds=30),
                     ),
                 ),
             )
             pending.append(
                 SupersededAgentEffect(
-                    parent_job_id=parent.id,
+                    parent_job_id=operation.parent_job_id,
                     operation_id=operation.id,
                     node_id=operation.node_id,
                     kind=operation.kind,
@@ -3668,10 +3671,15 @@ class AgentJobService:
             select(Job).where(Job.id == operation.parent_job_id).with_for_update(of=Job)
         )
         if job is None:
-            raise BookkeepingUnknown(
-                "agent operation lacks its parent job",
-                reason=WaitReason.JOB_STATE_UNCERTAIN,
+            # An order whose parent job is gone has no authority to be claimed;
+            # it is recorded and the Spark is simply offered no work for it.
+            retire_as_unknown(
+                "agent-job.claim",
+                operation.id,
+                BookkeepingReason.ROW_INCOMPLETE,
+                "the agent operation lacks its parent job",
             )
+            return False
         if self._target_scope(job.targets) != locked_targets:
             return False
         current_operation = session.scalar(
@@ -4307,11 +4315,6 @@ class AgentJobService:
             now = self._clock()
             node = session.get(AgentNode, operation.node_id)
             parent = session.get(Job, operation.parent_job_id)
-            if parent is None:
-                raise StaleAgentLease(
-                    "agent operation lacks its parent job",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
-                )
             superseded = bool(
                 node is not None
                 and operation.workload_intent_ordinal is not None
@@ -4443,7 +4446,7 @@ class AgentJobService:
     def _report_event(
         operation: StoredOperation,
         attempt: AgentOperationAttempt,
-        parent: Job,
+        parent: Job | None,
         outcome: OutcomeDone | OutcomeFailed | OutcomeUnknown,
         result: Mapping[str, object],
         now: datetime,
@@ -4639,14 +4642,8 @@ class AgentJobService:
     ) -> None:
         current = None if node.last_seen_at is None else _aware(node.last_seen_at)
         observed = _aware(now)
-        if current is None or observed > current:
-            node.last_seen_at = observed
-        contact_time = node.last_seen_at
-        if contact_time is None:
-            raise BookkeepingUnknown(
-                "agent contact timestamp is unavailable",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+        contact_time = observed if current is None or observed > current else current
+        node.last_seen_at = contact_time
         if hostname is not None:
             profile = session.scalar(
                 select(AgentNodeProfile)
@@ -4716,10 +4713,16 @@ class AgentJobService:
                 reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
             )
         if self._contact_consumer is None:
-            raise UnsettledOutcome(
-                "agent contact consumer is not configured",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            # The contact was authenticated above; only its persistence is
+            # unavailable, and that is bookkeeping, not a reason to refuse the
+            # Spark.  It is recorded and the next contact is stored normally.
+            retire_as_unknown(
+                "agent-job.contact",
+                node.node_id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "no contact consumer is configured",
             )
+            return
         self._contact_consumer(session, source)
 
     @staticmethod

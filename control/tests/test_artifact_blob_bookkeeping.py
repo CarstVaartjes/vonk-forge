@@ -50,8 +50,7 @@ def test_an_absent_object_is_not_found_rather_than_a_refusal(tmp_path: Path) -> 
     stored = store.put_bytes(_digest(content), content, maximum_bytes=1024)
     stored.path.unlink()
 
-    with pytest.raises(FileNotFoundError):
-        store.resolve(stored.storage_key, stored.sha256, len(content))
+    assert store.resolve(stored.storage_key, stored.sha256, len(content)) is None
 
 
 def test_digest_key_and_path_refusals_still_refuse(tmp_path: Path) -> None:

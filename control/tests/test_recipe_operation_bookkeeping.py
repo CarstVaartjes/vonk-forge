@@ -977,7 +977,7 @@ _OWNERS = {
     # A document this very call just wrote is checked before the transaction
     # commits (nothing damaged can be persisted), or the typed parent of a Stop
     # whose result is only probed (a damaged one reads as "not pending").
-    "activate_job_run",
+    "_activate_job_run_once",
     "_profile_jobrun_stop_is_pending",
     "_profile_jobrun_stop_in_session",
 }

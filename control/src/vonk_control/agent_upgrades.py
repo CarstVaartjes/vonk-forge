@@ -37,8 +37,8 @@ from .agent_jobs import (
 )
 from .agent_package_source import load_package_source
 from .bounded_json import require_integer
+from .bounded_retry import bounded_attempts
 from .categorized_errors import (
-    BookkeepingUnknown,
     InvalidType,
     InvalidValue,
     MissingRecord,
@@ -46,6 +46,7 @@ from .categorized_errors import (
 from .lifecycle import CancelRequested, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter
 from .lifecycle.agent_upgrade import UNSUPPORTED_DISPATCH, AgentUpgradeAdapter
+from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 from .strict_json import read_stored_model
 
@@ -184,6 +185,11 @@ class AgentUpgradeInvalid(InvalidRequestError, AgentUpgradeConflict):
         )
 
 
+#: Pause before the second and third release fetch (seconds): a release is
+#: published in a few steps, so a half-published channel settles within them.
+_RELEASE_PAUSES = (0.5, 2.0)
+
+
 class AgentUpgradeUnavailable(UnknownOutcomeError, AgentUpgradeConflict):
     """Release or stored evidence is unavailable or moved: observe and retry."""
 
@@ -281,6 +287,19 @@ class AgentUpgradeService:
         self._http.close()
 
     def current_package(self) -> dict[str, object]:
+        """The signed current release; a channel that is mid-publication is asked
+        again a few times before the requester is told to retry."""
+
+        refused: AgentUpgradeUnavailable | AgentUpgradeRetryLater | None = None
+        for _attempt in bounded_attempts(_RELEASE_PAUSES):
+            try:
+                return self._current_package_once()
+            except (AgentUpgradeUnavailable, AgentUpgradeRetryLater) as error:
+                refused = error
+        assert refused is not None
+        raise refused
+
+    def _current_package_once(self) -> dict[str, object]:
         prefix = f"/artifacts/{self._channel}"
         try:
             manifest_response = self._http.get(f"{prefix}/current.manifest")
@@ -570,6 +589,22 @@ class AgentUpgradeService:
         self._operations.notify_available()
         return job
 
+    def _retire_rollout(self, parent: Job, now: datetime, reason: str) -> None:
+        """A stored rollout that cannot be read ends as failed, with a residue.
+
+        Nothing re-derives a damaged plan, and dispatching a Spark from a plan
+        that does not verify would install an unproven package, so the rollout
+        is ended (the operator starts a new one) instead of waiting or raising.
+        """
+
+        retire_as_unknown(
+            "agent-upgrade.rollout",
+            parent.id,
+            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+            reason,
+        )
+        self._rollouts.fail(parent, now, reason)
+
     def resume(self, job_id: str) -> None:
         """Resume only the durable agent-operation side of an upgrade rollout."""
 
@@ -615,9 +650,13 @@ class AgentUpgradeService:
                 )
             )
             if parent.current_attempt > 0 and worker_attempt is None:
-                raise BookkeepingUnknown(
-                    "agent upgrade worker dispatch audit is invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                # The dispatch audit row is gone, so no worker can hold a lease
+                # on it: it is recorded and read as a lapsed dispatch.
+                retire_as_unknown(
+                    "agent-upgrade.dispatch-audit",
+                    parent.id,
+                    BookkeepingReason.ROW_INCOMPLETE,
+                    "the worker dispatch audit of the rollout is missing",
                 )
             if worker_attempt is not None and worker_attempt.state == "running":
                 if _aware(worker_attempt.lease_deadline) > _aware(now):
@@ -630,13 +669,20 @@ class AgentUpgradeService:
                 if failed_dispatch and (
                     worker_attempt is None or worker_attempt.state != "failed"
                 ):
-                    raise BookkeepingUnknown(
-                        "failed agent upgrade dispatch audit is invalid",
-                        reason=WaitReason.JOB_STATE_UNCERTAIN,
+                    # The failed dispatch is the evidence that reopening is
+                    # safe, and it is not there: reopening only projects the
+                    # rollout again (nothing is dispatched until the plan below
+                    # checks out), so it is recorded and carried on.
+                    retire_as_unknown(
+                        "agent-upgrade.dispatch-audit",
+                        parent.id,
+                        BookkeepingReason.EVIDENCE_MISMATCH,
+                        "the failed dispatch of the rollout has no failed audit",
                     )
-                if stale_dispatch and (
-                    worker_attempt is None
-                    or not job_states.attempt_lapsed(worker_attempt)
+                if (
+                    stale_dispatch
+                    and worker_attempt is not None
+                    and not job_states.attempt_lapsed(worker_attempt)
                 ):
                     raise InvalidValue(
                         "agent upgrade worker dispatch is not stale",
@@ -664,17 +710,17 @@ class AgentUpgradeService:
                 or order != parent.targets
                 or (repair is not None and not isinstance(repair, Mapping))
             ):
-                raise BookkeepingUnknown(
-                    "stored agent upgrade plan is invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                self._retire_rollout(
+                    parent, now, "stored agent upgrade plan is invalid"
                 )
+                return
             try:
                 normalized_intent = _request_intent(request_intent, None)
-            except AgentUpgradeConflict as error:
-                raise BookkeepingUnknown(
-                    "stored agent upgrade plan is invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
-                ) from error
+            except AgentUpgradeConflict:
+                self._retire_rollout(
+                    parent, now, "stored agent upgrade plan is invalid"
+                )
+                return
             try:
                 normalized_package = self._package(package)
                 normalized_repair = (
@@ -682,18 +728,18 @@ class AgentUpgradeService:
                     if repair is None
                     else self._repair_manifest(repair, normalized_package)
                 )
-            except AgentUpgradeConflict as error:
-                raise BookkeepingUnknown(
-                    "stored agent upgrade plan is invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
-                ) from error
+            except AgentUpgradeConflict:
+                self._retire_rollout(
+                    parent, now, "stored agent upgrade plan is invalid"
+                )
+                return
             if normalized_repair is not None and order != [
                 normalized_repair["node_id"]
             ]:
-                raise BookkeepingUnknown(
-                    "stored agent upgrade plan is invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                self._retire_rollout(
+                    parent, now, "stored agent upgrade plan is invalid"
                 )
+                return
             plan_digest = hashlib.sha256(
                 canonical_message(
                     {
@@ -711,18 +757,16 @@ class AgentUpgradeService:
                 )
             ).hexdigest()
             if parent.payload_digest != plan_digest:
-                raise BookkeepingUnknown(
-                    "stored agent upgrade plan is invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                self._retire_rollout(
+                    parent, now, "stored agent upgrade plan is invalid"
                 )
+                return
             from vonk_agent_protocol.contracts import AgentUpgradePayload
 
             sources = parent.payload["sources"]
             if not isinstance(sources, dict) or set(sources) != set(order):
-                raise BookkeepingUnknown(
-                    "stored rollback sources are invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
-                )
+                self._retire_rollout(parent, now, "stored rollback sources are invalid")
+                return
             stored_operations = list(
                 session.scalars(
                     select(AgentOperation)
@@ -744,10 +788,10 @@ class AgentUpgradeService:
             if len({operation.node_id for operation in stored_operations}) != len(
                 stored_operations
             ):
-                raise BookkeepingUnknown(
-                    "stored agent upgrade operation is invalid",
-                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                self._retire_rollout(
+                    parent, now, "stored agent upgrade operation is invalid"
                 )
+                return
             for operation in stored_operations:
                 payload = read_stored_model(AgentUpgradePayload, operation.payload)
                 source = read_stored_model(
@@ -774,19 +818,19 @@ class AgentUpgradeService:
                     or operation.payload_digest
                     != hashlib.sha256(canonical_message(operation.payload)).hexdigest()
                 ):
-                    raise BookkeepingUnknown(
-                        "stored agent upgrade operation is invalid",
-                        reason=WaitReason.JOB_STATE_UNCERTAIN,
+                    self._retire_rollout(
+                        parent, now, "stored agent upgrade operation is invalid"
                     )
+                    return
             # Deferred (offline) Sparks are passed over while later ones
             # upgrade, so materialized operations need not form a prefix.
             for operation in active:
                 if operation.state == "queued":
                     if operation.current_attempt != 0:
-                        raise BookkeepingUnknown(
-                            "stored agent upgrade attempt is invalid",
-                            reason=WaitReason.JOB_STATE_UNCERTAIN,
+                        self._retire_rollout(
+                            parent, now, "stored agent upgrade attempt is invalid"
                         )
+                        return
                     continue
                 active_attempt = session.scalar(
                     select(AgentOperationAttempt)
@@ -797,10 +841,10 @@ class AgentUpgradeService:
                     .with_for_update(of=AgentOperationAttempt)
                 )
                 if active_attempt is None or active_attempt.state != "running":
-                    raise BookkeepingUnknown(
-                        "stored agent upgrade attempt is invalid",
-                        reason=WaitReason.JOB_STATE_UNCERTAIN,
+                    self._retire_rollout(
+                        parent, now, "stored agent upgrade attempt is invalid"
                     )
+                    return
             if failed_dispatch:
                 self._rollouts.reopen(parent, now, reason=None)
             else:
@@ -819,10 +863,10 @@ class AgentUpgradeService:
                         "failed",
                         *agent_operation_states.ATTEMPT_OBSERVING,
                     }:
-                        raise BookkeepingUnknown(
-                            "stored agent upgrade attempt is invalid",
-                            reason=WaitReason.JOB_STATE_UNCERTAIN,
+                        self._retire_rollout(
+                            parent, now, "stored agent upgrade attempt is invalid"
                         )
+                        return
                     # Operator resume is a new dispatch decision. For an
                     # attempted install it must establish a fresh full safety
                     # fence regardless of the stored helper result. Old agents
