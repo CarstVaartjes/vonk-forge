@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from vonk_agent_protocol import LifecycleState
 from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheNotFound,
@@ -121,7 +122,7 @@ def test_a_stale_removal_scope_waits_instead_of_raising(cache, tmp_path: Path):
         )
     assert service._advance_model_removal(accepted.id) is False  # no raise
     waiting = service.get_operation(accepted.id)
-    assert waiting.state in {"queued", "partial"}
+    assert waiting.state in {"queued", LifecycleState.BACKOFF}
     assert waiting.failure is not None and waiting.failure["retryable"] is True
     with sessions() as session:
         assert session.get(ModelCacheSet, set_digest) is not None  # still fenced

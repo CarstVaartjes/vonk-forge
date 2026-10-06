@@ -65,7 +65,7 @@ def _model_operator_response(
         request_key=operation.request_key,
         model_content_sha256=operation.model_content_sha256,
         operation_id=operation.id,
-        state=operation.state,
+        state=operation.state,  # the contract adopts an old spelling
         phase=str(raw.get("phase", progress.phase)),
         progress=progress,
         transferred_bytes=progress.completed_bytes,

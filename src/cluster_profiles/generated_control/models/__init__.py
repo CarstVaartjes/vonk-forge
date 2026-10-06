@@ -295,7 +295,8 @@ from .model_cache_download_result import ModelCacheDownloadResult
 from .model_cache_operator_request import ModelCacheOperatorRequest
 from .model_cache_operator_response import ModelCacheOperatorResponse
 from .model_cache_operator_response_action import ModelCacheOperatorResponseAction
-from .model_cache_operator_response_state import ModelCacheOperatorResponseState
+from .model_cache_operator_response_state_type_0 import ModelCacheOperatorResponseStateType0
+from .model_cache_operator_response_state_type_1 import ModelCacheOperatorResponseStateType1
 from .model_cache_removal_request import ModelCacheRemovalRequest
 from .model_cache_removal_result import ModelCacheRemovalResult
 from .model_definition import ModelDefinition
@@ -872,7 +873,8 @@ __all__ = (
     "ModelCacheOperatorRequest",
     "ModelCacheOperatorResponse",
     "ModelCacheOperatorResponseAction",
-    "ModelCacheOperatorResponseState",
+    "ModelCacheOperatorResponseStateType0",
+    "ModelCacheOperatorResponseStateType1",
     "ModelCacheRemovalRequest",
     "ModelCacheRemovalResult",
     "ModelDefinition",

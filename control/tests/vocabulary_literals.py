@@ -102,6 +102,10 @@ NON_LIFECYCLE_STATE_SITES: dict[str, tuple[int, str]] = {
     ),
     "control/src/vonk_control/library_projection.py": (1, "installation state"),
     "control/src/vonk_control/metrics.py": (1, "certificate state"),
+    "control/src/vonk_control/model_cache.py": (
+        9,
+        "model file, asset and installation state",
+    ),
     "control/src/vonk_control/model_cache_contract.py": (1, "model file state"),
     "control/src/vonk_control/recipe_action_plans.py": (1, "installation state"),
     "control/src/vonk_control/unused_storage_collection.py": (1, "installation state"),

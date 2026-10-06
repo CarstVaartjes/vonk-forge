@@ -12,6 +12,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     Base,
@@ -343,7 +344,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
         for _ in range(4):
             cache.advance_removals(limit=1)
         waiting = cache.get_operation(accepted.id)
-        assert waiting.state in {"queued", "running", "partial"}, waiting
+        assert waiting.state in {"queued", "running", LifecycleState.BACKOFF}, waiting
         with sessions() as session:
             assert session.get(ModelCacheSet, target_set_digest) is not None
             assert session.get(ModelCacheSet, peer_set_digest) is not None

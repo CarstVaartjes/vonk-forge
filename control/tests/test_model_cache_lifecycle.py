@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.lifecycle import (
     STOP_BUDGET,
     Effect,
@@ -176,7 +177,9 @@ def test_a_legacy_live_claim_is_untouched_and_a_dead_one_is_retried(cache, tmp_p
     now[0] += timedelta(seconds=200)
     assert service._reconciler.reconcile().changed == 1
     retried = _row(sessions, operation.id)
-    assert retried.state == "partial" and retried.next_action_at is not None
+    assert (
+        retried.state == LifecycleState.BACKOFF and retried.next_action_at is not None
+    )
     assert retried.lease_deadline is None
     assert service._reconciler.reconcile().changed == 0  # idempotent
     now[0] += timedelta(minutes=5)
@@ -204,7 +207,7 @@ def test_an_unadopted_lapsed_legacy_row_still_heals(cache, tmp_path):
     )
     assert service._reconciler.reconcile().changed == 1
     healed = _row(sessions, operation.id)
-    assert healed.state == "partial" and healed.next_action_at is not None
+    assert healed.state == LifecycleState.BACKOFF and healed.next_action_at is not None
     assert "claim" not in healed.payload  # the legacy claim retired with the decision
 
 
@@ -542,3 +545,48 @@ def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
     )
     assert service.run_pending() == 1
     assert service.get_operation(operation.id).state == "succeeded"
+
+
+# ------------------------------------ the stored vocabulary is the core's
+
+
+def test_a_row_written_as_partial_is_adopted_found_and_served_as_backoff(
+    cache, tmp_path
+):
+    """The retired word is read, selected and shown as the word it means now."""
+
+    from vonk_control import model_cache_states
+
+    service, sessions = cache
+    operation, _artifact_document = _queue(
+        service, tmp_path, "00000000-0000-4000-8000-00000000a020"
+    )
+    _edit(sessions, operation.id, state="partial")
+
+    row = service._lifecycle.adopt(_row(sessions, operation.id))
+    assert row.state is State.BACKOFF
+    assert service.get_operation(operation.id).state == LifecycleState.BACKOFF
+    with sessions() as session:
+        found = session.scalars(
+            select(ModelCacheOperation.id).where(
+                ModelCacheOperation.state.in_(model_cache_states.LIVE)
+            )
+        ).all()
+    assert operation.id in found
+    # An old Activity filter still finds it by either name.
+    for word in ("partial", "backoff"):
+        page = service.activity_operations(state=word)
+        assert [item.id for item in page["operations"]] == [operation.id]
+
+
+def test_the_cache_writes_backoff_never_partial(cache, tmp_path):
+    service, sessions = cache
+    operation, _artifact_document = _queue(
+        service, tmp_path, "00000000-0000-4000-8000-00000000a021"
+    )
+    _edit(sessions, operation.id, state="running")
+    service._lifecycle.reopen(_row(sessions, operation.id), datetime.now(UTC))
+    assert LifecycleState.BACKOFF.value == "backoff"
+    from vonk_control import model_cache_states
+
+    assert model_cache_states.BACKOFF == "backoff"

@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control import artifact_reference_scan
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
 from vonk_control.artifact_reference_scan import (
@@ -3306,7 +3307,7 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
         artifacts=[artifact],
         interrupt_after_bytes=1,
     )
-    assert child.state == "partial"
+    assert child.state == LifecycleState.BACKOFF
     before_bytes = child.progress["downloaded_bytes"]
 
     service = _service(
@@ -3343,7 +3344,7 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     assert service.get(first.id).state == "cancelled"
     assert service.get(second.id).state == "queued"
     still_shared = cache.get_operation(child.id)
-    assert still_shared.state == "partial"
+    assert still_shared.state == LifecycleState.BACKOFF
     assert still_shared.progress["downloaded_bytes"] == before_bytes
     cache.close()
     engine.dispose()

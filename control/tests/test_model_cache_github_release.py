@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol import LifecycleState
 from vonk_control.model_cache import (
     ModelCacheService,
     ModelCacheStorageError,
@@ -529,7 +530,7 @@ def test_github_release_download_resumes_partial_bytes_after_service_restart(
         model_content_sha256=digest,
         interrupt_after_bytes=1_100_000,
     )
-    assert interrupted.state == "partial"
+    assert interrupted.state == LifecycleState.BACKOFF
     object_digest = hashlib.sha256(data).hexdigest()
     partial = (
         service.root

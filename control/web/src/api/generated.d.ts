@@ -3959,7 +3959,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "partial" | "succeeded" | "failed";
+            state: "queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled";
             /** Total Bytes */
             total_bytes?: number | null;
         };
@@ -4485,11 +4485,8 @@ export interface components {
             result?: components["schemas"]["ModelCacheDownloadResult"] | components["schemas"]["ModelCacheRemovalResult"] | null;
             /** Selector */
             selector: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "accepted" | "queued" | "running" | "partial" | "cancelling" | "succeeded" | "failed" | "cancelled";
+            /** State */
+            state: ("accepted" | "cancelling") | ("queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled");
             /** Total Bytes */
             total_bytes?: number | null;
             /** Transferred Bytes */

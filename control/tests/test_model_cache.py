@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.distribution import (
@@ -327,7 +328,7 @@ def test_model_removal_review_counts_resumable_partial_set_bytes(cache, tmp_path
         request_key="00000000-0000-4000-8000-000000001067",
         interrupt_after_bytes=1_100_000,
     )
-    assert operation.state == "partial"
+    assert operation.state == LifecycleState.BACKOFF
     assert operation.artifact_set_sha256 is not None
     object_digest = str(artifact["sha256"])
     partial = service._partial_path(operation.artifact_set_sha256, object_digest)
@@ -1896,7 +1897,7 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
         artifacts=[artifact],
         interrupt_after_bytes=1_100_000,
     )
-    assert partial.state == "partial"
+    assert partial.state == LifecycleState.BACKOFF
     assert partial.attempt == 1
     assert partial.progress["expected_bytes"] == len(data)
     checkpoint_bytes = (
@@ -2473,7 +2474,7 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
         plan_digest=preview["plan_digest"],
     )
     service._run_download(repair.id, force=True, interrupt_after_bytes=1024 * 1024)
-    assert service.get_operation(repair.id).state == "partial"
+    assert service.get_operation(repair.id).state == LifecycleState.BACKOFF
     available = service.download_preview(
         model_content_sha256="a" * 64, artifacts=[small, artifact]
     )
@@ -3020,7 +3021,7 @@ def test_fragmented_http_final_progress_is_durable_and_resumes(
                 interrupt_after_bytes=durable_after,
             )
             observed = interrupted
-            assert observed.state == "partial"
+            assert observed.state == LifecycleState.BACKOFF
         else:
             queued = service.start_download(
                 actor="test",
@@ -3095,7 +3096,7 @@ def test_fragmented_http_shutdown_preserves_sub_chunk_tail(
         )
         service.run_pending()
         observed = service.get_operation(operation.id)
-        assert observed.state == "partial"
+        assert observed.state == LifecycleState.BACKOFF
         assert fragments == [1, 2]
         assert sampled == [True]
         assert observed.progress["downloaded_bytes"] == 8192
@@ -3579,7 +3580,7 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
             assert row is not None
             row.next_action_at = None  # the one retry clock: due now
     waiting = service.get_operation(removal.id)
-    assert waiting.state in {"queued", "partial"}
+    assert waiting.state in {"queued", LifecycleState.BACKOFF}
     assert waiting.failure is not None and waiting.failure["retryable"] is True
     with sessions() as session:
         assert session.get(ModelCacheSet, set_digest) is not None
@@ -3625,7 +3626,7 @@ def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Pat
     with service._model_storage_lock(digest):
         assert service.advance_removals() == 0
         waiting = service.get_operation(accepted.id)
-        assert waiting.state == "partial"
+        assert waiting.state == LifecycleState.BACKOFF
         assert waiting.failure is not None
         assert waiting.failure["retry_time"] is not None
         assert waiting.failure["artifact_key"] == f"object:{digest}"
