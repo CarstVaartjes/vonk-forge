@@ -291,6 +291,7 @@ def recompute_publication_graphs(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
+        timeout=30,
     )
     if ordered.returncode != 0:
         raise ContractError("acceptance baseline version is not strictly lower")
