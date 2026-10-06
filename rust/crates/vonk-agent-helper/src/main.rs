@@ -113,7 +113,35 @@ impl HelperRejection {
             OperationError::RuntimeProcessExited {
                 logs,
                 capture_error,
-            } => (capture_error.map(str::to_owned), logs.clone()),
+                exit_summary,
+            } => (
+                // Always present: the exit code, OOM flag and cause token, and
+                // when the output could not be read, why.
+                Some(
+                    match capture_error {
+                        Some(reason) => format!("{exit_summary}; {reason}"),
+                        None => exit_summary.clone(),
+                    }
+                    .chars()
+                    .take(480)
+                    .collect(),
+                ),
+                logs.clone(),
+            ),
+            OperationError::RuntimeJobWaitFailed { evidence } => (
+                Some(
+                    evidence
+                        .as_ref()
+                        .map_or_else(
+                            || "runtime job wait failed; logs unavailable".to_owned(),
+                            |evidence| format!("runtime job wait failed; {}", evidence.summary),
+                        )
+                        .chars()
+                        .take(480)
+                        .collect(),
+                ),
+                evidence.as_ref().and_then(|evidence| evidence.logs.clone()),
+            ),
             // The firewall's refusal names the argument and rule, so it travels
             // as the diagnostic instead of collapsing to the stable code.
             OperationError::RuntimeFabricFirewallRejected { reason }
@@ -348,21 +376,26 @@ fn handle(
             HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())
         })?;
         let request_id = inspection.request_id.to_string();
-        let running = executor
-            .inspect_recipe_run(&inspection.request_sha256)
+        let inspected = executor
+            .inspect_recipe_run_with_logs(
+                &inspection.request_sha256,
+                inspection.include_logs == Some(true),
+            )
             .map_err(|error| HelperRejection::for_error(&request_id, false, error))?;
         return respond(
             stream,
             &request_id,
             HelperResponse {
-                diagnostic: None,
-                process_logs: None,
+                // Why a requested tail is missing; never an empty tail that
+                // reads like a workload with nothing to say.
+                diagnostic: inspected.log_error.map(str::to_owned),
+                process_logs: inspected.logs.map(|logs| *logs),
                 schema_version: 1,
                 request_id: Some(inspection.request_id),
                 status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
                 exit_code: None,
                 error_code: None,
-                process_running: Some(running),
+                process_running: Some(inspected.running),
             },
         );
     }
@@ -394,8 +427,8 @@ fn handle(
             HelperRejection::for_operation(&request_id, &request.claims.operation, error)
         })?;
     let response = HelperResponse {
-        diagnostic: None,
-        process_logs: None,
+        diagnostic: outcome.diagnostic.clone(),
+        process_logs: outcome.process_logs.clone(),
         schema_version: 1,
         request_id: Some(request.claims.request_id),
         status: outcome.status,
@@ -716,6 +749,7 @@ mod tests {
                     &b"startup failed\n".repeat(2000),
                 ))),
                 capture_error: None,
+                exit_summary: "exit_code=1 exit_cause=unclassified".to_owned(),
             },
         );
         super::reject(&mut server, &rejection);
@@ -726,7 +760,10 @@ mod tests {
         assert!(logs.stderr.text.contains("startup failed"));
         assert!(logs.stderr.truncated);
         assert!(logs.stderr.text.chars().count() <= 2048);
-        assert!(response.diagnostic.is_none());
+        assert_eq!(
+            response.diagnostic.as_deref(),
+            Some("exit_code=1 exit_cause=unclassified")
+        );
         assert_eq!(rejection.detail, "runtime process exited");
     }
 

@@ -271,6 +271,7 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
     result = clean(value)
     if not isinstance(result, dict):
         raise TypeError("failure evidence must be an object")
+    full = result
     encoded = json.dumps(result, sort_keys=True, separators=(",", ":")).encode()
     if len(encoded) > _MAX_FAILURE_EVIDENCE_BYTES:
         # Keep enough context to identify and recover the failure while placing
@@ -290,6 +291,75 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
             if key in result
         }
         result["detail"] = "failure evidence truncated"
+        # The container's own exit facts and log tails are the evidence that
+        # explains the failure; the size guard may shed the surrounding
+        # properties but never them.
+        diagnostics = full.get("diagnostics") if isinstance(full, dict) else None
+        if isinstance(diagnostics, dict):
+            kept = dict(diagnostics)
+            result["diagnostics"] = kept
+        # Restoring diagnostics cannot bypass the durable byte ceiling. Shed
+        # ancillary observations first, preserving exit facts and both streams.
+        # Escaped Unicode costs more bytes than its character count suggests.
+        while (
+            len(json.dumps(result, sort_keys=True, separators=(",", ":")).encode())
+            > _MAX_FAILURE_EVIDENCE_BYTES
+        ):
+            diagnostics = result.get("diagnostics")
+            if isinstance(diagnostics, dict):
+                ancillary = next(
+                    (
+                        field
+                        for field in (
+                            "versions",
+                            "sandbox",
+                            "storage",
+                            "collector_errors",
+                        )
+                        if isinstance(diagnostics.get(field), list)
+                        and diagnostics[field]
+                    ),
+                    None,
+                )
+                if ancillary is not None:
+                    observations = diagnostics[ancillary]
+                    if isinstance(observations, list):
+                        observations.pop()
+                        continue
+            strings: list[tuple[dict[str, object], str, str]] = []
+
+            def candidates(
+                document: dict[str, object],
+                strings: list[tuple[dict[str, object], str, str]],
+            ) -> None:
+                for key, nested_value in document.items():
+                    if isinstance(nested_value, str) and len(nested_value) > 1:
+                        strings.append((document, key, nested_value))
+                    elif isinstance(nested_value, dict):
+                        candidates(nested_value, strings)
+                    elif isinstance(nested_value, list):
+                        for child in nested_value:
+                            if isinstance(child, dict):
+                                candidates(child, strings)
+
+            candidates(result, strings)
+            if not strings:
+                # Only bounded structural/scalar fields remain at this point.
+                raise ValueError("failure evidence structure exceeds byte limit")
+            document, key, longest_text = max(
+                strings, key=lambda item: len(json.dumps(item[2]).encode())
+            )
+            shortened = longest_text[: len(longest_text) // 2]
+            document[key] = shortened
+            if key == "text" and "truncated" in document:
+                document["truncated"] = True
+                prior = document.get("dropped_bytes")
+                document["dropped_bytes"] = (
+                    prior if isinstance(prior, int) else 0
+                ) + len(longest_text[len(shortened) :].encode())
+                # A cut within a line does not prove how many complete lines
+                # were omitted; preserve unknown rather than inventing a count.
+                document["dropped_lines"] = None
     return result
 
 

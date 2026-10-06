@@ -845,6 +845,36 @@ def test_fleet_evidence_downloads_the_current_attempt_to_a_private_file(
     assert client.calls[-1][3] == {"attempt": 2}
 
 
+def test_fleet_evidence_falls_back_to_the_job_attempt_for_an_unprojected_job(
+    tmp_path: Path,
+) -> None:
+    """A job Activity does not project still has its evidence downloaded.
+
+    Wrong implementation caught: the default attempt came only from the
+    operation projection, so a recipe image build or run/switch parent answered
+    "operation not found" and its stored failure evidence was unreachable.
+    """
+    bundle = {"schema": "evidence"}
+    job_id = "11111111-1111-4111-8111-111111111111"
+    client = FakeClient(
+        {
+            ("GET", f"/api/operations/{job_id}"): ControlNotFound(
+                404, "operation not found"
+            ),
+            ("GET", f"/api/jobs/{job_id}"): {"current_attempt": 2},
+            ("GET", f"/api/operations/{job_id}/evidence"): bundle,
+        }
+    )
+    output = tmp_path / "evidence.json"
+
+    status, payload = run(
+        ("fleet", "evidence", job_id, "--output", str(output), "--json"), client
+    )
+
+    assert status == 0 and payload["attempt"] == 2
+    assert json.loads(output.read_text()) == bundle
+
+
 def test_recipe_sync_status_treats_a_missing_sync_as_never_run() -> None:
     class NeverSynced(FakeClient):
         def request(self, method, path, *args, **kwargs):

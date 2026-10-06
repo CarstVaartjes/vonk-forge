@@ -33,7 +33,7 @@ from vonk_control.models import (
     Base,
     Job,
 )
-from vonk_control.operation_item_contract import operation_item
+from vonk_control.operation_item_contract import OperationResultFacts, operation_item
 
 from .agent_fences import fenced_attempt
 from .runtime_identity_support import claim_agent
@@ -279,7 +279,7 @@ def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail() -> N
         }
     )
     cleaned = sanitize_diagnostics(diagnostics)
-    assert cleaned.stderr.text.endswith("the container exited here")
+    assert cleaned.stderr.text.endswith("the container exited here\n")
     assert len(cleaned.stderr.text.encode()) <= 2048
     assert cleaned.stderr.truncated
     assert (cleaned.stderr.dropped_bytes or 0) > 0
@@ -691,3 +691,173 @@ def test_download_is_named_only_for_a_stored_failed_attempt(service):
     assert download.href == f"/api/operations/{value['id']}/evidence?attempt=1"
     assert decorated({**value, "attempt": 2}) is None
     assert decorated({**value, "state": "running"}) is None
+
+
+def _child_diagnostics_document(stderr: str) -> dict[str, object]:
+    empty = {"text": "", "truncated": False, "dropped_bytes": 0, "dropped_lines": 0}
+    return {
+        "schema_version": 1,
+        "collected_at": NOW.isoformat(),
+        "phase": "start",
+        "category": "capacity",
+        "stdout": empty,
+        "stderr": {**empty, "text": stderr},
+        "versions": [],
+        "sandbox": [],
+        "storage": [],
+        "preflight": [{"name": "exit_cause", "value": "oom_killed"}],
+        "collector_errors": [],
+    }
+
+
+@pytest.mark.parametrize("unrelated_jobs", [0, 205])
+def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
+    service, unrelated_jobs
+):
+    """A Controller-owned parent shows what its Spark-side child captured.
+
+    Wrong implementation caught: the download rendered the parent's own result,
+    which holds progress and no logs, so a workload that exited printed an empty
+    stdout/stderr and category ``unknown`` while the child's receipt held the
+    exit cause.  The same Job is also reachable under attempt 1, the number
+    Activity advertises for its first attempt (the row stores 0).
+    """
+
+    job_id = str(uuid4())
+    child_id = str(uuid4())
+    application_id = str(uuid4())
+    with service.sessions.begin() as session:
+        session.add(
+            Job(
+                id=job_id,
+                request_id=str(uuid4()),
+                kind="recipe.run-switch.v2",
+                state="failed",
+                actor="test",
+                authority_revision="a" * 64,
+                targets=[NODE_A],
+                payload_digest="b" * 64,
+                payload={},
+                result={"phase_index": 3, "profile_application_id": application_id},
+                status_reason="run-switch phase operation failed: the workload process exited",
+                current_attempt=0,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            AgentOperation(
+                id=child_id,
+                parent_job_id=job_id,
+                node_id=NODE_A,
+                kind=ProtocolAgentOperation.RECIPE_START.value,
+                payload_digest="b" * 64,
+                payload={},
+                authority_revision=COMMIT,
+                state="failed",
+                status_reason="failed",
+                current_attempt=1,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                id=str(uuid4()),
+                operation_id=child_id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=NOW,
+                agent_certificate_serial="test-serial",
+                state="failed",
+                progress=None,
+                result={
+                    "error_code": "recipe_start_failed",
+                    "diagnostics": _child_diagnostics_document("Killed\n"),
+                },
+            )
+        )
+    # Empty later receipts and unrelated later jobs must not hide the exact
+    # parent's evidence through a global history-window cap.
+    with service.sessions.begin() as session:
+        for index in range(9):
+            empty_child_id = str(uuid4())
+            session.add(
+                AgentOperation(
+                    id=empty_child_id,
+                    parent_job_id=job_id,
+                    node_id=NODE_A,
+                    kind=ProtocolAgentOperation.RECIPE_START.value,
+                    payload_digest="b" * 64,
+                    payload={},
+                    authority_revision=COMMIT,
+                    state="failed",
+                    status_reason="failed",
+                    current_attempt=1,
+                    created_at=NOW,
+                    updated_at=NOW + timedelta(seconds=index + 1),
+                )
+            )
+            session.add(
+                AgentOperationAttempt(
+                    id=str(uuid4()),
+                    operation_id=empty_child_id,
+                    attempt=1,
+                    fence=str(uuid4()),
+                    lease_deadline=NOW,
+                    agent_certificate_serial="test-serial",
+                    state="failed",
+                    progress=None,
+                    result={"error_code": "recipe_start_failed"},
+                )
+            )
+        for index in range(unrelated_jobs):
+            session.add(
+                Job(
+                    id=str(uuid4()),
+                    request_id=str(uuid4()),
+                    kind="recipe.run-switch.v2",
+                    state="failed",
+                    actor="test",
+                    authority_revision="a" * 64,
+                    targets=[NODE_A],
+                    payload_digest="b" * 64,
+                    payload={},
+                    result={"profile_application_id": str(uuid4())},
+                    current_attempt=0,
+                    created_at=NOW,
+                    updated_at=NOW + timedelta(seconds=index + 1),
+                )
+            )
+    with service.sessions() as session:
+        diagnostics = service._application_child_diagnostics(session, application_id)
+    assert diagnostics is not None
+    assert diagnostics.stderr.text == "Killed\n"
+
+    for attempt in (0, 1):
+        bundle = service.read(job_id, attempt)
+        assert bundle.diagnostics.stderr.text == "Killed\n"
+        assert bundle.diagnostics.preflight[0].value == "oom_killed"
+        assert "run-switch phase operation failed" in bundle.summary
+        assert (
+            "agent-observations-unavailable" not in bundle.diagnostics.collector_errors
+        )
+
+
+def test_oversized_failure_evidence_keeps_the_container_diagnostics():
+    from vonk_control.operation_contract import sanitize_failure_evidence
+
+    document = _child_diagnostics_document("segfault\n")
+    document["versions"] = [{"name": f"v{i}", "value": "x" * 256} for i in range(8)]
+    document["sandbox"] = [{"name": f"s{i}", "value": "x" * 256} for i in range(12)]
+    kept = sanitize_failure_evidence(
+        {
+            "error_code": "recipe_start_failed",
+            "padding": ["y" * 1000 for _ in range(10)],
+            "diagnostics": document,
+        }
+    )
+    assert kept["detail"] == "failure evidence truncated"
+    facts = OperationResultFacts.model_validate(kept)
+    assert facts.diagnostics is not None
+    assert facts.diagnostics.stderr.text == "segfault\n"
