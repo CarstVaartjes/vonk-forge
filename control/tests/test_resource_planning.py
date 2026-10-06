@@ -653,6 +653,7 @@ def test_typed_effective_selection_roundtrip_keeps_bound_identity_and_knobs() ->
     )
     roundtrip = resolve_effective_settings(selection)
     assert roundtrip.allowed
+    assert roundtrip.settings is not None
     assert roundtrip.settings.identity_digest == selection.identity_sha256
     assert roundtrip.settings.knobs == selection.knobs
     assert resource_demand(roundtrip.settings, _evidence()).total_bytes == 120

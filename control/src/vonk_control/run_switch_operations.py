@@ -9346,33 +9346,46 @@ def effective_build_receipt(
     expected_build_id = plan.recipe_build_id
     expected_input = plan.build.build_input_sha256
     candidates: list[RunSwitchEffectiveBuildReceipt] = []
-    if plan.image_digest is not None:
+    planned_image = plan.image_digest
+    planned_layout = plan.build.oci_layout_sha256
+    planned_bytes = plan.build.image_bytes
+    if (
+        planned_image is not None
+        and planned_layout is not None
+        and planned_bytes is not None
+    ):
         try:
             candidates.append(
                 RunSwitchEffectiveBuildReceipt(
                     build_id=expected_build_id,
                     build_input_sha256=expected_input,
-                    image_digest=plan.image_digest,
-                    oci_layout_sha256=plan.build.oci_layout_sha256,
-                    image_bytes=plan.build.image_bytes,
+                    image_digest=planned_image,
+                    oci_layout_sha256=planned_layout,
+                    image_bytes=planned_bytes,
                 )
             )
         except ValidationError:
             pass
     for result in reversed(progress.phase_results):
         if (
-            isinstance(result, RunSwitchContainerBuildResult)
-            and result.state == "succeeded"
+            not isinstance(result, RunSwitchContainerBuildResult)
+            or result.state != "succeeded"
         ):
-            candidates.append(
-                RunSwitchEffectiveBuildReceipt(
-                    build_id=result.build_id,
-                    build_input_sha256=result.build_input_sha256,
-                    image_digest=result.image_digest,
-                    oci_layout_sha256=result.oci_layout_sha256,
-                    image_bytes=result.image_bytes,
-                )
+            continue
+        image_digest = result.image_digest
+        layout_digest = result.oci_layout_sha256
+        image_bytes = result.image_bytes
+        if image_digest is None or layout_digest is None or image_bytes is None:
+            continue
+        candidates.append(
+            RunSwitchEffectiveBuildReceipt(
+                build_id=result.build_id,
+                build_input_sha256=result.build_input_sha256,
+                image_digest=image_digest,
+                oci_layout_sha256=layout_digest,
+                image_bytes=image_bytes,
             )
+        )
     for result in candidates:
         if expected_build_id is not None and result.build_id != expected_build_id:
             continue
