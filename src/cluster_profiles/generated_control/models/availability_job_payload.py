@@ -70,6 +70,7 @@ class AvailabilityJobPayload:
             model_child (AvailabilityModelChild | None | Unset):
             model_digest (None | str | Unset):
             prebuilt_pull (bool | None | Unset):
+            removal_archives (list[str] | None | Unset):
             removal_fence (None | str | Unset):
             retry_after_at (datetime.datetime | None | Unset):
             stage (Literal['available'] | None | Unset):
@@ -100,6 +101,7 @@ class AvailabilityJobPayload:
     model_child: AvailabilityModelChild | None | Unset = UNSET
     model_digest: None | str | Unset = UNSET
     prebuilt_pull: bool | None | Unset = UNSET
+    removal_archives: list[str] | None | Unset = UNSET
     removal_fence: None | str | Unset = UNSET
     retry_after_at: datetime.datetime | None | Unset = UNSET
     stage: Literal['available'] | None | Unset = UNSET
@@ -257,6 +259,16 @@ class AvailabilityJobPayload:
         else:
             prebuilt_pull = self.prebuilt_pull
 
+        removal_archives: list[str] | None | Unset
+        if isinstance(self.removal_archives, Unset):
+            removal_archives = UNSET
+        elif isinstance(self.removal_archives, list):
+            removal_archives = self.removal_archives
+
+
+        else:
+            removal_archives = self.removal_archives
+
         removal_fence: None | str | Unset
         if isinstance(self.removal_fence, Unset):
             removal_fence = UNSET
@@ -328,6 +340,8 @@ class AvailabilityJobPayload:
             field_dict["model_digest"] = model_digest
         if prebuilt_pull is not UNSET:
             field_dict["prebuilt_pull"] = prebuilt_pull
+        if removal_archives is not UNSET:
+            field_dict["removal_archives"] = removal_archives
         if removal_fence is not UNSET:
             field_dict["removal_fence"] = removal_fence
         if retry_after_at is not UNSET:
@@ -650,6 +664,24 @@ class AvailabilityJobPayload:
         prebuilt_pull = _parse_prebuilt_pull(d.pop("prebuilt_pull", UNSET))
 
 
+        def _parse_removal_archives(data: object) -> list[str] | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, list):
+                    raise TypeError()
+                removal_archives_type_0 = cast(list[str], data)
+
+                return removal_archives_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(list[str] | None | Unset, data)
+
+        removal_archives = _parse_removal_archives(d.pop("removal_archives", UNSET))
+
+
         def _parse_removal_fence(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -739,6 +771,7 @@ class AvailabilityJobPayload:
             model_child=model_child,
             model_digest=model_digest,
             prebuilt_pull=prebuilt_pull,
+            removal_archives=removal_archives,
             removal_fence=removal_fence,
             retry_after_at=retry_after_at,
             stage=stage,

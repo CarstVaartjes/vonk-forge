@@ -499,6 +499,16 @@ class ImageAvailabilityAdapter:
             job, CancelRequested(request_key, reason), now, reason=reason
         ).row
 
+    def supersede_removal(self, job: Job, request_id: str, now: datetime) -> Lifecycle:
+        """Fence an old remover; individual storage gates settle exact effects."""
+        reason = f"Removal superseded by accepted preparation {request_id}"
+        return self._drive(
+            job,
+            Reported(Outcome.CANCELLED, effect=Effect.UNKNOWN, reason=reason),
+            now,
+            reason=reason,
+        ).row
+
     def supersede(self, job: Job, reason: str, now: datetime) -> Lifecycle:
         """Rule 6: a newer intent cancels an older, not-yet-started preparation."""
 
