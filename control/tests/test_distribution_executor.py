@@ -37,7 +37,8 @@ from vonk_control.distribution_executor import (
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_api import model_cache_operation_provider
-from vonk_control.model_cache_progress import cache_progress
+from vonk_control.model_cache_contract import ModelCacheCounters
+from vonk_control.model_cache_progress import cache_progress, progress_document
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -49,6 +50,7 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.operation_api import merge_operation_providers
+from vonk_control.operation_item_contract import operation_item
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
     RunSwitchPhase,
@@ -787,16 +789,20 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
         id=str(uuid4()),
         state="queued",
         artifact_set_sha256="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-                "downloaded_bytes": 3,
-                "expected_bytes": 15,
-            },
-            previous=None,
-            now=datetime.now(UTC),
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                        "downloaded_bytes": 3,
+                        "expected_bytes": 15,
+                    }
+                ),
+                previous=None,
+                now=datetime.now(UTC),
+            )
         ),
         last_error=None,
         result=None,
@@ -1509,7 +1515,11 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         node_id=None,
         cursors=cursors,
     )
-    merged_run = next(item for item in merged.items if item["id"] == run_id)
+    merged_run = next(
+        operation_item(item).model_dump(mode="json")
+        for item in merged.items
+        if operation_item(item).id == run_id
+    )
     merged_progress = _operation_progress(merged_run)
     assert merged_progress["completed_bytes"] == 90
     assert {

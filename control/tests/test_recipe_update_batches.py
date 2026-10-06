@@ -22,6 +22,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.operation_api import OperationQuery, operation_detail_response
+from vonk_control.operation_item_contract import operation_item
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityView,
@@ -185,7 +186,7 @@ def test_malformed_parent_does_not_block_other_eligible_updates(update_env):
     page = service.update_activity_provider().list_operations(
         OperationQuery(after=None, limit=10, state=None, node_id=None)
     )
-    assert {item["id"] for item in page.items} == {broken.id, healthy.id}
+    assert {operation_item(item).id for item in page.items} == {broken.id, healthy.id}
     for item in page.items:
         operation_detail_response(item)
 
@@ -482,7 +483,7 @@ def test_activity_projects_parent_with_common_ordering_and_state_filter(update_e
     provider = service.update_activity_provider()
     query = OperationQuery(after=None, limit=1, state="queued", node_id=None)
     page = provider.list_operations(query)
-    assert page.total == 2 and page.items[0]["id"] == newer.id
+    assert page.total == 2 and operation_item(page.items[0]).id == newer.id
     item = operation_detail_response(provider.get_operation(newer.id))
     assert item.progress is not None
     assert item.progress.total_items == 2 and item.node_ids == []
@@ -491,7 +492,7 @@ def test_activity_projects_parent_with_common_ordering_and_state_filter(update_e
             after=(newer.created_at, newer.id), limit=1, state="queued", node_id=None
         )
     )
-    assert next_page.items[0]["id"] == older.id
+    assert operation_item(next_page.items[0]).id == older.id
     assert (
         provider.list_operations(
             OperationQuery(after=None, limit=1, state=None, node_id="spk_" + "a" * 32)

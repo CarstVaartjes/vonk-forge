@@ -55,12 +55,20 @@ from .recipe_execution_contract import (
     parse_stored_run_endpoint,
     run_plan_document,
 )
+from .route_bundle_contract import (
+    RouteBundleDocument,
+    RouteEndpointDocument,
+    RouteIdentityDocument,
+    RouteRankIdentity,
+    RouteRunIdentity,
+)
 from .route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     ActivationMarker,
     AtomicRouteBundlePublisher,
     RouteRuntimeError,
 )
+from .stored_documents import RouteClaimMarker
 
 _ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
@@ -176,16 +184,16 @@ class _RecipeEndpoint:
         )
         return f"http://{host}:{self.port}/v1"
 
-    def route_document(self) -> dict[str, object]:
-        return {
-            "address": self.address,
-            "node_id": self.node_id,
-            "observed_at": self.observed_at.isoformat(),
-            "operation_id": self.operation_id,
-            "path": "/v1",
-            "port": self.port,
-            "scheme": "http",
-        }
+    def route_document(self) -> RouteEndpointDocument:
+        return RouteEndpointDocument(
+            address=self.address,
+            node_id=self.node_id,
+            observed_at=self.observed_at.isoformat(),
+            operation_id=self.operation_id,
+            path="/v1",
+            port=self.port,
+            scheme="http",
+        )
 
 
 @dataclass(frozen=True)
@@ -359,19 +367,27 @@ class AtomicRecipeRoutePublisher:
                 current = None
 
             def route_bytes(generation: int) -> bytes:
-                document: dict[str, object] = {
-                    "generation": generation,
-                    "routes": {
+                document = RouteBundleDocument(
+                    generation=generation,
+                    routes={
                         alias: endpoint.route_document()
                         for alias, endpoint in sorted(endpoints.items())
                     },
-                    "schema_version": 2,
-                    "state": state,
-                }
-                if state == GatewayRouteState.MAINTENANCE:
-                    document["reason"] = "recipe routes withdrawn"
+                    schema_version=2,
+                    state=state,
+                    reason=(
+                        "recipe routes withdrawn"
+                        if state == GatewayRouteState.MAINTENANCE
+                        else None
+                    ),
+                )
                 return (
-                    json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+                    json.dumps(
+                        document.model_dump(mode="json", exclude_none=True),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
                 ).encode()
 
             # Activation is durable before the supervisor acknowledgement and
@@ -492,7 +508,7 @@ class RecipeRouteService:
         now = _aware(self._clock())
         pending = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
         ordinal = (_claim_ordinal(pending) or 0) + 1
-        marker: dict[str, object] = {"claim_ordinal": ordinal}
+        marker = RouteClaimMarker(claim_ordinal=ordinal).model_dump(mode="json")
         if session.get(RecipeRouteAuthority, RECIPE_ROUTE_CLAIM_ID) is None:
             session.add(
                 RecipeRouteAuthority(
@@ -1360,7 +1376,7 @@ class RecipeRouteService:
         upstream_models: dict[str, str] = {}
         endpoints: dict[str, _RecipeEndpoint] = {}
         included: set[str] = set()
-        run_identities: list[dict[str, object]] = []
+        run_identities: list[RouteRunIdentity] = []
         run_statement = (
             select(RecipeRun)
             .where(
@@ -1540,32 +1556,28 @@ class RecipeRouteService:
             included.add(run.id)
             endpoints[run.alias] = endpoint
             run_identities.append(
-                {
-                    "run_id": run.id,
-                    "alias": run.alias,
-                    "plan_digest": run.plan_digest,
-                    "run_generation": run.run_generation,
-                    "upstream_model": upstream_model,
+                RouteRunIdentity(
+                    run_id=run.id,
+                    alias=run.alias,
+                    plan_digest=run.plan_digest,
+                    run_generation=run.run_generation,
+                    upstream_model=upstream_model,
                     # Observation time stays out of route identity so an
                     # otherwise identical heartbeat never generates a new
                     # bundle.
-                    "ranks": [
-                        {
-                            "node_id": node.node_id,
-                            "rank": node.rank,
-                            "role": node.role,
-                        }
+                    ranks=[
+                        RouteRankIdentity(
+                            node_id=node.node_id, rank=node.rank, role=node.role
+                        )
                         for node in nodes
                     ],
-                }
+                )
             )
-        identity = {
-            "schema_version": 1,
-            "runs": run_identities,
-            "aliases": aliases,
-        }
+        identity = RouteIdentityDocument(runs=run_identities, aliases=aliases)
         digest = hashlib.sha256(
-            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(
+                identity.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            ).encode()
         ).hexdigest()
         state = RouteState(aliases=aliases, digest=digest)
         policy = LiteLlmPolicy(

@@ -51,6 +51,7 @@ from vonk_control.recipe_image_availability import (
     BuildUnsettled,
     RecipeImageAvailabilityService,
 )
+from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.recipe_image_removal_contract import RecipeCacheRemovalOwner
 from vonk_control.recipe_operations import (
     RecipeOperationService,
@@ -68,6 +69,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .recipe_removal_review_support import remove_after_review
 from .runtime_image_fixtures import place_test_image, remove_test_image
+from .test_recipe_image_availability import _typed_availability_payload
 
 _CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
@@ -1802,13 +1804,18 @@ def test_forced_image_build_resumes_after_worker_restart(
                     authority_revision=revision.id,
                     targets=[revision.id],
                     payload_digest="a" * 64,
-                    payload={
-                        "runtime": runtime,
-                        "recipe_revision_id": revision.id,
-                        "build_input_sha256": plan.build_input_sha256,
-                        # The worker that held this claim died with its lease.
-                        "claim_until": (now - timedelta(seconds=1)).isoformat(),
-                    },
+                    payload=_typed_availability_payload(
+                        {
+                            "runtime": runtime,
+                            "recipe_revision_id": revision.id,
+                            "build_input_sha256": plan.build_input_sha256,
+                            # The worker that held this claim died with its lease.
+                            "claim_until": (now - timedelta(seconds=1)).isoformat(),
+                        },
+                        RecipeDefinition.model_validate_json(
+                            json.dumps(revision.document)
+                        ),
+                    ),
                     current_attempt=1,
                     created_at=now,
                     updated_at=now,
@@ -1907,7 +1914,10 @@ def test_forced_image_build_resumes_after_worker_restart(
         progress=lambda _: None,
     )
     assert not isinstance(result, BuildUnsettled)
-    assert result["state"] == "succeeded"
+    assert (
+        AvailabilityBuildReceipt.model_validate_json(canonical_message(result)).state
+        == "succeeded"
+    )
     with sessions() as session:
         jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
         assert len(jobs) == 2

@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, OperationProgress
 from vonk_control import artifact_reference_scan
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
 from vonk_control.artifact_reference_scan import (
@@ -30,12 +30,22 @@ from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import build_policy_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.failure_evidence import failure_code
+from vonk_control.job_documents import (
+    AvailabilityJobPayload,
+    AvailabilityModelChild,
+    AvailabilityRetry,
+    AvailabilityRuntime,
+)
 from vonk_control.model_cache import ModelCacheError, ModelCacheService
 from vonk_control.model_cache_contract import (
+    CacheManifest,
+    ModelCacheCounters,
     ModelCacheDownloadPayload,
+    ModelCacheDownloadPreviewResponse,
     ModelCacheOperationProgress,
+    ModelCacheRepairPreviewResponse,
 )
-from vonk_control.model_cache_progress import cache_progress
+from vonk_control.model_cache_progress import cache_progress, progress_document
 from vonk_control.models import (
     AgentNode,
     ArtifactLifecycleGate,
@@ -51,6 +61,11 @@ from vonk_control.models import (
     RecipeBuild,
     User,
 )
+from vonk_control.operation_contract import (
+    AvailabilityOperationFailure,
+    AvailabilityRecoveryAction,
+)
+from vonk_control.operation_item_contract import OperationResultFacts
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     SUPERSEDED_PREPARATION_CODE,
@@ -70,6 +85,7 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImageReferenceIntent,
     read_runtime_image_reference_intent,
 )
+from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_removal_review_support import remove_after_review
@@ -88,6 +104,42 @@ def _recipe(name: str) -> RecipeDefinition:
     return RecipeDefinition.model_validate(raw)
 
 
+def _download_preview(*, artifact_set_sha256: str, plan_digest: str, new_bytes: int):
+    return ModelCacheDownloadPreviewResponse(
+        artifact_set_sha256=artifact_set_sha256,
+        plan_digest=plan_digest,
+        artifact_count=0,
+        expected_bytes=new_bytes,
+        already_cached_bytes=0,
+        new_bytes=new_bytes,
+        blockers=[],
+        warnings=[],
+    ).model_dump(mode="json")
+
+
+def _manifest(*, model_content_digests: list[str]):
+    return CacheManifest(
+        schema_version=2,
+        source_policy="nas-first",
+        model_content_sha256=None,
+        recipe_revision_sha256=None,
+        model_definition_ref=None,
+        model_content_digests=model_content_digests,
+        artifacts=[],
+    ).model_dump(mode="json")
+
+
+def _repair_preview(*, artifact_set_sha256: str, plan_digest: str):
+    return ModelCacheRepairPreviewResponse(
+        artifact_set_sha256=artifact_set_sha256,
+        plan_digest=plan_digest,
+        artifact_count=0,
+        current_state="failed",
+        expected_bytes=0,
+        verified_bytes=0,
+    ).model_dump(mode="json")
+
+
 def _runtime() -> dict[str, object]:
     return {
         "architecture": "linux/arm64",
@@ -95,6 +147,39 @@ def _runtime() -> dict[str, object]:
         "image_bytes": len(ARCHIVE),
         "build_input_sha256": "f" * 64,
     }
+
+
+def _availability_payload(revision_id: str) -> AvailabilityJobPayload:
+    recipe = _recipe("recipe-source-build.json")
+    return AvailabilityJobPayload(
+        schema_version=2,
+        kind="recipe.image.availability.v2",
+        request=RecipeRevisionIntent(recipe_revision_id=revision_id),
+        recipe_revision_id=revision_id,
+        recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
+        recipe=recipe,
+        runtime=AvailabilityRuntime.model_validate(_runtime()),
+        force_rebuild=False,
+        progress=OperationProgress(phase="prepare"),
+        retry=AvailabilityRetry(automatic_attempts=0, operator_retries=0),
+    )
+
+
+def _typed_availability_payload(
+    observations: dict[str, object], recipe: RecipeDefinition
+):
+    """Behavior fixtures carry the same complete intent the service writes."""
+
+    revision_id = str(observations["recipe_revision_id"])
+    base = _availability_payload(revision_id).model_dump(mode="json")
+    base["recipe"] = recipe.model_dump(mode="json")
+    base["recipe_content_sha256"] = document_sha256(recipe.model_dump(mode="json"))
+    runtime = base["runtime"] | observations.get("runtime", {})
+    return serialize_json_value(
+        AvailabilityJobPayload.model_validate_json(
+            json.dumps(base | observations | {"runtime": runtime})
+        )
+    )
 
 
 _build_runtime = _runtime
@@ -954,7 +1039,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
     # The operator-facing evidence bundle reuses this contract, so it must
     # carry the failure instead of a summary of "[]" -- including the table
     # name, which names the constraint the operator has to repair.
-    code, evidence_detail = failure_code(failure)
+    code, evidence_detail = failure_code(OperationResultFacts.model_validate(failure))
     assert code == "integrityerror"
     assert evidence_detail is not None and evidence_detail != "[]"
     assert "jobs.request_id" in evidence_detail
@@ -1879,8 +1964,8 @@ def test_builder_dependency_wait_remains_durable_queue_after_automatic_limit(
         assert operation is not None
         retry = operation.payload["retry"]
         assert isinstance(retry, dict) and retry["automatic_attempts"] == 0
-        assert operation.payload["claim_owner"] is None
-        assert operation.payload["claim_until"] is None
+        assert operation.payload.get("claim_owner") is None
+        assert operation.payload.get("claim_until") is None
 
 
 def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> None:
@@ -2091,16 +2176,20 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 40,
-                "expected_bytes": 100,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=now[0],
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 40,
+                        "expected_bytes": 100,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=now[0],
+            )
         ),
         failure=None,
     )
@@ -2117,20 +2206,19 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
 
         def download_preview(self, *, recipe_revision_id: str) -> dict[str, object]:
             assert recipe_revision_id == revision.id
-            return {
-                "plan_digest": child.plan_digest,
-                "artifact_set_sha256": child.artifact_set_sha256,
-                "new_bytes": 0,
-            }
+            return _download_preview(
+                plan_digest=child.plan_digest,
+                artifact_set_sha256=child.artifact_set_sha256,
+                new_bytes=0,
+            )
 
         def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
             assert recipe_revision_id == revision.id
             return SimpleNamespace(
                 digest=child.artifact_set_sha256,
-                document=lambda: {
-                    "model_content_digests": [model_content_sha256],
-                    "artifacts": [],
-                },
+                document=lambda: _manifest(
+                    model_content_digests=[model_content_sha256]
+                ),
             )
 
         def list_operations(self, *, limit: int) -> tuple[object, ...]:
@@ -2211,16 +2299,20 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
             state="succeeded",
             artifact_set_sha256=child.artifact_set_sha256,
             plan_digest=child.plan_digest,
-            progress=cache_progress(
-                {
-                    "phase": "completed",
-                    "downloaded_bytes": 100,
-                    "expected_bytes": 100,
-                    "completed_artifacts": 1,
-                    "total_artifacts": 1,
-                },
-                previous=None,
-                now=now[0],
+            progress=progress_document(
+                cache_progress(
+                    ModelCacheCounters.model_validate(
+                        {
+                            "phase": "completed",
+                            "downloaded_bytes": 100,
+                            "expected_bytes": 100,
+                            "completed_artifacts": 1,
+                            "total_artifacts": 1,
+                        }
+                    ),
+                    previous=None,
+                    now=now[0],
+                )
             ),
             failure=None,
         ),
@@ -2228,16 +2320,20 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         now=now[0],
     )
     child.state = "succeeded"
-    child.progress = cache_progress(
-        {
-            "phase": "completed",
-            "downloaded_bytes": 100,
-            "expected_bytes": 100,
-            "completed_artifacts": 1,
-            "total_artifacts": 1,
-        },
-        previous=None,
-        now=now[0],
+    child.progress = progress_document(
+        cache_progress(
+            ModelCacheCounters.model_validate(
+                {
+                    "phase": "completed",
+                    "downloaded_bytes": 100,
+                    "expected_bytes": 100,
+                    "completed_artifacts": 1,
+                    "total_artifacts": 1,
+                }
+            ),
+            previous=None,
+            now=now[0],
+        )
     )
     now[0] = max(now[0] + timedelta(seconds=1), retry_at)
     retry = service.claim_pending(owner_id="lock-contention-recovery-worker")
@@ -2513,16 +2609,20 @@ def test_model_child_and_image_complete_through_one_sql_operation(
         state="succeeded",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 1024,
-                "expected_bytes": 1024,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=now,
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 1024,
+                        "expected_bytes": 1024,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=now,
+            )
         ),
         failure=None,
     )
@@ -2541,16 +2641,14 @@ def test_model_child_and_image_complete_through_one_sql_operation(
 
         def download_preview(self, *, recipe_revision_id: str) -> dict[str, object]:
             assert recipe_revision_id == "revision-model-image"
-            return {
-                "plan_digest": "d" * 64,
-                "artifact_set_sha256": "c" * 64,
-                "new_bytes": 0,
-            }
+            return _download_preview(
+                plan_digest="d" * 64, artifact_set_sha256="c" * 64, new_bytes=0
+            )
 
         def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
             return SimpleNamespace(
                 digest="c" * 64,
-                document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []},
+                document=lambda: _manifest(model_content_digests=["d" * 64]),
             )
 
         def list_operations(self, *, limit: int) -> tuple[object, ...]:
@@ -2625,16 +2723,20 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 40,
-                "expected_bytes": 100,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=now,
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 40,
+                        "expected_bytes": 100,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=now,
+            )
         ),
         failure=None,
     )
@@ -2649,16 +2751,14 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
 
     class ModelCache:
         def download_preview(self, **_: object) -> dict[str, object]:
-            return {
-                "plan_digest": "d" * 64,
-                "artifact_set_sha256": "c" * 64,
-                "new_bytes": 0,
-            }
+            return _download_preview(
+                plan_digest="d" * 64, artifact_set_sha256="c" * 64, new_bytes=0
+            )
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(
                 digest="c" * 64,
-                document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []},
+                document=lambda: _manifest(model_content_digests=["d" * 64]),
             )
 
         def list_operations(self, **_: object) -> tuple[object, ...]:
@@ -2731,21 +2831,25 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     failed = SimpleNamespace(
-        id="failed-model",
-        request_key="failed-request",
+        id="00000000-0000-4000-8000-000000000501",
+        request_key="00000000-0000-4000-8000-000000000502",
         state="failed",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 4,
-                "expected_bytes": 10,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=datetime.now(UTC),
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 4,
+                        "expected_bytes": 10,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=datetime.now(UTC),
+            )
         ),
         failure={
             "code": "access_denied",
@@ -2789,7 +2893,9 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
         clock=lambda: datetime.now(UTC),
     )
     service._resume_model_child(
-        {"id": failed.id, "state": "failed", "failure": failed.failure},
+        AvailabilityModelChild.model_validate_json(
+            json.dumps({"id": failed.id, "state": "failed", "failure": failed.failure})
+        ),
         actor="operator",
         parent_request_key="p" * 36,
     )
@@ -2815,16 +2921,20 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 4,
-                "expected_bytes": 10,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=datetime.now(UTC),
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 4,
+                        "expected_bytes": 10,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=datetime.now(UTC),
+            )
         ),
         failure=None,
     )
@@ -2834,16 +2944,20 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         state="succeeded",
         artifact_set_sha256="c" * 64,
         plan_digest="e" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 10,
-                "expected_bytes": 10,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=datetime.now(UTC),
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 10,
+                        "expected_bytes": 10,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=datetime.now(UTC),
+            )
         ),
         failure=None,
     )
@@ -2862,16 +2976,14 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
             self.repair_calls: list[dict[str, object]] = []
 
         def download_preview(self, **_: object) -> dict[str, object]:
-            return {
-                "plan_digest": "d" * 64,
-                "artifact_set_sha256": "c" * 64,
-                "new_bytes": 0,
-            }
+            return _download_preview(
+                plan_digest="d" * 64, artifact_set_sha256="c" * 64, new_bytes=0
+            )
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(
                 digest="c" * 64,
-                document=lambda: {"model_content_digests": ["d" * 64], "artifacts": []},
+                document=lambda: _manifest(model_content_digests=["d" * 64]),
             )
 
         def list_operations(self, **_: object) -> tuple[object, ...]:
@@ -2907,7 +3019,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
 
         def repair_preview(self, artifact_set_sha256: str) -> dict[str, object]:
             assert artifact_set_sha256 == "c" * 64
-            return {"plan_digest": "e" * 64}
+            return _repair_preview(artifact_set_sha256="c" * 64, plan_digest="e" * 64)
 
         def start_repair(self, **kwargs: object) -> SimpleNamespace:
             self.repair_calls.append(kwargs)
@@ -3179,14 +3291,16 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
             "unrecognized": "must be rejected"
         }
         row.payload = payload
-    with pytest.raises(RuntimeImagePreparationError):
-        service._persist_provisional_image_reference(
-            claim,
-            receipt=_reference_receipt(),
+    service._persist_provisional_image_reference(claim, receipt=_reference_receipt())
+    with sessions() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        assert "unrecognized" not in require_mapping(
+            row.payload["image_reference_intent"], "reference"
         )
-    with sessions() as session, pytest.raises(ArtifactLifecycleError) as malformed:
-        runtime_image_reference_reasons(session, [ARCHIVE_SHA])
-    assert malformed.value.code == "artifact.reference_scan_failed"
+        assert runtime_image_reference_reasons(session, [ARCHIVE_SHA])[ARCHIVE_SHA] == (
+            f"image publication operation {operation.id}",
+        )
     with sessions.begin() as session:
         row = session.get(Job, operation.id)
         assert row is not None
@@ -3412,38 +3526,43 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
         transport=Transport(),
         clock=lambda: now,
     )
-    payload = {
-        "request": RecipeRevisionIntent(
-            recipe_revision_id="revision-progress"
-        ).model_dump(mode="json"),
-        "recipe_revision_id": "revision-progress",
-        "recipe_content_sha256": document_sha256(recipe.model_dump(mode="json")),
-        "progress": {
-            "phase": "available",
-            "completed_bytes": 20,
-            "total_bytes": 20,
-            "total_bytes_known": True,
-        },
-        "image_result": {"image_bytes": 20},
-        "model_child": {
-            "id": "model-child",
-            "state": model_state,
-            "model_content_digests": ["d" * 64],
-            "progress": {
-                "phase": "download",
-                "completed_bytes": 40,
-                "total_bytes": 100,
-                "total_bytes_known": True,
-            },
-        },
-    }
-    if model_state == "failed":
-        payload["failure"] = {
-            "code": "recipe_image.model_cache_failed",
-            "detail": "model download failed",
-            "retryable": True,
-            "recovery_actions": ["retry"],
+    payload = _availability_payload("revision-progress").model_copy(
+        update={
+            "progress": OperationProgress(
+                phase="available",
+                completed_bytes=20,
+                total_bytes=20,
+                total_bytes_known=True,
+            ),
+            "image_result": _reference_receipt().model_copy(update={"image_bytes": 20}),
+            "model_child": AvailabilityModelChild.model_validate_json(
+                json.dumps(
+                    {
+                        "id": "00000000-0000-4000-8000-000000000701",
+                        "state": model_state,
+                        "model_content_digests": ["d" * 64],
+                        "progress": OperationProgress(
+                            phase="download",
+                            completed_bytes=40,
+                            total_bytes=100,
+                            total_bytes_known=True,
+                        ).model_dump(mode="json"),
+                    }
+                )
+            ),
         }
+    )
+    if model_state == "failed":
+        payload = payload.model_copy(
+            update={
+                "failure": AvailabilityOperationFailure(
+                    code="recipe_image.model_cache_failed",
+                    detail="model download failed",
+                    retryable=True,
+                    recovery_actions=[AvailabilityRecoveryAction.RETRY],
+                )
+            }
+        )
     operation = Job(
         id="availability-progress",
         request_id="p" * 36,
@@ -3453,7 +3572,7 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
         authority_revision="revision-progress",
         targets=["revision-progress"],
         payload_digest="a" * 64,
-        payload=payload,
+        payload=serialize_json_value(payload),
         result=None,
         current_attempt=1,
         created_at=now,
@@ -3646,13 +3765,17 @@ def test_newer_revision_is_prepared_at_once_after_the_older_build_failed(
 def _parked_operation(
     operation_id: str, *, now: datetime, model_child: bool, updated: datetime
 ) -> Job:
-    payload: dict[str, object] = {
-        "recipe_revision_id": f"revision-{operation_id}",
-        "build_input_sha256": "f" * 64,
-    }
+    payload = _availability_payload(f"revision-{operation_id}")
     if model_child:
-        payload["model_child"] = {"id": f"child-{operation_id}", "state": "running"}
-        payload["image_result"] = {"image_bytes": 1}
+        payload = payload.model_copy(
+            update={
+                "model_child": AvailabilityModelChild(
+                    id=str(uuid.uuid5(uuid.NAMESPACE_URL, operation_id)),
+                    state=LifecycleState.RUNNING,
+                ),
+                "image_result": _reference_receipt(),
+            }
+        )
     return Job(
         id=operation_id,
         request_id=operation_id.ljust(36, "x"),
@@ -3662,7 +3785,7 @@ def _parked_operation(
         authority_revision=f"revision-{operation_id}",
         targets=[f"revision-{operation_id}"],
         payload_digest="a" * 64,
-        payload=payload,
+        payload=serialize_json_value(payload),
         result=None,
         current_attempt=1 if model_child else 0,
         created_at=now,

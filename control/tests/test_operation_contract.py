@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import canonical_message
-from vonk_control.bounded_json import require_mapping, require_sequence, text
+from vonk_agent_protocol import OperationCheckpoint, canonical_message
+from vonk_control.bounded_json import text
 from vonk_control.operation_contract import (
     OperationMemberProgress,
     OperationPhase,
@@ -111,41 +111,41 @@ def test_progress_preserves_distribution_object_identity() -> None:
 
 
 def test_checkpoint_and_bytes_updates_are_monotonic() -> None:
-    previous = {
-        "phase": "transfer",
-        "completed_bytes": 50,
-        "total_bytes": 100,
-        "total_bytes_known": True,
-        "checkpoint": {"key": "shard", "sequence": 2, "cursor": "50"},
-    }
+    previous = OperationProgress(
+        phase="transfer",
+        completed_bytes=50,
+        total_bytes=100,
+        total_bytes_known=True,
+        checkpoint=OperationCheckpoint(key="shard", sequence=2, cursor="50"),
+    )
     updated = validate_progress_update(
         previous,
-        {
-            "phase": "transfer",
-            "completed_bytes": 75,
-            "total_bytes": 100,
-            "total_bytes_known": True,
-            "checkpoint": {"key": "shard", "sequence": 3, "cursor": "75"},
-        },
+        OperationProgress(
+            phase="transfer",
+            completed_bytes=75,
+            total_bytes=100,
+            total_bytes_known=True,
+            checkpoint=OperationCheckpoint(key="shard", sequence=3, cursor="75"),
+        ),
     )
-    assert updated["completed_bytes"] == 75
-    retained = validate_progress_update(previous, {"phase": "verify"})
-    assert retained["completed_bytes"] == 50
-    assert retained["checkpoint"] == previous["checkpoint"]
+    assert updated.completed_bytes == 75
+    retained = validate_progress_update(previous, OperationProgress(phase="verify"))
+    assert retained.completed_bytes == 50
+    assert retained.checkpoint == previous.checkpoint
     with pytest.raises(ValueError, match="cannot move backwards"):
-        validate_progress_update(previous, {"phase": "transfer", "completed_bytes": 49})
+        validate_progress_update(
+            previous, OperationProgress(phase="transfer", completed_bytes=49)
+        )
     with pytest.raises(ValueError, match="reused"):
         validate_progress_update(
             previous,
-            {
-                "phase": "transfer",
-                "completed_bytes": 50,
-                "checkpoint": {
-                    "key": "shard",
-                    "sequence": 2,
-                    "cursor": "different",
-                },
-            },
+            OperationProgress(
+                phase="transfer",
+                completed_bytes=50,
+                checkpoint=OperationCheckpoint(
+                    key="shard", sequence=2, cursor="different"
+                ),
+            ),
         )
 
 
@@ -184,37 +184,37 @@ def test_uncertain_operations_require_inspection_before_resume() -> None:
 
 
 def test_partial_progress_preserves_omitted_members_but_clears_explicit_empty() -> None:
-    previous = {
-        "phase": "transfer",
-        "completed_bytes": 10,
-        "total_bytes": 100,
-        "total_bytes_known": True,
-        "members": [{"member_id": "node", "phase": "transfer", "completed_bytes": 10}],
-    }
-    retained = validate_progress_update(previous, {"phase": "verify"})
-    assert retained["completed_bytes"] == 10
-    assert retained["total_bytes"] == 100
-    members = require_sequence(
-        retained["members"], "retained members must be a sequence"
+    previous = OperationProgress(
+        phase="transfer",
+        completed_bytes=10,
+        total_bytes=100,
+        total_bytes_known=True,
+        members=[
+            OperationMemberProgress(
+                member_id="node", phase="transfer", completed_bytes=10
+            )
+        ],
     )
-    member = require_mapping(members[0], "retained member must be an object")
-    assert member["member_id"] == "node"
-    cleared = validate_progress_update(previous, {"phase": "verify", "members": []})
-    assert cleared["members"] == []
-    assert cleared["completed_bytes"] == 10
+    retained = validate_progress_update(previous, OperationProgress(phase="verify"))
+    assert retained.completed_bytes == 10
+    assert retained.total_bytes == 100
+    assert [member.member_id for member in retained.members] == ["node"]
+    cleared = validate_progress_update(
+        previous, OperationProgress(phase="verify", members=[])
+    )
+    assert cleared.members == []
+    assert cleared.completed_bytes == 10
     snapshot = validate_progress_update(
         previous,
-        {
-            "phase": "verify",
-            "completed_bytes": 10,
-            "total_bytes_known": False,
-            "members": [],
-        },
+        OperationProgress(
+            phase="verify",
+            completed_bytes=10,
+            total_bytes_known=False,
+            members=[],
+        ),
         partial=False,
     )
-    assert snapshot["members"] == []
-    assert snapshot["total_bytes_known"] is False
-    assert "total_bytes" not in snapshot
+    assert snapshot.members == []
 
 
 def test_canonical_progress_retains_default_zero_false_and_empty_members() -> None:

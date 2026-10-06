@@ -57,18 +57,21 @@ recorded request, and a stored ``waiting-for-operator`` is retried.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vonk_agent_protocol import LifecycleState
 
 from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
+from ..recipe_image_availability_clocks_contract import StoredAvailabilityClocks
 from ..recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
 from ..recipe_update_contract import UPDATE_KIND
+from ..stored_json import read_row_column
+from ..strict_json import serialize_json_value
 from .adapter import Dispatch
 from .core import STOP_BUDGET, transition
 from .types import (
@@ -87,6 +90,9 @@ from .types import (
     StopResult,
 )
 
+if TYPE_CHECKING:
+    from ..job_documents import AvailabilityJobPayload
+
 KIND = "image-availability"
 OPERATION_KIND = "recipe.image.availability.v2"
 REMOVAL_KIND = RECIPE_CACHE_REMOVE_KIND
@@ -95,16 +101,13 @@ CANCEL_BUDGET = timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 #: How long a stored ``running`` removal is trusted to be between two steps.
 REMOVAL_STEP_LEASE = timedelta(minutes=2)
 _MAX_REASON = 1024
-_CLAIM_KEYS = ("claim_owner", "claim_until")
-#: Payload keys that show the preparation issued something an inspection of the
-#: world could find: a lease, a provisional image reference, an exact child.
-_EFFECT_KEYS = (
-    "claim_owner",
-    "image_reference_intent",
-    "model_child",
-    "build_dependency",
-)
-KEEP: Any = object()
+
+
+class _Keep:
+    pass
+
+
+KEEP = _Keep()
 
 _STORED = {
     State.QUEUED: State.QUEUED.value,
@@ -115,19 +118,6 @@ _STORED = {
     State.FAILED: State.FAILED.value,
     State.CANCELLED: State.CANCELLED.value,
 }
-
-
-def _when(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return aware(datetime.fromisoformat(value))
-    except ValueError:
-        return None
-
-
-def _count(value: object) -> int:
-    return value if type(value) is int and value > 0 else 0
 
 
 class ImageAvailabilityAdapter:
@@ -150,32 +140,37 @@ class ImageAvailabilityAdapter:
         """The lifecycle row of a stored (possibly legacy) job."""
 
         now = aware(now)
-        payload = job.payload if isinstance(job.payload, Mapping) else {}
+        clocks = StoredAvailabilityClocks.read(job.payload)
         removal = job.kind == REMOVAL_KIND
-        requested_at, request_key = self._cancel_request(payload)
-        failure = self._removal_failure(payload) if removal else None
-        if removal:
-            retry_count = _count(
-                self._removal_checkpoint(payload).get("retry_attempts")
-            )
-        else:
-            retry = payload.get("retry")
-            retry_count = _count(
-                retry.get("automatic_attempts") if isinstance(retry, Mapping) else 0
-            )
+        cancellation = clocks.cancellation
+        requested_at = cancellation.cancel_requested_at if cancellation else None
+        request_key = cancellation.cancel_request_id if cancellation else None
+        checkpoint = clocks.checkpoint
+        failure = checkpoint.failure if checkpoint else None
+        retry_count = (
+            ((checkpoint.retry_attempts or 0) if checkpoint else 0)
+            if removal
+            else ((clocks.retry.automatic_attempts or 0) if clocks.retry else 0)
+        )
         stored = job.state
-        due: datetime | None = None
+        due = (
+            (failure.retry_time if failure else None)
+            if removal
+            else clocks.retry_after_at
+        )
         lease: datetime | None = None
-        fence = payload.get("claim_owner")
-        fence = fence if isinstance(fence, str) else None
-        if removal:
-            due = _when(failure.get("retry_time")) if failure else None
-        else:
-            due = _when(payload.get("retry_after_at"))
+        fence = clocks.claim_owner
         issued = (
             job.kind == UPDATE_KIND
             or (int(job.current_attempt or 0) > 0 and not removal)
-            or any(payload.get(key) for key in _EFFECT_KEYS)
+            or any(
+                (
+                    clocks.claim_owner,
+                    clocks.image_reference_intent,
+                    clocks.model_child,
+                    clocks.build_dependency,
+                )
+            )
         )
         if stored == State.QUEUED:
             state = State.BACKOFF if due is not None and due > now else State.QUEUED
@@ -183,9 +178,7 @@ class ImageAvailabilityAdapter:
             state = State.BACKOFF
         elif stored == State.RUNNING:
             lease = (
-                job.updated_at + REMOVAL_STEP_LEASE
-                if removal
-                else _when(payload.get("claim_until"))
+                job.updated_at + REMOVAL_STEP_LEASE if removal else clocks.claim_until
             )
             lease = aware(lease) if lease is not None else None
             if lease is not None and lease > now:
@@ -237,27 +230,6 @@ class ImageAvailabilityAdapter:
             reason=job.status_reason,
         )
 
-    @staticmethod
-    def _cancel_request(
-        payload: Mapping[str, object],
-    ) -> tuple[datetime | None, str | None]:
-        cancellation = payload.get("cancellation")
-        if not isinstance(cancellation, Mapping):
-            return None, None
-        key = cancellation.get("cancel_request_id")
-        return _when(cancellation.get("cancel_requested_at")), (
-            key if isinstance(key, str) else None
-        )
-
-    @staticmethod
-    def _removal_checkpoint(payload: Mapping[str, object]) -> Mapping[str, object]:
-        checkpoint = payload.get("checkpoint")
-        return checkpoint if isinstance(checkpoint, Mapping) else {}
-
-    def _removal_failure(self, payload: Mapping[str, object]) -> Mapping[str, object]:
-        failure = self._removal_checkpoint(payload).get("failure")
-        return failure if isinstance(failure, Mapping) else {}
-
     # ------------------------------------------------------- kind questions
 
     def irreversible(self, row: Lifecycle) -> bool:
@@ -289,15 +261,16 @@ class ImageAvailabilityAdapter:
         after: Lifecycle,
         now: datetime,
         *,
-        reason: str | None = KEEP,
+        reason: str | None | _Keep = KEEP,
         visible: str | None = None,
-        payload: dict[str, object] | None = None,
-    ) -> None:
+        payload: AvailabilityJobPayload | None = None,
+    ) -> AvailabilityJobPayload | None:
         """Project a core decision onto the stored job; the only such writer.
 
-        ``payload`` is the caller's payload, changed in place (the caller stores
-        it with its own validation): a preparation's retry clock lands in it.
+        Return the updated typed payload; the caller stores it through its contract.
         """
+
+        from ..job_documents import AvailabilityJobPayload
 
         now = aware(now)
         if after.state is State.BACKOFF:
@@ -311,7 +284,7 @@ class ImageAvailabilityAdapter:
         else:
             state = _STORED[after.state]
         job.state = state
-        if reason is not KEEP:
+        if not isinstance(reason, _Keep):
             job.status_reason = None if reason is None else reason[:_MAX_REASON]
         elif after.state is State.CANCELLED and after.effect is Effect.UNKNOWN:
             job.status_reason = (after.reason or "")[:_MAX_REASON] or None
@@ -321,19 +294,25 @@ class ImageAvailabilityAdapter:
             and after.state is State.BACKOFF
             and after.next_action_at is not None
         ):
-            payload["retry_after_at"] = aware(after.next_action_at).isoformat()
+            payload = payload.model_copy(
+                update={"retry_after_at": aware(after.next_action_at)}
+            )
         if after.state is State.CANCELLED and after.effect is Effect.UNKNOWN:
             # The claim is fenced by the ended state; its keys no longer mean a
             # live lease (the exact children stay recorded as the residue).
-            target = payload if payload is not None else dict(job.payload or {})
-            if any(target.get(key) for key in _CLAIM_KEYS):
-                for key in _CLAIM_KEYS:
-                    target.pop(key, None)
+            target = payload if payload is not None else read_row_column(job, "payload")
+            if isinstance(target, AvailabilityJobPayload):
+                target = target.model_copy(
+                    update={"claim_owner": None, "claim_until": None}
+                )
                 if payload is None:
-                    job.payload = target
+                    job.payload = serialize_json_value(target)
+                else:
+                    payload = target
         if job.kind != REMOVAL_KIND:
             job.current_attempt = max(int(job.current_attempt or 0), after.attempt)
         job.updated_at = now
+        return payload
 
     def _drive(
         self,
@@ -342,7 +321,8 @@ class ImageAvailabilityAdapter:
         now: datetime,
         *,
         row: Lifecycle | None = None,
-        **write: Any,
+        reason: str | None | _Keep = KEEP,
+        visible: str | None = None,
     ) -> Decision:
         """Feed ``event`` to the core and write what it decides, inline.
 
@@ -354,7 +334,7 @@ class ImageAvailabilityAdapter:
         before = row if row is not None else self.lifecycle(job, now)
         decision = transition(before, event, self, now)
         if decision.row != before:
-            self.apply(job, decision.row, now, **write)
+            self.apply(job, decision.row, now, reason=reason, visible=visible)
         return decision
 
     # ------------------------------------------------ the owner's own events
@@ -394,15 +374,12 @@ class ImageAvailabilityAdapter:
             event = Claimed(row.attempt + 1, "removal", lease)
         return self._drive(job, event, now, row=row, reason=None).row
 
-    def succeed(
-        self, job: Job, now: datetime, *, payload: dict[str, object] | None = None
-    ) -> Lifecycle:
+    def succeed(self, job: Job, now: datetime) -> Lifecycle:
         return self._drive(
             job,
             Reported(Outcome.DONE, reason=None),
             now,
             reason=None,
-            payload=payload,
         ).row
 
     def plan_failure(
@@ -443,12 +420,12 @@ class ImageAvailabilityAdapter:
         after: Lifecycle,
         now: datetime,
         *,
-        reason: str | None = KEEP,
-        payload: dict[str, object] | None = None,
-    ) -> None:
+        reason: str | None | _Keep = KEEP,
+        payload: AvailabilityJobPayload | None = None,
+    ) -> AvailabilityJobPayload | None:
         """Write a decision :meth:`plan_failure` returned."""
 
-        self.apply(job, after, now, reason=reason, payload=payload)
+        return self.apply(job, after, now, reason=reason, payload=payload)
 
     def fail(
         self,
@@ -458,13 +435,12 @@ class ImageAvailabilityAdapter:
         retryable: bool,
         reason: str,
         retry_after: datetime | None = None,
-        payload: dict[str, object] | None = None,
         count: int | None = None,
     ) -> Lifecycle:
         after = self.plan_failure(
             job, now, retryable=retryable, retry_after=retry_after, count=count
         )
-        self.commit(job, after, now, reason=reason, payload=payload)
+        self.commit(job, after, now, reason=reason)
         return after
 
     def defer(
@@ -473,21 +449,19 @@ class ImageAvailabilityAdapter:
         now: datetime,
         retry_after: datetime,
         *,
-        payload: dict[str, object] | None = None,
-    ) -> Lifecycle:
-        """The preparation waits for a dependency (its model child): not a failure."""
-
+        payload: AvailabilityJobPayload,
+    ) -> AvailabilityJobPayload:
+        """A dependency wait returns its typed payload with the core retry clock."""
         now = aware(now)
         row = self.lifecycle(job, now)
-        return self._drive(
-            job,
-            Reported(Outcome.UNKNOWN, retry_after=retry_after),
-            now,
-            row=row,
-            reason=KEEP,
-            visible=State.BACKOFF.value,
-            payload=payload,
-        ).row
+        decision = transition(
+            row, Reported(Outcome.UNKNOWN, retry_after=retry_after), self, now
+        )
+        updated = self.apply(
+            job, decision.row, now, visible=State.BACKOFF.value, payload=payload
+        )
+        assert updated is not None
+        return updated
 
     def request_cancel(
         self, job: Job, request_key: str | None, reason: str, now: datetime

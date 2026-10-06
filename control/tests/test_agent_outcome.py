@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     OutcomeUnknown,
     WaitReason,
 )
+from vonk_agent_protocol.contracts import AgentResultPayload
 from vonk_control.agent_jobs import AgentJobService, _safe_retry_failure
 from vonk_control.agent_operation_facts import aware, operation_start_deadline
 from vonk_control.agent_outcome import agent_outcome, stored_report
@@ -165,7 +166,7 @@ def test_a_legacy_report_is_stored_exactly_as_it_arrived(
 
 
 def _old_report_event(
-    operation: Any, fence: str, parent: Any, state: str, result: dict[str, Any]
+    operation: Any, fence: str, parent: Any, state: str, result: AgentResultPayload
 ) -> Reported:
     """The event derivation before the typed contract, verbatim, as the oracle."""
 
@@ -242,7 +243,7 @@ def test_the_lifecycle_event_equals_the_one_derived_before_the_typed_contract(
     )
     message = _message(state, body)
     stored, outcome = stored_report(operation_kind, message)
-    result = {k: v for k, v in dict(stored.result).items() if v is not None}
+    result = stored.result
 
     event = AgentJobService._report_event(
         operation, attempt, parent, outcome, result, NOW
@@ -312,7 +313,7 @@ def test_a_typed_report_derives_the_event_its_stored_legacy_twin_derives(
     # and the legacy adapter reads it back as the same kind of outcome.
     legacy_outcome = agent_outcome(operation_kind, state, stored.result)
     assert type(legacy_outcome) is type(outcome)
-    result = {k: v for k, v in dict(stored.result).items() if v is not None}
+    result = stored.result
     typed_event = AgentJobService._report_event(
         operation, attempt, parent, outcome, result, NOW
     )
@@ -366,7 +367,7 @@ def test_a_foreign_container_refusal_is_retried_visibly_and_never_blocks() -> No
     assert body["error_code"] == "retained_container_foreign"
     assert body["failure_kind"] == "resource-prerequisite"
     assert body["diagnostic"] == "container=vonk-x"
-    assert _safe_retry_failure("recipe.start", "failed", body)
+    assert _safe_retry_failure("recipe.start", "failed", stored.result)
 
 
 def test_an_outcome_that_contradicts_its_state_is_refused() -> None:

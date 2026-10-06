@@ -37,6 +37,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     ModelCacheCode,
+    OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
     ProgressPhase,
@@ -73,7 +74,6 @@ from .artifact_reference_scan import (
     runtime_image_reference_findings,
     runtime_image_reference_reasons,
 )
-from .bounded_json import mapping, require_mapping, require_sequence
 from .cache_removal_review import (
     ArtifactKind,
     AssetDisposition,
@@ -86,11 +86,19 @@ from .cache_removal_review import (
     seal_cache_removal_review,
 )
 from .catalog_queries import active_head_revision
-from .catalog_revision_contract import read_catalog_document
 from .categorized_errors import InvalidValue, MissingRecord
 from .categorized_faults import security_reason
 from .content_identity import ImageContent, same_image
 from .failure_classification import is_redownload, is_security_failure
+from .job_documents import (
+    AvailabilityJobPayload,
+    AvailabilityJobResult,
+    AvailabilityModelChild,
+    AvailabilityRetry,
+    AvailabilityRuntime,
+    AvailabilitySupersession,
+    RecipeBuildParent,
+)
 from .lifecycle.core import STOP_BUDGET
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .lifecycle.image_availability import ImageAvailabilityAdapter
@@ -102,7 +110,12 @@ from .model_cache import (
     ModelCacheRemovalScope,
     model_cache_failure_is_terminal,
 )
-from .model_cache_contract import ModelCacheCancellation, ModelCacheRemovalResult
+from .model_cache_contract import (
+    CacheManifest,
+    ModelCacheOperationProgress,
+    ModelCacheRemovalResult,
+    ModelCacheRepairPreviewResponse,
+)
 from .model_cache_progress import project_cache_progress
 from .models import (
     ArtifactLifecycleGate,
@@ -115,13 +128,11 @@ from .models import (
 from .operation_blockers import (
     OperationBlocker,
     bound_blockers,
-    dump_blockers,
     make_blocker,
-    read_blockers,
 )
 from .operation_contract import (
     AvailabilityOperationFailure,
-    normalize_operation_progress,
+    AvailabilityRecoveryAction,
     sanitize_failure_evidence,
 )
 from .operation_progress import aggregate_progress
@@ -130,7 +141,6 @@ from .recipe_availability_intent import (
     RecipeRetryIntent,
     RecipeRevisionIntent,
     RecipeSelectorIntent,
-    read_availability_intent,
 )
 from .recipe_build_cancellation import (
     BuildConsumerError,
@@ -138,6 +148,21 @@ from .recipe_build_cancellation import (
     lock_availability_build_dependency,
     lock_build_dependency,
     request_build_cancellation,
+)
+from .recipe_image_availability_clocks_contract import StoredAvailabilityClocks
+from .recipe_image_availability_contract import (
+    AvailabilityBuildReceipt,
+    RecipeImageAvailabilityArtifact,
+)
+from .recipe_image_availability_reader_contract import (
+    AvailabilityDownloadPreview,
+    RecoveredAvailabilityPayload,
+    StoredAvailabilityIdentity,
+    StoredModelChildCancellation,
+)
+from .recipe_image_availability_view_contract import (
+    RecipeCacheRemovalStatus,
+    RecipeImageAvailabilityView,
 )
 from .recipe_image_removal_contract import (
     RECIPE_CACHE_REMOVE_KIND,
@@ -160,8 +185,8 @@ from .runtime_image_preparation import (
     RuntimeImageReferenceIntent,
     RuntimeImageStorage,
     prepare_runtime_image,
-    read_runtime_image_reference_intent,
 )
+from .stored_json import JsonColumn, Residue, read_column, read_row_column
 from .strict_json import read_stored_model, serialize_json_value
 from .worker_memory_contract import WorkerMemoryComponent
 
@@ -425,7 +450,7 @@ class RecipeAuthorityResolver(Protocol):
 
     def __call__(
         self, recipe_revision_id: str, *, force: bool = False
-    ) -> tuple[RecipeDefinition | Mapping[str, object], Mapping[str, object]]: ...
+    ) -> tuple[RecipeDefinition, AvailabilityRuntime]: ...
 
 
 class RecipeImageBuilder(Protocol):
@@ -434,13 +459,13 @@ class RecipeImageBuilder(Protocol):
     def __call__(
         self,
         recipe: RecipeDefinition,
-        runtime: Mapping[str, object],
+        runtime: AvailabilityRuntime,
         *,
         claim: RecipeImageAvailabilityClaim,
         build_input_sha256: str,
         force: bool,
-        progress: Callable[[Mapping[str, object]], None],
-    ) -> Mapping[str, object] | BuildUnsettled: ...
+        progress: Callable[[object], None],
+    ) -> object | BuildUnsettled: ...
 
 
 class RuntimeImageCacheStorage(RuntimeImageStorage, Protocol):
@@ -470,10 +495,10 @@ class ModelCacheOperationHandle(Protocol):
     kind: str
     request_key: str
     state: str
-    progress: Mapping[str, object]
+    progress: ModelCacheOperationProgress
     artifact_set_sha256: str | None
     plan_digest: str | None
-    failure: Mapping[str, object] | None
+    failure: AvailabilityOperationFailure | None
     result: object | None
 
 
@@ -527,65 +552,6 @@ class ModelCacheCancellationOwner(Protocol):
     def signal_cancelled_operation(self, operation_id: str) -> None: ...
 
     def get_operation(self, operation_id: str) -> ModelCacheOperationHandle: ...
-
-
-@dataclass(frozen=True, slots=True)
-class RecipeImageAvailabilityView:
-    id: str
-    request_id: str
-    request: RecipeAvailabilityIntent
-    kind: str
-    state: str
-    attempt: int
-    recipe_revision_id: str
-    recipe_content_sha256: str
-    model_digest: str | None
-    build_input_sha256: str | None
-    progress: Mapping[str, object]
-    image_progress: Mapping[str, object] | None
-    result: Mapping[str, object] | None
-    failure: Mapping[str, object] | None
-    supported_actions: tuple[str, ...]
-    created_at: str
-    updated_at: str
-    model_child: Mapping[str, object] | None = None
-    image_state: str | None = None
-    image_failure: Mapping[str, object] | None = None
-    cancellation: RecipeOperationCancellationResult | None = None
-    blockers: tuple[OperationBlocker, ...] = ()
-    next_attempt_at: str | None = None
-
-    def document(self) -> dict[str, object]:
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "id": self.id,
-            "request_id": self.request_id,
-            "request": serialize_json_value(self.request),
-            "kind": self.kind,
-            "state": self.state,
-            "attempt": self.attempt,
-            "recipe_revision_id": self.recipe_revision_id,
-            "recipe_content_sha256": self.recipe_content_sha256,
-            "model_digest": self.model_digest,
-            "build_input_sha256": self.build_input_sha256,
-            "progress": dict(self.progress),
-            "image_progress": None
-            if self.image_progress is None
-            else dict(self.image_progress),
-            "result": None if self.result is None else dict(self.result),
-            "failure": None if self.failure is None else dict(self.failure),
-            "cancellation": (
-                None
-                if self.cancellation is None
-                else self.cancellation.model_dump(mode="json", exclude_none=True)
-            ),
-            "supported_actions": list(self.supported_actions),
-            "blockers": [item.model_dump(mode="json") for item in self.blockers],
-            "next_attempt_at": self.next_attempt_at,
-            "children": ([] if self.model_child is None else [dict(self.model_child)]),
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -679,12 +645,10 @@ def _canonical_recipe(value: object) -> RecipeDefinition:
         ) from error
 
 
-def _known_total(runtime: Mapping[str, object]) -> int | None:
-    for key in ("image_bytes", "expected_bytes", "total_bytes"):
-        value = runtime.get(key)
-        if type(value) is int and value > 0:
-            return value
-    return None
+def _known_total(runtime: AvailabilityRuntime) -> int | None:
+    return (
+        runtime.image_bytes if runtime.image_bytes and runtime.image_bytes > 0 else None
+    )
 
 
 def _progress(
@@ -694,22 +658,27 @@ def _progress(
     total_bytes: int | None = None,
     bytes_per_second: float | None = None,
     eta_seconds: float | None = None,
-    checkpoint: Mapping[str, object] | None = None,
-) -> dict[str, object]:
-    value: dict[str, object] = {
-        "phase": phase,
-        "completed_bytes": max(0, completed_bytes),
-        "total_bytes_known": total_bytes is not None,
-    }
-    if total_bytes is not None:
-        value["total_bytes"] = total_bytes
-    if bytes_per_second is not None:
-        value["bytes_per_second"] = bytes_per_second
-    if eta_seconds is not None:
-        value["eta_seconds"] = eta_seconds
-    if checkpoint is not None:
-        value["checkpoint"] = dict(checkpoint)
-    return normalize_operation_progress(value)
+    checkpoint: OperationCheckpoint | None = None,
+) -> OperationProgress:
+    return OperationProgress(
+        phase=phase,
+        completed_bytes=max(0, completed_bytes),
+        total_bytes=total_bytes,
+        total_bytes_known=total_bytes is not None,
+        bytes_per_second=bytes_per_second,
+        eta_seconds=eta_seconds,
+        checkpoint=checkpoint,
+    )
+
+
+def _read[T](model: type[T], value: object, *, subject: str = "?") -> T | None:
+    """A typed producer/consumer seam; damaged bookkeeping is a residue."""
+    if isinstance(value, model):
+        return value
+    result = read_column(
+        JsonColumn("jobs", "projection", {None: model}), value, subject=subject
+    )
+    return result if isinstance(result, model) else None
 
 
 def _retryable(error: BaseException | BuildUnsettled) -> bool:
@@ -816,9 +785,7 @@ def _log_excerpt(error: BaseException | BuildUnsettled) -> str | None:
     return value[:1024]
 
 
-def _recovery_actions(
-    payload: Mapping[str, object], code: str, retryable: bool
-) -> list[str]:
+def _recovery_actions(code: str, retryable: bool) -> list[str]:
     """Map stable failure classes to UI action identifiers."""
 
     if code in _CAPACITY_FAILURE_CODES:
@@ -844,14 +811,13 @@ class RecipeImageAvailabilityService:
         sessions: sessionmaker[Session],
         *,
         storage: RuntimeImageCacheStorage,
-        authority: RecipeAuthorityResolver,
+        authority: Callable[..., tuple[RecipeDefinition, object]],
         transport: OCIImageTransport | None = None,
-        builder: RecipeImageBuilder | None = None,
+        builder: Callable[..., object] | None = None,
         clock: Callable[[], datetime],
         model_cache: Any | None = None,
         max_parallel: int = 4,
-        builder_admission: Callable[[RecipeDefinition, Mapping[str, object]], None]
-        | None = None,
+        builder_admission: Callable[..., None] | None = None,
         claim_lease_seconds: int = 120,
     ) -> None:
         if not 1 <= max_parallel <= 16:
@@ -875,6 +841,40 @@ class RecipeImageAvailabilityService:
         from .recipe_update_batches import RecipeUpdateBatches
 
         self._updates = RecipeUpdateBatches(self, sessions)
+
+    def _payload(self, operation: Job) -> AvailabilityJobPayload | Residue:
+        value = read_row_column(operation, "payload")
+        if isinstance(value, AvailabilityJobPayload):
+            return value
+        identity = _read(
+            StoredAvailabilityIdentity, operation.payload, subject=operation.id
+        )
+        if identity is not None:
+            try:
+                recipe = self._stored_recipe(identity)
+                if isinstance(recipe, Residue):
+                    return recipe
+                # Repair is confined to the JSON decoding boundary, then the
+                # complete current contract must validate again.
+                document = json.loads(canonical_message(operation.payload))
+                if isinstance(document, dict):
+                    document["recipe"] = recipe.model_dump(mode="json")
+                    recovered = _read(
+                        RecoveredAvailabilityPayload,
+                        document,
+                        subject=operation.id,
+                    )
+                    if recovered is not None:
+                        return AvailabilityJobPayload.model_validate_json(
+                            canonical_message(recovered)
+                        )
+            except (RecipeImageAvailabilityError, TypeError, ValueError):
+                pass
+        if isinstance(value, Residue):
+            return value
+        return retire_as_unknown(
+            "jobs.payload", operation.id, BookkeepingReason.ROW_INCOMPLETE
+        )
 
     def _recipe_removal_selection_in_session(
         self,
@@ -1025,14 +1025,8 @@ class RecipeImageAvailabilityService:
         return self._start_request(intent, actor=actor, request_id=request_id)
 
     @staticmethod
-    def _removal_payload_digest(payload: Mapping[str, object]) -> str:
-        encoded = json.dumps(
-            serialize_json_value(dict(payload)),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-        return hashlib.sha256(encoded).hexdigest()
+    def _removal_payload_digest(payload: RecipeCacheRemovalPlan) -> str:
+        return hashlib.sha256(canonical_message(payload)).hexdigest()
 
     def _read_removal_owner(self, operation: Job) -> RecipeCacheRemovalOwner:
         try:
@@ -1042,16 +1036,18 @@ class RecipeImageAvailabilityService:
                     "stored recipe removal owner exceeds the scan byte budget",
                     reason=InvalidRequestReason.LIMIT_EXCEEDED,
                 )
-            owner = read_stored_model(RecipeCacheRemovalOwner, encoded, from_json=True)
-        except (TypeError, ValueError) as error:
+            owner = read_row_column(operation, "payload")
+        except (TypeError, ValueError):
+            owner = None
+        if not isinstance(owner, RecipeCacheRemovalOwner):
             raise RecipeImageAvailabilityUnknown(
                 RecipeImageCode.OPERATION_INVALID,
                 "stored recipe removal owner is malformed",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
+            )
         plan = owner.plan
         intent = plan.intent
-        payload = plan.model_dump(mode="json")
+        payload = plan
         if (
             operation.kind != REMOVE_OPERATION_KIND
             or operation.state
@@ -1102,7 +1098,7 @@ class RecipeImageAvailabilityService:
     def _removal_progress_document(
         operation: Job,
         owner: RecipeCacheRemovalOwner,
-    ) -> dict[str, object]:
+    ):
         checkpoint = owner.checkpoint
         total_items = len(owner.plan.image_archives) + len(owner.plan.model_children)
         completed_items = checkpoint.image_index + checkpoint.model_index
@@ -1126,63 +1122,38 @@ class RecipeImageAvailabilityService:
             observed_at=_iso(operation.updated_at),
             activity=_ACTIVE if operation.state == "running" else _WAITING,
         )
-        return progress.model_dump(mode="json", exclude_none=True)
+        return progress
 
-    def _read_removal_result(
-        self, operation: Job, intent: RecipeCacheRemovalIntent
-    ) -> dict[str, object]:
-        """The removal's projection, rebuilt from its owner when the stored result
-        does not read: the owner's plan and checkpoint are the evidence, the
-        stored result only a copy of what they say."""
-
+    def _read_removal_result(self, operation: Job, intent: RecipeCacheRemovalIntent):
+        """Rebuild the read projection from the authoritative plan and checkpoint."""
         owner = self._read_removal_owner(operation)
         intent = owner.plan.intent
         if operation.state == "succeeded":
-            stored = self._stored_removal_result(operation, intent, owner)
-            if stored is not None:
-                document: dict[str, object] = stored.model_dump(mode="json")
-                document["progress"] = self._removal_progress_document(operation, owner)
-                return document
-            _LOGGER.warning(
-                "recipe removal %s has no readable stored result; it is projected "
-                "from its checkpoint",
-                operation.id,
-            )
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "action": intent.action,
-            "selector": intent.selector,
-            "request_key": intent.request_key,
-            "operation_id": operation.id,
-            "recipe_revision_id": intent.recipe_revision_id,
-            "review_digest": intent.review_digest,
-            "with_model": intent.with_model,
-            "state": operation.state,
-            "progress": self._removal_progress_document(operation, owner),
-            "reclaimed_bytes": (
-                owner.checkpoint.image_reclaimed_bytes
-                + owner.checkpoint.model_reclaimed_bytes
-            ),
-            "preserved": ["profile-assignments", "spark-local-copies"]
+            self._stored_removal_result(operation, intent, owner)
+        status = RecipeCacheRemovalStatus(
+            schema_version=SCHEMA_VERSION,
+            action=intent.action,
+            selector=intent.selector,
+            request_key=intent.request_key,
+            operation_id=operation.id,
+            recipe_revision_id=intent.recipe_revision_id,
+            review_digest=intent.review_digest,
+            with_model=intent.with_model,
+            state=operation.state,
+            progress=self._removal_progress_document(operation, owner),
+            reclaimed_bytes=owner.checkpoint.image_reclaimed_bytes
+            + owner.checkpoint.model_reclaimed_bytes,
+            preserved=["profile-assignments", "spark-local-copies"]
             + ([] if intent.with_model else ["model-download"]),
-            "failure": (
-                None
-                if owner.checkpoint.failure is None
-                else owner.checkpoint.failure.model_dump(mode="json")
-            ),
-            "next_actions": (
-                []
-                if owner.checkpoint.failure is None
-                else [
-                    action.value for action in owner.checkpoint.failure.recovery_actions
-                ]
-            ),
-            "cancelled_operations": [],
-            "cancelled_builds": [],
-            "model_removals": [
-                child.operation_id for child in owner.plan.model_children
-            ],
-        }
+            failure=owner.checkpoint.failure,
+            next_actions=[]
+            if owner.checkpoint.failure is None
+            else [action.value for action in owner.checkpoint.failure.recovery_actions],
+            cancelled_operations=[],
+            cancelled_builds=[],
+            model_removals=[child.operation_id for child in owner.plan.model_children],
+        )
+        return status.model_dump(mode="json", exclude_none=True)
 
     @staticmethod
     def _stored_removal_result(
@@ -1193,20 +1164,8 @@ class RecipeImageAvailabilityService:
         """The stored result of a finished removal, or ``None`` when it is
         missing, malformed or disagrees with the accepted intent."""
 
-        if not isinstance(operation.result, Mapping):
-            return None
-        try:
-            result = read_stored_model(
-                RecipeCacheRemovalResult,
-                json.dumps(
-                    serialize_json_value(operation.result),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-                from_json=True,
-            )
-        except (TypeError, ValidationError):
+        result = read_row_column(operation, "result")
+        if not isinstance(result, RecipeCacheRemovalResult):
             return None
         if (
             result.action != intent.action
@@ -1236,7 +1195,7 @@ class RecipeImageAvailabilityService:
         actor: str,
         request_id: str,
         with_model: bool,
-    ) -> dict[str, object]:
+    ):
         if operation.kind != REMOVE_OPERATION_KIND:
             raise RecipeImageAvailabilityInvalid(
                 RecipeImageCode.REQUEST_KEY_REUSED,
@@ -1326,7 +1285,7 @@ class RecipeImageAvailabilityService:
                     code=ArtifactLifecycleCode.REMOVAL_OWNER_UNRESOLVED,
                     detail="recipe removal holds an incomplete model deletion fence",
                     retryable=True,
-                    recovery_actions=["retry"],
+                    recovery_actions=[AvailabilityRecoveryAction.RETRY],
                 )
         try:
             if precondition is not None:
@@ -1392,7 +1351,7 @@ class RecipeImageAvailabilityService:
                         else "recipe cache reference scan could not be completed; removal was deferred"
                     ),
                     retryable=True,
-                    recovery_actions=["retry"],
+                    recovery_actions=[AvailabilityRecoveryAction.RETRY],
                 )
             )
 
@@ -1522,7 +1481,7 @@ class RecipeImageAvailabilityService:
                         else "recipe removal-owner scan could not be completed; removal was deferred"
                     ),
                     retryable=True,
-                    recovery_actions=["retry"],
+                    recovery_actions=[AvailabilityRecoveryAction.RETRY],
                 )
             )
         blockers.extend(scan_blockers)
@@ -1535,7 +1494,7 @@ class RecipeImageAvailabilityService:
                         "for another removal: " + "; ".join(sorted(gate_owners)[:4])
                     )[:512],
                     retryable=True,
-                    recovery_actions=["retry"],
+                    recovery_actions=[AvailabilityRecoveryAction.RETRY],
                 )
             )
         return selection, references, active_work, tuple(blockers)
@@ -1752,7 +1711,7 @@ class RecipeImageAvailabilityService:
                 code=ArtifactLifecycleCode.ASSET_AVAILABILITY_UNKNOWN,
                 detail=(f"{asset.kind} {asset.sha256} storage readiness is unknown"),
                 retryable=True,
-                recovery_actions=["retry"],
+                recovery_actions=[AvailabilityRecoveryAction.RETRY],
             )
             for asset in assets
             if asset.availability == AssetAvailability.UNKNOWN
@@ -1829,7 +1788,7 @@ class RecipeImageAvailabilityService:
         actor: str,
         request_id: str,
         with_model: bool = False,
-    ) -> dict[str, object]:
+    ):
         """Accept a restart-safe removal of the named recipe against current state.
 
         Assets still in use are fenced against new consumers and the removal
@@ -2058,10 +2017,8 @@ class RecipeImageAvailabilityService:
                     actor=actor,
                     authority_revision=revision_id,
                     targets=[],
-                    payload_digest=self._removal_payload_digest(
-                        plan.model_dump(mode="json")
-                    ),
-                    payload=owner.model_dump(mode="json"),
+                    payload_digest=self._removal_payload_digest(plan),
+                    payload=serialize_json_value(owner),
                     result=None,
                     current_attempt=1,
                     created_at=now,
@@ -2325,7 +2282,7 @@ class RecipeImageAvailabilityService:
                 update={"image_pending_bytes": pending_bytes, "failure": None}
             )
             updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
-            operation.payload = updated_owner.model_dump(mode="json")
+            operation.payload = serialize_json_value(updated_owner)
             self._lifecycle.advance_removal(operation, now)
             return pending_bytes
 
@@ -2376,7 +2333,7 @@ class RecipeImageAvailabilityService:
                 }
             )
             updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
-            operation.payload = updated_owner.model_dump(mode="json")
+            operation.payload = serialize_json_value(updated_owner)
             self._lifecycle.advance_removal(operation, now)
             return True
 
@@ -2451,12 +2408,12 @@ class RecipeImageAvailabilityService:
                 detail="accepted model-removal child did not complete successfully",
                 retryable=False,
             )
-        try:
-            if isinstance(operation.result, ModelCacheRemovalResult):
-                result = operation.result
-            else:
-                result = read_stored_model(ModelCacheRemovalResult, operation.result)
-        except (TypeError, ValueError, ValidationError):
+        result = (
+            operation.result
+            if isinstance(operation.result, ModelCacheRemovalResult)
+            else read_row_column(operation, "result")
+        )
+        if not isinstance(result, ModelCacheRemovalResult):
             return self._record_recipe_removal_failure(
                 operation_id,
                 code=ModelCacheCode.REMOVAL_CHILD_INVALID,
@@ -2528,7 +2485,7 @@ class RecipeImageAvailabilityService:
                 }
             )
             updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
-            operation.payload = updated_owner.model_dump(mode="json")
+            operation.payload = serialize_json_value(updated_owner)
             self._lifecycle.advance_removal(operation, now)
             return True
 
@@ -2592,9 +2549,9 @@ class RecipeImageAvailabilityService:
                 updated_checkpoint = checkpoint.model_copy(
                     update={"retry_attempts": retry_attempts, "failure": failure}
                 )
-                operation.payload = owner.model_copy(
-                    update={"checkpoint": updated_checkpoint}
-                ).model_dump(mode="json")
+                operation.payload = serialize_json_value(
+                    owner.model_copy(update={"checkpoint": updated_checkpoint})
+                )
                 if not retryable:
                     self._lifecycle.fail(
                         operation,
@@ -2698,14 +2655,14 @@ class RecipeImageAvailabilityService:
                     cancelled_builds=[],
                     next_actions=[],
                 )
-                operation.result = result.model_dump(mode="json")
+                operation.result = serialize_json_value(result)
                 self._lifecycle.succeed(operation, now)
                 updated_owner = owner.model_copy(
                     update={
                         "checkpoint": checkpoint.model_copy(update={"failure": None})
                     }
                 )
-                operation.payload = updated_owner.model_dump(mode="json")
+                operation.payload = serialize_json_value(updated_owner)
                 return True
         except ArtifactLifecycleError as error:
             return self._record_recipe_removal_failure(
@@ -2819,7 +2776,7 @@ class RecipeImageAvailabilityService:
         request_id: str,
         reason: str,
         authorize: bool,
-    ) -> RecipeOperationCancellationResult:
+    ) -> RecipeOperationCancellationResult | Residue:
         if job.kind not in {OPERATION_KIND, UPDATE_KIND}:
             raise RecipeImageAvailabilityInvalid(
                 RecipeImageCode.NOT_CANCELLABLE,
@@ -2887,11 +2844,11 @@ class RecipeImageAvailabilityService:
             )
             job.payload = serialize_json_value(document)
         else:
-            payload = dict(require_mapping(job.payload, "availability payload"))
-            payload["cancellation"] = cancellation.model_dump(
-                mode="json", exclude_none=True
-            )
-            job.payload = payload
+            payload = self._payload(job)
+            if isinstance(payload, Residue):
+                return payload
+            payload = payload.model_copy(update={"cancellation": cancellation})
+            job.payload = serialize_json_value(payload)
         # Rule 4 through the core: work that never ran and holds nothing ends
         # ``cancelled`` at once; anything else is ``cancelling`` until the
         # reconcile pass has released it (or its budget is spent).
@@ -2901,29 +2858,14 @@ class RecipeImageAvailabilityService:
     def _stored_cancellation(
         self, job: Job
     ) -> RecipeOperationCancellationResult | None:
-        try:
-            if job.kind == UPDATE_KIND:
-                return self._updates._document(job).cancellation
-            payload = require_mapping(job.payload, "availability payload")
-            value = payload.get("cancellation")
-            if value is None:
-                return None
-            return read_stored_model(
-                RecipeOperationCancellationResult,
-                json.dumps(value, allow_nan=False),
-                from_json=True,
-            )
-        except (TypeError, ValueError) as error:
-            # Damaged cancellation evidence is no cancellation: nothing re-derives
-            # it, so it is retired as unknown and the operation reads as not
-            # cancelled. The operator's next cancel request writes fresh evidence.
-            retire_as_unknown(
-                "recipe-image.cancellation",
-                job.id,
-                BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                f"{type(error).__name__}: {error}",
-            )
-            return None
+        if job.kind == UPDATE_KIND:
+            return self._updates._document(job).cancellation
+        payload = self._payload(job)
+        if isinstance(payload, AvailabilityJobPayload):
+            return payload.cancellation
+        # Unreadable unrelated fields must not erase a valid cancellation.
+        identity = _read(StoredAvailabilityIdentity, job.payload, subject=job.id)
+        return identity.cancellation if identity else None
 
     def _cancel_update_child(
         self, operation_id: str, cancellation: RecipeOperationCancellationResult
@@ -2991,7 +2933,7 @@ class RecipeImageAvailabilityService:
     def _model_child_cancellation_pending(
         self,
         operation_id: str,
-        payload: Mapping[str, object],
+        payload: AvailabilityJobPayload,
         request_id: str,
         cancellation: RecipeOperationCancellationResult,
     ) -> tuple[bool, bool]:
@@ -3005,10 +2947,9 @@ class RecipeImageAvailabilityService:
 
         if self._model_cache is None:
             return False, False
-        raw_child = payload.get("model_child")
-        child = raw_child if isinstance(raw_child, Mapping) else {}
-        child_id = child.get("id")
-        recipe_revision_id = payload.get("recipe_revision_id")
+        child = payload.model_child
+        child_id = child.id if child else None
+        recipe_revision_id = payload.recipe_revision_id
         request_keys = {
             str(
                 uuid.uuid5(
@@ -3017,7 +2958,7 @@ class RecipeImageAvailabilityService:
                 )
             )
         }
-        artifact_set = child.get("artifact_set_sha256")
+        artifact_set = child.artifact_set_sha256 if child else None
         if isinstance(artifact_set, str):
             request_keys.add(
                 str(
@@ -3147,16 +3088,16 @@ class RecipeImageAvailabilityService:
     def _build_child_cancellation_pending(
         self,
         operation_id: str,
-        payload: Mapping[str, object],
+        payload: AvailabilityJobPayload,
         current_attempt: int,
         cancellation: RecipeOperationCancellationResult,
     ) -> bool:
-        dependency = payload.get("build_dependency")
-        request_key = (
-            dependency.get("request_key") if isinstance(dependency, Mapping) else None
-        )
+        dependency = payload.build_dependency
+        request_key = str(dependency.request_key) if dependency else None
         child_operation_id = (
-            dependency.get("operation_id") if isinstance(dependency, Mapping) else None
+            str(dependency.operation_id)
+            if dependency and dependency.operation_id
+            else None
         )
         if not isinstance(request_key, str):
             request_key = str(
@@ -3181,9 +3122,10 @@ class RecipeImageAvailabilityService:
                     LifecycleState.NEEDS_OPERATOR,
                 ):
                     return False
+                child_payload = read_row_column(child, "payload")
                 owner_id = (
-                    child.payload.get("owner_id")
-                    if isinstance(child.payload, Mapping)
+                    child_payload.owner_id
+                    if isinstance(child_payload, RecipeBuildParent)
                     else None
                 )
                 if not isinstance(owner_id, str):
@@ -3191,8 +3133,8 @@ class RecipeImageAvailabilityService:
                 build = session.get(RecipeBuild, owner_id)
                 if build is None:
                     return True
-                recipe_revision_id = payload.get("recipe_revision_id")
-                build_input_sha256 = payload.get("build_input_sha256")
+                recipe_revision_id = payload.recipe_revision_id
+                build_input_sha256 = payload.build_input_sha256
                 try:
                     locked = lock_build_dependency(
                         session,
@@ -3233,9 +3175,14 @@ class RecipeImageAvailabilityService:
                 )
                 if child is None:
                     return False
-                if child.payload.get("owner_id") != locked.id or (
-                    not isinstance(operation_id, str)
-                    and child.request_id != request_key
+                child_payload = read_row_column(child, "payload")
+                if (
+                    not isinstance(child_payload, RecipeBuildParent)
+                    or child_payload.owner_id != locked.id
+                    or (
+                        not isinstance(operation_id, str)
+                        and child.request_id != request_key
+                    )
                 ):
                     return True
                 request_build_cancellation(
@@ -3260,18 +3207,22 @@ class RecipeImageAvailabilityService:
     def _release_cancelled_claim(self, claim: RecipeImageAvailabilityClaim) -> bool:
         with self._sessions() as session:
             operation = session.get(Job, claim.operation_id)
+            payload = self._payload(operation) if operation is not None else None
             if (
                 operation is None
+                or not isinstance(payload, AvailabilityJobPayload)
                 or operation.kind != OPERATION_KIND
                 or operation.state not in job_states.words(LifecycleState.OBSERVING)
                 or operation.current_attempt != claim.execution_attempt
                 or not isinstance(operation.payload, Mapping)
-                or operation.payload.get("claim_owner") != claim.claim_owner
+                or payload.claim_owner != claim.claim_owner
                 or self._stored_cancellation(operation) is None
-                or operation.payload.get("removal_fence") is not None
+                or payload.removal_fence is not None
             ):
                 return False
-            snapshot = dict(operation.payload)
+            snapshot = self._payload(operation)
+            if isinstance(snapshot, Residue):
+                return False
         try:
             reference = self._image_reference_intent_for_claim(snapshot, claim)
         except _AvailabilityClaimLost:
@@ -3289,17 +3240,21 @@ class RecipeImageAvailabilityService:
                     .with_for_update(nowait=True)
                     .execution_options(populate_existing=True)
                 )
+                payload = self._payload(operation) if operation is not None else None
                 if (
                     operation is None
+                    or not isinstance(payload, AvailabilityJobPayload)
                     or operation.state not in job_states.words(LifecycleState.OBSERVING)
                     or operation.current_attempt != claim.execution_attempt
                     or not isinstance(operation.payload, Mapping)
-                    or operation.payload.get("claim_owner") != claim.claim_owner
-                    or operation.payload.get("removal_fence") is not None
+                    or payload.claim_owner != claim.claim_owner
+                    or payload.removal_fence is not None
                     or self._stored_cancellation(operation) is None
                 ):
                     return False
-                payload = dict(operation.payload)
+                payload = self._payload(operation)
+                if isinstance(payload, Residue):
+                    return False
                 try:
                     latest_reference = self._image_reference_intent_for_claim(
                         payload, claim
@@ -3311,10 +3266,10 @@ class RecipeImageAvailabilityService:
                     # after our snapshot. Let the next pass claim its exact
                     # archive lock before releasing the owner.
                     return False
-                payload.pop("image_reference_intent", None)
-                payload.pop("claim_owner", None)
-                payload.pop("claim_until", None)
-                operation.payload = payload
+                payload = payload.model_copy(update={"image_reference_intent": None})
+                payload = payload.model_copy(update={"claim_owner": None})
+                payload = payload.model_copy(update={"claim_until": None})
+                operation.payload = serialize_json_value(payload)
                 operation.updated_at = self._clock()
                 return True
         except RuntimeImagePreparationError as error:
@@ -3370,7 +3325,9 @@ class RecipeImageAvailabilityService:
             ):
                 return False
             cancellation = self._stored_cancellation(operation)
-            payload = dict(require_mapping(operation.payload, "availability payload"))
+            payload = self._payload(operation)
+            if isinstance(payload, Residue):
+                return False
             request_id = operation.request_id
             current_attempt = int(operation.current_attempt)
         if cancellation is None:
@@ -3383,19 +3340,14 @@ class RecipeImageAvailabilityService:
         )
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-        owner = payload.get("claim_owner")
+        owner = payload.claim_owner
         if owner is not None:
             if not isinstance(owner, str):
                 return child_changed
-            if payload.get("image_reference_intent") is None:
-                raw_until = payload.get("claim_until")
-                if not isinstance(raw_until, str):
+            if payload.image_reference_intent is None:
+                until = payload.claim_until
+                if until is None:
                     return child_changed
-                try:
-                    until = datetime.fromisoformat(raw_until)
-                except ValueError:
-                    return child_changed
-                until = until if until.tzinfo is not None else until.replace(tzinfo=UTC)
                 if until > now:
                     # A valid lease may still be transferring bytes. Give its
                     # exact owner the chance to retain a verified receipt under
@@ -3404,7 +3356,7 @@ class RecipeImageAvailabilityService:
             recipe_revision_id = operation.authority_revision
             if not isinstance(recipe_revision_id, str):
                 return child_changed
-            build_input_sha256 = payload.get("build_input_sha256")
+            build_input_sha256 = payload.build_input_sha256
             claim = RecipeImageAvailabilityClaim(
                 operation_id=operation_id,
                 recipe_revision_id=recipe_revision_id,
@@ -3416,7 +3368,7 @@ class RecipeImageAvailabilityService:
             )
             if not self._release_cancelled_claim(claim):
                 return child_changed
-        elif payload.get("image_reference_intent") is not None:
+        elif payload.image_reference_intent is not None:
             # An intent without its exact claim owner is malformed and cannot
             # be treated as a stale, harmless record.
             return child_changed
@@ -3440,13 +3392,13 @@ class RecipeImageAvailabilityService:
                 != cancellation.cancel_request_id
             ):
                 return child_changed
-            current_payload = dict(
-                require_mapping(current.payload, "availability payload")
-            )
+            current_payload = self._payload(current)
+            if isinstance(current_payload, Residue):
+                return False
             if (
-                current_payload.get("claim_owner") is not None
-                or current_payload.get("image_reference_intent") is not None
-                or current_payload.get("removal_fence") is not None
+                current_payload.claim_owner is not None
+                or current_payload.image_reference_intent is not None
+                or current_payload.removal_fence is not None
             ):
                 return child_changed
             self._lifecycle.settle_cancel(current, now, outstanding=False)
@@ -3584,12 +3536,12 @@ class RecipeImageAvailabilityService:
             now = self._clock()
             now = now if now.tzinfo else now.replace(tzinfo=UTC)
             if now < retry_at:
-                failure = view.failure or {}
+                failure = view.failure_evidence
                 return (
                     make_blocker(
-                        str(failure.get("code") or RecipeImageCode.PREPARATION_FAILED),
+                        failure.code if failure else RecipeImageCode.PREPARATION_FAILED,
                         f"Preparing this recipe failed: "
-                        f"{failure.get('detail') or view.state}. "
+                        f"{failure.detail if failure else view.state}. "
                         f"The Controller asks again after {retry_at.isoformat()}.",
                         severity="error",
                     ),
@@ -3613,18 +3565,19 @@ class RecipeImageAvailabilityService:
         return view.blockers or (
             make_blocker(
                 RecipeImageCode.PREPARING,
-                "Preparing the model and runtime image "
-                f"({view.progress.get('phase', 'prepare')}).",
+                f"Preparing the model and runtime image ({view.measurement.phase}).",
                 severity="info",
             ),
         )
 
     def _refresh_authority(
         self, recipe_revision_id: str, *, force: bool
-    ) -> tuple[RecipeDefinition | Mapping[str, object], Mapping[str, object]]:
+    ) -> tuple[RecipeDefinition, AvailabilityRuntime | None]:
         assert self._authority is not None
         try:
-            return self._authority(recipe_revision_id, force=force)
+            recipe, runtime = self._authority(recipe_revision_id, force=force)
+            parsed = _read(AvailabilityRuntime, runtime, subject=recipe_revision_id)
+            return _canonical_recipe(recipe), parsed
         except RecipeImageAvailabilityError:
             raise
         except Exception as error:
@@ -3675,7 +3628,7 @@ class RecipeImageAvailabilityService:
                     recipe_revision_id, force=force
                 )
         _canonical_recipe(raw_recipe)
-        if not isinstance(runtime, Mapping):
+        if runtime is None:
             raise RecipeImageAvailabilityUnknown(
                 RecipeImageCode.RUNTIME_INVALID,
                 "selected recipe runtime projection is unavailable",
@@ -3713,8 +3666,8 @@ class RecipeImageAvailabilityService:
                     )
                 if force:
                     force_rebuild = True
-                runtime_build_input = runtime.get("build_input_sha256")
-                provisional_intent = runtime.get("input_intent_sha256")
+                runtime_build_input = runtime.build_input_sha256
+                provisional_intent = runtime.input_intent_sha256
                 if not isinstance(runtime_build_input, str) and not isinstance(
                     provisional_intent, str
                 ):
@@ -3736,25 +3689,24 @@ class RecipeImageAvailabilityService:
                             reason=InvalidRequestReason.CONFLICT,
                         )
                 identity_key = build_input_sha256
-                payload: dict[str, object] = {
-                    "schema_version": SCHEMA_VERSION,
-                    "kind": OPERATION_KIND,
-                    "request": serialize_json_value(intent),
-                    "recipe_revision_id": recipe_revision_id,
-                    "recipe_content_sha256": revision.content_digest,
-                    "effective_execution_key": effective_execution_key,
-                    "model_digest": model_digest,
-                    "build_input_sha256": build_input_sha256,
-                    "identity_key": identity_key,
-                    "recipe": dict(revision.document),
-                    "runtime": dict(runtime),
-                    "force_rebuild": force_rebuild,
-                    "progress": _progress("prepare", total_bytes=_known_total(runtime)),
-                    "retry": {"automatic_attempts": 0, "operator_retries": 0},
-                }
-                encoded = json.dumps(
-                    payload, sort_keys=True, separators=(",", ":")
-                ).encode()
+                recipe = _canonical_recipe(revision.document)
+                payload = AvailabilityJobPayload(
+                    schema_version=SCHEMA_VERSION,
+                    kind=OPERATION_KIND,
+                    request=intent,
+                    recipe_revision_id=recipe_revision_id,
+                    recipe_content_sha256=revision.content_digest,
+                    effective_execution_key=effective_execution_key,
+                    model_digest=model_digest,
+                    build_input_sha256=build_input_sha256,
+                    identity_key=identity_key,
+                    recipe=recipe,
+                    runtime=runtime,
+                    force_rebuild=force_rebuild,
+                    progress=_progress("prepare", total_bytes=_known_total(runtime)),
+                    retry=AvailabilityRetry(automatic_attempts=0, operator_retries=0),
+                )
+                encoded = canonical_message(payload)
                 existing = session.scalar(
                     select(Job).where(Job.request_id == request_id)
                 )
@@ -3789,7 +3741,7 @@ class RecipeImageAvailabilityService:
                     authority_revision=recipe_revision_id,
                     targets=[recipe_revision_id],
                     payload_digest=hashlib.sha256(encoded).hexdigest(),
-                    payload=payload,
+                    payload=serialize_json_value(payload),
                     result=None,
                     current_attempt=0,
                     created_at=now,
@@ -3808,9 +3760,9 @@ class RecipeImageAvailabilityService:
             return replay
 
     @staticmethod
-    def _lock_build_consumer(session: Session, payload: Mapping[str, object]) -> None:
+    def _lock_build_consumer(session: Session, payload: AvailabilityJobPayload) -> None:
         try:
-            lock_availability_build_dependency(session, payload)
+            lock_availability_build_dependency(session, payload.model_dump(mode="json"))
         except BuildConsumerError as error:
             raise RecipeImageAvailabilityUnknown(
                 error.code,
@@ -3819,13 +3771,49 @@ class RecipeImageAvailabilityService:
                 recovery_actions=("retry",) if error.retryable else (),
             ) from error
 
+    def _model_progress(self, value: object) -> OperationProgress:
+        parsed = _read(ModelCacheOperationProgress, value)
+        if parsed is None:
+            return _progress(ProgressPhase.WAITING)
+        result = _read(
+            OperationProgress,
+            project_cache_progress(parsed.model_dump(mode="json"), self._clock()),
+        )
+        return result if result is not None else _progress(ProgressPhase.WAITING)
+
+    def _refresh_model_observation(
+        self, child: AvailabilityModelChild, operation: ModelCacheOperationHandle
+    ) -> AvailabilityModelChild:
+        failure = (
+            _read(AvailabilityOperationFailure, operation.failure)
+            if operation.failure is not None
+            else None
+        )
+        return AvailabilityModelChild.model_validate_json(
+            canonical_message(
+                child.model_dump(mode="json")
+                | {
+                    "id": operation.id,
+                    "state": operation.state,
+                    "progress": self._model_progress(operation.progress).model_dump(
+                        mode="json"
+                    ),
+                    "artifact_set_sha256": operation.artifact_set_sha256,
+                    "plan_digest": operation.plan_digest,
+                    "failure": failure.model_dump(mode="json")
+                    if failure is not None
+                    else None,
+                }
+            )
+        )
+
     def _ensure_model_child(
         self,
         recipe_revision_id: str,
         *,
         actor: str,
         parent_request_key: str,
-    ) -> dict[str, object] | None:
+    ) -> AvailabilityModelChild | None:
         """Queue one exact durable ModelCache child for the complete model set."""
 
         if self._model_cache is None:
@@ -3837,14 +3825,12 @@ class RecipeImageAvailabilityService:
             )
         )
         try:
-            preview = self._model_cache.download_preview(
-                recipe_revision_id=recipe_revision_id
+            preview = AvailabilityDownloadPreview.read(
+                self._model_cache.download_preview(
+                    recipe_revision_id=recipe_revision_id
+                )
             )
-            plan_digest = preview.get("plan_digest")
-            artifact_set_sha256 = preview.get("artifact_set_sha256")
-            if not isinstance(plan_digest, str) or not isinstance(
-                artifact_set_sha256, str
-            ):
+            if preview is None:
                 raise RecipeImageAvailabilityUnknown(
                     RecipeImageCode.MODEL_CACHE_INVALID,
                     "ModelCache returned an incomplete exact artifact plan",
@@ -3852,18 +3838,18 @@ class RecipeImageAvailabilityService:
                     recovery_actions=("retry",),
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
+            plan_digest = preview.plan_digest
+            artifact_set_sha256 = preview.artifact_set_sha256
+            new_bytes = preview.new_bytes
             manifest = self._model_cache.resolve_artifact_set(
                 recipe_revision_id=recipe_revision_id
             )
-            manifest_document = manifest.document()
-            artifacts = manifest_document.get("artifacts")
-            new_bytes = preview.get("new_bytes")
-            if type(new_bytes) is not int or new_bytes < 0:
+            manifest_document = _read(CacheManifest, manifest.document())
+            if manifest_document is None:
                 raise RecipeImageAvailabilityUnknown(
                     RecipeImageCode.MODEL_CACHE_INVALID,
-                    "ModelCache returned incomplete transfer accounting",
+                    "ModelCache returned an incomplete artifact manifest",
                     retryable=True,
-                    recovery_actions=("retry",),
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             if manifest.digest != artifact_set_sha256:
@@ -3903,12 +3889,8 @@ class RecipeImageAvailabilityService:
                     default=None,
                 )
                 if operation is not None and operation.state == "failed":
-                    actions = operation.failure
-                    actions = (
-                        actions.get("recovery_actions", [])
-                        if isinstance(actions, Mapping)
-                        else []
-                    )
+                    failure = _read(AvailabilityOperationFailure, operation.failure)
+                    actions = failure.recovery_actions if failure else []
                     if "download_again" in actions:
                         operation = self._start_model_repair(
                             operation,
@@ -3928,19 +3910,34 @@ class RecipeImageAvailabilityService:
             raise _ModelQueueFailed(
                 error, "exact Model artifact preparation could not be queued"
             ) from error
-        model_content_digests = manifest_document["model_content_digests"]
-        return {
-            "id": operation.id,
-            "request_key": str(getattr(operation, "request_key", child_request_key)),
-            "state": operation.state,
-            "artifact_set_sha256": artifact_set_sha256,
-            "plan_digest": plan_digest,
-            "model_content_digests": model_content_digests,
-            "artifacts": [dict(item) for item in artifacts if isinstance(item, Mapping)]
-            if isinstance(artifacts, list)
-            else [],
-            "progress": project_cache_progress(operation.progress, self._clock()),
-        }
+        return AvailabilityModelChild.model_validate_json(
+            canonical_message(
+                {
+                    "id": operation.id,
+                    "request_key": str(
+                        getattr(operation, "request_key", child_request_key)
+                    ),
+                    "state": operation.state,
+                    "artifact_set_sha256": artifact_set_sha256,
+                    "plan_digest": plan_digest,
+                    "model_content_digests": manifest_document.model_content_digests,
+                    "artifacts": [
+                        artifact.model_dump(mode="json")
+                        for item in manifest_document.artifacts
+                        if (
+                            artifact := _read(
+                                RecipeImageAvailabilityArtifact,
+                                item.model_dump(mode="json"),
+                            )
+                        )
+                        is not None
+                    ],
+                    "progress": self._model_progress(operation.progress).model_dump(
+                        mode="json"
+                    ),
+                }
+            )
+        )
 
     def _start_model_repair(
         self,
@@ -3970,10 +3967,10 @@ class RecipeImageAvailabilityService:
                 recovery_actions=("retry",),
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        preview = repair_preview(artifact_set_sha256)
-        plan_digest = (
-            preview.get("plan_digest") if isinstance(preview, Mapping) else None
+        preview = _read(
+            ModelCacheRepairPreviewResponse, repair_preview(artifact_set_sha256)
         )
+        plan_digest = preview.plan_digest if preview else None
         if not isinstance(plan_digest, str):
             raise RecipeImageAvailabilityUnknown(
                 RecipeImageCode.MODEL_CACHE_INVALID,
@@ -3997,16 +3994,14 @@ class RecipeImageAvailabilityService:
 
     def _resume_model_child(
         self,
-        child: Mapping[str, object] | None,
+        child: AvailabilityModelChild | None,
         *,
         actor: str,
         parent_request_key: str,
-    ) -> dict[str, object] | None:
-        if self._model_cache is None or not isinstance(child, Mapping):
-            return dict(child) if isinstance(child, Mapping) else None
-        child_id = child.get("id")
-        if not isinstance(child_id, str):
-            return dict(child)
+    ) -> AvailabilityModelChild | None:
+        if self._model_cache is None or child is None:
+            return child
+        child_id = child.id
         try:
             operation = self._model_cache.get_operation(child_id)
             if operation.state == "failed":
@@ -4047,12 +4042,8 @@ class RecipeImageAvailabilityService:
                             f"vonk:recipe-availability-model-retry:{child_id}:{parent_request_key}",
                         )
                     )
-                    actions = operation.failure
-                    actions = (
-                        actions.get("recovery_actions", [])
-                        if isinstance(actions, Mapping)
-                        else []
-                    )
+                    failure = _read(AvailabilityOperationFailure, operation.failure)
+                    actions = failure.recovery_actions if failure else []
                     if "download_again" in actions and isinstance(
                         operation.artifact_set_sha256, str
                     ):
@@ -4080,18 +4071,7 @@ class RecipeImageAvailabilityService:
                         operation = self._model_cache.retry(
                             child_id, actor=actor, request_key=retry_key
                         )
-            return dict(child) | {
-                "id": operation.id,
-                "state": operation.state,
-                "progress": project_cache_progress(operation.progress, self._clock()),
-                "artifact_set_sha256": operation.artifact_set_sha256,
-                "plan_digest": operation.plan_digest,
-                "failure": (
-                    dict(operation.failure)
-                    if isinstance(operation.failure, Mapping)
-                    else None
-                ),
-            }
+            return self._refresh_model_observation(child, operation)
         except Exception as error:
             raise _ModelQueueFailed(
                 error, "Model artifact operation could not be resumed"
@@ -4111,8 +4091,10 @@ class RecipeImageAvailabilityService:
                 reason=InvalidRequestReason.CONFLICT,
             )
         try:
-            payload = require_mapping(existing.payload, "availability payload")
-            stored = read_availability_intent(payload.get("request"))
+            payload = self._payload(existing)
+            stored = (
+                payload.request if isinstance(payload, AvailabilityJobPayload) else None
+            )
         except (TypeError, ValueError, ValidationError) as error:
             # A stored request that does not parse cannot be the caller's request:
             # it is recorded and the key reads as used by another operation.
@@ -4151,9 +4133,7 @@ class RecipeImageAvailabilityService:
                 raise MissingRecord(operation_id)
             return self._view(operation)
 
-    def get_operator_operation(
-        self, operation_id: str
-    ) -> RecipeImageAvailabilityView | RecipeUpdateResponse | dict[str, object]:
+    def get_operator_operation(self, operation_id: str):
         """Observe either current recipe preparation or durable cache removal."""
 
         with self._sessions() as session:
@@ -4169,9 +4149,7 @@ class RecipeImageAvailabilityService:
                 raise MissingRecord(operation_id)
         return self._updates.get(operation_id)
 
-    def get_operator_request(
-        self, request_key: str, *, actor: str
-    ) -> RecipeImageAvailabilityView | RecipeUpdateResponse | dict[str, object]:
+    def get_operator_request(self, request_key: str, *, actor: str):
         """Correlate only this issuer's request within the recipe family."""
 
         with self._sessions() as session:
@@ -4252,35 +4230,31 @@ class RecipeImageAvailabilityService:
                 raise RecipeImageAvailabilityInvalid(
                     RecipeImageCode.NOT_RETRYABLE, "operation is not failed"
                 )
-            previous_payload = (
-                previous.payload if isinstance(previous.payload, Mapping) else {}
-            )
-            retry = previous_payload.get("retry", {})
-            retry_count = (
-                int(retry.get("operator_retries", 0))
-                if isinstance(retry, Mapping)
-                else 0
-            )
+            previous_payload = self._payload(previous)
+            if isinstance(previous_payload, Residue):
+                return self._unknown_view(previous, previous_payload)
+            retry_count = previous_payload.retry.operator_retries
             previous_authority = previous.authority_revision
             previous_targets = list(previous.targets)
-            payload = dict(previous_payload)
-        payload["request"] = serialize_json_value(intent)
+            payload = previous_payload
+        payload = payload.model_copy(update={"request": intent})
         with self._sessions.begin() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is not None:
                 return self._matching_request(existing, actor=actor, intent=intent)
-            payload["retry"] = {
-                "automatic_attempts": 0,
-                "operator_retries": retry_count + 1,
-            }
-            payload.pop("retry_after_at", None)
-            payload.pop("failure", None)
-            payload.pop("build_dependency", None)
+            payload = payload.model_copy(
+                update={
+                    "retry": AvailabilityRetry(
+                        automatic_attempts=0, operator_retries=retry_count + 1
+                    )
+                }
+            )
+            payload = payload.model_copy(update={"retry_after_at": None})
+            payload = payload.model_copy(update={"failure": None})
+            payload = payload.model_copy(update={"build_dependency": None})
             self._lock_build_consumer(session, payload)
             now = self._clock()
-            encoded = json.dumps(
-                payload, sort_keys=True, separators=(",", ":")
-            ).encode()
+            encoded = canonical_message(payload)
             operation = self._lifecycle.new_job(
                 id=str(uuid.uuid4()),
                 request_id=request_id,
@@ -4289,7 +4263,7 @@ class RecipeImageAvailabilityService:
                 authority_revision=previous_authority,
                 targets=previous_targets,
                 payload_digest=hashlib.sha256(encoded).hexdigest(),
-                payload=payload,
+                payload=serialize_json_value(payload),
                 result=None,
                 current_attempt=0,
                 created_at=now,
@@ -4362,7 +4336,6 @@ class RecipeImageAvailabilityService:
         owner_id = owner_id or str(uuid.uuid4())
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-        lease_until = _iso(now + timedelta(seconds=self._claim_lease_seconds))
         claims: list[RecipeImageAvailabilityClaim] = []
         with self._sessions.begin() as session:
             # The dispatch boundary.  A queued preparation whose recipe has
@@ -4408,9 +4381,9 @@ class RecipeImageAvailabilityService:
                 )
                 if operation is None:
                     continue
-                payload = (
-                    operation.payload if isinstance(operation.payload, Mapping) else {}
-                )
+                payload = self._payload(operation)
+                if isinstance(payload, Residue):
+                    continue
                 if not self._retry_due(payload, now):
                     continue
                 if operation.state in job_states.words(
@@ -4419,37 +4392,34 @@ class RecipeImageAvailabilityService:
                     # Only the model download is outstanding: no worker slot is
                     # spent polling it, so ready work is never queued behind it.
                     continue
-                if operation.state == "running":
-                    claimed_until = payload.get("claim_until")
-                    if isinstance(claimed_until, str):
-                        try:
-                            parsed_until = datetime.fromisoformat(claimed_until)
-                            parsed_until = (
-                                parsed_until
-                                if parsed_until.tzinfo is not None
-                                else parsed_until.replace(tzinfo=UTC)
-                            )
-                            if now < parsed_until:
-                                continue
-                        except ValueError:
-                            pass
+                if (
+                    operation.state == "running"
+                    and payload.claim_until is not None
+                    and now < payload.claim_until
+                ):
+                    continue
                 self._lifecycle.claim(
                     operation,
                     owner_id,
                     now + timedelta(seconds=self._claim_lease_seconds),
                     now,
                 )
-                operation.payload = dict(payload) | {
-                    "claim_owner": owner_id,
-                    "claim_until": lease_until,
-                }
+                operation.payload = serialize_json_value(
+                    payload.model_copy(
+                        update={
+                            "claim_owner": owner_id,
+                            "claim_until": now
+                            + timedelta(seconds=self._claim_lease_seconds),
+                        }
+                    )
+                )
                 claims.append(
                     RecipeImageAvailabilityClaim(
                         operation_id=operation.id,
-                        recipe_revision_id=str(payload.get("recipe_revision_id", "")),
+                        recipe_revision_id=str(payload.recipe_revision_id),
                         build_input_sha256=(
-                            str(payload.get("build_input_sha256"))
-                            if payload.get("build_input_sha256") is not None
+                            str(payload.build_input_sha256)
+                            if payload.build_input_sha256 is not None
                             else None
                         ),
                         claim_owner=owner_id,
@@ -4461,74 +4431,45 @@ class RecipeImageAvailabilityService:
         return tuple(claims)
 
     def _park_for_model(
-        self, operation: Job, payload: Mapping[str, object], now: datetime
+        self, operation: Job, payload: AvailabilityJobPayload, now: datetime
     ) -> bool:
-        """Re-park an operation whose only outstanding work is its model download.
-
-        The runtime image is already prepared, so a worker would only look at
-        the model child and release itself again.  The check is one cheap read
-        done at dispatch; the operation is pushed behind other work and
-        re-examined after a short poll.  Anything unclear falls through to a
-        normal claim, so a restart or an unreadable child never strands it.
-        """
-
-        child = payload.get("model_child")
-        if (
-            self._model_cache is None
-            or not isinstance(child, Mapping)
-            or not isinstance(child.get("id"), str)
-            or not isinstance(payload.get("image_result"), Mapping)
-        ):
+        """Wait without a worker slot when only the exact model child is active."""
+        child = payload.model_child
+        if self._model_cache is None or child is None or payload.image_result is None:
             return False
         try:
-            state = self._model_cache.get_operation(str(child["id"])).state
-        except Exception:  # noqa: BLE001 - dispatch falls back to a normal claim
+            state = self._model_cache.get_operation(child.id).state
+        except Exception:  # noqa: BLE001 - a normal claim refreshes unclear evidence
             return False
         if state not in model_cache_states.ACTIVE:
             return False
-        updated = dict(payload) | {
-            "retry_after_at": _iso(now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS))
-        }
+        updated = payload.model_copy(
+            update={"retry_after_at": now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS)}
+        )
         if not any(
             item.code == RecipeImageCode.WAITING_FOR_MODEL
-            for item in read_blockers(payload.get("blockers"))
+            for item in payload.blockers or []
         ):
-            self._record_blockers(
+            updated = self._record_blockers(
                 operation,
                 updated,
                 [
                     make_blocker(
                         RecipeImageCode.WAITING_FOR_MODEL,
-                        "Waiting for the model download to finish; "
-                        "the runtime image is already prepared.",
+                        "Waiting for the model download to finish; the runtime image is already prepared.",
                         severity="info",
                     )
                 ],
             )
-        operation.payload = updated
+        operation.payload = serialize_json_value(updated)
         operation.updated_at = now
         return True
 
     @staticmethod
-    def _holds_live_lease(payload: Mapping[str, object], now: datetime) -> bool:
-        """Report whether the operation still holds an unexpired claim lease.
-
-        A queued operation normally has no owner.  The check is defensive: a
-        lease that cannot be parsed or that has no deadline is treated as live,
-        so this path can never revoke an attempt that might still be running.
-        """
-        owner = payload.get("claim_owner")
-        if not isinstance(owner, str) or not owner:
-            return False
-        until = payload.get("claim_until")
-        if not isinstance(until, str):
-            return True
-        try:
-            parsed = datetime.fromisoformat(until)
-        except ValueError:
-            return True
-        parsed = parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-        return now < parsed
+    def _holds_live_lease(payload: AvailabilityJobPayload, now: datetime) -> bool:
+        return bool(payload.claim_owner) and (
+            payload.claim_until is None or now < payload.claim_until
+        )
 
     def _cancel_superseded_operation(
         self,
@@ -4547,33 +4488,34 @@ class RecipeImageAvailabilityService:
         """
         if operation.state != "queued":
             return False
-        payload = operation.payload if isinstance(operation.payload, Mapping) else {}
-        if isinstance(payload.get("image_result"), Mapping):
-            return False
-        if self._holds_live_lease(payload, now):
+        payload = self._payload(operation)
+        if (
+            isinstance(payload, Residue)
+            or payload.image_result is not None
+            or self._holds_live_lease(payload, now)
+        ):
             return False
         detail = f"superseded by newer recipe revision {newer_revision_id}"
-        failure = sanitize_failure_evidence(
-            {
-                "code": SUPERSEDED_PREPARATION_CODE,
-                "detail": detail,
-                "recovery_actions": ["download_again"],
-                "retryable": False,
+        failure = AvailabilityOperationFailure(
+            code=SUPERSEDED_PREPARATION_CODE,
+            detail=detail,
+            recovery_actions=[AvailabilityRecoveryAction.DOWNLOAD_AGAIN],
+            retryable=False,
+        )
+        updated = payload.model_copy(
+            update={
+                "claim_owner": None,
+                "claim_until": None,
+                "retry_after_at": None,
+                "failure": failure,
+                "supersession": AvailabilitySupersession(
+                    code=SUPERSEDED_PREPARATION_CODE,
+                    recipe_revision_id=newer_revision_id,
+                    superseded_at=now,
+                ),
             }
         )
-        updated = dict(payload)
-        # Release the queue position and any lease keys the cancelled operation
-        # held so the replacing preparation can be claimed immediately.
-        updated.pop("claim_owner", None)
-        updated.pop("claim_until", None)
-        updated.pop("retry_after_at", None)
-        updated["failure"] = failure
-        updated["supersession"] = {
-            "code": SUPERSEDED_PREPARATION_CODE,
-            "recipe_revision_id": newer_revision_id,
-            "superseded_at": _iso(now),
-        }
-        operation.payload = updated
+        operation.payload = serialize_json_value(updated)
         operation.result = None
         self._lifecycle.supersede(operation, detail[:512], now)
         return True
@@ -4692,39 +4634,16 @@ class RecipeImageAvailabilityService:
     def _eligible(self, operation_id: str) -> bool:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
-            if operation is None or not isinstance(operation.payload, Mapping):
+            if operation is None:
                 return False
-            value = operation.payload.get("retry_after_at")
-            if not isinstance(value, str):
-                return True
-            try:
-                eligible_at = datetime.fromisoformat(value)
-            except ValueError:
-                return True
+            clocks = StoredAvailabilityClocks.read(operation.payload)
             now = self._clock()
             now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-            eligible_at = (
-                eligible_at
-                if eligible_at.tzinfo is not None
-                else eligible_at.replace(tzinfo=UTC)
-            )
-            return now >= eligible_at
+            return clocks.retry_after_at is None or now >= clocks.retry_after_at
 
     @staticmethod
-    def _retry_due(payload: Mapping[str, object], now: datetime) -> bool:
-        value = payload.get("retry_after_at")
-        if not isinstance(value, str):
-            return True
-        try:
-            eligible_at = datetime.fromisoformat(value)
-        except ValueError:
-            return True
-        eligible_at = (
-            eligible_at
-            if eligible_at.tzinfo is not None
-            else eligible_at.replace(tzinfo=UTC)
-        )
-        return now >= eligible_at
+    def _retry_due(payload: AvailabilityJobPayload, now: datetime) -> bool:
+        return payload.retry_after_at is None or now >= payload.retry_after_at
 
     def _claim_operation(
         self,
@@ -4742,14 +4661,16 @@ class RecipeImageAvailabilityService:
             .with_for_update(skip_locked=True)
             .execution_options(populate_existing=True)
         )
+        payload = self._payload(operation) if operation is not None else None
         if (
             operation is None
             or operation.kind != OPERATION_KIND
             or operation.state not in allowed_states
             or operation.current_attempt != claim.execution_attempt
             or not isinstance(operation.payload, Mapping)
-            or operation.payload.get("claim_owner") != claim.claim_owner
-            or operation.payload.get("removal_fence") is not None
+            or not isinstance(payload, AvailabilityJobPayload)
+            or payload.claim_owner != claim.claim_owner
+            or payload.removal_fence is not None
         ):
             return None
         if (
@@ -4757,14 +4678,9 @@ class RecipeImageAvailabilityService:
             and self._stored_cancellation(operation) is None
         ):
             return None
-        raw_until = operation.payload.get("claim_until")
-        if not isinstance(raw_until, str):
+        until = payload.claim_until
+        if until is None:
             return None
-        try:
-            until = datetime.fromisoformat(raw_until)
-        except ValueError:
-            return None
-        until = until if until.tzinfo is not None else until.replace(tzinfo=UTC)
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         if now >= until:
@@ -4788,18 +4704,16 @@ class RecipeImageAvailabilityService:
         with self._sessions.begin() as session:
             operation = self._claim_operation(session, claim)
             if operation is not None:
-                payload = dict(operation.payload)
+                payload = self._payload(operation)
+                if isinstance(payload, Residue):
+                    return
                 operation_actor = operation.actor
                 operation_request_id = operation.request_id
                 operation.updated_at = self._clock()
                 self._set_progress(
                     operation,
                     "prepare",
-                    total_bytes=_known_total(
-                        require_mapping(
-                            payload.get("runtime", {}), "runtime projection"
-                        )
-                    ),
+                    total_bytes=_known_total(payload.runtime),
                 )
         if operation is None:
             self._release_cancelled_claim(claim)
@@ -4814,20 +4728,15 @@ class RecipeImageAvailabilityService:
         )
         heartbeat.start()
         try:
-            recipe = self._stored_recipe(payload)
-            runtime = payload["runtime"]
-            if not isinstance(runtime, Mapping):
-                raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.RUNTIME_INVALID,
-                    "runtime projection is invalid",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            request_intent = read_availability_intent(payload.get("request"))
-            if isinstance(request_intent, RecipeRetryIntent) and isinstance(
-                payload.get("model_child"), Mapping
+            recipe = payload.recipe
+            runtime = payload.runtime
+            request_intent = payload.request
+            if (
+                isinstance(request_intent, RecipeRetryIntent)
+                and payload.model_child is not None
             ):
                 model_child = self._resume_model_child(
-                    mapping(payload["model_child"]),
+                    payload.model_child,
                     actor=operation_actor,
                     parent_request_key=operation_request_id,
                 )
@@ -4838,27 +4747,19 @@ class RecipeImageAvailabilityService:
                     parent_request_key=operation_request_id,
                 )
             model_pending = False
-            model_failure: Mapping[str, object] | None = None
+            model_failure: AvailabilityOperationFailure | None = None
             if model_child is not None:
-                child_state = model_child.get("state")
+                child_state = model_child.state
                 if not self._update_model_progress(claim, model_child):
                     raise _AvailabilityClaimLost()
                 if child_state in model_cache_states.ACTIVE:
                     model_pending = True
                 elif child_state != "succeeded":
-                    model_failure = mapping(model_child.get("failure"))
-            identity_key = payload.get("identity_key")
+                    model_failure = model_child.failure
+            identity_key = payload.identity_key
             identity = identity_key if isinstance(identity_key, str) else None
             with self._identity_lock(identity):
-                stored_image = payload.get("image_result")
-                receipt = None
-                if isinstance(stored_image, Mapping):
-                    try:
-                        receipt = RuntimeImageReceipt(**dict(stored_image))
-                    except (TypeError, ValueError):
-                        # Our own malformed result record is rebuilt from the
-                        # image below instead of failing the operation.
-                        receipt = None
+                receipt = payload.image_result
                 if receipt is None or not self._storage.build_archive_available(
                     receipt.oci_archive_sha256, receipt.image_bytes
                 ):
@@ -4879,85 +4780,65 @@ class RecipeImageAvailabilityService:
                         self._persist_receipt(claim, receipt)
             with self._sessions() as session:
                 latest = session.get(Job, operation_id)
-                if latest is not None and isinstance(latest.payload, Mapping):
-                    payload = dict(latest.payload)
+                if latest is not None:
+                    payload = self._payload(latest)
+                    if isinstance(payload, Residue):
+                        return
             if model_pending:
                 self._defer_for_model(claim)
                 return
             if model_failure is not None:
-                child_failure = model_failure
-                failure_code = child_failure.get("code")
-                if isinstance(failure_code, str):
-                    retry_after_seconds = child_failure.get("retry_after_seconds")
-                    retry_time = child_failure.get("retry_time")
-                    recovery_actions = child_failure.get("recovery_actions", [])
-                    log_excerpt = child_failure.get("log_excerpt")
-                    required_bytes = child_failure.get("required_bytes")
-                    free_bytes = child_failure.get("free_bytes")
-                    shortfall_bytes = child_failure.get("shortfall_bytes")
-                    raise RecipeImageAvailabilityUnknown(
-                        failure_code,
-                        str(
-                            child_failure.get(
-                                "detail", "Model artifact preparation failed"
-                            )
-                        ),
-                        retryable=child_failure.get("retryable") is True,
-                        retry_after_seconds=(
-                            retry_after_seconds
-                            if type(retry_after_seconds) is int
-                            else None
-                        ),
-                        retry_time=retry_time if isinstance(retry_time, str) else None,
-                        recovery_actions=tuple(
-                            item
-                            for item in require_sequence(
-                                recovery_actions, "recovery actions"
-                            )
-                            if isinstance(item, str)
-                        ),
-                        log_excerpt=log_excerpt
-                        if isinstance(log_excerpt, str)
-                        else None,
-                        required_bytes=(
-                            required_bytes if type(required_bytes) is int else None
-                        ),
-                        free_bytes=free_bytes if type(free_bytes) is int else None,
-                        shortfall_bytes=(
-                            shortfall_bytes if type(shortfall_bytes) is int else None
-                        ),
-                    )
                 raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.MODEL_CACHE_FAILED,
-                    "one or more exact Model artifacts could not be prepared",
-                    retryable=True,
-                    recovery_actions=("retry",),
+                    model_failure.code,
+                    model_failure.detail,
+                    retryable=model_failure.retryable,
+                    retry_after_seconds=model_failure.retry_after_seconds,
+                    retry_time=model_failure.retry_time,
+                    recovery_actions=tuple(
+                        action.value for action in model_failure.recovery_actions
+                    ),
+                    log_excerpt=model_failure.log_excerpt,
+                    required_bytes=model_failure.required_bytes,
+                    free_bytes=model_failure.free_bytes,
+                    shortfall_bytes=model_failure.shortfall_bytes,
                 )
-            result = {
-                "schema_version": SCHEMA_VERSION,
-                "recipe_content_sha256": payload["recipe_content_sha256"],
-                "model_digest": payload.get("model_digest"),
-                "build_input_sha256": payload.get("build_input_sha256"),
-                "image_digest": receipt.image_digest,
-                "local_image_config_id": receipt.local_image_config_id,
-                "oci_archive_sha256": receipt.oci_archive_sha256,
-                "image_bytes": receipt.image_bytes,
-                "build_id": receipt.build_id,
-                "model_child": (None if model_child is None else dict(model_child)),
-            }
+            result = AvailabilityJobResult(
+                schema_version=SCHEMA_VERSION,
+                recipe_content_sha256=payload.recipe_content_sha256,
+                model_digest=payload.model_digest,
+                build_input_sha256=payload.build_input_sha256,
+                image_digest=receipt.image_digest,
+                local_image_config_id=receipt.local_image_config_id,
+                oci_archive_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+                build_id=receipt.build_id,
+                model_child=model_child,
+            )
             with self._removal_lock, self._sessions.begin() as session:
                 operation = self._require_claim(session, claim)
-                operation.result = result
+                operation.result = serialize_json_value(result)
                 self._lifecycle.succeed(operation, self._clock())
-                completed_payload = dict(operation.payload)
-                completed_payload.pop("failure", None)
-                completed_payload.pop("retry_after_at", None)
-                completed_payload.pop("blockers", None)
-                operation.payload = completed_payload | {
-                    "stage": "available",
-                    "claim_owner": None,
-                    "claim_until": None,
-                }
+                completed_payload = self._payload(operation)
+                if isinstance(completed_payload, Residue):
+                    return
+                completed_payload = completed_payload.model_copy(
+                    update={"failure": None}
+                )
+                completed_payload = completed_payload.model_copy(
+                    update={"retry_after_at": None}
+                )
+                completed_payload = completed_payload.model_copy(
+                    update={"blockers": None}
+                )
+                operation.payload = serialize_json_value(
+                    completed_payload.model_copy(
+                        update={
+                            "stage": "available",
+                            "claim_owner": None,
+                            "claim_until": None,
+                        }
+                    )
+                )
                 operation.current_attempt = int(operation.current_attempt)
                 self._set_progress(
                     operation,
@@ -4979,68 +4860,67 @@ class RecipeImageAvailabilityService:
             self._release_cancelled_claim(claim)
             self._reconcile_availability_cancellation(operation_id)
 
-    def _stored_recipe(self, payload: Mapping[str, object]) -> RecipeDefinition:
-        """The recipe an operation was accepted for: its stored copy, else its revision.
-
-        A stored copy that does not parse is rebuilt from the catalog revision the
-        operation names, accepted only when that revision has the content digest
-        the operation was accepted under (never a newer recipe); otherwise the
-        original validation failure stands.
-        """
-
-        try:
-            return _canonical_recipe(payload.get("recipe"))
-        except RecipeImageAvailabilityError:
-            revision_id = payload.get("recipe_revision_id")
-            digest = payload.get("recipe_content_sha256")
-            rebuilt: RecipeDefinition | None = None
-            if isinstance(revision_id, str) and isinstance(digest, str):
+    def _stored_recipe(
+        self, payload: AvailabilityJobPayload | StoredAvailabilityIdentity | object
+    ) -> RecipeDefinition | Residue:
+        """Rebuild a damaged recipe only from its exact accepted catalog digest."""
+        if isinstance(payload, AvailabilityJobPayload):
+            return payload.recipe
+        identity = (
+            payload
+            if isinstance(payload, StoredAvailabilityIdentity)
+            else _read(StoredAvailabilityIdentity, payload)
+        )
+        if identity is not None:
+            if identity.recipe is not None:
+                return identity.recipe
+            if (
+                identity.recipe_revision_id is not None
+                and identity.recipe_content_sha256 is not None
+            ):
                 with self._sessions() as session:
-                    revision = session.get(CatalogDocumentRevision, revision_id)
+                    revision = session.get(
+                        CatalogDocumentRevision, identity.recipe_revision_id
+                    )
                     if (
                         revision is not None
                         and revision.kind == "recipe"
-                        and revision.content_digest == digest
+                        and revision.content_digest == identity.recipe_content_sha256
                     ):
-                        try:
-                            document = read_catalog_document(revision)
-                        except (TypeError, ValueError):
-                            document = None
+                        document = read_row_column(revision, "document")
                         if isinstance(document, RecipeDefinition):
-                            rebuilt = document
-            if rebuilt is None:
-                raise
-            _LOGGER.info(
-                "stored recipe of availability operation rebuilt from its revision",
-                extra={"recipe_revision_id": revision_id},
-            )
-            return rebuilt
+                            return document
+        return retire_as_unknown(
+            "recipe-image.recipe",
+            identity.recipe_revision_id
+            if identity and identity.recipe_revision_id
+            else "?",
+            BookkeepingReason.EVIDENCE_UNAVAILABLE,
+        )
 
     def _current_model_child(
         self,
-        payload: Mapping[str, object],
+        payload: AvailabilityJobPayload,
         *,
         actor: str | None = None,
         parent_request_key: str | None = None,
-    ) -> Mapping[str, object] | None:
-        child = payload.get("model_child")
-        if not isinstance(child, Mapping) or self._model_cache is None:
+    ) -> AvailabilityModelChild | None:
+        child = payload.model_child
+        if child is None or self._model_cache is None:
             if (
                 child is None
                 and self._model_cache is not None
                 and actor is not None
                 and parent_request_key is not None
-                and self._stored_recipe(payload).models
+                and payload.recipe.models
             ):
                 return self._ensure_model_child(
-                    str(payload["recipe_revision_id"]),
+                    payload.recipe_revision_id,
                     actor=actor,
                     parent_request_key=parent_request_key,
                 )
-            return child if isinstance(child, Mapping) else None
-        child_id = child.get("id")
-        if not isinstance(child_id, str):
             return child
+        child_id = child.id
         try:
             operation = self._model_cache.get_operation(child_id)
             if (
@@ -5049,7 +4929,7 @@ class RecipeImageAvailabilityService:
                 and parent_request_key is not None
                 and isinstance(operation.artifact_set_sha256, str)
             ):
-                recipe_revision_id = payload.get("recipe_revision_id")
+                recipe_revision_id = payload.recipe_revision_id
                 if not isinstance(recipe_revision_id, str):
                     raise RecipeImageAvailabilityUnknown(
                         RecipeImageCode.MODEL_CACHE_INVALID,
@@ -5058,17 +4938,14 @@ class RecipeImageAvailabilityService:
                         recovery_actions=("retry",),
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
-                preview = self._model_cache.download_preview(
-                    recipe_revision_id=recipe_revision_id
+                preview = AvailabilityDownloadPreview.read(
+                    self._model_cache.download_preview(
+                        recipe_revision_id=recipe_revision_id
+                    ),
                 )
-                preview_set = preview.get("artifact_set_sha256")
-                preview_plan = preview.get("plan_digest")
-                new_bytes = preview.get("new_bytes")
                 if (
-                    preview_set != operation.artifact_set_sha256
-                    or not isinstance(preview_plan, str)
-                    or type(new_bytes) is not int
-                    or new_bytes < 0
+                    preview is None
+                    or preview.artifact_set_sha256 != operation.artifact_set_sha256
                 ):
                     raise RecipeImageAvailabilityUnknown(
                         RecipeImageCode.MODEL_CACHE_INVALID,
@@ -5077,6 +4954,8 @@ class RecipeImageAvailabilityService:
                         recovery_actions=("retry",),
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
+                preview_plan = preview.plan_digest
+                new_bytes = preview.new_bytes
                 if new_bytes > 0:
                     return self._ensure_model_child(
                         recipe_revision_id,
@@ -5086,28 +4965,23 @@ class RecipeImageAvailabilityService:
                         ),
                     )
         except ModelCacheNotFound:
-            return dict(child) | {
-                "state": "failed",
-                "failure": {
-                    "code": RecipeImageCode.MODEL_CHILD_MISSING,
-                    "detail": "durable ModelCache child operation is unavailable",
-                    "retryable": True,
-                    "recovery_actions": ["retry"],
-                },
-            }
-        failure = operation.failure
-        return dict(child) | {
-            "state": operation.state,
-            "progress": project_cache_progress(operation.progress, self._clock()),
-            "artifact_set_sha256": operation.artifact_set_sha256,
-            "plan_digest": operation.plan_digest,
-            "failure": (dict(failure) if isinstance(failure, Mapping) else None),
-        }
+            return child.model_copy(
+                update={
+                    "state": LifecycleState.FAILED,
+                    "failure": AvailabilityOperationFailure(
+                        code=RecipeImageCode.MODEL_CHILD_MISSING,
+                        detail="durable ModelCache child operation is unavailable",
+                        retryable=True,
+                        recovery_actions=[AvailabilityRecoveryAction.RETRY],
+                    ),
+                }
+            )
+        return self._refresh_model_observation(child, operation)
 
     def _update_model_progress(
-        self, claim: RecipeImageAvailabilityClaim, child: Mapping[str, object]
+        self, claim: RecipeImageAvailabilityClaim, child: AvailabilityModelChild
     ) -> bool:
-        child_id = child.get("id")
+        child_id = child.id
         with self._sessions.begin() as session:
             model_operation = None
             if isinstance(child_id, str):
@@ -5131,11 +5005,13 @@ class RecipeImageAvailabilityService:
                 .with_for_update(nowait=True)
                 .execution_options(populate_existing=True)
             )
+            payload = self._payload(operation) if operation is not None else None
             if (
                 operation is None
+                or not isinstance(payload, AvailabilityJobPayload)
                 or operation.current_attempt != claim.execution_attempt
                 or not isinstance(operation.payload, Mapping)
-                or operation.payload.get("claim_owner") != claim.claim_owner
+                or payload.claim_owner != claim.claim_owner
             ):
                 raise _AvailabilityClaimLost()
             cancelling = operation.state in job_states.words(LifecycleState.OBSERVING)
@@ -5155,9 +5031,11 @@ class RecipeImageAvailabilityService:
                     retryable=True,
                     recovery_actions=("resume", "retry"),
                 )
-            payload = dict(operation.payload)
-            payload["model_child"] = dict(child)
-            operation.payload = payload
+            payload = self._payload(operation)
+            if isinstance(payload, Residue):
+                return False
+            payload = payload.model_copy(update={"model_child": child})
+            operation.payload = serialize_json_value(payload)
             operation.updated_at = self._clock()
             # Keep image progress separate. The view aggregates the two
             # durable members exactly once.
@@ -5165,41 +5043,30 @@ class RecipeImageAvailabilityService:
 
     @staticmethod
     def _model_child_has_cancel_intent(operation: ModelCacheOperation) -> bool:
-        try:
-            payload = require_mapping(operation.payload, "ModelCache payload")
-            raw = payload.get("cancellation")
-            if raw is None:
-                return False
-            read_stored_model(
-                ModelCacheCancellation, json.dumps(raw, allow_nan=False), from_json=True
+        payload = read_row_column(operation, "payload")
+        if isinstance(payload, Residue):
+            cancellation = _read(
+                StoredModelChildCancellation, operation.payload, subject=operation.id
             )
-            return True
-        except (TypeError, ValueError, ValidationError) as error:
-            # The ModelCache row owns its cancellation: damaged evidence is no
-            # intent for this join, which keeps observing the child (the owner
-            # settles the row's own state, and a cancelled state still stops the
-            # join through the state check). The damage is recorded.
-            retire_as_unknown(
-                "recipe-image.model-child-cancellation",
-                operation.id,
-                BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                f"{type(error).__name__}: {error}",
-            )
+            return cancellation is not None and cancellation.cancellation is not None
+        if payload is None:
             return False
+        return payload.cancellation is not None
 
     def _defer_for_model(self, claim: RecipeImageAvailabilityClaim) -> None:
         with self._sessions.begin() as session:
             operation = self._require_claim(session, claim)
             now = self._clock()
-            payload = dict(operation.payload) | {
-                "claim_owner": None,
-                "claim_until": None,
-            }
-            # A dependency wait, not a failure: the core's first backoff step.
-            self._lifecycle.defer(
+            payload = self._payload(operation)
+            if isinstance(payload, Residue):
+                return
+            payload = payload.model_copy(
+                update={"claim_owner": None, "claim_until": None}
+            )
+            payload = self._lifecycle.defer(
                 operation, now, now + timedelta(seconds=1), payload=payload
             )
-            self._record_blockers(
+            payload = self._record_blockers(
                 operation,
                 payload,
                 [
@@ -5210,16 +5077,16 @@ class RecipeImageAvailabilityService:
                     )
                 ],
             )
-            operation.payload = payload
+            operation.payload = serialize_json_value(payload)
 
     def _prepare_claimed_image(
         self,
         claim: RecipeImageAvailabilityClaim,
-        payload: Mapping[str, object],
+        payload: AvailabilityJobPayload,
         recipe: RecipeDefinition,
-        runtime: Mapping[str, object],
+        runtime: AvailabilityRuntime,
     ) -> RuntimeImageReceipt | BuildUnsettled:
-        force_rebuild = payload.get("force_rebuild") is True
+        force_rebuild = payload.force_rebuild is True
 
         def persist_provisional_reference(
             receipt: RuntimeImageReceipt,
@@ -5235,24 +5102,25 @@ class RecipeImageAvailabilityService:
                 "no canonical recipe build executor is configured",
                 reason=InvalidRequestReason.NOT_FOUND,
             )
-        build_input_sha256 = payload.get("build_input_sha256")
+        build_input_sha256 = payload.build_input_sha256
         dispatch_identity_missing = not isinstance(build_input_sha256, str)
         if dispatch_identity_missing:
             build_input_sha256 = ""
         if self._builder_admission is not None:
-            self._builder_admission(recipe, runtime)
+            self._builder_admission(recipe, runtime.model_dump(mode="json"))
         self._update_progress(claim, "build", total_bytes=None)
 
-        def report(value: Mapping[str, object]) -> None:
-            phase = value.get("phase", "build")
-            self._update_progress(claim, str(phase), detail=value)
+        def report(value: object) -> None:
+            progress = _read(OperationProgress, value, subject=claim.operation_id)
+            if progress is not None:
+                self._update_progress(claim, progress.phase, detail=progress)
 
         # The builder re-resolves the exact executable identity and reuses
         # a verified filesystem receipt itself, so queue-time and
         # dispatch-time cache hits take the same path.
         build_receipt = self._builder(
             recipe,
-            runtime,
+            runtime.model_dump(mode="json"),
             claim=claim,
             build_input_sha256=build_input_sha256,
             force=force_rebuild,
@@ -5260,15 +5128,18 @@ class RecipeImageAvailabilityService:
         )
         if isinstance(build_receipt, BuildUnsettled):
             return build_receipt
-        if not isinstance(build_receipt, Mapping):
+        receipt = _read(
+            AvailabilityBuildReceipt, build_receipt, subject=claim.operation_id
+        )
+        if receipt is None:
             raise RecipeImageAvailabilityUnknown(
                 RecipeImageCode.BUILD_INVALID,
                 "builder returned no receipt",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         if dispatch_identity_missing:
-            resolved_input = build_receipt.get("build_input_sha256")
-            if not isinstance(resolved_input, str):
+            resolved_input = receipt.build_input_sha256
+            if resolved_input is None:
                 raise RecipeImageAvailabilityUnknown(
                     RecipeImageCode.BUILD_INPUT_MISSING,
                     "dispatch did not bind an exact build input identity",
@@ -5278,29 +5149,34 @@ class RecipeImageAvailabilityService:
                 )
             with self._sessions.begin() as session:
                 operation = self._require_claim(session, claim)
-                assigned_runtime = dict(
-                    require_mapping(operation.payload["runtime"], "runtime")
+                assigned = self._payload(operation)
+                if isinstance(assigned, Residue):
+                    return BuildUnsettled(
+                        RecipeImageCode.OPERATION_INVALID,
+                        "availability bookkeeping is unknown",
+                        WaitReason.OBSERVATION_UNAVAILABLE,
+                        retryable=True,
+                    )
+                runtime_update = {"build_input_sha256": resolved_input}
+                if receipt.builder_node_id is not None:
+                    runtime_update["builder_node_id"] = receipt.builder_node_id
+                assigned_runtime = assigned.runtime.model_copy(update=runtime_update)
+                operation.payload = serialize_json_value(
+                    assigned.model_copy(
+                        update={
+                            "build_input_sha256": resolved_input,
+                            "identity_key": resolved_input,
+                            "runtime": assigned_runtime,
+                        }
+                    )
                 )
-                if isinstance(build_receipt.get("builder_node_id"), str):
-                    assigned_runtime["builder_node_id"] = build_receipt[
-                        "builder_node_id"
-                    ]
-                if isinstance(build_receipt.get("build_input_sha256"), str):
-                    assigned_runtime["build_input_sha256"] = build_receipt[
-                        "build_input_sha256"
-                    ]
-                operation.payload = dict(operation.payload) | {
-                    "build_input_sha256": resolved_input,
-                    "identity_key": resolved_input,
-                    "runtime": assigned_runtime,
-                }
         self._update_progress(claim, "verify")
         return prepare_runtime_image(
             recipe.model_dump(mode="json"),
-            runtime=runtime,
+            runtime=runtime.model_dump(mode="json"),
             storage=self._storage,
             transport=self._transport,
-            build_receipt=build_receipt,
+            build_receipt=receipt.model_dump(mode="json"),
             now=self._clock(),
             before_publish=persist_provisional_reference,
         )
@@ -5326,9 +5202,17 @@ class RecipeImageAvailabilityService:
             )
             if operation is None:
                 return False
-            operation.payload = dict(operation.payload) | {
-                "claim_until": _iso(now + timedelta(seconds=self._claim_lease_seconds)),
-            }
+            payload = self._payload(operation)
+            if isinstance(payload, Residue):
+                return False
+            operation.payload = serialize_json_value(
+                payload.model_copy(
+                    update={
+                        "claim_until": now
+                        + timedelta(seconds=self._claim_lease_seconds),
+                    }
+                )
+            )
             operation.updated_at = now
             return True
 
@@ -5339,10 +5223,12 @@ class RecipeImageAvailabilityService:
     ) -> None:
         with self._sessions.begin() as session:
             operation = self._require_claim(session, claim)
-            operation_payload = dict(operation.payload)
+            operation_payload = self._payload(operation)
+            if isinstance(operation_payload, Residue):
+                return
             reference = self._image_reference_intent_for_claim(operation_payload, claim)
             if (
-                operation_payload.get("image_reference_intent") is not None
+                operation_payload.image_reference_intent is not None
                 and reference is None
             ):
                 raise _AvailabilityClaimLost()
@@ -5356,10 +5242,11 @@ class RecipeImageAvailabilityService:
                 raise RuntimeImagePreparationRefused(
                     error.code, error.detail, retryable=error.retryable
                 ) from error
-            operation.payload = dict(operation.payload) | {
-                "image_result": receipt.to_mapping()
-            }
-            operation.payload.pop("image_reference_intent", None)
+            operation.payload = serialize_json_value(
+                operation_payload.model_copy(
+                    update={"image_result": receipt, "image_reference_intent": None}
+                )
+            )
             self._set_progress(
                 operation,
                 "available",
@@ -5405,14 +5292,22 @@ class RecipeImageAvailabilityService:
                 raise RuntimeImagePreparationRefused(
                     error.code, error.detail, retryable=error.retryable
                 ) from error
-            payload = dict(operation.payload)
-            existing = payload.get("image_reference_intent")
+            payload = self._payload(operation)
+            if isinstance(payload, Residue):
+                return
+            stored = serialize_json_value(payload)
+            if stored != operation.payload:
+                operation.payload = stored
+                operation.updated_at = now
+            existing = payload.image_reference_intent
             if existing is None:
-                payload["image_reference_intent"] = serialize_json_value(reference)
-                operation.payload = payload
+                payload = payload.model_copy(
+                    update={"image_reference_intent": reference}
+                )
+                operation.payload = serialize_json_value(payload)
                 operation.updated_at = now
             else:
-                existing_reference = read_runtime_image_reference_intent(existing)
+                existing_reference = existing
                 if existing_reference != reference:
                     if not same_image(existing_reference, reference):
                         _LOGGER.warning(
@@ -5428,18 +5323,20 @@ class RecipeImageAvailabilityService:
                     # longer commit after this owner transfer; the exact bytes
                     # remain protected without opening a gap between
                     # provisional references.
-                    payload["image_reference_intent"] = serialize_json_value(reference)
-                    operation.payload = payload
+                    payload = payload.model_copy(
+                        update={"image_reference_intent": reference}
+                    )
+                    operation.payload = serialize_json_value(payload)
                     operation.updated_at = now
 
     @staticmethod
     def _image_reference_intent_for_claim(
-        payload: Mapping[str, object], claim: RecipeImageAvailabilityClaim
+        payload: AvailabilityJobPayload, claim: RecipeImageAvailabilityClaim
     ) -> RuntimeImageReferenceIntent | None:
-        raw_reference = payload.get("image_reference_intent")
+        raw_reference = payload.image_reference_intent
         if raw_reference is None:
             return None
-        reference = read_runtime_image_reference_intent(raw_reference)
+        reference = raw_reference
         if not reference.belongs_to(
             operation_id=claim.operation_id,
             recipe_revision_id=claim.recipe_revision_id,
@@ -5458,7 +5355,7 @@ class RecipeImageAvailabilityService:
         completed_bytes: int = 0,
         bytes_per_second: float | None = None,
         eta_seconds: float | None = None,
-        detail: Mapping[str, object] | None = None,
+        detail: OperationProgress | None = None,
     ) -> None:
         progress = _progress(
             phase,
@@ -5467,13 +5364,11 @@ class RecipeImageAvailabilityService:
             bytes_per_second=bytes_per_second,
             eta_seconds=eta_seconds,
         )
-        operation.payload = dict(operation.payload) | {"progress": progress}
-        if detail:
-            safe = sanitize_failure_evidence(detail)
-            operation.payload = dict(operation.payload) | {
-                "step": safe.get("step") or safe.get("current_step"),
-                "log_excerpt": safe.get("log_excerpt") or safe.get("log"),
-            }
+        payload = self._payload(operation)
+        if isinstance(payload, Residue):
+            return
+        payload = payload.model_copy(update={"progress": progress})
+        operation.payload = serialize_json_value(payload)
 
     def _update_progress(
         self,
@@ -5482,82 +5377,47 @@ class RecipeImageAvailabilityService:
         *,
         total_bytes: int | None = None,
         completed_bytes: int = 0,
-        detail: Mapping[str, object] | None = None,
+        detail: OperationProgress | None = None,
     ) -> None:
         with self._sessions.begin() as session:
             operation = self._require_claim(session, claim)
             if detail is not None:
-                raw_completed = detail.get(
-                    "completed_bytes", detail.get("downloaded_bytes")
-                )
-                if type(raw_completed) is int and raw_completed >= 0:
-                    completed_bytes = raw_completed
-                raw_total = detail.get("total_bytes", detail.get("expected_bytes"))
-                if type(raw_total) is int and raw_total >= 0:
-                    total_bytes = raw_total
-                raw_rate = detail.get("bytes_per_second")
-                bytes_per_second = (
-                    float(raw_rate)
-                    if isinstance(raw_rate, (int, float))
-                    and not isinstance(raw_rate, bool)
-                    and raw_rate >= 0
-                    else None
-                )
-                raw_eta = detail.get("eta_seconds")
-                eta_seconds = (
-                    float(raw_eta)
-                    if isinstance(raw_eta, (int, float))
-                    and not isinstance(raw_eta, bool)
-                    and raw_eta >= 0
-                    else None
-                )
-            else:
-                bytes_per_second = None
-                eta_seconds = None
-            raw_progress = (
-                operation.payload.get("progress")
-                if isinstance(operation.payload, Mapping)
-                else None
-            )
-            old = raw_progress if isinstance(raw_progress, Mapping) else {}
-            old_completed = old.get("completed_bytes", 0)
-            if type(old_completed) is int and old_completed > completed_bytes:
-                completed_bytes = old_completed
+                completed_bytes = detail.completed_bytes
+                total_bytes = detail.total_bytes
+            payload = self._payload(operation)
+            if isinstance(payload, Residue):
+                return
+            previous = payload.progress
             self._set_progress(
                 operation,
                 phase,
                 total_bytes=total_bytes,
-                completed_bytes=completed_bytes,
-                bytes_per_second=bytes_per_second,
-                eta_seconds=eta_seconds,
-                detail=detail,
+                completed_bytes=max(previous.completed_bytes, completed_bytes),
+                bytes_per_second=detail.bytes_per_second if detail else None,
+                eta_seconds=detail.eta_seconds if detail else None,
             )
             operation.updated_at = self._clock()
 
     @staticmethod
     def _record_blockers(
         operation: Job,
-        payload: dict[str, object],
+        payload: AvailabilityJobPayload,
         blockers: Sequence[OperationBlocker],
-    ) -> None:
-        """Store the current wait reasons; log one line when they change."""
-
-        before = {
-            (item.code, tuple(item.node_ids))
-            for item in read_blockers(payload.get("blockers"))
-        }
-        stored = dump_blockers(blockers)
-        payload["blockers"] = stored
-        after = {(item.code, tuple(item.node_ids)) for item in bound_blockers(blockers)}
+    ) -> AvailabilityJobPayload:
+        """Return the typed payload; log wait reasons only when they change."""
+        before = {(item.code, tuple(item.node_ids)) for item in payload.blockers or []}
+        stored = bound_blockers(blockers)
+        after = {(item.code, tuple(item.node_ids)) for item in stored}
         if before != after and stored:
             _LOGGER.log(
                 logging.WARNING
-                if any(item["severity"] == "error" for item in stored)
+                if any(item.severity == "error" for item in stored)
                 else logging.INFO,
                 "recipe image preparation %s is waiting: %s",
                 operation.id,
-                "; ".join(f"{item['code']}: {item['detail']}" for item in stored[:4]),
+                "; ".join(f"{item.code}: {item.detail}" for item in stored[:4]),
             )
+        return payload.model_copy(update={"blockers": stored})
 
     def note_waiting_for_worker(self, busy: int) -> None:
         """Say why queued preparations are not running: every worker is busy."""
@@ -5574,10 +5434,10 @@ class RecipeImageAvailabilityService:
                 .limit(16)
                 .with_for_update(skip_locked=True)
             ):
-                payload = dict(operation.payload)
-                if payload.get("blockers"):
+                payload = self._payload(operation)
+                if isinstance(payload, Residue) or payload.blockers:
                     continue
-                self._record_blockers(
+                payload = self._record_blockers(
                     operation,
                     payload,
                     [
@@ -5589,7 +5449,7 @@ class RecipeImageAvailabilityService:
                         )
                     ],
                 )
-                operation.payload = payload
+                operation.payload = serialize_json_value(payload)
 
     def _fail(
         self,
@@ -5615,12 +5475,18 @@ class RecipeImageAvailabilityService:
                     _failure_code(error),
                 )
                 return
-            retry = operation.payload.get("retry", {})
-            retry = dict(retry) if isinstance(retry, Mapping) else {}
-            automatic_attempts = int(retry.get("automatic_attempts", 0))
+            payload = self._payload(operation)
+            if isinstance(payload, Residue):
+                return
+            retry = payload.retry
+            automatic_attempts = retry.automatic_attempts
             dependency_wait = str(code) in _DEPENDENCY_WAIT_CODES
             bounded = retryable
-            retry["automatic_attempts"] = automatic_attempts + int(not dependency_wait)
+            retry = retry.model_copy(
+                update={
+                    "automatic_attempts": automatic_attempts + int(not dependency_wait)
+                }
+            )
             now = self._clock()
             now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
             # The core decides the retry (rule 1) on its one bounded, jittered
@@ -5668,39 +5534,44 @@ class RecipeImageAvailabilityService:
                 and type(free_bytes) is int
             ):
                 shortfall_bytes = max(0, required_bytes - free_bytes)
-            failure: dict[str, object] = {
-                "code": str(code)[:64],
-                "detail": str(detail)[:512],
-                "recovery_actions": list(getattr(error, "recovery_actions", ()))
-                or _recovery_actions(operation.payload, str(code), retryable),
-                "retryable": retryable,
-                "retry_time": preserved_retry_time
-                if isinstance(preserved_retry_time, str)
-                else (
-                    _iso(now + timedelta(seconds=retry_after))
-                    if retry_after is not None
-                    else None
-                ),
-                "retry_after_seconds": retry_after,
-                "log_excerpt": excerpt,
-                "required_bytes": required_bytes
-                if type(required_bytes) is int and required_bytes >= 0
-                else None,
-                "free_bytes": free_bytes
-                if type(free_bytes) is int and free_bytes >= 0
-                else None,
-                "shortfall_bytes": shortfall_bytes
-                if type(shortfall_bytes) is int and shortfall_bytes >= 0
-                else None,
-            }
-            failure = sanitize_failure_evidence(failure)
+            failure = AvailabilityOperationFailure.model_validate(
+                sanitize_failure_evidence(
+                    {
+                        "code": str(code)[:64],
+                        "detail": str(detail)[:512],
+                        "recovery_actions": list(getattr(error, "recovery_actions", ()))
+                        or _recovery_actions(str(code), retryable),
+                        "retryable": retryable,
+                        "retry_time": preserved_retry_time
+                        if isinstance(preserved_retry_time, str)
+                        else (
+                            _iso(now + timedelta(seconds=retry_after))
+                            if retry_after is not None
+                            else None
+                        ),
+                        "retry_after_seconds": retry_after,
+                        "log_excerpt": excerpt,
+                        "required_bytes": required_bytes
+                        if type(required_bytes) is int and required_bytes >= 0
+                        else None,
+                        "free_bytes": free_bytes
+                        if type(free_bytes) is int and free_bytes >= 0
+                        else None,
+                        "shortfall_bytes": shortfall_bytes
+                        if type(shortfall_bytes) is int and shortfall_bytes >= 0
+                        else None,
+                    }
+                )
+            )
             operation.result = None
-            payload = dict(operation.payload)
-            reference = self._image_reference_intent_for_claim(payload, claim)
-            if payload.get("image_reference_intent") is not None and reference is None:
+            payload = self._payload(operation)
+            if isinstance(payload, Residue):
                 return
-            payload.pop("image_reference_intent", None)
-            payload |= {"retry": retry, "failure": failure}
+            reference = self._image_reference_intent_for_claim(payload, claim)
+            if payload.image_reference_intent is not None and reference is None:
+                return
+            payload = payload.model_copy(update={"image_reference_intent": None})
+            payload = payload.model_copy(update={"retry": retry, "failure": failure})
             blockers = list(getattr(error, "blockers", ())) or [
                 make_blocker(
                     str(code),
@@ -5708,171 +5579,169 @@ class RecipeImageAvailabilityService:
                     severity="warning" if bounded else "error",
                 )
             ]
-            self._record_blockers(operation, payload, blockers)
+            payload = self._record_blockers(operation, payload, blockers)
             if bounded and (
                 str(code) in _INTEGRITY_FAILURE_CODES or is_redownload(str(code))
             ):
                 # Never reuse bytes that failed verification: the automatic
                 # retry downloads or builds them again.
-                payload["force_rebuild"] = True
-            dependency = payload.get("build_dependency")
+                payload = payload.model_copy(update={"force_rebuild": True})
+            dependency = payload.build_dependency
             settled_build_id = getattr(error, "settled_build_operation_id", None)
             exact_build_settled = (
                 isinstance(settled_build_id, str)
-                and isinstance(dependency, Mapping)
-                and dependency.get("operation_id") == settled_build_id
+                and dependency is not None
+                and str(dependency.operation_id) == settled_build_id
             )
             if exact_build_settled or str(code) == RuntimeImageCode.CACHE_MISSING:
                 # The failed effect is settled; a later execution claim may
                 # create a new child. Observation waits retain the exact child.
-                payload.pop("build_dependency", None)
-            payload.pop("retry_after_at", None)
-            payload["claim_owner"] = None
-            payload["claim_until"] = None
-            self._lifecycle.commit(
+                payload = payload.model_copy(update={"build_dependency": None})
+            payload = payload.model_copy(update={"retry_after_at": None})
+            payload = payload.model_copy(update={"claim_owner": None})
+            payload = payload.model_copy(update={"claim_until": None})
+            updated = self._lifecycle.commit(
                 operation, decided, now, reason=str(detail), payload=payload
             )
-            operation.payload = payload
+            assert updated is not None
+            operation.payload = serialize_json_value(updated)
+
+    def _unknown_view(
+        self, operation: Job, residue: Residue
+    ) -> RecipeImageAvailabilityView:
+        identity = _read(
+            StoredAvailabilityIdentity, operation.payload, subject=operation.id
+        )
+        return RecipeImageAvailabilityView(
+            id=operation.id,
+            request_id=operation.request_id,
+            request=identity.request if identity else None,
+            kind=operation.kind,
+            state=LifecycleState.BACKOFF,
+            attempt=int(operation.current_attempt or 0),
+            recipe_revision_id=identity.recipe_revision_id
+            if identity
+            else operation.authority_revision,
+            recipe_content_sha256=identity.recipe_content_sha256 if identity else None,
+            model_digest=None,
+            build_input_sha256=None,
+            progress=_progress(ProgressPhase.WAITING),
+            image_progress=None,
+            result=None,
+            failure=None,
+            supported_actions=(),
+            created_at=_iso(operation.created_at),
+            updated_at=_iso(operation.updated_at),
+            cancellation=self._stored_cancellation(operation),
+            residue=residue,
+        )
 
     def _view(self, operation: Job) -> RecipeImageAvailabilityView:
-        payload = operation.payload if isinstance(operation.payload, Mapping) else {}
-        result = operation.result if isinstance(operation.result, Mapping) else None
+        payload = self._payload(operation)
+        if isinstance(payload, Residue):
+            return self._unknown_view(operation, payload)
+        stored_result = read_row_column(operation, "result")
+        result = (
+            stored_result if isinstance(stored_result, AvailabilityJobResult) else None
+        )
         model_child = self._current_model_child(payload)
-        raw_image_progress = payload.get("progress")
-        image_progress = (
-            dict(raw_image_progress) if isinstance(raw_image_progress, Mapping) else {}
-        )
-        image_result = payload.get("image_result")
-        image_ready = isinstance(image_result, Mapping)
+        image_progress = payload.progress
+        image_result = payload.image_result
+        image_ready = image_result is not None
         image_state = "succeeded" if image_ready else operation.state
-        raw_failure = payload.get("failure")
-        failure = raw_failure if isinstance(raw_failure, Mapping) else None
-        if operation.state == "succeeded" and (result is None or failure is not None):
-            raise InvalidValue(
-                "successful image availability requires a result and no failure",
-                reason=InvalidRequestReason.INCOMPLETE,
+        failure = payload.failure
+        state = operation.state
+        residue = None
+        if (
+            state == "succeeded"
+            and (result is None or failure is not None)
+            or state == "failed"
+            and failure is None
+        ):
+            # Missing terminal evidence is typed unknown, not confirmed success
+            # or an assertion that this terminal row is executing again.
+            residue = retire_as_unknown(
+                "recipe-image.result", operation.id, BookkeepingReason.EVIDENCE_MISMATCH
             )
-        if operation.state == "failed" and failure is None:
-            raise InvalidValue(
-                "failed image availability requires failure evidence",
-                reason=InvalidRequestReason.INCOMPLETE,
+            state = LifecycleState.BACKOFF
+            result = None
+        if state != "succeeded":
+            result = None
+        if image_result is not None:
+            image_progress = image_progress.model_copy(
+                update={
+                    "phase": "available",
+                    "completed_bytes": image_result.image_bytes,
+                    "total_bytes": image_result.image_bytes,
+                    "total_bytes_known": True,
+                    "bytes_per_second": None,
+                    "eta_seconds": None,
+                }
             )
-        if operation.state != "succeeded" and result is not None:
-            raise InvalidValue(
-                "image availability result requires success",
-                reason=InvalidRequestReason.INCOMPLETE,
-            )
-        if image_ready:
-            image_bytes = image_result.get("image_bytes")
-            image_progress.update(
-                phase="available",
-                completed_bytes=image_bytes if type(image_bytes) is int else 0,
-                total_bytes=image_bytes if type(image_bytes) is int else None,
-                total_bytes_known=type(image_bytes) is int,
-            )
-            image_progress.pop("bytes_per_second", None)
-            image_progress.pop("eta_seconds", None)
-        progress = dict(image_progress)
-        image_members = [
-            {
-                "member_id": "runtime-image",
-                "phase": str(image_progress.get("phase", "prepare")),
-                "completed_bytes": int(image_progress.get("completed_bytes", 0) or 0),
-                "total_bytes": image_progress.get("total_bytes"),
-                "state": image_state,
-            }
-        ]
-        progress["members"] = image_members
-        if model_child is not None:
-            child = read_stored_model(OperationProgress, model_child["progress"])
-            model_progress = child.model_dump(
-                mode="json",
-                exclude_none=True,
-                exclude={"members", "checkpoint", "total_bytes_known"},
-            )
-            image = read_stored_model(OperationProgress, image_progress)
-            image_member = image.model_dump(
-                mode="json",
-                exclude_none=True,
-                exclude={"members", "checkpoint", "total_bytes_known"},
-            )
-            progress = aggregate_progress(
-                [
-                    read_stored_model(
-                        OperationMemberProgress,
-                        image_member
-                        | {"member_id": "runtime-image", "state": image_state},
-                    ),
-                    read_stored_model(
-                        OperationMemberProgress,
-                        model_progress
-                        | {
-                            "member_id": "model-cache",
-                            "state": str(model_child["state"]),
-                        },
-                    ),
-                ]
-            ).model_dump(mode="json", exclude_none=True)
-        actions = (
-            tuple(
-                str(item)
-                for item in failure.get("recovery_actions", [])
-                if isinstance(item, str)
-            )
-            if failure is not None and isinstance(failure.get("recovery_actions"), list)
-            else ()
+        shared = (
+            OperationProgress.model_fields.keys()
+            & OperationMemberProgress.model_fields.keys()
         )
-        raw_model_digest = payload.get("model_digest")
-        raw_build_input_sha256 = payload.get("build_input_sha256")
-        raw_retry_at = payload.get("retry_after_at")
+        members = [
+            OperationMemberProgress.model_validate_json(
+                canonical_message(
+                    image_progress.model_dump(mode="json", include=shared)
+                    | {"member_id": "runtime-image", "state": image_state}
+                )
+            )
+        ]
+        if model_child is not None and model_child.progress is not None:
+            members.append(
+                OperationMemberProgress.model_validate_json(
+                    canonical_message(
+                        model_child.progress.model_dump(mode="json", include=shared)
+                        | {"member_id": "model-cache", "state": model_child.state}
+                    )
+                )
+            )
+        progress = (
+            aggregate_progress(members)
+            if len(members) > 1
+            else image_progress.model_copy(update={"members": members})
+        )
         next_attempt_at = (
-            raw_retry_at
-            if operation.state
-            in job_states.words(LifecycleState.QUEUED, LifecycleState.BACKOFF)
-            and isinstance(raw_retry_at, str)
+            _iso(payload.retry_after_at)
+            if payload.retry_after_at is not None
+            and state in job_states.words(LifecycleState.QUEUED, LifecycleState.BACKOFF)
             else None
         )
         return RecipeImageAvailabilityView(
             id=operation.id,
             request_id=operation.request_id,
-            request=read_availability_intent(payload.get("request")),
+            request=payload.request,
             kind=operation.kind,
-            state=operation.state,
+            state=state,
             attempt=int(operation.current_attempt),
-            recipe_revision_id=str(payload.get("recipe_revision_id", "")),
-            recipe_content_sha256=str(payload.get("recipe_content_sha256", "")),
-            model_digest=(
-                raw_model_digest if isinstance(raw_model_digest, str) else None
-            ),
-            build_input_sha256=(
-                raw_build_input_sha256
-                if isinstance(raw_build_input_sha256, str)
-                else None
-            ),
+            recipe_revision_id=payload.recipe_revision_id,
+            recipe_content_sha256=payload.recipe_content_sha256,
+            model_digest=payload.model_digest,
+            build_input_sha256=payload.build_input_sha256,
             progress=progress,
             image_progress=image_progress,
             image_state=image_state,
-            image_failure=None if image_ready or failure is None else dict(failure),
-            result=(
-                dict(result)
-                if result is not None and operation.state == "succeeded"
-                else None
-            ),
-            failure=(dict(failure) if failure is not None else None),
-            supported_actions=actions,
+            image_failure=None if image_ready else failure,
+            result=result,
+            failure=failure,
+            supported_actions=tuple(action.value for action in failure.recovery_actions)
+            if failure
+            else (),
             created_at=_iso(operation.created_at),
             updated_at=_iso(operation.updated_at),
-            model_child=(None if model_child is None else dict(model_child)),
+            model_child=model_child,
             cancellation=self._stored_cancellation(operation),
-            blockers=tuple(
-                read_blockers(payload.get("blockers"))
-                if operation.state
-                in job_states.words(
-                    LifecycleState.QUEUED, LifecycleState.BACKOFF, LifecycleState.FAILED
-                )
-                else ()
-            ),
+            blockers=tuple(payload.blockers or [])
+            if state
+            in job_states.words(
+                LifecycleState.QUEUED, LifecycleState.BACKOFF, LifecycleState.FAILED
+            )
+            else (),
             next_attempt_at=next_attempt_at,
+            residue=residue,
         )
 
 

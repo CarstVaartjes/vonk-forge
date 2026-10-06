@@ -45,6 +45,7 @@ from vonk_control.model_cache_api import (
     model_cache_operation_provider,
 )
 from vonk_control.model_cache_contract import (
+    ModelCacheCounters,
     ModelCacheDownloadResult,
     ModelCacheRemovalResult,
 )
@@ -59,6 +60,7 @@ from vonk_control.models import (
     ModelCacheSetArtifact,
     RecipeBuild,
 )
+from vonk_control.operation_item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.worker import Worker
@@ -1492,14 +1494,10 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         model_content_sha256=model,
         request_key="ea2c5c20-038a-4a0d-bdaa-40d756fb01bb",
     )
-    spec = ArtifactSpec.from_manifest(
-        service.resolve_artifact_set(
-            model_content_sha256=model,
-            artifacts=[artifact],
-        )
-        .artifacts[0]
-        .identity()
-    )
+    spec = service.resolve_artifact_set(
+        model_content_sha256=model,
+        artifacts=[artifact],
+    ).artifacts[0]
     path = service._object_path(spec.sha256)
     if stored_state == "receipt_missing":
         # Bytes are present but the managed-storage receipt is gone: this is
@@ -1788,7 +1786,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     assert isinstance(first_page, operation_api.OperationListPage)
     assert first_page.total == 2
     assert len(first_page.items) == 1
-    first = first_page.items[0]
+    first = operation_item(first_page.items[0]).model_dump(mode="json")
     assert first["node_ids"] == []
     assert first["attempt"] == 1
     assert first["supported_actions"] == []
@@ -1815,7 +1813,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     )
     assert second_page.total == 2
     assert len(second_page.items) == 1
-    assert second_page.items[0]["id"] != first["id"]
+    assert operation_item(second_page.items[0]).id != first["id"]
     assert second_page.next_cursor is None
 
     queued_page = provider.list_operations(
@@ -1824,7 +1822,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         )
     )
     assert queued_page.total == 2
-    assert {item["id"] for item in queued_page.items} == set(operation_ids)
+    assert {operation_item(item).id for item in queued_page.items} == set(operation_ids)
 
     node_page = provider.list_operations(
         operation_api.OperationQuery(
@@ -1836,7 +1834,9 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     )
     assert list(node_page.items) == []
     assert node_page.total == 0
-    detail = provider.get_operation(str(first["id"]))
+    detail = operation_item(provider.get_operation(str(first["id"]))).model_dump(
+        mode="json"
+    )
     assert detail["id"] == first["id"]
     assert detail["node_ids"] == []
     assert detail["attempt"] == 1
@@ -1848,7 +1848,9 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         )
     )
     assert succeeded_page.total == 2
-    assert all(item["state"] == "succeeded" for item in succeeded_page.items)
+    assert all(
+        operation_item(item).state == "succeeded" for item in succeeded_page.items
+    )
 
 
 def test_malformed_pagination_boundary_fails_instead_of_ending_the_page(cache) -> None:
@@ -2429,18 +2431,20 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
 
 
 def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
-    from vonk_control.model_cache_progress import cache_progress
+    from vonk_control.model_cache_progress import cache_progress, progress_document
 
-    value = cache_progress(
-        {
-            "phase": "downloading",
-            "completed_artifacts": 0,
-            "total_artifacts": 1,
-            "downloaded_bytes": 12,
-            "expected_bytes": None,
-        },
-        previous=None,
-        now=NOW,
+    value = progress_document(
+        cache_progress(
+            ModelCacheCounters(
+                phase="downloading",
+                completed_artifacts=0,
+                total_artifacts=1,
+                downloaded_bytes=12,
+                expected_bytes=None,
+            ),
+            previous=None,
+            now=NOW,
+        )
     )
     progress = ModelCacheOperationProvider._progress(value)
     assert progress["phase"] == ProgressPhase.DOWNLOADING
@@ -2763,35 +2767,32 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
 def test_cache_measurements_handle_unknown_total_and_observation_gap():
     from vonk_control.model_cache_progress import cache_progress, project_cache_progress
 
-    def snapshot(count: int, total: int | None = 100) -> dict[str, object]:
-        return {
-            "phase": "downloading",
-            "completed_artifacts": 0,
-            "total_artifacts": 1,
-            "downloaded_bytes": count,
-            "expected_bytes": total,
-        }
+    def snapshot(count: int, total: int | None = 100) -> ModelCacheCounters:
+        return ModelCacheCounters(
+            phase="downloading",
+            completed_artifacts=0,
+            total_artifacts=1,
+            downloaded_bytes=count,
+            expected_bytes=total,
+        )
 
     first = cache_progress(snapshot(0), previous=None, now=NOW)
     second = cache_progress(
         snapshot(10), previous=first, now=NOW + timedelta(seconds=1)
     )
-    second_measurement = require_mapping(second["measurement"], "cache measurement")
-    assert second_measurement["eta_seconds"] == 9
+    assert second.measurement.eta_seconds == 9
     restarted = cache_progress(
         snapshot(20), previous=second, now=NOW + timedelta(seconds=60)
     )
-    restarted_measurement = require_mapping(
-        restarted["measurement"], "cache measurement"
-    )
-    assert "bytes_per_second" not in restarted_measurement
+    assert restarted.measurement.bytes_per_second is None
     unknown = cache_progress(
         snapshot(30, None), previous=restarted, now=NOW + timedelta(seconds=61)
     )
-    unknown_measurement = require_mapping(unknown["measurement"], "cache measurement")
-    assert unknown_measurement["bytes_per_second"] == 10
-    assert "eta_seconds" not in unknown_measurement
-    stale = project_cache_progress(unknown, NOW + timedelta(seconds=200))
+    assert unknown.measurement.bytes_per_second == 10
+    assert unknown.measurement.eta_seconds is None
+    stale = project_cache_progress(
+        unknown.model_dump(mode="json"), NOW + timedelta(seconds=200)
+    )
     assert stale["activity"] == "possibly_stalled"
     assert "bytes_per_second" not in stale
 
@@ -2815,9 +2816,9 @@ def test_large_model_keeps_exact_aggregate_without_truncated_member_list(
         }
     }
     progress = service._progress(large, phase="downloading", transfer=transfer)
-    assert progress["measurement"]["total_items"] == 1025
-    assert progress["measurement"]["total_bytes"] == 1025
-    assert progress["measurement"]["members"] == []
+    assert progress.measurement.total_items == 1025
+    assert progress.measurement.total_bytes == 1025
+    assert progress.measurement.members == []
 
 
 class _FragmentedByteStream(httpx2.SyncByteStream):
@@ -3412,11 +3413,11 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
         assert partials[0].read_bytes() == payload
         service._finish_succeeded(
             operation.id,
-            {
-                "schema_version": 2,
-                "artifact_set_sha256": str(operation.artifact_set_sha256),
-                "coverage": "complete",
-            },
+            ModelCacheDownloadResult(
+                schema_version=2,
+                artifact_set_sha256=str(operation.artifact_set_sha256),
+                coverage="complete",
+            ),
         )
         assert service.get_operation(operation.id).state == "cancelled"
     finally:

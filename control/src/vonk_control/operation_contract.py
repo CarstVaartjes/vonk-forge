@@ -19,7 +19,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentFailureResult
 
 from . import agent_operation_states
-from .bounded_json import integer, require_integer, sequence
 from .logging import redact_text
 
 _SENSITIVE = re.compile(
@@ -169,95 +168,83 @@ class OperationRecovery(BaseModel):
     explanation: str | None = Field(default=None, max_length=512)
 
 
+#: The durable fields a partial update that omits them carries forward.
+_CARRIED_PROGRESS_FIELDS = (
+    "kind",
+    "object_sha256",
+    "completed_bytes",
+    "total_bytes",
+    "total_bytes_known",
+    "completed_items",
+    "total_items",
+    "checkpoint",
+    "members",
+)
+
+
 def validate_progress_update(
-    previous: Mapping[str, object] | None,
-    current: Mapping[str, object],
+    previous: OperationProgress | None,
+    current: OperationProgress,
     *,
     partial: bool = True,
-) -> dict[str, object]:
-    """Validate monotonic bytes/checkpoint updates within one leased attempt."""
+) -> OperationProgress:
+    """Validate monotonic bytes/checkpoint updates within one leased attempt.
 
-    normalized = normalize_operation_progress(current)
-    if not previous:
-        return normalized
-    old = normalize_operation_progress(previous)
-    # Controller-internal partial updates carry omitted durable fields forward.
-    # Agent snapshots are complete; lease-only heartbeats carry no progress.
-    for key in (
-        "kind",
-        "object_sha256",
-        "completed_bytes",
-        "total_bytes",
-        "total_bytes_known",
-        "completed_items",
-        "total_items",
-        "checkpoint",
-        "members",
-    ):
-        if not partial or key not in old:
-            continue
-        if key == "total_bytes" and (
-            "total_bytes" in current or current.get("total_bytes_known") is False
-        ):
-            continue
-        omitted_total = (
-            key == "total_bytes_known"
-            and "total_bytes_known" not in current
-            and "total_bytes" not in current
-        )
-        if key not in current or current[key] is None or omitted_total:
-            normalized[key] = old[key]
-    old_bytes = require_integer(
-        old.get("completed_bytes"), "previous progress completed_bytes is invalid"
-    )
-    new_bytes = require_integer(
-        normalized.get("completed_bytes"), "progress completed_bytes is invalid"
-    )
-    if new_bytes < old_bytes:
+    ``current`` carries only the fields its producer set (``model_fields_set``):
+    a Controller-internal partial update omits durable fields and takes them from
+    ``previous``; an agent snapshot is complete (``partial=False``).
+    """
+
+    if previous is None:
+        return current
+    given = current.model_fields_set
+    document = current.model_dump(mode="python", exclude_unset=True)
+    if partial:
+        for key in _CARRIED_PROGRESS_FIELDS:
+            if key == "total_bytes" and (
+                "total_bytes" in given
+                or ("total_bytes_known" in given and not current.total_bytes_known)
+            ):
+                continue
+            omitted_total = (
+                key == "total_bytes_known"
+                and "total_bytes_known" not in given
+                and "total_bytes" not in given
+            )
+            if key in given and getattr(current, key) is not None and not omitted_total:
+                continue
+            carried = getattr(previous, key)
+            if carried is None:
+                continue
+            if key == "members":
+                document[key] = [item.model_dump(mode="python") for item in carried]
+            elif key == "checkpoint":
+                document[key] = carried.model_dump(mode="python")
+            else:
+                document[key] = carried
+    merged = OperationProgress.model_validate(document)
+    if merged.completed_bytes < previous.completed_bytes:
         raise ValueError("operation progress bytes cannot move backwards")
     # ``completed_items`` is optional: an operation without item accounting
     # persists no count, which is zero for the monotonicity check.
-    old_items = integer(old.get("completed_items"), default=0)
-    new_items = integer(normalized.get("completed_items"), default=0)
-    if old_items is None:
-        old_items = 0
-    if new_items is None:
-        new_items = 0
-    if new_items < old_items:
+    if (merged.completed_items or 0) < (previous.completed_items or 0):
         raise ValueError("operation progress items cannot move backwards")
-    old_checkpoint = old.get("checkpoint")
-    new_checkpoint = normalized.get("checkpoint")
-    if isinstance(old_checkpoint, Mapping) and isinstance(new_checkpoint, Mapping):
-        old_sequence = require_integer(
-            old_checkpoint.get("sequence"), "previous checkpoint sequence is invalid"
-        )
-        new_sequence = require_integer(
-            new_checkpoint.get("sequence"), "checkpoint sequence is invalid"
-        )
-        if new_sequence < old_sequence:
+    old_checkpoint = previous.checkpoint
+    new_checkpoint = merged.checkpoint
+    if old_checkpoint is not None and new_checkpoint is not None:
+        if new_checkpoint.sequence < old_checkpoint.sequence:
             raise ValueError("operation checkpoint sequence cannot move backwards")
-        if new_sequence == old_sequence and dict(new_checkpoint) != dict(
-            old_checkpoint
+        if new_checkpoint.sequence == old_checkpoint.sequence and (
+            new_checkpoint.model_dump(mode="json", exclude_none=True)
+            != old_checkpoint.model_dump(mode="json", exclude_none=True)
         ):
             raise ValueError("operation checkpoint was reused with different data")
-    old_members = {
-        str(item["member_id"]): item
-        for item in sequence(old.get("members")) or ()
-        if isinstance(item, Mapping) and isinstance(item.get("member_id"), str)
-    }
-    for item in sequence(normalized.get("members")) or ():
-        if not isinstance(item, Mapping):
-            continue
-        member_id = item.get("member_id")
-        prior = old_members.get(str(member_id))
-        if prior is not None and require_integer(
-            item.get("completed_bytes"), "operation member completed_bytes is invalid"
-        ) < require_integer(
-            prior.get("completed_bytes"),
-            "stored operation member completed_bytes is invalid",
-        ):
+    old_members = {member.member_id: member for member in previous.members}
+    for member in merged.members:
+        prior = old_members.get(member.member_id)
+        if prior is not None and member.completed_bytes < prior.completed_bytes:
             raise ValueError("operation member progress bytes cannot move backwards")
-    return normalize_operation_progress(normalized)
+    return merged
 
 
 def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:

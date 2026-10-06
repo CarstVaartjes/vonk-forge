@@ -59,6 +59,7 @@ from vonk_control.models import (
 from vonk_control.operation_api import OperationQuery
 from vonk_control.operation_blockers import PHASE_RETRY_CODE
 from vonk_control.operation_contract import OperationFailureEvidence
+from vonk_control.operation_item_contract import operation_item
 from vonk_control.recipe_build_cancellation import (
     lock_build_dependency,
 )
@@ -4050,7 +4051,7 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     assert detail.progress.members[0].member_id == nodes[0]
     assert detail.recovery is not None
     assert detail.recovery.actions[0].value == "inspect"
-    assert get_operation_from_providers([shared], operations[0].operation_id)["id"] == (
+    assert get_operation_from_providers([shared], operations[0].operation_id).id == (
         operations[0].operation_id
     )
 
@@ -4120,22 +4121,23 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     )
 
     assert page.total == 2
-    assert [item["id"] for item in page.items] == [
+    assert [operation_item(item).id for item in page.items] == [
         unreadable.operation_id,
         valid.operation_id,
     ]
-    damaged_item = page.items[0]
+    damaged_item = operation_item(page.items[0])
     # The unreadable plan does not make the row unavailable: it is listed from
     # the identity recorded beside the plan.
-    assert damaged_item["kind"] != "run-switch-unreadable"
-    assert damaged_item["state"] != "unavailable"
-    assert damaged_item.get("failure") is None
+    assert damaged_item.kind != "run-switch-unreadable"
+    assert damaged_item.state != "unavailable"
+    assert damaged_item.failure is None
     damaged_detail = operation_detail_response(damaged_item)
     assert damaged_detail.id == unreadable.operation_id
     assert damaged_detail.failure is None
-    assert page.items[1]["id"] == valid.operation_id
-    assert page.items[1]["node_ids"] == list(nodes)
-    assert page.items[1].get("failure") is None
+    valid_item = operation_item(page.items[1])
+    assert valid_item.id == valid.operation_id
+    assert valid_item.node_ids == list(nodes)
+    assert valid_item.failure is None
 
 
 @pytest.mark.parametrize("failed", [False, True])
@@ -6026,13 +6028,13 @@ def test_stored_run_switch_with_retired_fields_stays_readable_and_new_work_proce
         payload["plan"] = plan
         job.payload = payload
 
-    item = (
+    item = operation_item(
         service.activity_provider()
         .list_operations(
             OperationQuery(after=None, limit=10, state=None, node_id=nodes[0])
         )
         .items[0]
-    )
+    ).model_dump(mode="json")
 
     assert item["id"] == old.operation_id
     assert item["kind"] != "run-switch-unreadable"
