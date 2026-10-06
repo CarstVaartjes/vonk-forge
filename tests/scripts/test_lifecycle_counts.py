@@ -93,3 +93,15 @@ def test_cli_prints_json_for_the_tree(capsys) -> None:
     module = _module()
     assert module.main([]) == 0
     assert set(json.loads(capsys.readouterr().out)) == set(module.KEYS)
+
+
+def test_a_commit_without_the_writers_allowlist_counts_zero_writers() -> None:
+    module = _module()
+    blockers = json.dumps(BLOCKERS)
+
+    def read(path: str) -> str:
+        if path == module.WRITERS:
+            raise FileNotFoundError(path)
+        return blockers
+
+    assert module.counts_from(read)["writers"] == 0

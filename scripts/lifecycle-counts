@@ -7,7 +7,9 @@ code (a stale or moved count fails there), so they can be read from any commit
 without running its code:
 
 * ``writers``: lifecycle state writes outside the core
-  (``tools/lifecycle-writers-allowlist.json``, the sum of the entry counts);
+  (``tools/lifecycle-writers-allowlist.json``, the sum of the entry counts;
+  the file is gone since the last writer moved onto the core, and a commit
+  without it counts zero, so a new writer fails the scanner instead);
 * ``operator_waits``: sites that produce an operator wait
   (``tools/blocker-allowlist.json``, ``operator_waits``);
 * ``raises``: fail-closed raises in the audited modules
@@ -84,8 +86,17 @@ def count_documents(writers: dict, blockers: dict) -> dict[str, int]:
     }
 
 
+def _writers_document(read: Reader) -> dict:
+    """The writers allowlist, or the empty one once the file was deleted."""
+
+    try:
+        return json.loads(read(WRITERS))
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return {"writers": []}
+
+
 def counts_from(read: Reader) -> dict[str, int]:
-    return count_documents(json.loads(read(WRITERS)), json.loads(read(BLOCKERS)))
+    return count_documents(_writers_document(read), json.loads(read(BLOCKERS)))
 
 
 def _git(*args: str) -> str:
