@@ -8587,6 +8587,8 @@
     "ResourcePlanningCode": {
       "description": "Resource planning (memory, disk, parallelism) refusals and unknowns.",
       "enum": [
+        "resource.envelope_exceeds_capacity",
+        "resource.envelope_unverified",
         "resource.estimate_uncertain",
         "resource.evidence_invalid",
         "resource.evidence_unknown",
@@ -8902,6 +8904,8 @@
         "run-switch.cleanup-waiting-without-child",
         "run-switch.cleanup-returned-no-evidence",
         "run-switch.resource.capacity_unknown",
+        "run-switch.resource.envelope_exceeds_capacity",
+        "run-switch.resource.envelope_unverified",
         "run-switch.resource.estimate_uncertain",
         "run-switch.resource.evidence_invalid",
         "run-switch.resource.evidence_unknown",

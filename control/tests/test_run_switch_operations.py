@@ -6375,7 +6375,12 @@ def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
     plan = service.preview(request, actor="admin")
 
     codes = {reason.code for reason in plan.blockers}
+    warnings = {reason.code for reason in plan.warnings}
+    # No Vonk claim holds memory here, so a shortfall is never a refusal. The
+    # credit still decides whether the declared envelope fits: without it the
+    # attempt is admitted but typed as an unverified fit.
+    assert "run-switch.resource.insufficient_capacity" not in codes, plan.blockers
     if admitted:
-        assert "run-switch.resource.insufficient_capacity" not in codes, plan.blockers
+        assert "run-switch.resource.envelope_unverified" not in warnings
     else:
-        assert "run-switch.resource.insufficient_capacity" in codes, plan.blockers
+        assert "run-switch.resource.envelope_unverified" in warnings, plan.warnings

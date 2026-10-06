@@ -66,11 +66,11 @@ PLATFORM_MEMORY_FLOOR_BYTES = 2_000_000_000
 
 # Informational: a recipe's declared peak plus the platform floor exceeds a
 # Spark's physical memory. Never a refusal; the declared envelope is an estimate.
-ENVELOPE_EXCEEDS_CAPACITY = "resource.envelope_exceeds_capacity"
+ENVELOPE_EXCEEDS_CAPACITY = ResourcePlanningCode.ENVELOPE_EXCEEDS_CAPACITY.value
 
 # Warning: admitted although the declared envelope does not fit, because no Vonk
 # claim holds memory on the Spark. The run's real outcome is the evidence.
-ENVELOPE_UNVERIFIED = "resource.envelope_unverified"
+ENVELOPE_UNVERIFIED = ResourcePlanningCode.ENVELOPE_UNVERIFIED.value
 
 
 @dataclass(frozen=True, slots=True)

@@ -425,6 +425,7 @@ def retry_proof_graph() -> object:
     return build_graph_for(load_allowlist())
 
 
+@pytest.fixture(scope="session")
 def parsed_repository() -> None:
     """Parse the scanned source trees once, outside any one test's time budget.
 

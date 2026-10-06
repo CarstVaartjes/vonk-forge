@@ -8911,6 +8911,10 @@ impl ::std::convert::TryFrom<::std::string::String> for ResourceBlockerCode {
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
 pub enum ResourcePlanningCode {
+    #[serde(rename = "resource.envelope_exceeds_capacity")]
+    ResourceEnvelopeExceedsCapacity,
+    #[serde(rename = "resource.envelope_unverified")]
+    ResourceEnvelopeUnverified,
     #[serde(rename = "resource.estimate_uncertain")]
     ResourceEstimateUncertain,
     #[serde(rename = "resource.evidence_invalid")]
@@ -8963,6 +8967,10 @@ pub enum ResourcePlanningCode {
 impl ::std::fmt::Display for ResourcePlanningCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
+            Self::ResourceEnvelopeExceedsCapacity => {
+                f.write_str("resource.envelope_exceeds_capacity")
+            }
+            Self::ResourceEnvelopeUnverified => f.write_str("resource.envelope_unverified"),
             Self::ResourceEstimateUncertain => f.write_str("resource.estimate_uncertain"),
             Self::ResourceEvidenceInvalid => f.write_str("resource.evidence_invalid"),
             Self::ResourceEvidenceUnknown => f.write_str("resource.evidence_unknown"),
@@ -9004,6 +9012,8 @@ impl ::std::str::FromStr for ResourcePlanningCode {
     type Err = self::error::ConversionError;
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
+            "resource.envelope_exceeds_capacity" => Ok(Self::ResourceEnvelopeExceedsCapacity),
+            "resource.envelope_unverified" => Ok(Self::ResourceEnvelopeUnverified),
             "resource.estimate_uncertain" => Ok(Self::ResourceEstimateUncertain),
             "resource.evidence_invalid" => Ok(Self::ResourceEvidenceInvalid),
             "resource.evidence_unknown" => Ok(Self::ResourceEvidenceUnknown),
@@ -9772,6 +9782,10 @@ pub enum RunSwitchCode {
     RunSwitchCleanupReturnedNoEvidence,
     #[serde(rename = "run-switch.resource.capacity_unknown")]
     RunSwitchResourceCapacityUnknown,
+    #[serde(rename = "run-switch.resource.envelope_exceeds_capacity")]
+    RunSwitchResourceEnvelopeExceedsCapacity,
+    #[serde(rename = "run-switch.resource.envelope_unverified")]
+    RunSwitchResourceEnvelopeUnverified,
     #[serde(rename = "run-switch.resource.estimate_uncertain")]
     RunSwitchResourceEstimateUncertain,
     #[serde(rename = "run-switch.resource.evidence_invalid")]
@@ -10225,6 +10239,12 @@ impl ::std::fmt::Display for RunSwitchCode {
             Self::RunSwitchResourceCapacityUnknown => {
                 f.write_str("run-switch.resource.capacity_unknown")
             }
+            Self::RunSwitchResourceEnvelopeExceedsCapacity => {
+                f.write_str("run-switch.resource.envelope_exceeds_capacity")
+            }
+            Self::RunSwitchResourceEnvelopeUnverified => {
+                f.write_str("run-switch.resource.envelope_unverified")
+            }
             Self::RunSwitchResourceEstimateUncertain => {
                 f.write_str("run-switch.resource.estimate_uncertain")
             }
@@ -10650,6 +10670,12 @@ impl ::std::str::FromStr for RunSwitchCode {
                 Ok(Self::RunSwitchCleanupReturnedNoEvidence)
             }
             "run-switch.resource.capacity_unknown" => Ok(Self::RunSwitchResourceCapacityUnknown),
+            "run-switch.resource.envelope_exceeds_capacity" => {
+                Ok(Self::RunSwitchResourceEnvelopeExceedsCapacity)
+            }
+            "run-switch.resource.envelope_unverified" => {
+                Ok(Self::RunSwitchResourceEnvelopeUnverified)
+            }
             "run-switch.resource.estimate_uncertain" => {
                 Ok(Self::RunSwitchResourceEstimateUncertain)
             }
@@ -24651,6 +24677,8 @@ impl<'de> ::serde::Deserialize<'de> for ResourceBlockerCode {
 impl ResourcePlanningCode {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::ResourceEnvelopeExceedsCapacity => "resource.envelope_exceeds_capacity",
+            Self::ResourceEnvelopeUnverified => "resource.envelope_unverified",
             Self::ResourceEstimateUncertain => "resource.estimate_uncertain",
             Self::ResourceEvidenceInvalid => "resource.evidence_invalid",
             Self::ResourceEvidenceUnknown => "resource.evidence_unknown",
@@ -24713,6 +24741,10 @@ impl<'de> ::serde::Deserialize<'de> for ResourcePlanningCode {
         )]
         #[allow(clippy::enum_variant_names)]
         enum Raw {
+            #[serde(rename = "resource.envelope_exceeds_capacity")]
+            ResourceEnvelopeExceedsCapacity,
+            #[serde(rename = "resource.envelope_unverified")]
+            ResourceEnvelopeUnverified,
             #[serde(rename = "resource.estimate_uncertain")]
             ResourceEstimateUncertain,
             #[serde(rename = "resource.evidence_invalid")]
@@ -24765,6 +24797,8 @@ impl<'de> ::serde::Deserialize<'de> for ResourcePlanningCode {
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
+            Raw::ResourceEnvelopeExceedsCapacity => Self::ResourceEnvelopeExceedsCapacity,
+            Raw::ResourceEnvelopeUnverified => Self::ResourceEnvelopeUnverified,
             Raw::ResourceEstimateUncertain => Self::ResourceEstimateUncertain,
             Raw::ResourceEvidenceInvalid => Self::ResourceEvidenceInvalid,
             Raw::ResourceEvidenceUnknown => Self::ResourceEvidenceUnknown,
@@ -25609,6 +25643,10 @@ impl RunSwitchCode {
             Self::RunSwitchCleanupWaitingWithoutChild => "run-switch.cleanup-waiting-without-child",
             Self::RunSwitchCleanupReturnedNoEvidence => "run-switch.cleanup-returned-no-evidence",
             Self::RunSwitchResourceCapacityUnknown => "run-switch.resource.capacity_unknown",
+            Self::RunSwitchResourceEnvelopeExceedsCapacity => {
+                "run-switch.resource.envelope_exceeds_capacity"
+            }
+            Self::RunSwitchResourceEnvelopeUnverified => "run-switch.resource.envelope_unverified",
             Self::RunSwitchResourceEstimateUncertain => "run-switch.resource.estimate_uncertain",
             Self::RunSwitchResourceEvidenceInvalid => "run-switch.resource.evidence_invalid",
             Self::RunSwitchResourceEvidenceUnknown => "run-switch.resource.evidence_unknown",
@@ -26030,6 +26068,10 @@ impl<'de> ::serde::Deserialize<'de> for RunSwitchCode {
             RunSwitchCleanupReturnedNoEvidence,
             #[serde(rename = "run-switch.resource.capacity_unknown")]
             RunSwitchResourceCapacityUnknown,
+            #[serde(rename = "run-switch.resource.envelope_exceeds_capacity")]
+            RunSwitchResourceEnvelopeExceedsCapacity,
+            #[serde(rename = "run-switch.resource.envelope_unverified")]
+            RunSwitchResourceEnvelopeUnverified,
             #[serde(rename = "run-switch.resource.estimate_uncertain")]
             RunSwitchResourceEstimateUncertain,
             #[serde(rename = "run-switch.resource.evidence_invalid")]
@@ -26365,6 +26407,10 @@ impl<'de> ::serde::Deserialize<'de> for RunSwitchCode {
             Raw::RunSwitchCleanupWaitingWithoutChild => Self::RunSwitchCleanupWaitingWithoutChild,
             Raw::RunSwitchCleanupReturnedNoEvidence => Self::RunSwitchCleanupReturnedNoEvidence,
             Raw::RunSwitchResourceCapacityUnknown => Self::RunSwitchResourceCapacityUnknown,
+            Raw::RunSwitchResourceEnvelopeExceedsCapacity => {
+                Self::RunSwitchResourceEnvelopeExceedsCapacity
+            }
+            Raw::RunSwitchResourceEnvelopeUnverified => Self::RunSwitchResourceEnvelopeUnverified,
             Raw::RunSwitchResourceEstimateUncertain => Self::RunSwitchResourceEstimateUncertain,
             Raw::RunSwitchResourceEvidenceInvalid => Self::RunSwitchResourceEvidenceInvalid,
             Raw::RunSwitchResourceEvidenceUnknown => Self::RunSwitchResourceEvidenceUnknown,
