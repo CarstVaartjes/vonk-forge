@@ -1444,7 +1444,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
 
 
 @pytest.mark.parametrize("damage", ("document", "digest", "candidate"))
-def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
+def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     damage: str,
 ) -> None:
     """A node whose catalog revision is unreadable must not read as empty.
@@ -1616,10 +1616,35 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
         snapshot = projection.read()
         assert (snapshot.nodes[0].installed, snapshot.nodes[0].loaded) == ([], [])
         return
-    # The revision refuses to be read as canonical, and no snapshot is produced
-    # at all: an empty installation list is never substituted for the failure.
-    with pytest.raises(ValueError, match="immutable"):
-        projection.read()
+    from .test_operation_api import _client
+
+    client, operator, *_ = _client(fleet_projection=projection)
+    observed = client.get("/api/fleet", headers=operator)
+    assert observed.status_code == 200
+    assert observed.json()["nodes"][0]["installed"][0]["complete"] is None
+    assert observed.json()["nodes"][0]["loaded"][0]["healthy"] is None
+    snapshot = projection.read()
+    assert snapshot.nodes[0].installed[0].installation_id == installation_id
+    assert snapshot.nodes[0].loaded[0].run_id == run_id
+    assert snapshot.nodes[0].installed[0].complete is None
+    assert snapshot.nodes[0].loaded[0].healthy is None
+    assert "unknown" in snapshot.nodes[0].installed[0].projection_issue
+    assert "unknown" in snapshot.nodes[0].loaded[0].projection_issue
+    with sessions.begin() as session:
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision_id)
+            .values(
+                document=revisions[0].document,
+                content_digest=revisions[0].content_digest,
+            )
+        )
+    recovered = client.get("/api/fleet", headers=operator)
+    assert recovered.status_code == 200
+    assert recovered.json()["nodes"][0]["loaded"][0]["healthy"] is True
+    restored = projection.read()
+    assert restored.nodes[0].installed[0].complete is True
+    assert restored.nodes[0].loaded[0].healthy is True
 
 
 def test_non_rfc_non_nil_boot_id_flows_through_snapshot() -> None:

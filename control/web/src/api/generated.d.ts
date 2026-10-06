@@ -8637,7 +8637,7 @@ export interface components {
             /** Affected Ranks */
             affected_ranks?: number[];
             /** Complete */
-            complete: boolean;
+            complete: boolean | null;
             degraded_reason?: components["schemas"]["InstallDegradedReason"] | null;
             /** Expected Rank Count */
             expected_rank_count: number;
@@ -8650,6 +8650,8 @@ export interface components {
             member_node_ids: string[];
             /** Present Ranks */
             present_ranks: number[];
+            /** Projection Issue */
+            projection_issue?: string | null;
             /** Rank */
             rank: number;
             rank_state: components["schemas"]["InstallationState"];
@@ -9660,9 +9662,9 @@ export interface components {
              * Group State
              * @enum {string}
              */
-            group_state: "healthy" | "degraded";
+            group_state: "healthy" | "degraded" | "unavailable";
             /** Healthy */
-            healthy: boolean;
+            healthy: boolean | null;
             /** Installation Id */
             installation_id: string;
             /** Member Node Ids */
@@ -9673,6 +9675,8 @@ export interface components {
             };
             /** Present Ranks */
             present_ranks: number[];
+            /** Projection Issue */
+            projection_issue?: string | null;
             /** Rank */
             rank: number;
             /** Rank Age Seconds */

@@ -521,6 +521,9 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
         if stale:
             notes.append(f"{title} has stale rank reports from {', '.join(stale)}")
         for _, member in members:
+            if member.get("projection_issue") is not None:
+                notes.append(f"{title}: {_text(member.get('projection_issue'))}")
+                break
             if member.get("degraded_reason") is not None:
                 reason = member["degraded_reason"]
                 detail = (
@@ -538,6 +541,10 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
     stopped: dict[str, tuple[str, list[str]]] = {}
     for node in nodes:
         for presence in _records(node, "installed"):
+            if presence.get("projection_issue") is not None:
+                notes.append(
+                    f"{_text(presence.get('title'))}: {_text(presence.get('projection_issue'))}"
+                )
             installation = presence.get("installation_id")
             if not isinstance(installation, str) or installation in loaded:
                 continue
@@ -1368,6 +1375,10 @@ def _job(payload: Mapping[str, object]) -> None:
             f"{_text(progress.get('completed'))} / {_text(progress.get('total'))}",
         )
         _field("Failed", progress.get("failed"))
+    if payload.get("projection_issue") is not None:
+        _field("Observation", payload["projection_issue"])
+    if payload.get("operations") is None:
+        return
     for operation in _records(payload, "operations"):
         _field("Operation", operation.get("id"))
         _field("Spark", operation.get("node_id"))

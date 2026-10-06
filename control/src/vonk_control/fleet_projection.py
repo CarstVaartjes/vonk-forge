@@ -27,7 +27,7 @@ from vonk_agent_protocol import (
     RunState,
 )
 from vonk_agent_protocol.inventory import NetworkInterface
-from vonk_forge_contracts import RecipeDefinition, read_recipe
+from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .auth import CursorError
 from .cluster_mappings import mapping_option_choices
@@ -101,6 +101,8 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
     ):
         return None
     try:
+        if document_sha256(revision.document) != revision.content_digest:
+            return None
         return read_recipe(revision.document)
     except (TypeError, ValueError):
         return None
@@ -189,6 +191,15 @@ def _install_partial_warnings(
     named = incomplete[:_INSTALL_PARTIAL_MAX_NAMED]
     warnings: list[ProjectionReason] = []
     for value in named:
+        if value.projection_issue is not None:
+            warnings.append(
+                ProjectionReason(
+                    code=ProjectionCode.INSTALL_PARTIAL,
+                    detail=f"{value.title}: {value.projection_issue}"[:256],
+                    severity="warning",
+                )
+            )
+            continue
         reason = value.degraded_reason
         if reason is None:
             reason = InstallDegradedReason.INSTALLATION_NOT_INSTALLED
@@ -387,7 +398,8 @@ class RecipePresence(StrictModel):
     role: Text64
     group_state: InstallationStateField
     rank_state: InstallationStateField
-    complete: bool
+    complete: bool | None
+    projection_issue: str | None = Field(default=None, max_length=256)
     degraded_reason: InstallDegradedReason | None = None
     affected_ranks: list[Rank] = Field(
         default_factory=list, max_length=_MAX_FLEET_NODES
@@ -413,8 +425,9 @@ class RunPresence(StrictModel):
     rank_state: RunStateField
     rank_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     rank_fresh: bool
-    group_state: Literal["healthy", "degraded"]
-    healthy: bool
+    group_state: Literal["healthy", "degraded", "unavailable"]
+    healthy: bool | None
+    projection_issue: str | None = Field(default=None, max_length=256)
     degraded_reason: RunDegradedReason | None = None
     # Why the route is not published, when the Controller withdrew it.
     route_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
@@ -591,7 +604,7 @@ class FleetProjection:
         ):
             raise CursorError("Fleet event cursor is invalid")
         current = _utc(self._clock())
-        with self._sessions.begin() as session:
+        with self._sessions() as session:
             agents = self._registered_agents(session)
             node_ids = tuple(agents)
             profiles = self._node_profiles(session, node_ids)
@@ -872,13 +885,11 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][3]
             recipe = group[0][4]
-            if _canonical_recipe(revision) is None:
-                # An ineligible revision is simply not this projection's
-                # business. A damaged active one cannot pass unnoticed: the ORM
-                # refuses to commit a stored document that no longer hashes to
-                # its recorded digest, so the read fails instead of returning a
-                # node with nothing installed.
-                continue
+            projection_issue = (
+                "Stored recipe revision is unreadable; installation completeness is unknown."
+                if _canonical_recipe(revision) is None
+                else None
+            )
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
             reason = _install_degraded_reason(
                 self._exact_group_reason(
@@ -926,7 +937,10 @@ class FleetProjection:
                         role=node.role,
                         group_state=read_state(InstallationState, installation.state),
                         rank_state=read_state(InstallationState, node.state),
-                        complete=reason is None,
+                        complete=None
+                        if projection_issue is not None
+                        else reason is None,
+                        projection_issue=projection_issue,
                         degraded_reason=reason,
                         affected_ranks=affected,
                         installed_bytes=node.installed_bytes,
@@ -963,10 +977,11 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][4]
             recipe = group[0][5]
-            # As above: a damaged active revision fails the read at commit, so
-            # this only ever skips a run that is genuinely ineligible.
-            if _canonical_recipe(revision) is None:
-                continue
+            projection_issue = (
+                "Stored recipe revision is unreadable; run health is unknown."
+                if _canonical_recipe(revision) is None
+                else None
+            )
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
             reason = _run_degraded_reason(
                 self._exact_group_reason(
@@ -1019,8 +1034,17 @@ class FleetProjection:
                         rank_state=read_state(RunState, node.state),
                         rank_age_seconds=rank_age,
                         rank_fresh=rank_fresh,
-                        group_state="healthy" if reason is None else "degraded",
-                        healthy=reason is None,
+                        group_state=(
+                            "unavailable"
+                            if projection_issue is not None
+                            else "healthy"
+                            if reason is None
+                            else "degraded"
+                        ),
+                        healthy=None
+                        if projection_issue is not None
+                        else reason is None,
+                        projection_issue=projection_issue,
                         degraded_reason=reason,
                         route_reason=(
                             run.route_error
@@ -1273,7 +1297,16 @@ class FleetProjection:
                     severity="warning",
                 )
             )
-        if any(not value.healthy for value in loaded):
+        for value in loaded:
+            if value.projection_issue is not None:
+                warnings.append(
+                    ProjectionReason(
+                        code=ProjectionCode.RUN_DEGRADED,
+                        detail=f"{value.title}: {value.projection_issue}"[:256],
+                        severity="warning",
+                    )
+                )
+        if any(value.healthy is False for value in loaded):
             warnings.append(
                 ProjectionReason(
                     code=ProjectionCode.RUN_DEGRADED,

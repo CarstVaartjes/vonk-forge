@@ -23455,8 +23455,15 @@
             "type": "array"
           },
           "complete": {
-            "title": "Complete",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Complete"
           },
           "degraded_reason": {
             "anyOf": [
@@ -23514,6 +23521,18 @@
             "maxItems": 500,
             "title": "Present Ranks",
             "type": "array"
+          },
+          "projection_issue": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Issue"
           },
           "rank": {
             "maximum": 499.0,
@@ -26352,14 +26371,22 @@
           "group_state": {
             "enum": [
               "healthy",
-              "degraded"
+              "degraded",
+              "unavailable"
             ],
             "title": "Group State",
             "type": "string"
           },
           "healthy": {
-            "title": "Healthy",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy"
           },
           "installation_id": {
             "maxLength": 128,
@@ -26399,6 +26426,18 @@
             "maxItems": 500,
             "title": "Present Ranks",
             "type": "array"
+          },
+          "projection_issue": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Issue"
           },
           "rank": {
             "maximum": 499.0,
