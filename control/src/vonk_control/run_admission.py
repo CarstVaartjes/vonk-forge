@@ -433,6 +433,40 @@ class RunPlan:
     plan_digest: str
 
 
+def require_same_execution(reviewed: RunPlan, current: RunPlan) -> None:
+    """Re-observe capacity without replacing the reviewed execution effects."""
+
+    def identity(plan: RunPlan) -> tuple[object, ...]:
+        return (
+            plan.installation_id,
+            plan.alias,
+            plan.mapping_id,
+            plan.mapping_generation,
+            plan.recipe_revision_id,
+            tuple(
+                (
+                    node.node_id,
+                    node.rank,
+                    node.role,
+                    node.endpoint_owner,
+                    node.port,
+                    node.memory_kind,
+                    node.required_memory_bytes,
+                    node.memory_floor_bytes,
+                    node.fabric_address,
+                    node.rendezvous_port,
+                    node.memory_pool,
+                )
+                for node in plan.nodes
+            ),
+        )
+
+    if identity(reviewed) != identity(current):
+        raise RunPlanInvalid(
+            RunAdmissionCode.PLAN_STALE, reason=InvalidRequestReason.SUPERSEDED
+        )
+
+
 class RunAdmissionService:
     def __init__(
         self,
@@ -822,6 +856,7 @@ class RunAdmissionService:
         workload_intent_ordinal: int | None = None,
     ) -> str:
         try:
+            reviewed = plan
             plan = self.plan_run(
                 plan.installation_id,
                 plan.alias,
@@ -830,6 +865,7 @@ class RunAdmissionService:
                 profile_application_id=profile_application_id,
             )
             require_admissible(plan)
+            require_same_execution(reviewed, plan)
             acquire_admission_keys(
                 session,
                 tuple(node_admission_key(node.node_id) for node in plan.nodes),
@@ -936,6 +972,7 @@ class RunAdmissionService:
             profile_application_id=profile_application_id,
         )
         require_admissible(fresh)
+        require_same_execution(plan, fresh)
         if {node.node_id for node in fresh.nodes} != set(node_ids):
             raise RunAdmissionBusy(
                 "run target membership changed during admission",
