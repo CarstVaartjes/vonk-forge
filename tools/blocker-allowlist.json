@@ -57,7 +57,7 @@
   },
   "max_debt": 9,
   "debt_ceiling": {
-    "total": 74,
+    "total": 73,
     "unaudited": 306,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -157,27 +157,25 @@
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService.install",
       "catches": [
-        "InstallAdmissionBusy",
-        "RunAdmissionBusy"
+        "UnknownOutcomeError"
       ],
-      "reason": "The install request retries its whole admission transaction a bounded number of times with short jittered pauses (a try-lock refusal is contention that clears in milliseconds); the request identity makes a repeat idempotent."
+      "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService.start",
       "catches": [
-        "InstallAdmissionBusy",
-        "RunAdmissionBusy"
+        "UnknownOutcomeError"
       ],
-      "reason": "The start request retries its whole admission transaction a bounded number of times with short jittered pauses; the request identity makes a repeat idempotent."
+      "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService.activate_job_run",
       "catches": [
-        "RunAdmissionBusy"
+        "UnknownOutcomeError"
       ],
-      "reason": "The job-run activation retries its whole admission transaction a bounded number of times with short jittered pauses; the request identity makes a repeat idempotent."
+      "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
@@ -355,6 +353,30 @@
         "AdmissionLockBusy"
       ],
       "reason": "A busy build admission, a busy Spark admission lock or a build dependency that cannot be taken is returned as BuildUnsettled; the availability run records it and the lifecycle core schedules the next attempt on its bounded backoff, which runs the builder again."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.record_node_result",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService.succeed",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "AgentJobService.fail",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
     }
   ],
   "call_edges": [
@@ -3252,14 +3274,6 @@
       ]
     },
     {
-      "family": "agent_jobs.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService._finish", "superseded-operation-has-no-completion-authority", 1]
-      ]
-    },
-    {
       "family": "artifact_blob_store.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
@@ -3574,6 +3588,7 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
+        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService._finish", "superseded-operation-has-no-completion-authority", 1],
         ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-expired", 1],
         ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-is-invalid", 1]
       ]
