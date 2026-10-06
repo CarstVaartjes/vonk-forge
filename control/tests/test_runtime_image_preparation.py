@@ -1129,3 +1129,91 @@ def test_receipt_content_is_the_identity_and_provenance_never_conflicts(
     )
     storage.commit(manifest, receipt=observed)
     assert storage.read_receipt(digest).local_image_config_id == ("sha256:" + "9" * 64)
+
+
+@pytest.mark.parametrize("lookup", ["image", "build"])
+def test_temporary_unreadable_receipt_does_not_block_verified_reuse(
+    tmp_path: Path, monkeypatch, lookup: str
+) -> None:
+    """A transient sibling I/O fault must not rebuild or wedge an eligible image."""
+    import errno
+
+    from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    transport = TinyTransport()
+    published = _prepare(storage=storage, transport=transport)
+    published = published.model_copy(update={"build_input_sha256": "d" * 64})
+    (storage.root / f"{published.oci_archive_sha256}.receipt.json").write_text(
+        published.model_dump_json(), encoding="utf-8"
+    )
+    other_digest = "0" * 64
+    place_test_image(storage, other_digest, published.image_bytes)
+    other = published.model_copy(
+        update={
+            "oci_archive_sha256": other_digest,
+            "image_digest": "sha256:" + "9" * 64,
+            "archive_path": str(storage.root / other_digest),
+            "build_input_sha256": "e" * 64,
+        }
+    )
+    receipt_path = storage.root / f"{other_digest}.receipt.json"
+    receipt_path.write_text(other.model_dump_json(), encoding="utf-8")
+    original = Path.read_text
+    faulty = [True]
+
+    def read(path, *args, **kwargs):
+        if path == receipt_path and faulty[0]:
+            raise OSError(errno.EIO, "temporary receipt I/O failure")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    arguments = {
+        "expected_architecture": "linux/arm64",
+        "expected_runtime_interface": "vonk.runtime.v1",
+    }
+    assert published.build_input_sha256 is not None
+    found = (
+        storage.find_verified(published.image_digest, **arguments)
+        if lookup == "image"
+        else storage.find_build(published.build_input_sha256, **arguments)
+    )
+    assert found == published
+    assert len(transport.calls) == 1
+    with pytest.raises(RuntimeImagePreparationUnknown):
+        storage.find_verified(other.image_digest, **arguments)
+    assert receipt_path.exists()
+    faulty[0] = False
+    assert storage.find_verified(other.image_digest, **arguments) == other
+    assert len(transport.calls) == 1
+
+
+def test_receipt_permission_denial_remains_a_security_refusal(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Denied receipt access must never turn into automatic repair or a cache miss."""
+    from vonk_agent_protocol import SecurityRefusalError, SecurityRefusalReason
+    from vonk_control.recipe_image_availability import _retryable
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    published = _prepare(storage=storage, transport=TinyTransport())
+    receipt_path = storage.root / f"{published.oci_archive_sha256}.receipt.json"
+    original = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if path == receipt_path:
+            raise PermissionError(13, "receipt access denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    with pytest.raises(SecurityRefusalError) as denied:
+        storage.find_verified(
+            published.image_digest,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+    assert denied.value.typed_reason == SecurityRefusalReason.PERMISSION_DENIED
+    assert not _retryable(denied.value)
+    assert receipt_path.exists()
+    monkeypatch.setattr(Path, "read_text", original)
+    assert storage.read_receipt(published.oci_archive_sha256) == published
