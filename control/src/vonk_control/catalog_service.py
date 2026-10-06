@@ -249,7 +249,8 @@ class CatalogService:
                 .with_for_update()
             ).all()
             for head in heads:
-                if (head.publisher, head.slug) in keep:
+                identity = (head.publisher, head.slug)
+                if identity in keep:
                     continue
                 revision = session.get(CatalogDocumentRevision, head.active_revision_id)
                 head.active_revision_id = None

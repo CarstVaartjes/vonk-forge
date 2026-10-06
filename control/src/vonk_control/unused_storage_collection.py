@@ -349,8 +349,9 @@ class _Evidence:
     pointed_digests: frozenset[str]
     pointed_models: frozenset[str]
     pointed_archives: frozenset[str]
-    # Newest active recipe revision of each document: id and creation time.
-    newest: Mapping[str, tuple[str, datetime, int]]
+    # Newest active recipe revision of each document: id, creation time, number
+    # and content digest (what an installation is compared on).
+    newest: Mapping[str, tuple[str, datetime, int, str]]
     # (publisher, slug) -> Spark sets of the saved profile assignments naming it.
     # None when a profile cannot be read: nothing can then be proven unused.
     pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None
@@ -372,16 +373,17 @@ class _Evidence:
                 CatalogDocumentRevision.document_id,
                 CatalogDocumentRevision.revision_number,
                 CatalogDocumentRevision.created_at,
+                CatalogDocumentRevision.content_digest,
             ).where(
                 CatalogDocumentRevision.kind == "recipe",
                 CatalogDocumentRevision.state == "active",
             )
         )
-        newest: dict[str, tuple[str, datetime, int]] = {}
-        for revision_id, document_id, number, created in revisions:
+        newest: dict[str, tuple[str, datetime, int, str]] = {}
+        for revision_id, document_id, number, created, digest in revisions:
             known = newest.get(document_id)
             if known is None or number > known[2]:
-                newest[document_id] = (revision_id, _utc(created), number)
+                newest[document_id] = (revision_id, _utc(created), number, digest)
         pointers = _profile_pointers(session)
         selected = session.scalar(select(FleetProfileSelection.profile_id))
         loaded_pointers = (
@@ -389,7 +391,7 @@ class _Evidence:
             if selected is None
             else _profile_pointers(session, only_profile_id=selected)
         )
-        head_ids = {revision_id for revision_id, _created, _number in newest.values()}
+        head_ids = {item[0] for item in newest.values()}
         for column in (
             CatalogDocumentHead.active_revision_id,
             CatalogDocumentHead.candidate_revision_id,
@@ -1391,19 +1393,9 @@ def _installation_pointing(
     installation = session.get(RecipeInstallation, installation_id)
     if installation is None or pointers is None:
         return ()
-    revision = session.execute(
-        select(
-            CatalogDocumentRevision.document_id,
-            CatalogDocumentRevision.publisher,
-            CatalogDocumentRevision.slug,
-        ).where(CatalogDocumentRevision.id == installation.recipe_revision_id)
-    ).one_or_none()
+    revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
     newest = evidence.newest.get(revision.document_id) if revision else None
-    if (
-        revision is None
-        or newest is None
-        or newest[0] != installation.recipe_revision_id
-    ):
+    if revision is None or newest is None or newest[3] != revision.content_digest:
         return ()
     nodes = set(
         session.scalars(

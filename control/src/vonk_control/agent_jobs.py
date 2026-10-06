@@ -100,6 +100,7 @@ from .lifecycle.agent_operation import (
     set_parent_state,
 )
 from .lifecycle.artifact_job import ArtifactJobAdapter
+from .lifecycle.types import State as _LifecycleState
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -1845,7 +1846,11 @@ class AgentJobService:
         with self._sessions() as session:
             operation = session.get(StoredOperation, operation_id)
             node = session.get(AgentNode, node_id)
-            if operation is None or node is None or operation.state != "running":
+            if (
+                operation is None
+                or node is None
+                or operation.state != _LifecycleState.RUNNING
+            ):
                 return False
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(

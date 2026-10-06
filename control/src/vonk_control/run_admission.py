@@ -337,7 +337,9 @@ def require_admissible(plan: RunPlan) -> None:
         # wait on named evidence (memory, port, inventory), not a busy writer.
         first = min(blockers, key=lambda reason: reason.code)
         raise RunAdmissionBusy(
-            _blocker_text(blockers), code=first.code, blockers=blockers
+            f"run is waiting for current inventory or capacity: {_blocker_text(blockers)}",
+            code=first.code,
+            blockers=blockers,
         )
     raise RunPlanConflict(
         "run.plan_invalid: run plan is blocked by current admission evidence"

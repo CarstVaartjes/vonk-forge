@@ -1868,14 +1868,16 @@ class InstallationNode(Base):
     )
 
 
-ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
+#: Stoppable runs that no running-run path (observation, recovery) advances.
+STOPPABLE_NOT_RUNNING_RUN_STATES = frozenset(
+    {"planned", "starting", "stopping", "lost"}
+)
+ACTIVE_RUN_STATES = (STOPPABLE_NOT_RUNNING_RUN_STATES - {"lost"}) | {"running"}
 #: The run states that own capacity and a Spark lifecycle: any load that needs
 #: such a run's Sparks plans its exact Stop, which releases the claims. A run in
 #: any other state can never be stopped by a plan, so it holds no ports or
 #: memory and is not wanted on any Spark.
 STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {"lost"}
-#: Stoppable runs that no running-run path (observation, recovery) advances.
-STOPPABLE_NOT_RUNNING_RUN_STATES = STOPPABLE_RUN_STATES - {"running"}
 
 
 class RecipeRun(Base):
