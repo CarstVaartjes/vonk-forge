@@ -32,10 +32,11 @@ from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.failure_evidence import failure_code
 from vonk_control.model_cache import ModelCacheError, ModelCacheService
 from vonk_control.model_cache_contract import (
+    ModelCacheCounters,
     ModelCacheDownloadPayload,
     ModelCacheOperationProgress,
 )
-from vonk_control.model_cache_progress import cache_progress
+from vonk_control.model_cache_progress import cache_progress, progress_document
 from vonk_control.models import (
     AgentNode,
     ArtifactLifecycleGate,
@@ -2091,16 +2092,20 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 40,
-                "expected_bytes": 100,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=now[0],
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 40,
+                        "expected_bytes": 100,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=now[0],
+            )
         ),
         failure=None,
     )
@@ -2211,16 +2216,20 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
             state="succeeded",
             artifact_set_sha256=child.artifact_set_sha256,
             plan_digest=child.plan_digest,
-            progress=cache_progress(
-                {
-                    "phase": "completed",
-                    "downloaded_bytes": 100,
-                    "expected_bytes": 100,
-                    "completed_artifacts": 1,
-                    "total_artifacts": 1,
-                },
-                previous=None,
-                now=now[0],
+            progress=progress_document(
+                cache_progress(
+                    ModelCacheCounters.model_validate(
+                        {
+                            "phase": "completed",
+                            "downloaded_bytes": 100,
+                            "expected_bytes": 100,
+                            "completed_artifacts": 1,
+                            "total_artifacts": 1,
+                        }
+                    ),
+                    previous=None,
+                    now=now[0],
+                )
             ),
             failure=None,
         ),
@@ -2228,16 +2237,20 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         now=now[0],
     )
     child.state = "succeeded"
-    child.progress = cache_progress(
-        {
-            "phase": "completed",
-            "downloaded_bytes": 100,
-            "expected_bytes": 100,
-            "completed_artifacts": 1,
-            "total_artifacts": 1,
-        },
-        previous=None,
-        now=now[0],
+    child.progress = progress_document(
+        cache_progress(
+            ModelCacheCounters.model_validate(
+                {
+                    "phase": "completed",
+                    "downloaded_bytes": 100,
+                    "expected_bytes": 100,
+                    "completed_artifacts": 1,
+                    "total_artifacts": 1,
+                }
+            ),
+            previous=None,
+            now=now[0],
+        )
     )
     now[0] = max(now[0] + timedelta(seconds=1), retry_at)
     retry = service.claim_pending(owner_id="lock-contention-recovery-worker")
@@ -2513,16 +2526,20 @@ def test_model_child_and_image_complete_through_one_sql_operation(
         state="succeeded",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 1024,
-                "expected_bytes": 1024,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=now,
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 1024,
+                        "expected_bytes": 1024,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=now,
+            )
         ),
         failure=None,
     )
@@ -2625,16 +2642,20 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 40,
-                "expected_bytes": 100,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=now,
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 40,
+                        "expected_bytes": 100,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=now,
+            )
         ),
         failure=None,
     )
@@ -2736,16 +2757,20 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
         state="failed",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 4,
-                "expected_bytes": 10,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=datetime.now(UTC),
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 4,
+                        "expected_bytes": 10,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=datetime.now(UTC),
+            )
         ),
         failure={
             "code": "access_denied",
@@ -2815,16 +2840,20 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         state="running",
         artifact_set_sha256="c" * 64,
         plan_digest="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 4,
-                "expected_bytes": 10,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=datetime.now(UTC),
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 4,
+                        "expected_bytes": 10,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=datetime.now(UTC),
+            )
         ),
         failure=None,
     )
@@ -2834,16 +2863,20 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         state="succeeded",
         artifact_set_sha256="c" * 64,
         plan_digest="e" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "downloaded_bytes": 10,
-                "expected_bytes": 10,
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-            },
-            previous=None,
-            now=datetime.now(UTC),
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "downloaded_bytes": 10,
+                        "expected_bytes": 10,
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                    }
+                ),
+                previous=None,
+                now=datetime.now(UTC),
+            )
         ),
         failure=None,
     )

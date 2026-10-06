@@ -705,8 +705,7 @@
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "_recipe_model_content_digests", "model_cache.model_pin_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "_recipe_model_content_digests", "model_cache.recipe_model_missing", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "_source_for_catalog_artifact", "model_cache.source_unsupported", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "_validate_manifest", "model_cache.manifest_too_large", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageInvalid", "_operation_cancellation", "model_cache.payload_invalid", 1]
+        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "_validate_manifest", "model_cache.manifest_too_large", 1]
       ]
     },
     {
@@ -1772,14 +1771,6 @@
         ["control/src/vonk_control/operation_api.py", "OperationProjectionError", "get_operation_from_providers", "operation-ids-are-not-globally-unique", 1],
         ["control/src/vonk_control/operation_api.py", "OperationProjectionError", "merge_operation_providers", "message", 2],
         ["control/src/vonk_control/operation_api.py", "OperationProjectionError", "merge_operation_providers", "operation-ids-are-not-globally-unique", 1]
-      ]
-    },
-    {
-      "family": "operation_progress.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class BoundedJSONError validates a contract or request.",
-      "sites": [
-        ["control/src/vonk_control/operation_progress.py", "BoundedJSONError", "_measurement", "message", 1]
       ]
     },
     {

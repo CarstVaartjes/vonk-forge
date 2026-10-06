@@ -37,7 +37,8 @@ from vonk_control.distribution_executor import (
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_api import model_cache_operation_provider
-from vonk_control.model_cache_progress import cache_progress
+from vonk_control.model_cache_contract import ModelCacheCounters
+from vonk_control.model_cache_progress import cache_progress, progress_document
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -787,16 +788,20 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
         id=str(uuid4()),
         state="queued",
         artifact_set_sha256="d" * 64,
-        progress=cache_progress(
-            {
-                "phase": "downloading",
-                "completed_artifacts": 0,
-                "total_artifacts": 1,
-                "downloaded_bytes": 3,
-                "expected_bytes": 15,
-            },
-            previous=None,
-            now=datetime.now(UTC),
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters.model_validate(
+                    {
+                        "phase": "downloading",
+                        "completed_artifacts": 0,
+                        "total_artifacts": 1,
+                        "downloaded_bytes": 3,
+                        "expected_bytes": 15,
+                    }
+                ),
+                previous=None,
+                now=datetime.now(UTC),
+            )
         ),
         last_error=None,
         result=None,

@@ -6,9 +6,12 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import (
+    AwareDatetime,
+    BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
+    TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
@@ -102,6 +105,28 @@ class CacheManifestArtifact(StrippedStrictModel):
     # Omitted unless the source publishes the file only as split parts, so the
     # manifests of ordinary files stay byte-identical.
     parts: list[CacheManifestArtifactPart] | None = None
+
+
+class CacheIdentityArtifact(StrippedStrictModel):
+    """The immutable bytes-and-source identity of one artifact (what is hashed)."""
+
+    key: str
+    id: str
+    path: str
+    kind: str
+    repository: str | None
+    source: str
+    revision: str | None
+    sha256: str
+    download_bytes: int
+
+
+class CacheIdentity(StrippedStrictModel):
+    """The reusable identity of an artifact set; its digest is the set's key."""
+
+    schema_version: Literal[2]
+    source_policy: Literal["nas-first"]
+    artifacts: list[CacheIdentityArtifact]
 
 
 class CacheManifest(StrippedStrictModel):
@@ -213,6 +238,85 @@ class _ModelCacheOperationPayload(StrippedStrictModel):
     force_refresh: bool = False
     #: What a queued or interrupted operation is waiting for; empty otherwise.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+
+
+def _readable_or_none[T](adapter: TypeAdapter[T]) -> BeforeValidator:
+    """A field whose damage reads as absent: bookkeeping never blocks (rule 5)."""
+
+    def read(value: object) -> object:
+        try:
+            return adapter.validate_python(value)
+        except ValidationError:
+            return None
+
+    return BeforeValidator(read)
+
+
+_AWARE_TIME = TypeAdapter(AwareDatetime)
+_NAME = TypeAdapter(Annotated[str, Field(min_length=1)])
+_ATTEMPTS = TypeAdapter(Annotated[int, Field(strict=True, ge=1)])
+
+
+class StoredCacheRetryClock(BaseModel):
+    """The retry bookkeeping of a stored operation, however the rest reads."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    automatic_attempts: Annotated[int | None, _readable_or_none(_ATTEMPTS)] = None
+    next_retry_at: Annotated[AwareDatetime | None, _readable_or_none(_AWARE_TIME)] = (
+        None
+    )
+
+
+class StoredCacheClaimClock(BaseModel):
+    """The claim a Controller wrote into the payload before the lifecycle core."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    owner: Annotated[str | None, _readable_or_none(_NAME)] = None
+    expires_at: Annotated[AwareDatetime | None, _readable_or_none(_AWARE_TIME)] = None
+
+
+class StoredCacheCancelClock(BaseModel):
+    """When a cancel was requested and under which request key."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    requested_at: Annotated[AwareDatetime | None, _readable_or_none(_AWARE_TIME)] = None
+    request_key: Annotated[str | None, _readable_or_none(_NAME)] = None
+
+
+class StoredCacheClocks(BaseModel):
+    """The lifecycle-relevant slice of a stored operation payload.
+
+    A tolerant projection, not a second contract: the full payload is
+    :data:`ModelCacheOperationPayload`.  The lifecycle core reads the retry
+    clock, the legacy claim and the cancel request from here, so a row whose
+    envelope no longer validates still keeps its cancel and its schedule.
+    Anything unreadable is absent.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    claim: Annotated[
+        StoredCacheClaimClock | None,
+        _readable_or_none(TypeAdapter(StoredCacheClaimClock)),
+    ] = None
+    retry: Annotated[
+        StoredCacheRetryClock | None,
+        _readable_or_none(TypeAdapter(StoredCacheRetryClock)),
+    ] = None
+    cancellation: Annotated[
+        StoredCacheCancelClock | None,
+        _readable_or_none(TypeAdapter(StoredCacheCancelClock)),
+    ] = None
+
+    @classmethod
+    def read(cls, document: object) -> StoredCacheClocks:
+        try:
+            return cls.model_validate(document)
+        except ValidationError:
+            return cls()
 
 
 class ModelCacheDownloadPayload(_ModelCacheOperationPayload):
@@ -520,6 +624,17 @@ class ModelCacheOperationProgress(StrippedStrictModel):
         if len(self.model_dump_json().encode("utf-8")) > 1024 * 1024:
             raise ValueError("cache progress exceeds 1 MiB")
         return self
+
+
+class ModelCacheCounters(StrippedStrictModel):
+    """The counters one progress sample is taken from, before it is measured."""
+
+    phase: ModelCacheOperationPhase
+    completed_artifacts: int = Field(ge=0)
+    total_artifacts: int = Field(ge=0)
+    downloaded_bytes: int = Field(ge=0)
+    expected_bytes: int | None = Field(default=None, ge=0)
+    current_artifact_key: str | None = Field(default=None, pattern=ARTIFACT_KEY_PATTERN)
 
 
 ModelCacheOperationResult = ModelCacheDownloadResult | ModelCacheRemovalResult
