@@ -4222,14 +4222,11 @@ class RunSwitchOperationService:
                 for compiled in installed_plan.compiled_execution_plans.values():
                     _require_profile_runtime_image(
                         expected_image,
-                        {
-                            name: getattr(compiled.runtime_image, name)
-                            for name in (
-                                "image_digest",
-                                "oci_layout_sha256",
-                                "image_bytes",
-                            )
-                        },
+                        RunSwitchObservedImageIdentity(
+                            image_digest=compiled.runtime_image.image_digest,
+                            oci_layout_sha256=compiled.runtime_image.oci_layout_sha256,
+                            image_bytes=compiled.runtime_image.image_bytes,
+                        ),
                     )
             if (
                 installation is not None
@@ -4317,14 +4314,14 @@ class RunSwitchOperationService:
                 if runtime_storage.image_digest is not None:
                     _require_profile_runtime_image(
                         expected_image,
-                        {
-                            "image_digest": runtime_storage.image_digest,
-                            "oci_layout_sha256": runtime_storage.oci_layout_sha256,
-                            "image_bytes": runtime_storage.image_bytes,
-                            "build_id": recipe_build_id,
-                            "architecture": "linux-arm64",
-                            "runtime_interface": RUNTIME_INTERFACE,
-                        },
+                        RunSwitchObservedImageIdentity(
+                            image_digest=runtime_storage.image_digest,
+                            oci_layout_sha256=runtime_storage.oci_layout_sha256,
+                            image_bytes=runtime_storage.image_bytes,
+                            build_id=recipe_build_id,
+                            architecture="linux-arm64",
+                            runtime_interface=RUNTIME_INTERFACE,
+                        ),
                     )
             if installation is None:
                 if self._phase_executor is None:
@@ -9390,10 +9387,10 @@ def effective_build_receipt(
 
 
 def _require_profile_runtime_image(
-    expected: RuntimeImageIdentity, observed: Mapping[str, object]
+    expected: RuntimeImageIdentity, observed: RunSwitchObservedImageIdentity
 ) -> None:
     """Compare observed identity fields with the accepted image, naming drift."""
-    actual = RunSwitchObservedImageIdentity.model_validate(observed, strict=True)
+    actual = observed
     values = (
         ("build_id", expected.build_id, actual.build_id),
         ("image_digest", expected.image_digest, actual.image_digest),
@@ -9446,12 +9443,12 @@ def _build_receipt_in_session(
     if expected_image is not None:
         _require_profile_runtime_image(
             expected_image,
-            {
-                "build_id": build.id,
-                "image_digest": build.image_digest,
-                "oci_layout_sha256": build.oci_layout_sha256,
-                "image_bytes": build.image_bytes,
-            },
+            RunSwitchObservedImageIdentity(
+                build_id=build.id,
+                image_digest=build.image_digest,
+                oci_layout_sha256=build.oci_layout_sha256,
+                image_bytes=build.image_bytes,
+            ),
         )
     return RunSwitchContainerBuildResult(
         phase="prepare",
@@ -10370,13 +10367,13 @@ def _validate_artifact_execution(
         if expected_image is not None:
             _require_profile_runtime_image(
                 expected_image,
-                {
-                    "image_digest": image_digest,
-                    "oci_layout_sha256": layout_digest,
-                    "image_bytes": receipt.image_bytes,
-                    "architecture": receipt.architecture,
-                    "runtime_interface": receipt.runtime_interface,
-                },
+                RunSwitchObservedImageIdentity(
+                    image_digest=image_digest,
+                    oci_layout_sha256=layout_digest,
+                    image_bytes=receipt.image_bytes,
+                    architecture=receipt.architecture,
+                    runtime_interface=receipt.runtime_interface,
+                ),
             )
         differing = differing_image_fields(
             ImageContent(
@@ -10965,13 +10962,13 @@ def _persist_run_switch_runtime_image_reference(
                 )
                 _require_profile_runtime_image(
                     expected_image,
-                    {
-                        "image_digest": parsed_receipt.image_digest,
-                        "oci_layout_sha256": parsed_receipt.oci_archive_sha256,
-                        "image_bytes": parsed_receipt.image_bytes,
-                        "architecture": parsed_receipt.architecture,
-                        "runtime_interface": parsed_receipt.runtime_interface,
-                    },
+                    RunSwitchObservedImageIdentity(
+                        image_digest=parsed_receipt.image_digest,
+                        oci_layout_sha256=parsed_receipt.oci_archive_sha256,
+                        image_bytes=parsed_receipt.image_bytes,
+                        architecture=parsed_receipt.architecture,
+                        runtime_interface=parsed_receipt.runtime_interface,
+                    ),
                 )
             except (RunSwitchOperationConflict, ValueError) as error:
                 raise _RuntimeImageIdentityMismatch(
