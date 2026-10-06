@@ -180,7 +180,7 @@
       "path": "control/tests/test_agent_jobs.py",
       "function": "test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retry",
       "kind": "transient-failed-assertion",
-      "count": 2
+      "count": 1
     },
     {
       "path": "control/tests/test_agent_jobs.py",
@@ -311,18 +311,6 @@
     {
       "path": "control/tests/test_agent_operation_lifecycle.py",
       "function": "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_outcome.py",
-      "function": "test_a_typed_report_keeps_its_state_word_and_projects_to_the_stored_body",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_restart_recovery_wire_bridge.py",
-      "function": "test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim",
       "kind": "operator-wait-assertion",
       "count": 1
     },
@@ -1554,12 +1542,6 @@
       "path": "control/tests/test_recipe_builds.py",
       "function": "test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed",
       "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_builds.py",
-      "function": "test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed",
-      "kind": "operator-wait-assertion",
       "count": 1
     },
     {
