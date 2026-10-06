@@ -40,21 +40,23 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from vonk_agent_protocol import ImageStoreCode
+
 IMAGE_CACHE_DIRECTORY = "image-cache"
 LAYOUT_DIRECTORY = "oci"
 OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
-STORE_BUSY = "image_store.busy"
-REFERENCE_SCAN_FAILED = "image_store.reference_scan_failed"
+STORE_BUSY = ImageStoreCode.BUSY
+REFERENCE_SCAN_FAILED = ImageStoreCode.REFERENCE_SCAN_FAILED
 #: A manifest a receipt names exists but its content is damaged (not a
 #: permission or I/O fault): ``OciImageStoreError.address`` names it.
-REFERENCED_MANIFEST_DAMAGED = "image_store.referenced_manifest_damaged"
+REFERENCED_MANIFEST_DAMAGED = ImageStoreCode.REFERENCED_MANIFEST_DAMAGED
 #: Codes of a stored manifest whose content is damaged or not an image this
 #: store holds. Reading it as absent is cache loss; an OS error is not.
 DAMAGED_MANIFEST_CODES = frozenset(
     {
-        "image_store.manifest_corrupt",
-        "image_store.manifest_invalid",
-        "image_store.manifest_unsupported",
+        ImageStoreCode.MANIFEST_CORRUPT,
+        ImageStoreCode.MANIFEST_INVALID,
+        ImageStoreCode.MANIFEST_UNSUPPORTED,
     }
 )
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -117,7 +119,7 @@ class OciImageStore:
 
     def blob_path(self, digest: str) -> Path:
         if _DIGEST.fullmatch(digest) is None:
-            raise OciImageStoreError("image_store.digest_invalid", "digest is invalid")
+            raise OciImageStoreError(ImageStoreCode.DIGEST_INVALID, "digest is invalid")
         return self.root / "blobs" / "sha256" / digest.removeprefix("sha256:")
 
     def read(self, manifest_digest: str) -> StoredImage | None:
@@ -130,12 +132,12 @@ class OciImageStore:
             return None
         except ValueError as error:
             raise OciImageStoreError(
-                "image_store.manifest_corrupt",
+                ImageStoreCode.MANIFEST_CORRUPT,
                 f"stored manifest is damaged: {error}",
             ) from error
         except OSError as error:
             raise OciImageStoreError(
-                "image_store.manifest_unreadable",
+                ImageStoreCode.MANIFEST_UNREADABLE,
                 f"stored manifest is unreadable: {error}",
             ) from error
         image = _stored_image(manifest_digest, manifest)
@@ -160,7 +162,8 @@ class OciImageStore:
         _, _, digest = reference.rpartition("@")
         if _DIGEST.fullmatch(digest) is None:
             raise OciImageStoreError(
-                "image_store.reference_unpinned", "image reference is not digest-pinned"
+                ImageStoreCode.REFERENCE_UNPINNED,
+                "image reference is not digest-pinned",
             )
         self._copy(
             [
@@ -175,7 +178,7 @@ class OciImageStore:
         image = self.read(digest)
         if image is None:
             raise OciImageStoreError(
-                "image_store.import_incomplete", "copied image is incomplete"
+                ImageStoreCode.IMPORT_INCOMPLETE, "copied image is incomplete"
             )
         return image
 
@@ -210,27 +213,27 @@ class OciImageStore:
                 )
             except (OSError, subprocess.TimeoutExpired) as error:
                 raise OciImageStoreError(
-                    "image_store.copy_failed", f"skopeo copy did not finish: {error}"
+                    ImageStoreCode.COPY_FAILED, f"skopeo copy did not finish: {error}"
                 ) from error
             if result.returncode != 0:
                 detail = (
                     result.stderr or result.stdout or "skopeo copy failed"
                 ).strip()
                 raise OciImageStoreError(
-                    "image_store.copy_failed", detail.splitlines()[-1]
+                    ImageStoreCode.COPY_FAILED, detail.splitlines()[-1]
                 )
             try:
                 manifest_digest = digest_file.read_text(encoding="utf-8").strip()
             except OSError as error:
                 raise OciImageStoreError(
-                    "image_store.copy_failed", "skopeo reported no manifest digest"
+                    ImageStoreCode.COPY_FAILED, "skopeo reported no manifest digest"
                 ) from error
             finally:
                 digest_file.unlink(missing_ok=True)
             image = self.read(manifest_digest)
             if image is None:
                 raise OciImageStoreError(
-                    "image_store.import_incomplete", "copied image is incomplete"
+                    ImageStoreCode.IMPORT_INCOMPLETE, "copied image is incomplete"
                 )
             # A copy that found every blob already present writes nothing;
             # mark the image fresh so collection keeps it for the grace
@@ -339,7 +342,7 @@ def _descriptor_size(descriptor: object) -> int:
     size = descriptor.get("size") if isinstance(descriptor, Mapping) else None
     if type(size) is not int or size < 0:
         raise OciImageStoreError(
-            "image_store.manifest_invalid", "manifest descriptor size is invalid"
+            ImageStoreCode.MANIFEST_INVALID, "manifest descriptor size is invalid"
         )
     return size
 
@@ -352,7 +355,7 @@ def _stored_image(manifest_digest: str, manifest: object) -> StoredImage:
         or not isinstance(manifest.get("layers"), list)
     ):
         raise OciImageStoreError(
-            "image_store.manifest_unsupported",
+            ImageStoreCode.MANIFEST_UNSUPPORTED,
             "only single-platform OCI image manifests are stored",
         )
     config = manifest["config"]
@@ -368,7 +371,7 @@ def _stored_image(manifest_digest: str, manifest: object) -> StoredImage:
         isinstance(value, str) and _DIGEST.fullmatch(value) for value in digests
     ):
         raise OciImageStoreError(
-            "image_store.manifest_invalid", "manifest descriptor digest is invalid"
+            ImageStoreCode.MANIFEST_INVALID, "manifest descriptor digest is invalid"
         )
     return StoredImage(
         manifest_digest=manifest_digest,

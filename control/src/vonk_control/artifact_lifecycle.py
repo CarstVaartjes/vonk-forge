@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
     InvalidRequestError,
     InvalidRequestReason,
     SecurityRefusalError,
@@ -77,7 +78,7 @@ def retryable_artifact_database_error(
     state = _sqlstate(error)
     if state in _RETRYABLE_SQLSTATES:
         return ArtifactReferenceUnsettled(
-            "artifact.reference_busy",
+            ArtifactLifecycleCode.REFERENCE_BUSY,
             f"artifact reference transaction conflicted with PostgreSQL ({state}); retry the operation",
             retryable=True,
         )
@@ -86,7 +87,7 @@ def retryable_artifact_database_error(
         primary = getattr(diagnostic, "message_primary", None)
         if isinstance(primary, str) and "statement timeout" in primary.lower():
             return ArtifactReferenceUnsettled(
-                "artifact.reference_timeout",
+                ArtifactLifecycleCode.REFERENCE_TIMEOUT,
                 "artifact reference SQL exceeded the caller's statement time budget; retry the operation",
                 retryable=True,
             )
@@ -193,7 +194,7 @@ def lock_reference_gates(
             )
             if acquired is not True:
                 raise ArtifactReferenceUnsettled(
-                    "artifact.reference_busy",
+                    ArtifactLifecycleCode.REFERENCE_BUSY,
                     "artifact reference ownership is changing; retry the operation",
                     retryable=True,
                 )
@@ -234,7 +235,7 @@ def lock_reference_gates(
         )
         if locked is None:
             raise ArtifactReferenceUnsettled(
-                "artifact.reference_unavailable",
+                ArtifactLifecycleCode.REFERENCE_UNAVAILABLE,
                 "artifact reference ownership could not be read safely",
                 retryable=True,
             )
@@ -253,7 +254,7 @@ def require_reference_open(
     for row in lock_reference_gates(session, identities, now=now):
         if row.removal_owner_id is not None:
             raise ArtifactReferenceUnsettled(
-                "artifact.deletion_in_progress",
+                ArtifactLifecycleCode.DELETION_IN_PROGRESS,
                 f"{row.artifact_kind} {row.artifact_sha256} is reserved for removal",
                 retryable=True,
             )
@@ -371,7 +372,7 @@ def reserve_removal_owners(
         )
         if row.removal_owner_id is not None and not same_owner:
             raise ArtifactReferenceUnsettled(
-                "artifact.deletion_busy",
+                ArtifactLifecycleCode.DELETION_BUSY,
                 f"{row.artifact_kind} {row.artifact_sha256} has another removal owner",
                 retryable=True,
             )
@@ -454,7 +455,7 @@ def clear_removal(
             or row.removal_fence != fence
         ):
             raise ArtifactRemovalFenceLost(
-                "artifact.deletion_fence_lost",
+                ArtifactLifecycleCode.DELETION_FENCE_LOST,
                 "artifact removal fence changed before it could be released",
             )
         row.removal_owner_kind = None

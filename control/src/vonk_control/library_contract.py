@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
+from vonk_agent_protocol import LibraryProjectionCode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
@@ -645,7 +646,7 @@ def _bounded_reasons(
     if len(ordered) <= maximum:
         return ordered
     marker = _reason(
-        "projection.reasons_truncated",
+        LibraryProjectionCode.REASONS_TRUNCATED,
         f"Projection produced {len(ordered)} distinct reasons; returning {maximum}, including this truncation marker.",
         "warning",
     )

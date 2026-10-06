@@ -18,6 +18,8 @@ from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
     OperationProgress,
+    ProfileReasonCode,
+    SupersedeCode,
     state_adopter,
 )
 from vonk_agent_protocol.inventory import MemoryPool
@@ -143,11 +145,7 @@ else:
     ]
 #: Why an application ended ``superseded`` (never ``failed``): a newer accepted
 #: intent, or the Controller's own automatic retry, took over its work.
-FleetProfileSupersedeCode = Literal[
-    "superseded-by-retry",
-    "superseded-by-intent",
-    "effects-changed-during-admission",
-]
+FleetProfileSupersedeCode = SupersedeCode
 #: Application states from which nothing more happens; one name for every consumer.
 FLEET_PROFILE_ENDED_STATES = frozenset(
     {
@@ -196,7 +194,7 @@ class _StrictModel(StrictJSONModel):
 class FleetProfileEndpointProjectionIssue(_StrictModel):
     """Safe diagnostic for immutable profile history that cannot be read."""
 
-    code: Literal["profile.application_intent.invalid"]
+    code: Literal[ProfileReasonCode.APPLICATION_INTENT_INVALID]
     detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
 
 
@@ -1207,7 +1205,10 @@ class FleetProfileApplicationView(_StrictModel):
         if self.state == "superseded":
             if self.reason_code is None:
                 raise ValueError("superseded application requires a reason code")
-            if self.reason_code == "superseded-by-retry" and self.superseded_by is None:
+            if (
+                self.reason_code == SupersedeCode.SUPERSEDED_BY_RETRY
+                and self.superseded_by is None
+            ):
                 raise ValueError("a retry supersession names its successor")
         elif self.superseded_by is not None or self.reason_code is not None:
             raise ValueError("only a superseded application names a successor")

@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+from vonk_agent_protocol import RecipePackageCode
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
     ModelDefinition,
@@ -247,7 +248,7 @@ class RecipePackageClient:
             and parsed.hostname not in {"localhost", "127.0.0.1", "::1", "caddy"}
         ):
             raise RecipePackageError(
-                "recipe_package.url_insecure", "recipe package URL must use HTTPS"
+                RecipePackageCode.URL_INSECURE, "recipe package URL must use HTTPS"
             )
         if (
             parsed.username
@@ -257,7 +258,7 @@ class RecipePackageClient:
             or parsed.path not in {"", "/"}
         ):
             raise RecipePackageError(
-                "recipe_package.url_invalid",
+                RecipePackageCode.URL_INVALID,
                 "recipe package URL contains forbidden components",
             )
         api = urlsplit(api_url.rstrip("/"))
@@ -274,12 +275,12 @@ class RecipePackageClient:
             or api.path not in {"", "/"}
         ):
             raise RecipePackageError(
-                "recipe_package.url_invalid", "recipe package API URL is invalid"
+                RecipePackageCode.URL_INVALID, "recipe package API URL is invalid"
             )
         tag = _RELEASE_TAG.fullmatch(release)
         if release != "latest" and (tag is None or int(tag[1]) != CONTRACT_MAJOR):
             raise RecipePackageError(
-                "recipe_package.release_invalid",
+                RecipePackageCode.RELEASE_INVALID,
                 "recipe release must be latest or an exact "
                 f"v{CONTRACT_MAJOR}.MINOR.PATCH tag",
             )
@@ -346,12 +347,12 @@ class RecipePackageClient:
             if persisted is not None:
                 return persisted
             raise RecipePackageError(
-                "recipe_package.unavailable", "recipe package index is unavailable"
+                RecipePackageCode.UNAVAILABLE, "recipe package index is unavailable"
             ) from error
         except RecipePackageError as error:
             # Only an unreachable publication falls back to the previous
             # verified generation; an integrity failure is always surfaced.
-            if error.code == "recipe_package.unavailable":
+            if error.code == RecipePackageCode.UNAVAILABLE:
                 persisted = self._read_persisted_snapshot()
                 if persisted is not None:
                     return persisted
@@ -381,7 +382,7 @@ class RecipePackageClient:
             # A release mid-update (or before its first bundle) is a transient
             # absence: the previous verified generation stays in use.
             raise RecipePackageError(
-                "recipe_package.unavailable",
+                RecipePackageCode.UNAVAILABLE,
                 f"recipe release {tag} does not contain {RELEASE_LIBRARY}",
             )
         partial = self._cache_root / f".{RELEASE_LIBRARY}.part"
@@ -404,7 +405,7 @@ class RecipePackageClient:
                     continue
                 if response.status_code != 200:
                     raise RecipePackageError(
-                        "recipe_package.unavailable",
+                        RecipePackageCode.UNAVAILABLE,
                         f"recipe release asset {RELEASE_LIBRARY} is unavailable",
                     )
                 written = 0
@@ -413,14 +414,14 @@ class RecipePackageClient:
                         written += len(chunk)
                         if written > MAX_LIBRARY_BYTES:
                             raise RecipePackageError(
-                                "recipe_package.response_invalid",
+                                RecipePackageCode.RESPONSE_INVALID,
                                 f"recipe release asset {RELEASE_LIBRARY} exceeds "
                                 "its size bound",
                             )
                         stream.write(chunk)
                 return
         raise RecipePackageError(
-            "recipe_package.response_invalid",
+            RecipePackageCode.RESPONSE_INVALID,
             f"recipe release asset {RELEASE_LIBRARY} redirects more than once",
         )
 
@@ -436,7 +437,7 @@ class RecipePackageClient:
             or not target.path.startswith("/")
         ):
             raise RecipePackageError(
-                "recipe_package.response_invalid",
+                RecipePackageCode.RESPONSE_INVALID,
                 "recipe release asset redirect leaves the GitHub asset origin",
             )
         # The signed query is opaque; the relay forwards it unchanged.
@@ -465,7 +466,7 @@ class RecipePackageClient:
                         or member.name in members
                     ):
                         raise RecipePackageError(
-                            "recipe_package.response_invalid",
+                            RecipePackageCode.RESPONSE_INVALID,
                             f"{RELEASE_LIBRARY} member "
                             f"{_asset_label(member.name)} is not a unique flat file",
                         )
@@ -476,7 +477,7 @@ class RecipePackageClient:
                     stream = tar.extractfile(member) if member is not None else None
                     if member is None or stream is None or member.size > maximum:
                         raise RecipePackageError(
-                            "recipe_package.response_invalid",
+                            RecipePackageCode.RESPONSE_INVALID,
                             f"{RELEASE_LIBRARY} lacks a bounded {name}",
                         )
                     return stream.read(maximum + 1)
@@ -488,7 +489,7 @@ class RecipePackageClient:
                 raw = read(RELEASE_INDEX, MAX_INDEX_BYTES)
                 if _sha256(raw) != checksums[RELEASE_INDEX]:
                     raise RecipePackageError(
-                        "recipe_package.digest_mismatch",
+                        RecipePackageCode.DIGEST_MISMATCH,
                         f"{RELEASE_LIBRARY} {RELEASE_INDEX} does not match SHA256SUMS",
                     )
                 verified = {RELEASE_INDEX}
@@ -504,7 +505,7 @@ class RecipePackageClient:
                         verified.add(name)
         except (OSError, tarfile.TarError) as error:
             raise RecipePackageError(
-                "recipe_package.response_invalid",
+                RecipePackageCode.RESPONSE_INVALID,
                 f"{RELEASE_LIBRARY} is not a readable tar archive",
             ) from error
         return (
@@ -574,11 +575,11 @@ class RecipePackageClient:
             return self._listing
         if response.status_code != 200 or response.is_redirect:
             raise RecipePackageError(
-                "recipe_package.unavailable", "recipe release is unavailable"
+                RecipePackageCode.UNAVAILABLE, "recipe release is unavailable"
             )
         if len(response.content) > maximum:
             raise RecipePackageError(
-                "recipe_package.response_invalid", "recipe release response is invalid"
+                RecipePackageCode.RESPONSE_INVALID, "recipe release response is invalid"
             )
         try:
             payload = _json(response.content)
@@ -589,12 +590,12 @@ class RecipePackageClient:
             )
         except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as error:
             raise RecipePackageError(
-                "recipe_package.response_invalid", "recipe release response is invalid"
+                RecipePackageCode.RESPONSE_INVALID, "recipe release response is invalid"
             ) from error
         release = _select_release(releases, self._release_selector)
         if release is None:
             raise RecipePackageError(
-                "recipe_package.unavailable",
+                RecipePackageCode.UNAVAILABLE,
                 f"no published recipe library release for contract v{CONTRACT_MAJOR}",
             )
         assets: set[str] = set()
@@ -604,7 +605,7 @@ class RecipePackageClient:
                 continue
             if asset.name in assets or not _ASSET_NAME.fullmatch(asset.name):
                 raise RecipePackageError(
-                    "recipe_package.response_invalid",
+                    RecipePackageCode.RESPONSE_INVALID,
                     f"recipe release asset {_asset_label(asset.name)} is duplicated "
                     "or misnamed",
                 )
@@ -622,7 +623,7 @@ class RecipePackageClient:
             index = _json(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise RecipePackageError(
-                "recipe_package.response_invalid",
+                RecipePackageCode.RESPONSE_INVALID,
                 "recipe package index is invalid JSON",
             ) from error
         if (
@@ -631,7 +632,7 @@ class RecipePackageClient:
             or index.get("kind") != "recipe-library-index"
         ):
             raise RecipePackageError(
-                "recipe_package.schema_incompatible",
+                RecipePackageCode.SCHEMA_INCOMPATIBLE,
                 "recipe package index schema is unsupported",
             )
         repository, commit, raw_recipes = (
@@ -653,7 +654,7 @@ class RecipePackageClient:
             or not isinstance(raw_entities, list)
         ):
             raise RecipePackageError(
-                "recipe_package.response_invalid",
+                RecipePackageCode.RESPONSE_INVALID,
                 "recipe package index identity is invalid",
             )
         catalog_entities: list[dict[str, object]] = []
@@ -689,7 +690,7 @@ class RecipePackageClient:
             identity = (model.identity.publisher, model.identity.slug)
             if identity in identities:
                 raise RecipePackageError(
-                    "recipe_package.response_invalid",
+                    RecipePackageCode.RESPONSE_INVALID,
                     "catalog model identity is duplicated",
                 )
             identities.add(identity)
@@ -761,7 +762,8 @@ class RecipePackageClient:
         for package_entry in raw_packages:
             if not isinstance(package_entry, Mapping):
                 raise RecipePackageError(
-                    "recipe_package.response_invalid", "recipe package entry is invalid"
+                    RecipePackageCode.RESPONSE_INVALID,
+                    "recipe package entry is invalid",
                 )
             publisher, slug, digest = (
                 package_entry.get("publisher"),
@@ -805,13 +807,13 @@ class RecipePackageClient:
                 or not 1 <= size <= MAX_PACKAGE_BYTES
             ):
                 raise RecipePackageError(
-                    "recipe_package.response_invalid",
+                    RecipePackageCode.RESPONSE_INVALID,
                     "recipe package entry identity is invalid",
                 )
             key = f"{publisher}/{slug}"
             if key in packages:
                 raise RecipePackageError(
-                    "recipe_package.response_invalid",
+                    RecipePackageCode.RESPONSE_INVALID,
                     "recipe package identity is duplicated",
                 )
             packages[key] = dict(package_entry)
@@ -842,7 +844,7 @@ class RecipePackageClient:
             (item.publisher, item.slug) for item in items
         ):
             raise RecipePackageError(
-                "recipe_package.response_invalid", "recipe package index is not sorted"
+                RecipePackageCode.RESPONSE_INVALID, "recipe package index is not sorted"
             )
         return RecipeLibrarySnapshot(
             commit=commit,
@@ -894,7 +896,7 @@ class RecipePackageClient:
             os.replace(self._candidate_path, self._snapshot_path)
         except OSError as error:
             raise RecipePackageError(
-                "recipe_package.cache_unavailable",
+                RecipePackageCode.CACHE_UNAVAILABLE,
                 "recipe package snapshot could not be committed",
             ) from error
         # The candidate becomes the only previous-good generation after every
@@ -970,7 +972,7 @@ class RecipePackageClient:
     def prepare(self, snapshot: RecipeLibrarySnapshot) -> None:
         if self._snapshot is None or self._snapshot.commit != snapshot.commit:
             raise RecipePackageError(
-                "recipe_package.snapshot_changed",
+                RecipePackageCode.SNAPSHOT_CHANGED,
                 "package index changed during preparation",
             )
         previous = (
@@ -994,7 +996,7 @@ class RecipePackageClient:
                 # package whose documents this Controller's contract cannot
                 # read belongs to that recipe alone: the sync fetches it again
                 # and reports it as that recipe's problem.
-                if error.code != "recipe_package.document_incompatible":
+                if error.code != RecipePackageCode.DOCUMENT_INCOMPATIBLE:
                     raise
         self._prepared = prepared
         self._promote_candidate()
@@ -1017,7 +1019,7 @@ class RecipePackageClient:
         )
         if match is None:
             raise RecipePackageError(
-                "recipe_package.uri_invalid", "recipe URI is invalid"
+                RecipePackageCode.URI_INVALID, "recipe URI is invalid"
             )
         snapshot = self._snapshot or self.list()
         publisher, slug, digest = match.groups()
@@ -1031,7 +1033,8 @@ class RecipePackageClient:
         )
         if item is None or item.content_sha256 != digest:
             raise RecipePackageError(
-                "recipe_package.not_found", "recipe is not in the current package index"
+                RecipePackageCode.NOT_FOUND,
+                "recipe is not in the current package index",
             )
         if uri in self._prepared:
             return self._prepared[uri]
@@ -1062,7 +1065,7 @@ class RecipePackageClient:
             self._listing_etag = None
             self._library_digest = None
             raise RecipePackageError(
-                "recipe_package.unavailable",
+                RecipePackageCode.UNAVAILABLE,
                 "recipe package is not in the verified local library",
             )
         return cached, target
@@ -1103,7 +1106,7 @@ class RecipePackageClient:
                     files[member.name] = content
         except (OSError, tarfile.TarError, ValueError) as error:
             raise RecipePackageError(
-                "recipe_package.extract_invalid", "recipe package extraction failed"
+                RecipePackageCode.EXTRACT_INVALID, "recipe package extraction failed"
             ) from error
         try:
             manifest = _json(files["manifest.json"])
@@ -1180,7 +1183,7 @@ class RecipePackageClient:
             # The package bytes are the signed ones, but a document in it does
             # not fit this Controller's contract: that recipe alone is skipped.
             raise RecipePackageError(
-                "recipe_package.document_incompatible",
+                RecipePackageCode.DOCUMENT_INCOMPATIBLE,
                 _incompatible_detail(
                     f"recipe package document is incompatible {item.publisher}/"
                     f"{item.slug}",
@@ -1195,7 +1198,7 @@ class RecipePackageClient:
             json.JSONDecodeError,
         ) as error:
             raise RecipePackageError(
-                "recipe_package.package_invalid",
+                RecipePackageCode.PACKAGE_INVALID,
                 "recipe package identity or contents are invalid",
             ) from error
         metadata = recipe.metadata
@@ -1234,7 +1237,7 @@ class RecipePackageClient:
             bundle = generate_source_bundle(context_files)
         except (SourceBundleError, ValueError) as error:
             raise RecipePackageError(
-                "recipe_package.package_invalid",
+                RecipePackageCode.PACKAGE_INVALID,
                 "recipe build source closure is invalid",
             ) from error
         source_bundle, source_bundle_sha256 = bundle.archive, bundle.sha256
@@ -1317,19 +1320,19 @@ def _library_release(index: Mapping[str, object]) -> tuple[str, datetime]:
     match = _CONTRACT_VERSION.fullmatch(version) if isinstance(version, str) else None
     if match is None or int(match[1]) != CONTRACT_MAJOR:
         raise RecipePackageError(
-            "recipe_package.schema_incompatible",
+            RecipePackageCode.SCHEMA_INCOMPATIBLE,
             f"recipe library index is not a contract v{CONTRACT_MAJOR} release",
         )
     try:
         parsed = datetime.fromisoformat(str(updated))
     except ValueError as error:
         raise RecipePackageError(
-            "recipe_package.response_invalid",
+            RecipePackageCode.RESPONSE_INVALID,
             "recipe library index update time is invalid",
         ) from error
     if parsed.tzinfo is None:
         raise RecipePackageError(
-            "recipe_package.response_invalid",
+            RecipePackageCode.RESPONSE_INVALID,
             "recipe library index update time is invalid",
         )
     return str(version), parsed.astimezone(UTC)
@@ -1376,9 +1379,9 @@ def _index_problem(
                 name = f" {publisher}/{slug}"
     return {
         "recipe_uri": uri,
-        "code": "recipe_package.document_incompatible"
+        "code": RecipePackageCode.DOCUMENT_INCOMPATIBLE
         if error is not None
-        else "recipe_package.response_invalid",
+        else RecipePackageCode.RESPONSE_INVALID,
         "detail": _incompatible_detail(f"{detail}{name}", error),
     }
 
@@ -1406,7 +1409,7 @@ def _bind_release(
     """
     if snapshot.commit != release.commit:
         raise RecipePackageError(
-            "recipe_package.response_invalid",
+            RecipePackageCode.RESPONSE_INVALID,
             "recipe index was not built from the signed release commit",
         )
     kept: dict[str, dict[str, object]] = {}
@@ -1436,7 +1439,7 @@ def _bind_release(
                         "content_sha256": package.get("recipe_content_sha256"),
                     }
                 ),
-                "code": "recipe_package.release_incomplete",
+                "code": RecipePackageCode.RELEASE_INCOMPLETE,
                 "detail": f"{reason} for {key}"[:256],
             }
         )
@@ -1507,7 +1510,7 @@ def load_recipe_package(
         archive = path.read_bytes()
     except OSError as error:
         raise RecipePackageError(
-            "recipe_package.unavailable", "offline recipe package is unavailable"
+            RecipePackageCode.UNAVAILABLE, "offline recipe package is unavailable"
         ) from error
     if (
         not _SHA256.fullmatch(package_sha256)
@@ -1515,7 +1518,7 @@ def load_recipe_package(
         or _sha256(archive) != package_sha256
     ):
         raise RecipePackageError(
-            "recipe_package.digest_mismatch",
+            RecipePackageCode.DIGEST_MISMATCH,
             "offline recipe package digest does not match",
         )
     item = RecipeLibraryItem(

@@ -1,0 +1,10 @@
+from typing import Literal
+
+CatalogCode = Literal['catalog.actor', 'catalog.candidate_exists', 'catalog.conflict', 'catalog.document_exists', 'catalog.document_invalid', 'catalog.document_missing', 'catalog.head_missing', 'catalog.identities', 'catalog.identity_changed', 'catalog.insufficient_role', 'catalog.invalid_request', 'catalog.model_artifact_missing', 'catalog.model_reference_invalid', 'catalog.model_reference_missing', 'catalog.not_candidate', 'catalog.not_found', 'catalog.recipe_invalid', 'catalog.reference', 'catalog.reference_missing', 'catalog.request_failed', 'catalog.revision_missing', 'catalog.stale_revision', 'catalog.unavailable', 'recipe_library.document_invalid', 'recipe_library.hash_mismatch', 'recipe_library.model_document_invalid', 'recipe_library.package_handle_invalid', 'recipe_library.release_invalid', 'recipe_library.source_invalid', 'recipe_release.signature_invalid']
+
+CATALOG_CODE_VALUES: set[CatalogCode] = { 'catalog.actor', 'catalog.candidate_exists', 'catalog.conflict', 'catalog.document_exists', 'catalog.document_invalid', 'catalog.document_missing', 'catalog.head_missing', 'catalog.identities', 'catalog.identity_changed', 'catalog.insufficient_role', 'catalog.invalid_request', 'catalog.model_artifact_missing', 'catalog.model_reference_invalid', 'catalog.model_reference_missing', 'catalog.not_candidate', 'catalog.not_found', 'catalog.recipe_invalid', 'catalog.reference', 'catalog.reference_missing', 'catalog.request_failed', 'catalog.revision_missing', 'catalog.stale_revision', 'catalog.unavailable', 'recipe_library.document_invalid', 'recipe_library.hash_mismatch', 'recipe_library.model_document_invalid', 'recipe_library.package_handle_invalid', 'recipe_library.release_invalid', 'recipe_library.source_invalid', 'recipe_release.signature_invalid',  }
+
+def check_catalog_code(value: str) -> CatalogCode:
+    if value in CATALOG_CODE_VALUES:
+        return value
+    raise TypeError(f"Unexpected value {value!r}. Expected one of {CATALOG_CODE_VALUES!r}")

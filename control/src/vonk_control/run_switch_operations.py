@@ -27,17 +27,24 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
+    InstallDegradedReason,
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     OperationProgress,
+    ProfileReasonCode,
     ResourceBlockerCode,
+    ResourcePlanningCode,
     RunAdmissionCode,
+    RunSwitchCode,
     SecurityRefusalError,
     SecurityRefusalReason,
+    UninstallPlanCode,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
+    run_switch_code,
 )
 
 from . import job_states
@@ -325,7 +332,7 @@ class _RunSwitchDefiniteConflict(InvalidRequestError, RunSwitchOperationConflict
 class _RunSwitchIncompleteProfileGroupConflict(_RunSwitchDefiniteConflict):
     """Reachable ranks stopped, but the profile group remains incomplete."""
 
-    code = "run-switch.profile.incomplete_multi_spark_model"
+    code = RunSwitchCode.PROFILE_INCOMPLETE_MULTI_SPARK_MODEL
 
 
 class _RunSwitchBuildParentChanged(UnknownOutcomeError, RunSwitchOperationConflict):
@@ -344,7 +351,8 @@ class RunSwitchIssuedWorkloadPending(UnknownOutcomeError, RunSwitchOperationConf
         observe_due_at: datetime,
         observation_deadline: datetime,
     ) -> None:
-        super().__init__(f"run-switch.{kind}-issued-pending: {owner_id} ({job_id})")
+        code = run_switch_code(f"{kind}-issued-pending")
+        super().__init__(f"{code}: {owner_id} ({job_id})")
         self.kind = kind
         self.job_id = job_id
         self.observe_due_at = observe_due_at
@@ -358,7 +366,7 @@ class RunSwitchPostStopEvidencePending(UnknownOutcomeError, RunSwitchOperationCo
     a retry before it cannot find any, so the retry clock never schedules one.
     """
 
-    code = "run-switch.post-stop-inventory-pending"
+    code = RunSwitchCode.POST_STOP_INVENTORY_PENDING
 
     def __init__(self, message: str, *, collected_after: datetime | None = None):
         super().__init__(message)
@@ -606,7 +614,7 @@ class _ResourceFits:
     def stop_before_prepare(self) -> bool:
         return (
             self.requires_early_stop(
-                "run-switch.insufficient-memory",
+                RunSwitchCode.INSUFFICIENT_MEMORY,
                 f"run-switch.{ResourceBlockerCode.INSUFFICIENT}",
             )
             or self.post_stop_memory_check is not None
@@ -614,7 +622,7 @@ class _ResourceFits:
 
     @property
     def stop_before_transfer(self) -> bool:
-        return self.requires_early_stop("run-switch.insufficient-disk")
+        return self.requires_early_stop(RunSwitchCode.INSUFFICIENT_DISK)
 
 
 _TERMINAL_STATES = frozenset(
@@ -638,9 +646,9 @@ _MEMORY_STOP_CONDITIONAL_REFUSALS = _MEMORY_CAPACITY_REFUSALS | {
 _INSTALL_PREFLIGHT_REFRESH_REASON = (
     "runtime preflight expired during install compilation"
 )
-_RUNTIME_IMAGE_OWNER_CHANGED = "run-switch.runtime-image-owner-changed"
+_RUNTIME_IMAGE_OWNER_CHANGED = RunSwitchCode.RUNTIME_IMAGE_OWNER_CHANGED
 _RUNTIME_IMAGE_IDENTITY_MISMATCH = (
-    "run-switch.runtime-image-reference-identity-mismatch"
+    RunSwitchCode.RUNTIME_IMAGE_REFERENCE_IDENTITY_MISMATCH
 )
 _LOGGER = logging.getLogger("vonk-control-run-switch")
 _FINAL_VERIFICATION_MAX_SECONDS = 900
@@ -757,7 +765,7 @@ def _resource_reason(
 ) -> RunSwitchReason:
     node_id = getattr(reason, "node_id", None)
     return _as_reason(
-        f"run-switch.{getattr(reason, 'code', 'resource.evidence_unknown')}",
+        run_switch_code(getattr(reason, "code", ResourcePlanningCode.EVIDENCE_UNKNOWN)),
         str(getattr(reason, "detail", "Resource planning evidence is unavailable.")),
         scope="node" if isinstance(node_id, str) else "operation",
         severity=_REASON_SEVERITY_ADAPTER.validate_python(
@@ -1015,7 +1023,7 @@ class DatabaseRunSwitchArtifactInspector:
         )
         blockers = [
             _as_reason(
-                "run-switch.nas-download-blocked",
+                RunSwitchCode.NAS_DOWNLOAD_BLOCKED,
                 detail,
                 scope="artifact",
                 node_ids=node_ids,
@@ -1059,7 +1067,7 @@ class DatabaseRunSwitchArtifactInspector:
         if missing_nas_bytes:
             warnings.append(
                 _as_reason(
-                    "run-switch.nas-download-required",
+                    RunSwitchCode.NAS_DOWNLOAD_REQUIRED,
                     "The exact model artifact set is resolved but missing from the NAS cache; the operation will download it before Spark transfer.",
                     scope="artifact",
                     severity="warning",
@@ -1134,7 +1142,7 @@ def _container_build_result(build: RecipeBuild) -> dict[str, object]:
         )
     except ValidationError as error:
         raise RunSwitchRetryLater(
-            "run-switch.container-build-evidence-invalid",
+            RunSwitchCode.CONTAINER_BUILD_EVIDENCE_INVALID,
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
     return json.loads(canonical_message(receipt))
@@ -1173,7 +1181,7 @@ class RecipeLifecyclePhaseExecutor:
                 or revision.content_digest != plan.recipe_content_sha256
             ):
                 raise RunSwitchRetryLater(
-                    "run-switch.preflight-recipe-changed",
+                    RunSwitchCode.PREFLIGHT_RECIPE_CHANGED,
                     reason=WaitReason.SCOPE_CHANGED,
                 )
             document = revision.document
@@ -1222,7 +1230,7 @@ class RecipeLifecyclePhaseExecutor:
                 run = session.get(RecipeRun, stop.run_id)
                 if run is None or run.plan_digest != stop.run_plan_digest:
                     raise RunSwitchRetryLater(
-                        "run-switch.stopped-run-identity-changed",
+                        RunSwitchCode.STOPPED_RUN_IDENTITY_CHANGED,
                         reason=WaitReason.SCOPE_CHANGED,
                     )
                 members = set(
@@ -1232,7 +1240,7 @@ class RecipeLifecyclePhaseExecutor:
                 )
                 if members != set(stop.node_ids):
                     raise RunSwitchRetryLater(
-                        "run-switch.stopped-run-membership-changed",
+                        RunSwitchCode.STOPPED_RUN_MEMBERSHIP_CHANGED,
                         reason=WaitReason.SCOPE_CHANGED,
                     )
                 if run.state != "stopped" or run.stopped_at is None:
@@ -1254,7 +1262,7 @@ class RecipeLifecyclePhaseExecutor:
                         ) from None
                     if snapshot.memory_pool != expected_pools.get(node_id):
                         raise RunSwitchRetryLater(
-                            "run-switch.post-stop-memory-pool-changed",
+                            RunSwitchCode.POST_STOP_MEMORY_POOL_CHANGED,
                             reason=WaitReason.SCOPE_CHANGED,
                         )
                     # A sample received after the receipt can still have been
@@ -1290,14 +1298,14 @@ class RecipeLifecyclePhaseExecutor:
         revision_id = plan.recipe_revision_id
         if build_id is None or revision_id is None:
             raise RunSwitchRetryLater(
-                "run-switch.container-build-identity-unavailable",
+                RunSwitchCode.CONTAINER_BUILD_IDENTITY_UNAVAILABLE,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         expected_build_id = _string_or_none(plan.build.build_id)
         expected_build_input = _string_or_none(plan.build.build_input_sha256)
         if expected_build_id != build_id or expected_build_input is None:
             raise RunSwitchRetryLater(
-                "run-switch.container-build-plan-invalid", reason=WaitReason.STALE_PLAN
+                RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID, reason=WaitReason.STALE_PLAN
             )
         ordinal = _bound_workload_intent(progress)
 
@@ -1317,7 +1325,7 @@ class RecipeLifecyclePhaseExecutor:
             build = session.get(RecipeBuild, build_id)
             if build is None:
                 raise RunSwitchRetryLater(
-                    "run-switch.container-build-receipt-unavailable",
+                    RunSwitchCode.CONTAINER_BUILD_RECEIPT_UNAVAILABLE,
                     reason=WaitReason.RECEIPT_MISSING,
                 )
             # Reconnecting bypasses capacity admission, never identity. Both
@@ -1325,14 +1333,14 @@ class RecipeLifecyclePhaseExecutor:
             # executable inputs before either may be adopted.
             if expected_build_input != build.build_input_sha256:
                 raise RunSwitchRetryLater(
-                    "run-switch.container-build-plan-invalid",
+                    RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID,
                     reason=WaitReason.STALE_PLAN,
                 )
             if build.state == "succeeded":
                 return PhaseExecution(result=_container_build_result(build))
             if build.state not in {"planned", "building", "failed"}:
                 raise RunSwitchRetryLater(
-                    "run-switch.container-build-state-invalid",
+                    RunSwitchCode.CONTAINER_BUILD_STATE_INVALID,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             active = session.scalar(
@@ -1355,14 +1363,14 @@ class RecipeLifecyclePhaseExecutor:
                 stored_plan = build_plan_document(build.plan)
             except RecipeExecutionContractError as error:
                 raise RunSwitchRetryLater(
-                    "run-switch.container-build-plan-invalid",
+                    RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID,
                     reason=WaitReason.STALE_PLAN,
                 ) from error
         self._require_post_stop_inventory(plan)
         start_build = getattr(self._lifecycle, "build", None)
         if not callable(start_build):
             raise RunSwitchRetryLater(
-                "run-switch.container-build-executor-unavailable",
+                RunSwitchCode.CONTAINER_BUILD_EXECUTOR_UNAVAILABLE,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         # Preview already selected and persisted the exact executable build
@@ -1378,7 +1386,7 @@ class RecipeLifecyclePhaseExecutor:
                 parsed_plan = parse_stored_build_plan(stored_plan)
             except RecipeExecutionContractError as error:
                 raise RunSwitchRetryLater(
-                    "run-switch.container-build-plan-invalid",
+                    RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID,
                     reason=WaitReason.STALE_PLAN,
                 ) from error
             if (
@@ -1392,7 +1400,7 @@ class RecipeLifecyclePhaseExecutor:
                 or parsed_plan.recipe_content_sha256 != revision.content_digest
             ):
                 raise RunSwitchRetryLater(
-                    "run-switch.container-build-plan-invalid",
+                    RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID,
                     reason=WaitReason.STALE_PLAN,
                 )
             try:
@@ -1437,7 +1445,7 @@ class RecipeLifecyclePhaseExecutor:
             persisted = session.get(RecipeBuild, build_id)
             if persisted is None:
                 raise RunSwitchRetryLater(
-                    "run-switch.container-build-receipt-unavailable",
+                    RunSwitchCode.CONTAINER_BUILD_RECEIPT_UNAVAILABLE,
                     reason=WaitReason.RECEIPT_MISSING,
                 )
             if (
@@ -1445,7 +1453,7 @@ class RecipeLifecyclePhaseExecutor:
                 or persisted.build_input_sha256 != build_input_sha256
             ):
                 raise RunSwitchRetryLater(
-                    "run-switch.container-build-plan-invalid",
+                    RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID,
                     reason=WaitReason.STALE_PLAN,
                 )
             result = _container_build_result(persisted)
@@ -1517,7 +1525,7 @@ class RecipeLifecyclePhaseExecutor:
         if phase.kind == "prepare" and phase.subphase == "runtime-image":
             if self._artifact_executor is None:
                 raise RunSwitchRetryLater(
-                    "run-switch.runtime-image-executor-unavailable",
+                    RunSwitchCode.RUNTIME_IMAGE_EXECUTOR_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             execution = self._artifact_executor.execute(
@@ -1534,7 +1542,7 @@ class RecipeLifecyclePhaseExecutor:
                 and phase.subphase != "runtime-image"
             ):
                 raise RunSwitchRetryLater(
-                    "run-switch.runtime-image-waiting-without-child",
+                    RunSwitchCode.RUNTIME_IMAGE_WAITING_WITHOUT_CHILD,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             if execution.operation_id is None and not execution.waiting:
@@ -1573,7 +1581,7 @@ class RecipeLifecyclePhaseExecutor:
                 with self._sessions() as session:
                     run = session.get(RecipeRun, target.run_id)
                     if run is None:
-                        raise RunSwitchRetryLater("run-switch.stop-target-disappeared")
+                        raise RunSwitchRetryLater(RunSwitchCode.STOP_TARGET_DISAPPEARED)
                     if run.state == "stopped" and run.route_state == "withdrawn":
                         return PhaseExecution(result={"run_id": target.run_id})
                 fresh = self._lifecycle.preview_stop(
@@ -1582,7 +1590,7 @@ class RecipeLifecyclePhaseExecutor:
                 )
                 if not fresh.allowed:
                     raise RunSwitchRetryLater(
-                        "run-switch.stop-still-unresolved-after-cancellation"
+                        RunSwitchCode.STOP_STILL_UNRESOLVED_AFTER_CANCELLATION
                     )
                 stop_digest = fresh.plan_digest
             profile_application_id = _string_or_none(
@@ -1690,13 +1698,13 @@ class RecipeLifecyclePhaseExecutor:
                             "installed",
                         }:
                             raise RunSwitchRetryLater(
-                                "run-switch.installation-handoff-unavailable",
+                                RunSwitchCode.INSTALLATION_HANDOFF_UNAVAILABLE,
                                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
                             )
                         stored = parse_stored_installation_plan(installation.plan)
                         if stored.plan_digest != install_plan_digest:
                             raise RunSwitchRetryLater(
-                                "run-switch.installation-identity-changed",
+                                RunSwitchCode.INSTALLATION_IDENTITY_CHANGED,
                                 reason=WaitReason.SCOPE_CHANGED,
                             )
                         return self._prepared_installation_result(
@@ -1732,7 +1740,7 @@ class RecipeLifecyclePhaseExecutor:
             )
             if not callable(prepare_installation):
                 raise RunSwitchRetryLater(
-                    "run-switch.install-preparation-unavailable",
+                    RunSwitchCode.INSTALL_PREPARATION_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             try:
@@ -1750,7 +1758,7 @@ class RecipeLifecyclePhaseExecutor:
                 # about the install changed, so ask the caller to rerun the
                 # ordinary probe rather than failing an identical plan.
                 raise RunSwitchInstallPreflightExpired(
-                    f"run-switch.install-preflight-expired: {error}"
+                    f"{RunSwitchCode.INSTALL_PREFLIGHT_EXPIRED}: {error}"
                 ) from error
             except InstallAdmissionBusy:
                 raise
@@ -1769,14 +1777,14 @@ class RecipeLifecyclePhaseExecutor:
                 installation = session.get(RecipeInstallation, prepared_id)
                 if installation is None:
                     raise RunSwitchRetryLater(
-                        "run-switch.install-preparation-unavailable",
+                        RunSwitchCode.INSTALL_PREPARATION_UNAVAILABLE,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
                 try:
                     stored_plan = parse_stored_installation_plan(installation.plan)
                 except RecipeExecutionContractError as error:
                     raise RunSwitchRetryLater(
-                        "run-switch.installation-identity-unavailable",
+                        RunSwitchCode.INSTALLATION_IDENTITY_UNAVAILABLE,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     ) from error
             return self._prepared_installation_result(
@@ -1800,7 +1808,7 @@ class RecipeLifecyclePhaseExecutor:
                             break
             if installation_id is None:
                 raise RunSwitchRetryLater(
-                    "run-switch.installation-preparation-unavailable",
+                    RunSwitchCode.INSTALLATION_PREPARATION_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             self._lifecycle.reconcile_superseded_unissued(
@@ -1810,7 +1818,7 @@ class RecipeLifecyclePhaseExecutor:
             start_installation = getattr(self._lifecycle, "start_installation", None)
             if not callable(start_installation):
                 raise RunSwitchRetryLater(
-                    "run-switch.install-executor-unavailable",
+                    RunSwitchCode.INSTALL_EXECUTOR_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             try:
@@ -1839,7 +1847,7 @@ class RecipeLifecyclePhaseExecutor:
                 {"installation_id": installation_id},
             )
         if phase.kind == "prepare":
-            raise _RunSwitchDefiniteConflict("run-switch.prepare-subphase-unsupported")
+            raise _RunSwitchDefiniteConflict(RunSwitchCode.PREPARE_SUBPHASE_UNSUPPORTED)
         if phase.kind == "start":
             ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
@@ -1852,7 +1860,7 @@ class RecipeLifecyclePhaseExecutor:
                             break
             if installation_id is None or plan.alias is None:
                 raise RunSwitchRetryLater(
-                    "run-switch.start_installation_unavailable",
+                    RunSwitchCode.START_INSTALLATION_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             start_request_id = str(uuid.uuid5(uuid.UUID(request_key), "start"))
@@ -1893,7 +1901,7 @@ class RecipeLifecyclePhaseExecutor:
             installation_id = plan.installation_id
             if installation_id is None:
                 raise RunSwitchRetryLater(
-                    "run-switch.uninstall_target_unavailable",
+                    RunSwitchCode.UNINSTALL_TARGET_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             if (
@@ -1903,7 +1911,7 @@ class RecipeLifecyclePhaseExecutor:
                 authority = plan.reconciliation_authority
                 if authority is None:
                     raise RunSwitchRetryLater(
-                        "run-switch.reconciliation-authority-unavailable",
+                        RunSwitchCode.RECONCILIATION_AUTHORITY_UNAVAILABLE,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
                 reconcile_request_id = str(
@@ -1972,7 +1980,7 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(
                     result={
                         **abandoned,
-                        "reason": "installation-not-installed",
+                        "reason": InstallDegradedReason.INSTALLATION_NOT_INSTALLED,
                     }
                 )
             uninstall_request_id = str(uuid.uuid5(uuid.UUID(request_key), "uninstall"))
@@ -2032,7 +2040,7 @@ class RecipeLifecyclePhaseExecutor:
                             break
             if run_id is None or self._lifecycle is None:
                 raise RunSwitchRetryLater(
-                    "run-switch.final-verification-unavailable",
+                    RunSwitchCode.FINAL_VERIFICATION_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             status = self._lifecycle.run_status(run_id)
@@ -2055,7 +2063,7 @@ class RecipeLifecyclePhaseExecutor:
                             if rank.node_id in scope.missing_node_ids
                         ]
                         raise _RunSwitchIncompleteProfileGroupConflict(
-                            "run-switch.profile.incomplete_multi_spark_model: "
+                            f"{RunSwitchCode.PROFILE_INCOMPLETE_MULTI_SPARK_MODEL}: "
                             f"{plan.alias or run_id} was removed from service after "
                             "stopping reachable ranks; missing Spark ranks may still "
                             "be running: "
@@ -2077,7 +2085,7 @@ class RecipeLifecyclePhaseExecutor:
                     }
                 )
                 status_reason = (
-                    f"run-switch.stop-verification-pending: run {run_id} is "
+                    f"{RunSwitchCode.STOP_VERIFICATION_PENDING}: run {run_id} is "
                     f"{status.state}, route is {status.route_state}"
                 )
             else:
@@ -2129,35 +2137,35 @@ class RecipeLifecyclePhaseExecutor:
                             for owner in status.recovery_owners
                         )
                         status_reason = (
-                            f"run-switch.distributed-recovery-active: {owners}; run "
+                            f"{RunSwitchCode.DISTRIBUTED_RECOVERY_ACTIVE}: {owners}; run "
                             f"{run_id} generation {status.run_generation}; {route_cause}"
                         )
                     elif status.route_recovery_pending:
                         status_reason = (
-                            "run-switch.route-health-recovery-active: route owner is "
+                            f"{RunSwitchCode.ROUTE_HEALTH_RECOVERY_ACTIVE}: route owner is "
                             f"reconciling run {run_id} generation {status.run_generation}; "
                             f"{route_cause}"
                         )
                     elif status.state in {"starting", "stopping"}:
                         status_reason = (
-                            f"run-switch.run-owner-active: run {run_id} generation "
+                            f"{RunSwitchCode.RUN_OWNER_ACTIVE}: run {run_id} generation "
                             f"{status.run_generation} is {status.state}; {route_cause}"
                         )
                     elif status.route_state == "pending":
                         status_reason = (
-                            f"run-switch.route-publication-pending: run {run_id} "
+                            f"{RunSwitchCode.ROUTE_PUBLICATION_PENDING}: run {run_id} "
                             f"generation {status.run_generation}; {route_cause}"
                         )
                     elif status.route_state == "withdrawn":
                         cause = route_error or "no terminal route-owner cause recorded"
                         status_reason = (
-                            f"run-switch.route-withdrawn-owner-unknown: run {run_id} "
+                            f"{RunSwitchCode.ROUTE_WITHDRAWN_OWNER_UNKNOWN}: run {run_id} "
                             f"generation {status.run_generation} remains {status.state}; "
                             f"route cause {cause}; waiting for exact reconciliation"
                         )
                     else:
                         status_reason = (
-                            f"run-switch.final-owner-state-unknown: run {run_id} "
+                            f"{RunSwitchCode.FINAL_OWNER_STATE_UNKNOWN}: run {run_id} "
                             f"generation {status.run_generation} is {status.state}; "
                             f"route is {status.route_state}; waiting for exact reconciliation"
                         )
@@ -2185,7 +2193,7 @@ class RecipeLifecyclePhaseExecutor:
                     waiting=True,
                     status_reason=status_reason,
                 )
-            raise RunSwitchRetryLater("run-switch.final-verification-failed")
+            raise RunSwitchRetryLater(RunSwitchCode.FINAL_VERIFICATION_FAILED)
         return PhaseExecution()
 
     @staticmethod
@@ -2243,7 +2251,7 @@ class RecipeLifecyclePhaseExecutor:
             )
         ):
             raise RunSwitchRetryLater(
-                "run-switch.installation-identity-changed",
+                RunSwitchCode.INSTALLATION_IDENTITY_CHANGED,
                 reason=WaitReason.SCOPE_CHANGED,
             )
         members = tuple(
@@ -2258,7 +2266,7 @@ class RecipeLifecyclePhaseExecutor:
         }
         if {(node.node_id, node.rank, node.role) for node in members} != expected:
             raise RunSwitchRetryLater(
-                "run-switch.installation-membership-changed",
+                RunSwitchCode.INSTALLATION_MEMBERSHIP_CHANGED,
                 reason=WaitReason.SCOPE_CHANGED,
             )
         return installation, members
@@ -2286,7 +2294,7 @@ class RecipeLifecyclePhaseExecutor:
                     )
         if installation_id is None or mapping_id is None or plan.mapping is None:
             raise RunSwitchRetryLater(
-                "run-switch.installation-verification-unavailable",
+                RunSwitchCode.INSTALLATION_VERIFICATION_UNAVAILABLE,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         with self._sessions() as session:
@@ -2328,7 +2336,7 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(result=evidence)
             if installation.state in {"planned", "installing"}:
                 return PhaseExecution(result=evidence, waiting=True)
-        raise RunSwitchRetryLater("run-switch.installation-verification-failed")
+        raise RunSwitchRetryLater(RunSwitchCode.INSTALLATION_VERIFICATION_FAILED)
 
     def _verify_cleanup(
         self, plan: RunSwitchPlan, *, request_key: str
@@ -2343,7 +2351,7 @@ class RecipeLifecyclePhaseExecutor:
         installation_id = plan.installation_id
         if installation_id is None:
             raise RunSwitchRetryLater(
-                "run-switch.uninstall_target_unavailable",
+                RunSwitchCode.UNINSTALL_TARGET_UNAVAILABLE,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         reconciliation_complete = True
@@ -2355,7 +2363,7 @@ class RecipeLifecyclePhaseExecutor:
         if plan.cleanup_mode == "reconcile" and plan.cleanup_disposition != "abandon":
             if self._lifecycle is None or plan.reconciliation_authority is None:
                 raise RunSwitchRetryLater(
-                    "run-switch.reconciliation-authority-unavailable",
+                    RunSwitchCode.RECONCILIATION_AUTHORITY_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             assert reconcile_request_id is not None
@@ -2400,7 +2408,7 @@ class RecipeLifecyclePhaseExecutor:
             )
             if not reconciliation_complete:
                 raise RunSwitchRetryLater(
-                    "run-switch.reconciliation-verification-failed"
+                    RunSwitchCode.RECONCILIATION_VERIFICATION_FAILED
                 )
             if (
                 installation is None
@@ -2409,7 +2417,7 @@ class RecipeLifecyclePhaseExecutor:
                 or any(node.state != "uninstalled" for node in members)
             ):
                 raise RunSwitchRetryLater(
-                    "run-switch.reconciliation-state-verification-failed"
+                    RunSwitchCode.RECONCILIATION_STATE_VERIFICATION_FAILED
                 )
         else:
             removed = installation is None or installation.state == "uninstalled"
@@ -2657,7 +2665,7 @@ class RunSwitchOperationService:
             if profile_stop_scope is not None:
                 if original_group != profile_stop_scope.original_group:
                     raise RunSwitchRequestInvalid(
-                        "run-switch.profile_stop_scope_changed",
+                        RunSwitchCode.PROFILE_STOP_SCOPE_CHANGED,
                         reason=InvalidRequestReason.CONFLICT,
                     )
                 target_node_ids = tuple(profile_stop_scope.target_node_ids)
@@ -2787,7 +2795,7 @@ class RunSwitchOperationService:
                 ]
                 warnings.append(
                     _as_reason(
-                        "run-switch.profile.incomplete_multi_spark_model",
+                        RunSwitchCode.PROFILE_INCOMPLETE_MULTI_SPARK_MODEL,
                         "This profile Stop will withdraw the model route and stop "
                         "only reachable ranks. Missing Spark ranks may still be running: "
                         + ", ".join(
@@ -2801,7 +2809,7 @@ class RunSwitchOperationService:
             if run.state not in STOPPABLE_RUN_STATES:
                 blockers.append(
                     _as_reason(
-                        "run-switch.run-not-active",
+                        RunSwitchCode.RUN_NOT_ACTIVE,
                         "The selected run is no longer active and cannot be stopped.",
                         scope="operation",
                         node_ids=[node.node_id for node in mapping_nodes],
@@ -2810,7 +2818,7 @@ class RunSwitchOperationService:
             elif stop_digest is None:
                 blockers.append(
                     _as_reason(
-                        "run-switch.stop-plan-unavailable",
+                        RunSwitchCode.STOP_PLAN_UNAVAILABLE,
                         "The existing run cannot be represented by a safe stop plan.",
                         scope="operation",
                         node_ids=[node.node_id for node in mapping_nodes],
@@ -3031,9 +3039,9 @@ class RunSwitchOperationService:
                 blockers.append(
                     _as_reason(
                         (
-                            "run-switch.reconciliation-assessment-unavailable"
+                            RunSwitchCode.RECONCILIATION_ASSESSMENT_UNAVAILABLE
                             if cleanup_mode == "reconcile"
-                            else "run-switch.uninstall-assessment-unavailable"
+                            else RunSwitchCode.UNINSTALL_ASSESSMENT_UNAVAILABLE
                         ),
                         "Cleanup cannot be assessed without the lifecycle service.",
                         scope="operation",
@@ -3059,7 +3067,7 @@ class RunSwitchOperationService:
                 except RecipeReconciliationBlocked as error:
                     blockers.append(
                         _as_reason(
-                            f"run-switch.{error.code}",
+                            run_switch_code(error.code),
                             error.detail,
                             scope="operation",
                             node_ids=node_ids,
@@ -3074,7 +3082,7 @@ class RunSwitchOperationService:
                 ) as error:
                     blockers.append(
                         _as_reason(
-                            "run-switch.reconciliation-assessment-unavailable",
+                            RunSwitchCode.RECONCILIATION_ASSESSMENT_UNAVAILABLE,
                             f"The installation cannot be represented by an exact reconciliation authority: {error}",
                             scope="operation",
                             node_ids=node_ids,
@@ -3092,7 +3100,7 @@ class RunSwitchOperationService:
                     ):
                         warnings.append(
                             _as_reason(
-                                "run-switch.reconciliation-prerequisite",
+                                RunSwitchCode.RECONCILIATION_PREREQUISITE,
                                 "The prior exact reconciliation attempt will be retired or observed before new cleanup is queued.",
                                 scope="operation",
                                 node_ids=node_ids,
@@ -3107,7 +3115,7 @@ class RunSwitchOperationService:
                     if completed_nodes:
                         warnings.append(
                             _as_reason(
-                                "run-switch.reconciliation-receipts-retained",
+                                RunSwitchCode.RECONCILIATION_RECEIPTS_RETAINED,
                                 "Previously verified node cleanup receipts will be reused.",
                                 scope="node",
                                 node_ids=completed_nodes,
@@ -3128,7 +3136,7 @@ class RunSwitchOperationService:
                 if assessment is None:
                     blockers.append(
                         _as_reason(
-                            "run-switch.uninstall-assessment-unavailable",
+                            RunSwitchCode.UNINSTALL_ASSESSMENT_UNAVAILABLE,
                             "The installation cannot be represented by a safe uninstall plan.",
                             scope="operation",
                             node_ids=node_ids,
@@ -3140,15 +3148,15 @@ class RunSwitchOperationService:
                     )
                     for blocker in assessment.blockers:
                         reason = _as_reason(
-                            "run-switch.uninstall-issued-prerequisite"
+                            RunSwitchCode.UNINSTALL_ISSUED_PREREQUISITE
                             if issued is not None
-                            and blocker.code == "uninstall.operation_active"
-                            else "run-switch.uninstall-blocked",
+                            and blocker.code == UninstallPlanCode.OPERATION_ACTIVE
+                            else RunSwitchCode.UNINSTALL_BLOCKED,
                             (
                                 "The prior issued uninstall will be cancelled and "
                                 "observed before this cleanup starts."
                                 if issued is not None
-                                and blocker.code == "uninstall.operation_active"
+                                and blocker.code == UninstallPlanCode.OPERATION_ACTIVE
                                 else f"{blocker.code}: {blocker.detail}"
                             ),
                             scope="operation",
@@ -3156,7 +3164,7 @@ class RunSwitchOperationService:
                             severity=(
                                 "warning"
                                 if issued is not None
-                                and blocker.code == "uninstall.operation_active"
+                                and blocker.code == UninstallPlanCode.OPERATION_ACTIVE
                                 else "blocker"
                             ),
                         )
@@ -3172,7 +3180,7 @@ class RunSwitchOperationService:
                     for warning in assessment.warnings:
                         warnings.append(
                             _as_reason(
-                                f"run-switch.{warning.code}",
+                                run_switch_code(warning.code),
                                 warning.detail,
                                 scope="operation",
                                 node_ids=node_ids,
@@ -3271,7 +3279,7 @@ class RunSwitchOperationService:
         _require_reviewed_plan(request.plan_digest, preview)
         if not preview.allowed and not _plan_blockers_are_waitable(preview):
             raise RunSwitchRequestInvalid(
-                "run-switch.plan_blocked: "
+                f"{RunSwitchCode.PLAN_BLOCKED}: "
                 + "; ".join(reason.code for reason in preview.blockers[:8])
             )
         return self._apply_plan(
@@ -3312,7 +3320,7 @@ class RunSwitchOperationService:
         _require_reviewed_plan(request.plan_digest, plan)
         if not plan.allowed and not _plan_blockers_are_waitable(plan):
             raise RunSwitchRequestInvalid(
-                "run-switch.plan_blocked: "
+                f"{RunSwitchCode.PLAN_BLOCKED}: "
                 + "; ".join(reason.code for reason in plan.blockers[:8])
             )
         return self._apply_plan(
@@ -3360,7 +3368,7 @@ class RunSwitchOperationService:
         _require_reviewed_plan(request.plan_digest, preview)
         if not preview.allowed and not _plan_blockers_are_waitable(preview):
             raise RunSwitchRequestInvalid(
-                "run-switch.plan_blocked: "
+                f"{RunSwitchCode.PLAN_BLOCKED}: "
                 + "; ".join(reason.code for reason in preview.blockers[:8])
             )
         return self._apply_plan(
@@ -3405,7 +3413,7 @@ class RunSwitchOperationService:
         )
         if not plan.allowed and not _plan_blockers_are_waitable(plan):
             raise RunSwitchRequestInvalid(
-                "run-switch.plan_blocked: "
+                f"{RunSwitchCode.PLAN_BLOCKED}: "
                 + "; ".join(reason.code for reason in plan.blockers[:8])
             )
         return self._apply_plan(
@@ -3610,7 +3618,7 @@ class RunSwitchOperationService:
                 for node in nodes
             ):
                 raise RunSwitchRequestInvalid(
-                    "run-switch.superseded: retry belongs to an obsolete workload intent",
+                    f"{RunSwitchCode.SUPERSEDED}: retry belongs to an obsolete workload intent",
                     reason=InvalidRequestReason.SUPERSEDED,
                 )
             retry_plan = _load_plan(previous.payload["plan"])
@@ -3827,7 +3835,7 @@ class RunSwitchOperationService:
                 ):
                     return
                 progress = _read_progress(job.result)
-                code = error_code(error) or "run-switch.advance-failed"
+                code = error_code(error) or RunSwitchCode.ADVANCE_FAILED
                 attempt = (
                     require_integer(progress.get("retry_attempt"), "retry attempt")
                     if progress.get("retry_reason") == code
@@ -3917,7 +3925,7 @@ class RunSwitchOperationService:
             if revision.state != "active" or revision.content_digest is None:
                 blockers.append(
                     _as_reason(
-                        "run-switch.recipe_unresolved",
+                        RunSwitchCode.RECIPE_UNRESOLVED,
                         "The selected recipe revision is not an immutable resolved revision.",
                         scope="recipe",
                     )
@@ -3943,7 +3951,7 @@ class RunSwitchOperationService:
             if recipe_model_digest != request.model_content_sha256:
                 blockers.append(
                     _as_reason(
-                        "run-switch.model_recipe_mismatch",
+                        RunSwitchCode.MODEL_RECIPE_MISMATCH,
                         "The selected model variant is not the model pinned by this recipe revision.",
                         scope="model",
                     )
@@ -4001,7 +4009,7 @@ class RunSwitchOperationService:
             ):
                 blockers.append(
                     _as_reason(
-                        "run-switch.mapping_materialization_unavailable",
+                        RunSwitchCode.MAPPING_MATERIALIZATION_UNAVAILABLE,
                         "No phase executor is configured to materialize a new exact Spark mapping.",
                         scope="mapping",
                         node_ids=node_ids,
@@ -4140,7 +4148,7 @@ class RunSwitchOperationService:
             if expected_image is not None and profile_application_id is not None:
                 if recipe_build_id != expected_image.build_id:
                     raise RunSwitchRequestInvalid(
-                        "profile.runtime-image-changed: selected build differs from the accepted image; review and load the profile again",
+                        f"{ProfileReasonCode.RUNTIME_IMAGE_CHANGED}: selected build differs from the accepted image; review and load the profile again",
                         reason=InvalidRequestReason.CONFLICT,
                     )
                 if runtime_storage.image_digest is not None:
@@ -4159,7 +4167,7 @@ class RunSwitchOperationService:
                 if self._phase_executor is None:
                     blockers.append(
                         _as_reason(
-                            "run-switch.installation_preparation_unavailable",
+                            RunSwitchCode.INSTALLATION_PREPARATION_UNAVAILABLE,
                             "No phase executor is configured to prepare this exact recipe on the selected group.",
                             scope="operation",
                             node_ids=node_ids,
@@ -4192,7 +4200,7 @@ class RunSwitchOperationService:
                 ) as error:
                     blockers.append(
                         _as_reason(
-                            "run-switch.run_admission_unavailable",
+                            RunSwitchCode.RUN_ADMISSION_UNAVAILABLE,
                             f"The exact run admission plan could not be produced: {error}",
                             scope="operation",
                             node_ids=node_ids,
@@ -4237,7 +4245,7 @@ class RunSwitchOperationService:
                     if remaining_admission_blockers:
                         blockers.append(
                             _as_reason(
-                                "run-switch.run_admission_blocked",
+                                RunSwitchCode.RUN_ADMISSION_BLOCKED,
                                 "The existing run admission primitive rejected one or more selected ranks.",
                                 scope="operation",
                                 node_ids=node_ids,
@@ -4285,7 +4293,7 @@ class RunSwitchOperationService:
             ):
                 blockers.append(
                     _as_reason(
-                        "run-switch.artifact-phase-executor-unavailable",
+                        RunSwitchCode.ARTIFACT_PHASE_EXECUTOR_UNAVAILABLE,
                         "Artifact transfer, verification, Spark-local cleanup, or Controller image preparation requires an injected cache boundary.",
                         scope="artifact",
                         node_ids=node_ids,
@@ -4403,7 +4411,7 @@ class RunSwitchOperationService:
         ):
             blockers.append(
                 _as_reason(
-                    "run-switch.recipe_digest_changed",
+                    RunSwitchCode.RECIPE_DIGEST_CHANGED,
                     "The selected recipe revision digest changed before planning.",
                     scope="recipe",
                     stale=True,
@@ -4444,7 +4452,7 @@ class RunSwitchOperationService:
             ):
                 blockers.append(
                     _as_reason(
-                        "run-switch.model_revision_unavailable",
+                        RunSwitchCode.MODEL_REVISION_UNAVAILABLE,
                         "The exact model definition selected for this run is not resolved in local catalog authority.",
                         scope="model",
                     )
@@ -4452,7 +4460,7 @@ class RunSwitchOperationService:
         except (RecipeRuntimeSpecError, RuntimeError, TypeError, ValueError):
             blockers.append(
                 _as_reason(
-                    "run-switch.recipe_dependencies_unavailable",
+                    RunSwitchCode.RECIPE_DEPENDENCIES_UNAVAILABLE,
                     "Exact model and runtime dependencies could not be resolved from immutable catalog authority.",
                     scope="recipe",
                 )
@@ -4480,7 +4488,7 @@ class RunSwitchOperationService:
                 None,
                 [
                     _as_reason(
-                        "run-switch.option_invalid",
+                        RunSwitchCode.OPTION_INVALID,
                         str(error),
                         scope="mapping",
                     )
@@ -4539,7 +4547,7 @@ class RunSwitchOperationService:
                 None,
                 [
                     _as_reason(
-                        "run-switch.mapping_invalid",
+                        RunSwitchCode.MAPPING_INVALID,
                         f"The selected Spark group cannot satisfy the exact recipe topology: {error}",
                         scope="mapping",
                         node_ids=desired_ids,
@@ -4556,7 +4564,7 @@ class RunSwitchOperationService:
                 None,
                 [
                     _as_reason(
-                        "run-switch.mapping_group_mismatch",
+                        RunSwitchCode.MAPPING_GROUP_MISMATCH,
                         "The selected Spark ranks and roles do not form the complete topology required by the recipe.",
                         scope="group",
                         node_ids=desired_ids,
@@ -4749,7 +4757,7 @@ class RunSwitchOperationService:
                 candidate=None,
                 blockers=(
                     _as_reason(
-                        "run-switch.container-build-unavailable",
+                        RunSwitchCode.CONTAINER_BUILD_UNAVAILABLE,
                         "The existing recipe build primitive is unavailable; the Controller cannot prepare the exact OCI runtime image.",
                         scope="operation",
                         node_ids=[node.node_id for node in group.nodes],
@@ -4822,7 +4830,7 @@ class RunSwitchOperationService:
             candidate=None,
             blockers=(
                 _as_reason(
-                    "run-switch.container-build-unavailable",
+                    RunSwitchCode.CONTAINER_BUILD_UNAVAILABLE,
                     detail,
                     scope="operation",
                     node_ids=[node.node_id for node in group.nodes],
@@ -4945,7 +4953,7 @@ class RunSwitchOperationService:
                 candidate_plan_valid = False
                 blockers.append(
                     _as_reason(
-                        "run-switch.container-build-plan-invalid",
+                        RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID,
                         "The persisted source-build plan is invalid.",
                         scope="operation",
                     )
@@ -5139,7 +5147,7 @@ class RunSwitchOperationService:
                 if (pending or defer_source_build) and source_state == "available":
                     warnings.append(
                         _as_reason(
-                            "run-switch.container-build-required",
+                            RunSwitchCode.CONTAINER_BUILD_REQUIRED,
                             (
                                 "The accepted runtime image needs cache repair before target transfer."
                                 if defer_source_build and not pending
@@ -5153,7 +5161,7 @@ class RunSwitchOperationService:
                 else:
                     blockers.append(
                         _as_reason(
-                            "run-switch.recipe-build-unavailable",
+                            RunSwitchCode.RECIPE_BUILD_UNAVAILABLE,
                             (
                                 "No successful immutable runtime image build is available."
                                 if candidate is None
@@ -5166,7 +5174,7 @@ class RunSwitchOperationService:
             if compatibility_state == "incompatible":
                 blockers.append(
                     _as_reason(
-                        "run-switch.recipe-build-incompatible",
+                        RunSwitchCode.RECIPE_BUILD_INCOMPATIBLE,
                         compatibility.detail
                         or "Runtime image architecture is incompatible with the selected group.",
                         scope="operation",
@@ -5176,7 +5184,7 @@ class RunSwitchOperationService:
             elif compatibility_state == "unknown":
                 warnings.append(
                     _as_reason(
-                        "run-switch.recipe-build-compatibility-unknown",
+                        RunSwitchCode.RECIPE_BUILD_COMPATIBILITY_UNKNOWN,
                         "The immutable build receipt does not include enough architecture evidence to prove compatibility.",
                         scope="operation",
                         severity="warning",
@@ -5362,7 +5370,7 @@ class RunSwitchOperationService:
                 and runtime_storage.missing_nas_bytes in (None, 0)
                 else "failed"
                 if any(
-                    reason.code == "run-switch.runtime-image-authorization-mismatch"
+                    reason.code == RunSwitchCode.RUNTIME_IMAGE_AUTHORIZATION_MISMATCH
                     for reason in reasons
                 )
                 else "missing"
@@ -5404,7 +5412,7 @@ class RunSwitchOperationService:
                         reason.detail[:256]
                         for reason in reasons
                         if reason.code
-                        == "run-switch.runtime-image-authorization-mismatch"
+                        == RunSwitchCode.RUNTIME_IMAGE_AUTHORIZATION_MISMATCH
                     ),
                     "The exact OCI archive is missing from Controller storage."
                     if runtime_storage.missing_nas_bytes not in (None, 0)
@@ -5527,7 +5535,7 @@ class RunSwitchOperationService:
                 continue
             if run_ids - wanted:
                 reason = _as_reason(
-                    "run-switch.cross-group_conflict",
+                    RunSwitchCode.CROSS_GROUP_CONFLICT,
                     "An active distributed run crosses the selected complete Spark group; partial stop is unsafe.",
                     scope="conflict",
                     node_ids=tuple(sorted(overlap)),
@@ -5537,7 +5545,7 @@ class RunSwitchOperationService:
                 continue
             if action == "run":
                 reason = _as_reason(
-                    "run-switch.active-run-conflict",
+                    RunSwitchCode.ACTIVE_RUN_CONFLICT,
                     "The selected Spark group already has an active workload and must be stopped before starting this outcome.",
                     scope="conflict",
                     severity="warning",
@@ -5558,7 +5566,7 @@ class RunSwitchOperationService:
                 stop_plan = None
             if stop_plan is None or not stop_plan.allowed:
                 reason = _as_reason(
-                    "run-switch.stop_plan_unavailable",
+                    RunSwitchCode.STOP_PLAN_UNAVAILABLE,
                     "The existing workload cannot be represented by a safe stop plan.",
                     scope="conflict",
                     node_ids=tuple(sorted(run_ids)),
@@ -5602,7 +5610,7 @@ class RunSwitchOperationService:
         """
         revision = _active_recipe_revision(session, request.recipe_revision_id)
         if revision is None:
-            raise RunSwitchRequestInvalid("run-switch.recipe_unresolved")
+            raise RunSwitchRequestInvalid(RunSwitchCode.RECIPE_UNRESOLVED)
         _, model_documents, blockers = self._resolve_documents(
             session,
             revision,
@@ -5864,7 +5872,7 @@ class RunSwitchOperationService:
                 except (TypeError, ValueError) as error:
                     node_blockers.append(
                         _as_reason(
-                            "run-switch.interface-invalid",
+                            RunSwitchCode.INTERFACE_INVALID,
                             str(error),
                             scope="recipe",
                             node_ids=(item.node_id,),
@@ -5890,7 +5898,7 @@ class RunSwitchOperationService:
             if snapshot is None:
                 node_blockers.append(
                     _as_reason(
-                        "run-switch.inventory-unknown",
+                        RunSwitchCode.INVENTORY_UNKNOWN,
                         "No authenticated Spark inventory is available.",
                         scope="freshness",
                         node_ids=(item.node_id,),
@@ -5899,7 +5907,7 @@ class RunSwitchOperationService:
             elif evidence.state == "stale":
                 node_blockers.append(
                     _as_reason(
-                        "run-switch.inventory-stale",
+                        RunSwitchCode.INVENTORY_STALE,
                         "Spark inventory is older than the Run/Switch freshness policy.",
                         scope="freshness",
                         node_ids=(item.node_id,),
@@ -5910,7 +5918,7 @@ class RunSwitchOperationService:
             if agent is None or agent.state != "active" or agent.revoked_at is not None:
                 node_blockers.append(
                     _as_reason(
-                        "run-switch.spark-unavailable",
+                        RunSwitchCode.SPARK_UNAVAILABLE,
                         "Selected Spark is not active in Controller authority.",
                         scope="node",
                         node_ids=(item.node_id,),
@@ -5923,7 +5931,7 @@ class RunSwitchOperationService:
             ):
                 node_blockers.append(
                     _as_reason(
-                        "run-switch.agent-upgrade-required",
+                        RunSwitchCode.AGENT_UPGRADE_REQUIRED,
                         AGENT_UPGRADE_REQUIRED_DETAIL,
                         scope="node",
                         node_ids=(item.node_id,),
@@ -5946,7 +5954,7 @@ class RunSwitchOperationService:
             if memory is None or disk is None:
                 node_blockers.append(
                     _as_reason(
-                        "run-switch.resource-contract-invalid",
+                        RunSwitchCode.RESOURCE_CONTRACT_INVALID,
                         "The selected recipe role does not contain an exact disk and memory envelope.",
                         scope="recipe",
                         node_ids=(item.node_id,),
@@ -5968,7 +5976,7 @@ class RunSwitchOperationService:
                     except (TypeError, ValueError) as error:
                         node_blockers.append(
                             _as_reason(
-                                "run-switch.memory-envelope-invalid",
+                                RunSwitchCode.MEMORY_ENVELOPE_INVALID,
                                 str(error),
                                 scope="recipe",
                                 node_ids=(item.node_id,),
@@ -6124,7 +6132,7 @@ class RunSwitchOperationService:
                 except (TypeError, ValueError):
                     node_blockers.append(
                         _as_reason(
-                            "run-switch.disk-envelope-invalid",
+                            RunSwitchCode.DISK_ENVELOPE_INVALID,
                             "The recipe disk envelope is incomplete.",
                             scope="recipe",
                             node_ids=(item.node_id,),
@@ -6169,7 +6177,7 @@ class RunSwitchOperationService:
                             if evictable >= -disk_free_after:
                                 node_warnings.append(
                                     _as_reason(
-                                        "run-switch.disk-eviction-planned",
+                                        RunSwitchCode.DISK_EVICTION_PLANNED,
                                         f"The operation needs {required_disk} bytes and "
                                         f"{-disk_free_after} more must be freed on "
                                         "this Spark: "
@@ -6184,7 +6192,7 @@ class RunSwitchOperationService:
                             else:
                                 node_blockers.append(
                                     _as_reason(
-                                        "run-switch.insufficient-disk",
+                                        RunSwitchCode.INSUFFICIENT_DISK,
                                         f"The operation needs {required_disk} bytes and would leave {disk_free_after} bytes."
                                         + (f" Disk is {holders}." if holders else "")
                                         + f" Only {evictable} bytes of unused installations can be removed. "
@@ -6301,7 +6309,7 @@ class RunSwitchOperationService:
                 reclaimable_digests=(),
                 blockers=(
                     _as_reason(
-                        "run-switch.artifact-identity-unknown",
+                        RunSwitchCode.ARTIFACT_IDENTITY_UNKNOWN,
                         "The exact model artifact identity is unavailable.",
                         scope="artifact",
                     ),
@@ -6330,7 +6338,7 @@ class RunSwitchOperationService:
                 reclaimable_digests=(),
                 blockers=(
                     _as_reason(
-                        "run-switch.artifact-inspection-unavailable",
+                        RunSwitchCode.ARTIFACT_INSPECTION_UNAVAILABLE,
                         f"Artifact coverage could not be inspected: {error}",
                         scope="artifact",
                     ),
@@ -6359,7 +6367,7 @@ class RunSwitchOperationService:
                 blockers=(
                     *inspection.blockers,
                     _as_reason(
-                        "run-switch.nas-coverage-unknown",
+                        RunSwitchCode.NAS_COVERAGE_UNKNOWN,
                         "Spark copies are missing but NAS coverage is unknown; the Controller cannot promise a reusable source.",
                         scope="artifact",
                     ),
@@ -6378,7 +6386,7 @@ class RunSwitchOperationService:
                 blockers=(
                     *inspection.blockers,
                     _as_reason(
-                        "run-switch.artifact-manifest-unknown",
+                        RunSwitchCode.ARTIFACT_MANIFEST_UNKNOWN,
                         "The authoritative complete model artifact set and byte manifest are unavailable.",
                         scope="artifact",
                     ),
@@ -6801,7 +6809,7 @@ class RunSwitchOperationService:
             if existing is not None:
                 if existing.kind != kind or not _same_intent(existing, intent):
                     raise RunSwitchRequestInvalid(
-                        "run-switch.request_key_reused_differently",
+                        RunSwitchCode.REQUEST_KEY_REUSED_DIFFERENTLY,
                         reason=InvalidRequestReason.CONFLICT,
                     )
                 return self._operation_view(existing)
@@ -6831,7 +6839,7 @@ class RunSwitchOperationService:
                 )
             ):
                 raise RunSwitchRequestInvalid(
-                    "run-switch.superseded: Spark scope has a later workload intent",
+                    f"{RunSwitchCode.SUPERSEDED}: Spark scope has a later workload intent",
                     reason=InvalidRequestReason.SUPERSEDED,
                 )
             payload["workload_intent_ordinal"] = workload_intent_ordinal
@@ -6902,7 +6910,7 @@ class RunSwitchOperationService:
                 return None
             if existing.kind != kind or not _same_intent(existing, intent):
                 raise RunSwitchRequestInvalid(
-                    "run-switch.request_key_reused_differently",
+                    RunSwitchCode.REQUEST_KEY_REUSED_DIFFERENTLY,
                     reason=InvalidRequestReason.CONFLICT,
                 )
             return self._operation_view(existing)
@@ -7068,11 +7076,11 @@ class RunSwitchOperationService:
                 )
             else:
                 reasons = (
-                    "run-switch.plan-targets-changed"
+                    RunSwitchCode.PLAN_TARGETS_CHANGED
                     if targets_changed
                     else "; ".join(reason.code for reason in refreshed.blockers[:8])
                     if refreshed is not None
-                    else "run-switch.plan-refresh-unavailable"
+                    else RunSwitchCode.PLAN_REFRESH_UNAVAILABLE
                 )
                 _ADAPTER.retry(
                     current,
@@ -7161,7 +7169,7 @@ class RunSwitchOperationService:
                 _ADAPTER.retry(
                     job,
                     progress,
-                    "run-switch.target-not-active",
+                    RunSwitchCode.TARGET_NOT_ACTIVE,
                     now,
                     visible=_OBSERVING,
                     record_reason=False,
@@ -7180,7 +7188,7 @@ class RunSwitchOperationService:
                     progress,
                     now,
                     reason=(
-                        "run-switch.superseded: the logical order was cancelled by "
+                        f"{RunSwitchCode.SUPERSEDED}: the logical order was cancelled by "
                         "a later authorized Spark intent; issued effects still "
                         "require their own cancellation receipts"
                     ),
@@ -7930,7 +7938,7 @@ class RunSwitchOperationService:
             and phase.kind != "final_verify"
             and not (phase.kind == "prepare" and phase.subphase == "runtime-image")
         ):
-            fail(f"run-switch.{phase.kind}-waiting-without-child", replan=True)
+            fail(run_switch_code(f"{phase.kind}-waiting-without-child"), replan=True)
             return True
         if (
             execution.operation_id is None
@@ -8006,7 +8014,7 @@ class RunSwitchOperationService:
                     ):
                         self._mark_failed(
                             job,
-                            "run-switch.final-verification-clock-invalid",
+                            RunSwitchCode.FINAL_VERIFICATION_CLOCK_INVALID,
                             now=now,
                             progress=progress,
                         )
@@ -8079,7 +8087,7 @@ class RunSwitchOperationService:
                                 failed_node.updated_at = now
                             run.updated_at = now
                         reason = (
-                            "run-switch.final-verification-timeout: exact run and "
+                            f"{RunSwitchCode.FINAL_VERIFICATION_TIMEOUT}: exact run and "
                             "route evidence did not arrive within 15 minutes; the "
                             "route is withdrawn and exact workload recovery has "
                             "been queued"
@@ -8088,7 +8096,7 @@ class RunSwitchOperationService:
                             job,
                             reason,
                             now=now,
-                            failure_code="run-switch.final-verification-timeout",
+                            failure_code=RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
                             progress=progress,
                         )
                         return True
@@ -8105,7 +8113,7 @@ class RunSwitchOperationService:
                             "run and route owners have not produced exact final evidence"
                         )
                         job.status_reason = (
-                            "run-switch.final-verification-expired: accepted start "
+                            f"{RunSwitchCode.FINAL_VERIFICATION_EXPIRED}: accepted start "
                             f"deadline {start_deadline.isoformat()} passed; "
                             f"{owner_reason[:220]}; exact reconciliation retains the "
                             f"run and reservations; next observation at {due.isoformat()}"
@@ -8121,7 +8129,7 @@ class RunSwitchOperationService:
                         if not (
                             isinstance(previous_status_reason, str)
                             and previous_status_reason.startswith(
-                                "run-switch.final-verification-expired:"
+                                f"{RunSwitchCode.FINAL_VERIFICATION_EXPIRED}:"
                             )
                         ):
                             phase_evidence = execution.result or {}
@@ -8339,12 +8347,12 @@ class RunSwitchOperationService:
                 _ADAPTER.retry(
                     job,
                     progress,
-                    "run-switch.start-observation-expired",
+                    RunSwitchCode.START_OBSERVATION_EXPIRED,
                     now,
                     visible=_OBSERVING,
                     record_reason=False,
                     describe=lambda due: (
-                        "run-switch.start-observation-expired: exact effect remains "
+                        f"{RunSwitchCode.START_OBSERVATION_EXPIRED}: exact effect remains "
                         f"unresolved; next observation at {due.isoformat()}"
                     ),
                 )
@@ -9252,7 +9260,7 @@ def _require_profile_runtime_image(
     ]
     if changes:
         raise _RunSwitchDefiniteConflict(
-            "profile.runtime-image-changed: "
+            f"{ProfileReasonCode.RUNTIME_IMAGE_CHANGED}: "
             + ", ".join(changes)
             + " differs from the accepted image; review and load the profile again"
         )
@@ -9269,7 +9277,7 @@ def _build_receipt_in_session(
     build_id = plan.recipe_build_id or plan.build.build_id
     if build_id is None:
         raise RunSwitchRetryLater(
-            "run-switch.container-build-receipt-unavailable",
+            RunSwitchCode.CONTAINER_BUILD_RECEIPT_UNAVAILABLE,
             reason=WaitReason.RECEIPT_MISSING,
         )
     build = session.get(RecipeBuild, build_id)
@@ -9283,7 +9291,7 @@ def _build_receipt_in_session(
         or build.image_bytes < 1
     ):
         raise RunSwitchRetryLater(
-            "run-switch.container-build-receipt-unavailable",
+            RunSwitchCode.CONTAINER_BUILD_RECEIPT_UNAVAILABLE,
             reason=WaitReason.RECEIPT_MISSING,
         )
     if expected_image is not None:
@@ -9402,10 +9410,10 @@ _WAIT_CODE = re.compile(
 
 
 _WAIT_PHRASES = (
-    ("Waiting for a target Spark", "run-switch.target-not-active"),
-    ("Runtime image preparation", "run-switch.runtime-image-preparing"),
-    ("Waiting for exact run and route", "run-switch.final-verification"),
-    ("Lifecycle effect is uncertain", "run-switch.effect-uncertain"),
+    ("Waiting for a target Spark", RunSwitchCode.TARGET_NOT_ACTIVE),
+    ("Runtime image preparation", RunSwitchCode.RUNTIME_IMAGE_PREPARING),
+    ("Waiting for exact run and route", RunSwitchCode.FINAL_VERIFICATION),
+    ("Lifecycle effect is uncertain", RunSwitchCode.EFFECT_UNCERTAIN),
 )
 
 
@@ -9429,7 +9437,7 @@ def _wait_blockers(job: Job, progress: Mapping[str, object]) -> list[OperationBl
     ):
         return [
             make_blocker(
-                _wait_code(reason, "run-switch.waiting"),
+                _wait_code(reason, RunSwitchCode.WAITING),
                 reason or "waiting for the next check",
                 node_ids=nodes,
             )
@@ -9459,7 +9467,7 @@ def _wait_blockers(job: Job, progress: Mapping[str, object]) -> list[OperationBl
     if job.state == "running" and reason.startswith("Start result uncertain"):
         return [
             make_blocker(
-                "run-switch.start-observation",
+                RunSwitchCode.START_OBSERVATION,
                 reason,
                 severity="info",
                 node_ids=nodes,
@@ -9709,7 +9717,7 @@ def _same_intent(existing: Job, intent: Mapping[str, object] | None) -> bool:
 def _require_reviewed_plan(reviewed_digest: str | None, plan: RunSwitchPlan) -> None:
     if reviewed_digest is not None and reviewed_digest != plan.plan_digest:
         raise RunSwitchRequestInvalid(
-            "run-switch.stale_plan: effects changed; review the current plan",
+            f"{RunSwitchCode.STALE_PLAN}: effects changed; review the current plan",
             reason=InvalidRequestReason.SUPERSEDED,
         )
 
@@ -9842,7 +9850,7 @@ def _lock_current_build_parent(
         plan.phases[phase_index].state,
     ) != ("prepare", "container-build", "planned"):
         raise RunSwitchRetryLater(
-            "run-switch.container-build-plan-invalid", reason=WaitReason.STALE_PLAN
+            RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID, reason=WaitReason.STALE_PLAN
         )
     targets = {node.node_id for node in plan.spark_group.nodes}
     locked_nodes = targets | (
@@ -9872,17 +9880,17 @@ def _lock_current_build_parent(
         or job.payload.get("workload_intent_ordinal") != ordinal
     ):
         raise RunSwitchRetryLater(
-            "run-switch.container-build-parent-invalid",
+            RunSwitchCode.CONTAINER_BUILD_PARENT_INVALID,
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     if _load_plan(job.payload["plan"]) != plan:
         raise RunSwitchRetryLater(
-            "run-switch.container-build-plan-invalid", reason=WaitReason.STALE_PLAN
+            RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID, reason=WaitReason.STALE_PLAN
         )
     current = _read_progress(job.result)
     if _bound_workload_intent(current) != ordinal:
         raise RunSwitchRetryLater(
-            "run-switch.container-build-parent-invalid",
+            RunSwitchCode.CONTAINER_BUILD_PARENT_INVALID,
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     if (
@@ -9890,7 +9898,7 @@ def _lock_current_build_parent(
         or current.get("cancellation") != cancellation
         or RunSwitchOperationService._scope_intent_status(session, job) != "current"
     ):
-        raise _RunSwitchBuildParentChanged("run-switch.container-build-parent-changed")
+        raise _RunSwitchBuildParentChanged(RunSwitchCode.CONTAINER_BUILD_PARENT_CHANGED)
     return job
 
 
@@ -10324,7 +10332,7 @@ def _validate_artifact_execution(
             )
         except (TypeError, ValidationError) as error:
             raise RunSwitchRetryLater(
-                "run-switch.runtime-image-preparation-receipt-invalid",
+                RunSwitchCode.RUNTIME_IMAGE_PREPARATION_RECEIPT_INVALID,
                 reason=WaitReason.RECEIPT_MISSING,
             ) from error
         image_digest = receipt.image_digest
@@ -10353,7 +10361,7 @@ def _validate_artifact_execution(
             )
         if "archive_sha256" in differing:
             raise RunSwitchRetryLater(
-                "run-switch.runtime-image-preparation-layout-mismatch",
+                RunSwitchCode.RUNTIME_IMAGE_PREPARATION_LAYOUT_MISMATCH,
                 reason=WaitReason.SCOPE_CHANGED,
             )
         return
@@ -10366,11 +10374,11 @@ def _validate_artifact_execution(
         )
         if result.get("artifact_set_sha256") != expected_set:
             raise RunSwitchRetryLater(
-                "run-switch.model-download-artifact-set-mismatch",
+                RunSwitchCode.MODEL_DOWNLOAD_ARTIFACT_SET_MISMATCH,
                 reason=WaitReason.SCOPE_CHANGED,
             )
         if result.get("coverage") != "complete":
-            raise RunSwitchRetryLater("run-switch.model-download-coverage-incomplete")
+            raise RunSwitchRetryLater(RunSwitchCode.MODEL_DOWNLOAD_COVERAGE_INCOMPLETE)
         expected_bytes = (
             preparation.model.artifact_set_bytes
             if preparation is not None
@@ -10396,7 +10404,7 @@ def _validate_artifact_execution(
             )
         if not valid_bytes:
             raise RunSwitchRetryLater(
-                "run-switch.model-download-byte-evidence-mismatch",
+                RunSwitchCode.MODEL_DOWNLOAD_BYTE_EVIDENCE_MISMATCH,
                 reason=WaitReason.SCOPE_CHANGED,
             )
         return
@@ -10415,11 +10423,11 @@ def _validate_artifact_execution(
                 and result.get("verified_build_id") != plan.recipe_build_id
             ):
                 raise RunSwitchRetryLater(
-                    "run-switch.runtime-build-verification-mismatch",
+                    RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
                     reason=WaitReason.SCOPE_CHANGED,
                 ) from error
             raise RunSwitchRetryLater(
-                "run-switch.artifact-verification-result-invalid",
+                RunSwitchCode.ARTIFACT_VERIFICATION_RESULT_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         result = verification.model_dump(mode="python")
@@ -10432,13 +10440,13 @@ def _validate_artifact_execution(
             # output digest at preview time.  The distribution adapter must
             # bind its verification receipt to the exact durable build row.
             raise RunSwitchRetryLater(
-                "run-switch.runtime-build-verification-mismatch",
+                RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
                 reason=WaitReason.SCOPE_CHANGED,
             )
     elif phase.kind == "cleanup":
         if result.get("scope") != "spark-local":
             raise RunSwitchRetryLater(
-                "run-switch.cleanup-scope-invalid", reason=WaitReason.SCOPE_CHANGED
+                RunSwitchCode.CLEANUP_SCOPE_INVALID, reason=WaitReason.SCOPE_CHANGED
             )
         if result.get("nas_evicted") is True:
             raise RunSwitchRefused(
@@ -10447,13 +10455,13 @@ def _validate_artifact_execution(
         reclaimed = result.get("reclaimed_bytes")
         if type(reclaimed) is not int or reclaimed < 0:
             raise RunSwitchRetryLater(
-                "run-switch.cleanup-reclaim-evidence-invalid",
+                RunSwitchCode.CLEANUP_RECLAIM_EVIDENCE_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         protected_bytes = result.get("protected_referenced_bytes")
         if type(protected_bytes) is not int or protected_bytes < 0:
             raise RunSwitchRetryLater(
-                "run-switch.cleanup-reference-protection-evidence-invalid",
+                RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         raw_reclaimed = result.get("reclaimed_digests")
@@ -10468,13 +10476,15 @@ def _validate_artifact_execution(
             or len(set(raw_protected)) != len(raw_protected)
         ):
             raise RunSwitchRetryLater(
-                "run-switch.cleanup-reference-protection-evidence-invalid",
+                RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         reclaimed_digests = set(raw_reclaimed)
         protected_digests = set(raw_protected)
         if reclaimed_digests & protected_digests:
-            raise RunSwitchRetryLater("run-switch.cleanup-reference-protection-overlap")
+            raise RunSwitchRetryLater(
+                RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_OVERLAP
+            )
         allowed_reclaimable = set(plan.storage.reclaimable_digests)
         allowed_reclaimable.update(plan.runtime_storage.reclaimable_digests)
         if not reclaimed_digests <= allowed_reclaimable:
@@ -10486,14 +10496,14 @@ def _validate_artifact_execution(
         )
         if reclaimed > maximum_reclaimable:
             raise RunSwitchRetryLater(
-                "run-switch.cleanup-reclaimed-bytes-exceed-plan",
+                RunSwitchCode.CLEANUP_RECLAIMED_BYTES_EXCEED_PLAN,
                 reason=WaitReason.STALE_PLAN,
             )
     elif phase.kind == "transfer":
         copied = result.get("copied_bytes")
         if copied is not None and (type(copied) is not int or copied < 0):
             raise RunSwitchRetryLater(
-                "run-switch.transfer-byte-evidence-invalid",
+                RunSwitchCode.TRANSFER_BYTE_EVIDENCE_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
 
@@ -10769,7 +10779,7 @@ def _persist_run_switch_runtime_image_reference(
             )
             if state in {"55P03", "40P01", "40001"}:
                 raise RuntimeImagePreparationUnknown(
-                    "artifact.reference_busy",
+                    ArtifactLifecycleCode.REFERENCE_BUSY,
                     "RunSwitch target ownership is changing; image publication will retry",
                     retryable=True,
                 ) from error
@@ -10803,7 +10813,7 @@ def _persist_run_switch_runtime_image_reference(
             )
             if state in {"55P03", "40P01", "40001"}:
                 raise RuntimeImagePreparationUnknown(
-                    "artifact.reference_busy",
+                    ArtifactLifecycleCode.REFERENCE_BUSY,
                     "RunSwitch operation ownership is changing; image publication will retry",
                     retryable=True,
                 ) from error

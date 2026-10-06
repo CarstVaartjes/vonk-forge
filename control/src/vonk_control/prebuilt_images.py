@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    PrebuiltImageCode,
     canonical_message,
 )
 from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
@@ -70,10 +71,10 @@ _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
 # Why a plan did or did not use the catalog's prebuilt image.  The codes are
 # stable: they are stored with the build, logged, and shown as operation
 # blockers, so an operator can tell a Spark build from an image pull.
-PREBUILT_USED = "prebuilt.used"
-PREBUILT_NOT_PINNED = "prebuilt.not_pinned"
-PREBUILT_KEY_MISMATCH = "prebuilt.build_key_mismatch"
-PREBUILT_RECENT_PULL_FAILURE = "prebuilt.pull_failed_recently"
+PREBUILT_USED = PrebuiltImageCode.USED
+PREBUILT_NOT_PINNED = PrebuiltImageCode.NOT_PINNED
+PREBUILT_KEY_MISMATCH = PrebuiltImageCode.BUILD_KEY_MISMATCH
+PREBUILT_RECENT_PULL_FAILURE = PrebuiltImageCode.PULL_FAILED_RECENTLY
 
 
 @dataclass(frozen=True, slots=True)

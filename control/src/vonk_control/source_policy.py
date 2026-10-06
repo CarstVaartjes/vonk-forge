@@ -11,6 +11,10 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 import yaml
+from vonk_agent_protocol import (
+    SourceBundleCode,
+    SourcePolicyCode,
+)
 
 from .source_bundles import GeneratedSourceBundle
 
@@ -76,7 +80,7 @@ def inspect_build_source_policy(
     if expected != bundle.sha256:
         findings.append(
             SourcePolicyFinding(
-                "source.digest_mismatch",
+                SourceBundleCode.DIGEST_MISMATCH_,
                 dockerfile_path,
                 None,
                 "recipe source digest does not match the canonical bundle",
@@ -86,7 +90,7 @@ def inspect_build_source_policy(
     if payload is None:
         findings.append(
             SourcePolicyFinding(
-                "dockerfile.missing",
+                SourcePolicyCode.MISSING,
                 dockerfile_path,
                 None,
                 "recipe Dockerfile is missing from the source bundle",
@@ -156,7 +160,9 @@ def _inspect_dockerfile(
         text = payload.decode("utf-8")
     except UnicodeDecodeError:
         return [
-            _finding("dockerfile.invalid_utf8", path, None, "Dockerfile must be UTF-8")
+            _finding(
+                SourcePolicyCode.INVALID_UTF8, path, None, "Dockerfile must be UTF-8"
+            )
         ]
     findings: list[SourcePolicyFinding] = []
     aliases: set[str] = set()
@@ -167,7 +173,7 @@ def _inspect_dockerfile(
         if upper in {"RUN", "COPY", "ADD"} and _has_heredoc(argument):
             findings.append(
                 _finding(
-                    "dockerfile.heredoc_forbidden",
+                    SourcePolicyCode.HEREDOC_FORBIDDEN,
                     path,
                     line_number,
                     "Dockerfile heredocs are not accepted",
@@ -183,7 +189,7 @@ def _inspect_dockerfile(
             if pinned is not None and pinned.group(1) == "0" * 64:
                 findings.append(
                     _finding(
-                        "dockerfile.base_placeholder",
+                        SourcePolicyCode.BASE_PLACEHOLDER,
                         path,
                         line_number,
                         "replace the all-zero base-image placeholder with a verified linux/arm64 digest",
@@ -192,7 +198,7 @@ def _inspect_dockerfile(
             elif base != "scratch" and pinned is None:
                 findings.append(
                     _finding(
-                        "dockerfile.base_unpinned",
+                        SourcePolicyCode.BASE_UNPINNED,
                         path,
                         line_number,
                         "every base image must be pinned by sha256 digest",
@@ -205,7 +211,7 @@ def _inspect_dockerfile(
         elif upper == "ADD":
             findings.append(
                 _finding(
-                    "dockerfile.add_forbidden",
+                    SourcePolicyCode.ADD_FORBIDDEN,
                     path,
                     line_number,
                     "ADD is forbidden; use bounded local COPY",
@@ -214,7 +220,7 @@ def _inspect_dockerfile(
         elif upper == "ONBUILD":
             findings.append(
                 _finding(
-                    "dockerfile.onbuild_forbidden",
+                    SourcePolicyCode.ONBUILD_FORBIDDEN,
                     path,
                     line_number,
                     "ONBUILD may hide deferred build instructions",
@@ -227,7 +233,7 @@ def _inspect_dockerfile(
                 if host is None or host.lower() not in allowed_hosts:
                     findings.append(
                         _finding(
-                            "dockerfile.network_host",
+                            SourcePolicyCode.NETWORK_HOST,
                             path,
                             line_number,
                             "Dockerfile URL host is outside the declared build allowlist",
@@ -236,7 +242,7 @@ def _inspect_dockerfile(
             if re.search(r"--mount\s*=\s*type\s*=\s*(?:secret|ssh)", lowered):
                 findings.append(
                     _finding(
-                        "dockerfile.secret_mount",
+                        SourcePolicyCode.SECRET_MOUNT,
                         path,
                         line_number,
                         "secret and SSH build mounts are forbidden",
@@ -245,7 +251,7 @@ def _inspect_dockerfile(
             if "--network=host" in lowered or "--security=insecure" in lowered:
                 findings.append(
                     _finding(
-                        "dockerfile.build_privilege",
+                        SourcePolicyCode.BUILD_PRIVILEGE,
                         path,
                         line_number,
                         "host networking and insecure build execution are forbidden",
@@ -256,7 +262,7 @@ def _inspect_dockerfile(
     if not saw_from:
         findings.append(
             _finding(
-                "dockerfile.from_missing",
+                SourcePolicyCode.FROM_MISSING,
                 path,
                 None,
                 "Dockerfile must declare a base stage",
@@ -265,7 +271,7 @@ def _inspect_dockerfile(
     if final_user is None or _NON_ROOT_USER.fullmatch(final_user[0]) is None:
         findings.append(
             _finding(
-                "dockerfile.root_user",
+                SourcePolicyCode.ROOT_USER,
                 path,
                 final_user[1] if final_user else None,
                 "the final image stage must select an explicit numeric non-root user",
@@ -359,7 +365,7 @@ def _inspect_copy(
     except (json.JSONDecodeError, ValueError):
         return [
             _finding(
-                "dockerfile.copy_invalid",
+                SourcePolicyCode.COPY_INVALID,
                 path,
                 line,
                 "COPY syntax cannot be reviewed safely",
@@ -370,7 +376,7 @@ def _inspect_copy(
     ):
         return [
             _finding(
-                "dockerfile.copy_invalid",
+                SourcePolicyCode.COPY_INVALID,
                 path,
                 line,
                 "COPY syntax cannot be reviewed safely",
@@ -386,7 +392,7 @@ def _inspect_copy(
             if pinned is not None and pinned.group(1) == "0" * 64:
                 findings.append(
                     _finding(
-                        "dockerfile.copy_base_placeholder",
+                        SourcePolicyCode.COPY_BASE_PLACEHOLDER,
                         path,
                         line,
                         "replace the all-zero external COPY placeholder with a verified digest",
@@ -395,7 +401,7 @@ def _inspect_copy(
             elif source not in aliases and pinned is None:
                 findings.append(
                     _finding(
-                        "dockerfile.copy_base_unpinned",
+                        SourcePolicyCode.COPY_BASE_UNPINNED,
                         path,
                         line,
                         "external COPY stage must be digest-pinned",
@@ -413,7 +419,7 @@ def _inspect_copy(
         ):
             findings.append(
                 _finding(
-                    "dockerfile.copy_path",
+                    SourcePolicyCode.COPY_PATH,
                     path,
                     line,
                     "COPY source must stay within the canonical context",
@@ -426,7 +432,10 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
     if len(payload) > 256 * 1024:
         return [
             _finding(
-                "compose.too_large", path, None, "Compose policy input exceeds 256 KiB"
+                SourcePolicyCode.TOO_LARGE,
+                path,
+                None,
+                "Compose policy input exceeds 256 KiB",
             )
         ]
     try:
@@ -434,7 +443,7 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
     except (UnicodeDecodeError, yaml.YAMLError):
         return [
             _finding(
-                "compose.invalid",
+                SourcePolicyCode.INVALID,
                 path,
                 None,
                 "Compose document is not valid UTF-8 YAML",
@@ -445,7 +454,7 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
     ):
         return [
             _finding(
-                "compose.invalid",
+                SourcePolicyCode.INVALID,
                 path,
                 None,
                 "Compose document must contain a services mapping",
@@ -457,7 +466,7 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
         if not isinstance(raw_service, Mapping):
             findings.append(
                 _finding(
-                    "compose.service_invalid",
+                    SourcePolicyCode.SERVICE_INVALID,
                     service_path,
                     None,
                     "Compose service must be a mapping",
@@ -467,7 +476,7 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
         if raw_service.get("privileged") is True:
             findings.append(
                 _finding(
-                    "compose.privileged",
+                    SourcePolicyCode.PRIVILEGED,
                     service_path,
                     None,
                     "privileged Compose services are forbidden",
@@ -477,7 +486,7 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
             if raw_service.get(key) == "host":
                 findings.append(
                     _finding(
-                        "compose.host_namespace",
+                        SourcePolicyCode.HOST_NAMESPACE,
                         service_path,
                         None,
                         f"host {key} is forbidden",
@@ -486,7 +495,7 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
         if raw_service.get("cap_add"):
             findings.append(
                 _finding(
-                    "compose.capabilities",
+                    SourcePolicyCode.CAPABILITIES,
                     service_path,
                     None,
                     "added Linux capabilities are forbidden",
@@ -495,7 +504,7 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
         if raw_service.get("devices"):
             findings.append(
                 _finding(
-                    "compose.devices",
+                    SourcePolicyCode.DEVICES,
                     service_path,
                     None,
                     "Compose device passthrough is not a build input",
@@ -509,7 +518,7 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
         ):
             findings.append(
                 _finding(
-                    "compose.unconfined",
+                    SourcePolicyCode.UNCONFINED,
                     service_path,
                     None,
                     "unconfined security profiles are forbidden",
@@ -525,7 +534,10 @@ def _inspect_compose_volumes(path: str, volumes: object) -> list[SourcePolicyFin
     if not isinstance(volumes, list):
         return [
             _finding(
-                "compose.volumes_invalid", path, None, "Compose volumes must be a list"
+                SourcePolicyCode.VOLUMES_INVALID,
+                path,
+                None,
+                "Compose volumes must be a list",
             )
         ]
     findings: list[SourcePolicyFinding] = []
@@ -543,7 +555,7 @@ def _inspect_compose_volumes(path: str, volumes: object) -> list[SourcePolicyFin
         else:
             findings.append(
                 _finding(
-                    "compose.volumes_invalid",
+                    SourcePolicyCode.VOLUMES_INVALID,
                     path,
                     None,
                     "Compose volume syntax is invalid",
@@ -553,7 +565,7 @@ def _inspect_compose_volumes(path: str, volumes: object) -> list[SourcePolicyFin
         if host_bind or socket:
             findings.append(
                 _finding(
-                    "compose.host_bind",
+                    SourcePolicyCode.HOST_BIND,
                     path,
                     None,
                     "host bind mounts and container-engine sockets are forbidden",

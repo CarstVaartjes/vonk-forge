@@ -70,7 +70,11 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    LifecycleState,
+    RunSwitchCode,
+    canonical_message,
+)
 
 from . import job_states, model_cache_states
 from .artifact_lifecycle import (
@@ -218,8 +222,8 @@ _KEPT_WORDS = {
 
 _STORAGE_WAIT_CODES = frozenset(
     {
-        "run-switch.insufficient-disk",
-        "run-switch.disk-eviction-planned",
+        RunSwitchCode.INSUFFICIENT_DISK,
+        RunSwitchCode.DISK_EVICTION_PLANNED,
         STORAGE_EVICTING,
         STORAGE_INSUFFICIENT,
     }

@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 from sqlalchemy import select
+from vonk_agent_protocol import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from .failure_classification import is_security_failure
@@ -155,12 +156,12 @@ class LifecyclePreflight:
                     return (
                         checkpoint,
                         (
-                            "runtime_preflight.node_missing: node was removed from "
+                            f"{RuntimePreflightCode.NODE_MISSING}: node was removed from "
                             "Controller authority"
                         ),
                     )
                 if node.revoked_at is not None:
-                    return checkpoint, "runtime_preflight.node_revoked"
+                    return checkpoint, RuntimePreflightCode.NODE_REVOKED
                 request = recipe_requirements(
                     document,
                     source_build=source_build,
@@ -191,7 +192,7 @@ class LifecyclePreflight:
                         continue
                     child = session.get(Job, checkpoint.pending_job_id)
                     if child is None:
-                        return retry_probe(node_id, "runtime_preflight.child_missing")
+                        return retry_probe(node_id, RuntimePreflightCode.CHILD_MISSING)
                     operation = session.scalar(
                         select(AgentOperation).where(
                             AgentOperation.parent_job_id == child.id,
@@ -200,7 +201,7 @@ class LifecyclePreflight:
                     )
                     if operation is None:
                         return retry_probe(
-                            node_id, "runtime_preflight.operation_missing"
+                            node_id, RuntimePreflightCode.OPERATION_MISSING
                         )
                     if child.state in {"queued", "running"}:
                         created_at = child.created_at
@@ -227,15 +228,20 @@ class LifecyclePreflight:
                         # Classify on the typed code only; status_reason is prose.
                         return retry_probe(
                             node_id,
-                            child.status_reason or "runtime_preflight.execution_failed",
+                            child.status_reason
+                            or RuntimePreflightCode.EXECUTION_FAILED,
                             _child_error_code(raw),
                         )
                     if raw is None:
-                        return retry_probe(node_id, "runtime_preflight.receipt_missing")
+                        return retry_probe(
+                            node_id, RuntimePreflightCode.RECEIPT_MISSING
+                        )
                     try:
                         result = RuntimePreflightResult.model_validate(raw)
                     except (TypeError, ValueError):
-                        return retry_probe(node_id, "runtime_preflight.receipt_invalid")
+                        return retry_probe(
+                            node_id, RuntimePreflightCode.RECEIPT_INVALID
+                        )
                     checkpoint.receipts[node_id] = result
                     checkpoint.pending_job_id = None
                     checkpoint.pending_node_id = None
@@ -253,9 +259,9 @@ class LifecyclePreflight:
                     if any(
                         item.code
                         not in {
-                            "runtime_preflight.host_changed",
-                            "runtime_preflight.requirements_changed",
-                            "runtime_preflight.stale",
+                            RuntimePreflightCode.HOST_CHANGED,
+                            RuntimePreflightCode.REQUIREMENTS_CHANGED,
+                            RuntimePreflightCode.STALE,
                         }
                         for item in blockers
                     ):
@@ -277,12 +283,12 @@ class LifecyclePreflight:
                             for item in blockers
                             if item.code
                             in {
-                                "runtime_preflight.host_changed",
-                                "runtime_preflight.requirements_changed",
-                                "runtime_preflight.stale",
+                                RuntimePreflightCode.HOST_CHANGED,
+                                RuntimePreflightCode.REQUIREMENTS_CHANGED,
+                                RuntimePreflightCode.STALE,
                             }
                         ),
-                        "runtime_preflight.stale",
+                        RuntimePreflightCode.STALE,
                     )
                     checkpoint.last_failure_detail = stale_cause[:512]
                     return checkpoint, None

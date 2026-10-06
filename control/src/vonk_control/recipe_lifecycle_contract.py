@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,
     RecipeJobRunResult,
+    RecipeOperationCode,
     RecipeReconcileResult,
     RecipeStartResult,
     RecipeStopResult,
@@ -238,7 +239,7 @@ def _model_accepts(model: type[BaseModel], value: Mapping[str, object]) -> bool:
 
 
 class RecipeOperationConflictResponse(LifecycleModel):
-    code: Literal["recipe.operation_conflict"]
+    code: Literal[RecipeOperationCode.RECIPE_OPERATION_CONFLICT]
     detail: str = Field(min_length=1, max_length=256)
     request_id: UuidId
 

@@ -388,7 +388,19 @@ guard per file, and a new literal, a higher count or an unlowered count fails; t
 same test requires the web app (`control/web/src`, except generated files and tests)
 to spell none and to import `vocabulary.generated.ts` instead.
 
-A third tier, `legacy_state`, keeps the retired state spellings that are ordinary
+Two more tiers are flat at zero and have no baseline. `reason_code` finds a string
+equal to a member of a reason-code enum (`vonk_agent_protocol.reason_codes`:
+blockers, refusals, warnings and attention codes grouped by domain), or a message
+that starts with one (`"run-switch.plan_blocked: ..."`), anywhere in `control/src`
+and the web app. `code_position` finds a *free-string code*: a string constant or
+f-string in the `code=` / `*_code=` keyword of a call, the first argument of
+`make_blocker`, the code argument of an error class or helper that takes one, a
+`code` / `*_CODE` class or module attribute, or a `code` parameter default. It
+catches a new code that is not in any enum yet, so the code has to be added to its
+domain enum first. The CLI ships without the contract package and spells the codes
+it renders; `test_the_cli_spells_only_contract_codes` keeps those equal to members.
+
+The `legacy_state` tier keeps the retired state spellings that are ordinary
 words (`waiting`, `partial`, `cancelling`, `expired`) out of lifecycle code: a literal
 equal to one of them in a statement that also names a state (`row.state`, `state=`,
 `*_STATES`, `State.X`) counts. The migration is finished, so its baseline is empty and

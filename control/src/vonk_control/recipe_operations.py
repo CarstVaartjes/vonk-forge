@@ -17,11 +17,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    InstallAdmissionCode,
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
+    RecipeBuildCode,
     RecipeInstallPayload,
     RecipeJobRunRequest,
     RecipeReconcilePayload,
@@ -29,6 +31,7 @@ from vonk_agent_protocol import (
     RecipeStartResult,
     RecipeStopPayload,
     RecipeUninstallPayload,
+    ReconcileCode,
     SecurityRefusalError,
     UnknownOutcomeError,
     WaitReason,
@@ -1029,7 +1032,7 @@ class RecipeOperationService:
                 node.free_bytes is None
                 or node.free_after_bytes is None
                 or not any(
-                    reason.code == "install.insufficient_disk"
+                    reason.code == InstallAdmissionCode.INSUFFICIENT_DISK
                     for reason in node.blockers
                 )
             ):
@@ -1039,7 +1042,7 @@ class RecipeOperationService:
                 node.free_bytes - node.free_after_bytes + node.disk_floor_bytes,
                 source="install",
                 subject=plan.recipe_revision_id,
-                reason="install.insufficient_disk",
+                reason=InstallAdmissionCode.INSUFFICIENT_DISK,
             )
 
     def preview_mapping(
@@ -1541,7 +1544,7 @@ class RecipeOperationService:
 
         if not plan.allowed and {
             reason.code for node in plan.nodes for reason in node.blockers
-        } <= {"install.insufficient_disk"}:
+        } <= {InstallAdmissionCode.INSUFFICIENT_DISK}:
             # The exact plan an earlier attempt already persisted holds its own
             # disk claim; counting that claim against itself must not stop
             # this attempt adopting it.
@@ -2141,7 +2144,8 @@ class RecipeOperationService:
                 )
             except AdmissionLockBusy as error:
                 raise RecipeInstallBusy(
-                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             replay = self._idempotent_in_session(
                 session,
@@ -3572,7 +3576,7 @@ class RecipeOperationService:
             locked = lock_admission_rows(session, requests)
         except AdmissionLockBusy as error:
             raise RecipeInstallBusy(
-                "reconcile.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                ReconcileCode.CAPACITY_BUSY, reason=WaitReason.OBSERVATION_UNAVAILABLE
             ) from error
         locked_nodes = locked["reconcile-installation-nodes"]
         locked_mapping_nodes = locked["reconcile-mapping-nodes"]
@@ -3588,7 +3592,7 @@ class RecipeOperationService:
             sorted((node.node_id, node.rank, node.role) for node in mapping_nodes)
         ):
             raise RecipeInstallBusy(
-                "reconcile.membership_changed",
+                ReconcileCode.MEMBERSHIP_CHANGED,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
 
@@ -3621,7 +3625,7 @@ class RecipeOperationService:
         stored_plan = installation.plan
         if not isinstance(stored_plan, Mapping):
             blocked(
-                "reconcile.installation_identity_unavailable",
+                ReconcileCode.INSTALLATION_IDENTITY_UNAVAILABLE,
                 "The original installation identity is not a JSON object.",
             )
 
@@ -3641,7 +3645,7 @@ class RecipeOperationService:
             or revision.content_digest != stored_plan.get("recipe_content_sha256")
         ):
             blocked(
-                "reconcile.recipe_revision_unavailable",
+                ReconcileCode.RECIPE_REVISION_UNAVAILABLE,
                 "The installation's exact accepted recipe revision is unavailable.",
             )
 
@@ -3654,7 +3658,7 @@ class RecipeOperationService:
             )
         except (KeyError, TypeError, ValueError) as error:
             blocked(
-                "reconcile.installation_identity_unavailable",
+                ReconcileCode.INSTALLATION_IDENTITY_UNAVAILABLE,
                 f"The original installation identity cannot be fingerprinted: {error}",
             )
         expected_top_level = {
@@ -3674,13 +3678,13 @@ class RecipeOperationService:
             or stored_plan_digest != installation.plan_digest
         ):
             blocked(
-                "reconcile.installation_identity_mismatch",
+                ReconcileCode.INSTALLATION_IDENTITY_MISMATCH,
                 "The relational installation identity differs from its original admitted plan.",
             )
         model_identity = _primary_model_identity(revision.document)
         if model_identity is None:
             blocked(
-                "reconcile.recipe_revision_unavailable",
+                ReconcileCode.RECIPE_REVISION_UNAVAILABLE,
                 "The exact accepted recipe revision has no model identity.",
             )
         recipe_model_content_sha256, _ = model_identity
@@ -3689,12 +3693,12 @@ class RecipeOperationService:
             recipe_model_content_sha256,
         }:
             blocked(
-                "reconcile.installation_identity_mismatch",
+                ReconcileCode.INSTALLATION_IDENTITY_MISMATCH,
                 "The relational model identity differs from the exact accepted recipe revision.",
             )
         if installation.state not in {"installed", "partial"}:
             blocked(
-                "reconcile.installation_effect_unknown",
+                ReconcileCode.INSTALLATION_EFFECT_UNKNOWN,
                 f"Installation state {installation.state} does not prove a complete installed effect.",
             )
 
@@ -3709,7 +3713,7 @@ class RecipeOperationService:
         all_nodes = tuple(session.scalars(node_statement))
         if not all_nodes or len(all_nodes) > _MAX_ACTION_NODES:
             blocked(
-                "reconcile.rank_membership_changed",
+                ReconcileCode.RANK_MEMBERSHIP_CHANGED,
                 "The installation has no bounded exact node membership.",
             )
         mapping_statement = select(ClusterMapping).where(
@@ -3757,7 +3761,7 @@ class RecipeOperationService:
             not in {node.node_id for node in mapping_nodes}
         ):
             blocked(
-                "reconcile.rank_membership_changed",
+                ReconcileCode.RANK_MEMBERSHIP_CHANGED,
                 "The stored installation, relational membership, and saved mapping no longer identify the same exact ranks.",
             )
 
@@ -3772,7 +3776,7 @@ class RecipeOperationService:
             for run in installation_runs
         ):
             blocked(
-                "reconcile.active_effect_unknown",
+                ReconcileCode.ACTIVE_EFFECT_UNKNOWN,
                 "An installation run or route is active or has an unconfirmed effect.",
             )
 
@@ -3819,7 +3823,7 @@ class RecipeOperationService:
         )
         if blocking_active_jobs or active_run_jobs:
             blocked(
-                "reconcile.operation_active",
+                ReconcileCode.OPERATION_ACTIVE,
                 "An install, start, stop, uninstall, or reconciliation operation is still active or uncertain.",
             )
 
@@ -3839,7 +3843,7 @@ class RecipeOperationService:
         )
         if len(install_jobs) != 1:
             blocked(
-                "reconcile.install_provenance_unavailable",
+                ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                 "Exactly one successful original install operation is required to identify the local specs.",
             )
         install_job = install_jobs[0]
@@ -3855,7 +3859,7 @@ class RecipeOperationService:
             != install_job.payload_digest
         ):
             blocked(
-                "reconcile.install_provenance_mismatch",
+                ReconcileCode.INSTALL_PROVENANCE_MISMATCH,
                 "The successful original install job no longer matches the admitted installation identity.",
             )
         try:
@@ -3864,7 +3868,7 @@ class RecipeOperationService:
             )
         except (TypeError, ValueError) as error:
             blocked(
-                "reconcile.install_provenance_unavailable",
+                ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                 f"The original successful install receipt cannot be validated: {error}",
             )
         if (
@@ -3876,7 +3880,7 @@ class RecipeOperationService:
             or set(install_result.node_evidence) != {node.node_id for node in all_nodes}
         ):
             blocked(
-                "reconcile.install_provenance_unavailable",
+                ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                 "The original install receipt does not prove success on every exact node.",
             )
 
@@ -3891,7 +3895,7 @@ class RecipeOperationService:
             operation.node_id for operation in operations
         } != {node.node_id for node in all_nodes}:
             blocked(
-                "reconcile.install_provenance_unavailable",
+                ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                 "The original install child operations do not match exact node membership.",
             )
 
@@ -3899,7 +3903,7 @@ class RecipeOperationService:
         stored_compiled = stored_plan.get("compiled_execution_plans")
         if not isinstance(stored_compiled, Mapping):
             blocked(
-                "reconcile.installation_identity_unavailable",
+                ReconcileCode.INSTALLATION_IDENTITY_UNAVAILABLE,
                 "The opaque admitted plan has no exact per-node specification map.",
             )
         agent_nodes_statement = (
@@ -3925,7 +3929,7 @@ class RecipeOperationService:
                 != operation.payload_digest
             ):
                 blocked(
-                    "reconcile.install_provenance_mismatch",
+                    ReconcileCode.INSTALL_PROVENANCE_MISMATCH,
                     f"The original install operation for {node.node_id} is not an exact successful source.",
                 )
             payload = operation.payload
@@ -3935,7 +3939,7 @@ class RecipeOperationService:
                 or payload.get("expected_bytes") != node.required_bytes
             ):
                 blocked(
-                    "reconcile.install_provenance_mismatch",
+                    ReconcileCode.INSTALL_PROVENANCE_MISMATCH,
                     f"The original install payload for {node.node_id} differs from its exact installation row.",
                 )
             compiled = payload.get("compiled_execution_plan")
@@ -3947,7 +3951,7 @@ class RecipeOperationService:
                 != canonical_message(stored_node_compiled)
             ):
                 blocked(
-                    "reconcile.spec_identity_mismatch",
+                    ReconcileCode.SPEC_IDENTITY_MISMATCH,
                     f"The original install payload and stored opaque specification differ for {node.node_id}.",
                 )
             identity = compiled.get("identity")
@@ -3967,13 +3971,13 @@ class RecipeOperationService:
                 or placement.get("role") != node.role
             ):
                 blocked(
-                    "reconcile.spec_identity_mismatch",
+                    ReconcileCode.SPEC_IDENTITY_MISMATCH,
                     f"The original specification for {node.node_id} is not bound to this recipe, image, and rank.",
                 )
             evidence = install_result.node_evidence.get(node.node_id)
             if not isinstance(evidence, Mapping):
                 blocked(
-                    "reconcile.install_provenance_unavailable",
+                    ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                     f"The original successful receipt for {node.node_id} is unavailable.",
                 )
             current_attempt = session.scalar(
@@ -3991,7 +3995,7 @@ class RecipeOperationService:
                 or evidence.get("installed_bytes") != node.installed_bytes
             ):
                 blocked(
-                    "reconcile.install_provenance_unavailable",
+                    ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                     f"The current successful install attempt does not match recorded bytes for {node.node_id}.",
                 )
             if (
@@ -4000,7 +4004,7 @@ class RecipeOperationService:
                 or agent_node.revoked_at is not None
             ):
                 blocked(
-                    "reconcile.agent_unavailable",
+                    ReconcileCode.AGENT_UNAVAILABLE,
                     f"Node {node.node_id} is not an active authorized target.",
                 )
             # A succeeded, fenced reconcile attempt marked the rank uninstalled;
@@ -4070,7 +4074,7 @@ class RecipeOperationService:
                     )
                 except AdmissionLockBusy as error:
                     raise RecipeInstallBusy(
-                        "reconcile.capacity_busy",
+                        ReconcileCode.CAPACITY_BUSY,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     ) from error
                 authority = self._reconciliation_authority_in_session(
@@ -4128,7 +4132,7 @@ class RecipeOperationService:
                 )
         except AdmissionLockBusy as error:
             raise RecipeInstallBusy(
-                "reconcile.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                ReconcileCode.CAPACITY_BUSY, reason=WaitReason.OBSERVATION_UNAVAILABLE
             ) from error
         except IntegrityError as error:
             raced = self._idempotent(
@@ -6296,7 +6300,7 @@ class RecipeOperationService:
             }:
                 raise
             raise RecipeRetryLater(
-                "build.consumer_busy: build ownership is changing; retry cancellation",
+                f"{RecipeBuildCode.CONSUMER_BUSY}: build ownership is changing; retry cancellation",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
 
@@ -6366,7 +6370,7 @@ class RecipeOperationService:
                     if only_if_unneeded:
                         return False
                     raise RecipeRequestInvalid(
-                        "build.shared_consumers: accepted preparation still needs this build; "
+                        f"{RecipeBuildCode.SHARED_CONSUMERS}: accepted preparation still needs this build; "
                         "cancel its parent intent first"
                     )
             cancellation = request_build_cancellation(
@@ -6471,7 +6475,7 @@ class RecipeOperationService:
                 if getattr(error.orig, "sqlstate", None) != "55P03":
                     raise
                 raise RecipeRetryLater(
-                    "build.consumer_busy: build ownership is changing; retry cancellation",
+                    f"{RecipeBuildCode.CONSUMER_BUSY}: build ownership is changing; retry cancellation",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             if build is None or build.builder_node_id != node_id:
@@ -6493,7 +6497,7 @@ class RecipeOperationService:
                     if only_if_unneeded:
                         return False
                     raise RecipeRequestInvalid(
-                        "build.shared_consumers: accepted preparation still needs this build; "
+                        f"{RecipeBuildCode.SHARED_CONSUMERS}: accepted preparation still needs this build; "
                         "cancel its parent intent first"
                     )
             cancellation = request_build_cancellation(
@@ -8140,7 +8144,8 @@ class RecipeOperationService:
         except AdmissionLockBusy as error:
             if kind == "recipe.install":
                 raise RecipeInstallBusy(
-                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         if tuple(node.node_id for node in target_nodes) != tuple(targets):
@@ -8165,7 +8170,7 @@ class RecipeOperationService:
             except AdmissionLockBusy as error:
                 if kind == "recipe.install":
                     raise RecipeInstallBusy(
-                        "install.capacity_busy",
+                        InstallAdmissionCode.CAPACITY_BUSY,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     ) from error
                 raise RunAdmissionBusy("run capacity writer is busy") from error
@@ -8249,7 +8254,8 @@ class RecipeOperationService:
         except AdmissionLockBusy as error:
             if kind == "recipe.install":
                 raise RecipeInstallBusy(
-                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         existing = self._idempotent_job_in_session(
@@ -8348,7 +8354,8 @@ class RecipeOperationService:
         except AdmissionLockBusy as error:
             if kind == "recipe.install":
                 raise RecipeInstallBusy(
-                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         except OperationalError as error:
@@ -8356,7 +8363,8 @@ class RecipeOperationService:
                 raise
             if kind == "recipe.install":
                 raise RecipeInstallBusy(
-                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         return job

@@ -14,12 +14,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from vonk_agent_protocol import ProjectionCode
 from vonk_agent_protocol.inventory import NetworkInterface
 
 NasRouteWarningCode = Literal[
-    "network.nas-route-wifi-no-wired-port",
-    "network.nas-route-wifi-wired-port-down",
-    "network.nas-route-wifi-wired-port-unused",
+    ProjectionCode.NETWORK_NAS_ROUTE_WIFI_NO_WIRED_PORT,
+    ProjectionCode.NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_DOWN,
+    ProjectionCode.NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_UNUSED,
 ]
 
 
@@ -53,7 +54,7 @@ def nas_route_notice(
     if linked:
         port = linked[0]
         return NasRouteNotice(
-            "network.nas-route-wifi-wired-port-unused",
+            ProjectionCode.NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_UNUSED,
             detail,
             f"Wired port {port.name} has link ({_speed(port.link_speed_mbps)}) "
             "but is not the NAS route; give it an address on the NAS network "
@@ -61,13 +62,13 @@ def nas_route_notice(
         )
     if wired:
         return NasRouteNotice(
-            "network.nas-route-wifi-wired-port-down",
+            ProjectionCode.NETWORK_NAS_ROUTE_WIFI_WIRED_PORT_DOWN,
             detail,
             f"Connect a network cable to the RJ45 port {wired[0].name} and "
             "connect it to the NAS network.",
         )
     return NasRouteNotice(
-        "network.nas-route-wifi-no-wired-port",
+        ProjectionCode.NETWORK_NAS_ROUTE_WIFI_NO_WIRED_PORT,
         detail,
         "Connect this Spark to the NAS network over wired Ethernet.",
     )

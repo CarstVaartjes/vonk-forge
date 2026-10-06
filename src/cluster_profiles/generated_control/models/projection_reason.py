@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.projection_reason_code import check_projection_reason_code
-from ..models.projection_reason_code import ProjectionReasonCode
+from ..models.projection_code import check_projection_code
+from ..models.projection_code import ProjectionCode
 from ..models.projection_reason_severity import check_projection_reason_severity
 from ..models.projection_reason_severity import ProjectionReasonSeverity
 from ..types import UNSET, Unset
@@ -30,14 +30,14 @@ T = TypeVar("T", bound="ProjectionReason")
 class ProjectionReason:
     """
         Attributes:
-            code (ProjectionReasonCode):
+            code (ProjectionCode): Warnings and attention items of the fleet and library projections.
             detail (str):
             severity (ProjectionReasonSeverity):
             install_partial (InstallPartialEvidence | None | Unset):
             recommendation (None | str | Unset):
      """
 
-    code: ProjectionReasonCode
+    code: ProjectionCode
     detail: str
     severity: ProjectionReasonSeverity
     install_partial: InstallPartialEvidence | None | Unset = UNSET
@@ -90,7 +90,7 @@ class ProjectionReason:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.install_partial_evidence import InstallPartialEvidence # noqa: PLC0415
         d = dict(src_dict)
-        code = check_projection_reason_code(d.pop("code"))
+        code = check_projection_code(d.pop("code"))
 
 
 

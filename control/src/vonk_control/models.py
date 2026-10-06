@@ -41,6 +41,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql.functions import FunctionElement
 from vonk_agent_protocol import (
     ArtifactPreparation,
+    ClusterMappingCode,
     LifecycleState,
     LifecycleSubject,
     check_words,
@@ -1580,7 +1581,7 @@ def _reject_ready_mapping_node_mutation(
         select(ClusterMapping.state).where(ClusterMapping.id == target.mapping_id)
     ).scalar_one_or_none()
     if state == "ready":
-        raise ValueError("mapping.ready_immutable")
+        raise ValueError(ClusterMappingCode.READY_IMMUTABLE)
 
 
 event.listen(ClusterMappingNode, "before_update", _reject_ready_mapping_node_mutation)

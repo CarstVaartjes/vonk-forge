@@ -55,7 +55,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import (
+    LifecycleState,
+    SupersedeCode,
+)
 
 from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
@@ -879,12 +882,12 @@ def legacy_supersession(
             uuid.UUID(successor)
         except ValueError:
             return None
-        return ("superseded-by-retry", successor)
+        return (SupersedeCode.SUPERSEDED_BY_RETRY, successor)
     if stored == State.CANCELLED.value:
         if text.startswith("Pending profile intent was superseded: "):
-            return ("effects-changed-during-admission", None)
+            return (SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION, None)
         if text.startswith(_LEGACY_INTENT_PREFIXES):
-            return ("superseded-by-intent", None)
+            return (SupersedeCode.SUPERSEDED_BY_INTENT, None)
     return None
 
 

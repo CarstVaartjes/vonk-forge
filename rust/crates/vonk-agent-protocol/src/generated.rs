@@ -71,6 +71,41 @@ impl ::std::convert::TryFrom<::std::string::String> for ActivationMarkerState {
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AdmissionCode {
+    #[serde(rename = "admission.capacity_busy")]
+    AdmissionCapacityBusy,
+}
+impl ::std::fmt::Display for AdmissionCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::AdmissionCapacityBusy => f.write_str("admission.capacity_busy"),
+        }
+    }
+}
+impl ::std::str::FromStr for AdmissionCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "admission.capacity_busy" => Ok(Self::AdmissionCapacityBusy),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AdmissionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AdmissionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -622,6 +657,96 @@ pub struct ArtifactDistributionResult {
     pub downloaded_bytes: u64,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum ArtifactLifecycleCode {
+    #[serde(rename = "artifact.asset_availability_unknown")]
+    ArtifactAssetAvailabilityUnknown,
+    #[serde(rename = "artifact.deletion_busy")]
+    ArtifactDeletionBusy,
+    #[serde(rename = "artifact.deletion_fence_lost")]
+    ArtifactDeletionFenceLost,
+    #[serde(rename = "artifact.deletion_in_progress")]
+    ArtifactDeletionInProgress,
+    #[serde(rename = "artifact.reference_busy")]
+    ArtifactReferenceBusy,
+    #[serde(rename = "artifact.reference_changed")]
+    ArtifactReferenceChanged,
+    #[serde(rename = "artifact.reference_identity_mismatch")]
+    ArtifactReferenceIdentityMismatch,
+    #[serde(rename = "artifact.reference_scan_failed")]
+    ArtifactReferenceScanFailed,
+    #[serde(rename = "artifact.reference_scan_limited")]
+    ArtifactReferenceScanLimited,
+    #[serde(rename = "artifact.reference_timeout")]
+    ArtifactReferenceTimeout,
+    #[serde(rename = "artifact.reference_unavailable")]
+    ArtifactReferenceUnavailable,
+    #[serde(rename = "artifact.removal_owner_invalid")]
+    ArtifactRemovalOwnerInvalid,
+    #[serde(rename = "artifact.removal_owner_unresolved")]
+    ArtifactRemovalOwnerUnresolved,
+}
+impl ::std::fmt::Display for ArtifactLifecycleCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ArtifactAssetAvailabilityUnknown => {
+                f.write_str("artifact.asset_availability_unknown")
+            }
+            Self::ArtifactDeletionBusy => f.write_str("artifact.deletion_busy"),
+            Self::ArtifactDeletionFenceLost => f.write_str("artifact.deletion_fence_lost"),
+            Self::ArtifactDeletionInProgress => f.write_str("artifact.deletion_in_progress"),
+            Self::ArtifactReferenceBusy => f.write_str("artifact.reference_busy"),
+            Self::ArtifactReferenceChanged => f.write_str("artifact.reference_changed"),
+            Self::ArtifactReferenceIdentityMismatch => {
+                f.write_str("artifact.reference_identity_mismatch")
+            }
+            Self::ArtifactReferenceScanFailed => f.write_str("artifact.reference_scan_failed"),
+            Self::ArtifactReferenceScanLimited => f.write_str("artifact.reference_scan_limited"),
+            Self::ArtifactReferenceTimeout => f.write_str("artifact.reference_timeout"),
+            Self::ArtifactReferenceUnavailable => f.write_str("artifact.reference_unavailable"),
+            Self::ArtifactRemovalOwnerInvalid => f.write_str("artifact.removal_owner_invalid"),
+            Self::ArtifactRemovalOwnerUnresolved => {
+                f.write_str("artifact.removal_owner_unresolved")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for ArtifactLifecycleCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "artifact.asset_availability_unknown" => Ok(Self::ArtifactAssetAvailabilityUnknown),
+            "artifact.deletion_busy" => Ok(Self::ArtifactDeletionBusy),
+            "artifact.deletion_fence_lost" => Ok(Self::ArtifactDeletionFenceLost),
+            "artifact.deletion_in_progress" => Ok(Self::ArtifactDeletionInProgress),
+            "artifact.reference_busy" => Ok(Self::ArtifactReferenceBusy),
+            "artifact.reference_changed" => Ok(Self::ArtifactReferenceChanged),
+            "artifact.reference_identity_mismatch" => Ok(Self::ArtifactReferenceIdentityMismatch),
+            "artifact.reference_scan_failed" => Ok(Self::ArtifactReferenceScanFailed),
+            "artifact.reference_scan_limited" => Ok(Self::ArtifactReferenceScanLimited),
+            "artifact.reference_timeout" => Ok(Self::ArtifactReferenceTimeout),
+            "artifact.reference_unavailable" => Ok(Self::ArtifactReferenceUnavailable),
+            "artifact.removal_owner_invalid" => Ok(Self::ArtifactRemovalOwnerInvalid),
+            "artifact.removal_owner_unresolved" => Ok(Self::ArtifactRemovalOwnerUnresolved),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ArtifactLifecycleCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ArtifactLifecycleCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ArtifactPreparation {
     #[serde(rename = "draft")]
     Draft,
@@ -715,6 +840,313 @@ pub struct BoundedErrorResponse {
     pub context: ::std::option::Option<ErrorContextResponse>,
     pub detail: ::std::string::String,
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CacheReferenceReason {
+    #[serde(rename = "recipe-installation")]
+    RecipeInstallation,
+    #[serde(rename = "running-model")]
+    RunningModel,
+    #[serde(rename = "saved-profile")]
+    SavedProfile,
+}
+impl ::std::fmt::Display for CacheReferenceReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RecipeInstallation => f.write_str("recipe-installation"),
+            Self::RunningModel => f.write_str("running-model"),
+            Self::SavedProfile => f.write_str("saved-profile"),
+        }
+    }
+}
+impl ::std::str::FromStr for CacheReferenceReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "recipe-installation" => Ok(Self::RecipeInstallation),
+            "running-model" => Ok(Self::RunningModel),
+            "saved-profile" => Ok(Self::SavedProfile),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CacheReferenceReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CacheReferenceReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CatalogCode {
+    #[serde(rename = "catalog.actor")]
+    CatalogActor,
+    #[serde(rename = "catalog.candidate_exists")]
+    CatalogCandidateExists,
+    #[serde(rename = "catalog.conflict")]
+    CatalogConflict,
+    #[serde(rename = "catalog.document_exists")]
+    CatalogDocumentExists,
+    #[serde(rename = "catalog.document_invalid")]
+    CatalogDocumentInvalid,
+    #[serde(rename = "catalog.document_missing")]
+    CatalogDocumentMissing,
+    #[serde(rename = "catalog.head_missing")]
+    CatalogHeadMissing,
+    #[serde(rename = "catalog.identities")]
+    CatalogIdentities,
+    #[serde(rename = "catalog.identity_changed")]
+    CatalogIdentityChanged,
+    #[serde(rename = "catalog.insufficient_role")]
+    CatalogInsufficientRole,
+    #[serde(rename = "catalog.invalid_request")]
+    CatalogInvalidRequest,
+    #[serde(rename = "catalog.model_artifact_missing")]
+    CatalogModelArtifactMissing,
+    #[serde(rename = "catalog.model_reference_invalid")]
+    CatalogModelReferenceInvalid,
+    #[serde(rename = "catalog.model_reference_missing")]
+    CatalogModelReferenceMissing,
+    #[serde(rename = "catalog.not_candidate")]
+    CatalogNotCandidate,
+    #[serde(rename = "catalog.not_found")]
+    CatalogNotFound,
+    #[serde(rename = "catalog.recipe_invalid")]
+    CatalogRecipeInvalid,
+    #[serde(rename = "catalog.reference")]
+    CatalogReference,
+    #[serde(rename = "catalog.reference_missing")]
+    CatalogReferenceMissing,
+    #[serde(rename = "catalog.request_failed")]
+    CatalogRequestFailed,
+    #[serde(rename = "catalog.revision_missing")]
+    CatalogRevisionMissing,
+    #[serde(rename = "catalog.stale_revision")]
+    CatalogStaleRevision,
+    #[serde(rename = "catalog.unavailable")]
+    CatalogUnavailable,
+    #[serde(rename = "recipe_library.document_invalid")]
+    RecipeLibraryDocumentInvalid,
+    #[serde(rename = "recipe_library.hash_mismatch")]
+    RecipeLibraryHashMismatch,
+    #[serde(rename = "recipe_library.model_document_invalid")]
+    RecipeLibraryModelDocumentInvalid,
+    #[serde(rename = "recipe_library.package_handle_invalid")]
+    RecipeLibraryPackageHandleInvalid,
+    #[serde(rename = "recipe_library.release_invalid")]
+    RecipeLibraryReleaseInvalid,
+    #[serde(rename = "recipe_library.source_invalid")]
+    RecipeLibrarySourceInvalid,
+    #[serde(rename = "recipe_release.signature_invalid")]
+    RecipeReleaseSignatureInvalid,
+}
+impl ::std::fmt::Display for CatalogCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CatalogActor => f.write_str("catalog.actor"),
+            Self::CatalogCandidateExists => f.write_str("catalog.candidate_exists"),
+            Self::CatalogConflict => f.write_str("catalog.conflict"),
+            Self::CatalogDocumentExists => f.write_str("catalog.document_exists"),
+            Self::CatalogDocumentInvalid => f.write_str("catalog.document_invalid"),
+            Self::CatalogDocumentMissing => f.write_str("catalog.document_missing"),
+            Self::CatalogHeadMissing => f.write_str("catalog.head_missing"),
+            Self::CatalogIdentities => f.write_str("catalog.identities"),
+            Self::CatalogIdentityChanged => f.write_str("catalog.identity_changed"),
+            Self::CatalogInsufficientRole => f.write_str("catalog.insufficient_role"),
+            Self::CatalogInvalidRequest => f.write_str("catalog.invalid_request"),
+            Self::CatalogModelArtifactMissing => f.write_str("catalog.model_artifact_missing"),
+            Self::CatalogModelReferenceInvalid => f.write_str("catalog.model_reference_invalid"),
+            Self::CatalogModelReferenceMissing => f.write_str("catalog.model_reference_missing"),
+            Self::CatalogNotCandidate => f.write_str("catalog.not_candidate"),
+            Self::CatalogNotFound => f.write_str("catalog.not_found"),
+            Self::CatalogRecipeInvalid => f.write_str("catalog.recipe_invalid"),
+            Self::CatalogReference => f.write_str("catalog.reference"),
+            Self::CatalogReferenceMissing => f.write_str("catalog.reference_missing"),
+            Self::CatalogRequestFailed => f.write_str("catalog.request_failed"),
+            Self::CatalogRevisionMissing => f.write_str("catalog.revision_missing"),
+            Self::CatalogStaleRevision => f.write_str("catalog.stale_revision"),
+            Self::CatalogUnavailable => f.write_str("catalog.unavailable"),
+            Self::RecipeLibraryDocumentInvalid => f.write_str("recipe_library.document_invalid"),
+            Self::RecipeLibraryHashMismatch => f.write_str("recipe_library.hash_mismatch"),
+            Self::RecipeLibraryModelDocumentInvalid => {
+                f.write_str("recipe_library.model_document_invalid")
+            }
+            Self::RecipeLibraryPackageHandleInvalid => {
+                f.write_str("recipe_library.package_handle_invalid")
+            }
+            Self::RecipeLibraryReleaseInvalid => f.write_str("recipe_library.release_invalid"),
+            Self::RecipeLibrarySourceInvalid => f.write_str("recipe_library.source_invalid"),
+            Self::RecipeReleaseSignatureInvalid => f.write_str("recipe_release.signature_invalid"),
+        }
+    }
+}
+impl ::std::str::FromStr for CatalogCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "catalog.actor" => Ok(Self::CatalogActor),
+            "catalog.candidate_exists" => Ok(Self::CatalogCandidateExists),
+            "catalog.conflict" => Ok(Self::CatalogConflict),
+            "catalog.document_exists" => Ok(Self::CatalogDocumentExists),
+            "catalog.document_invalid" => Ok(Self::CatalogDocumentInvalid),
+            "catalog.document_missing" => Ok(Self::CatalogDocumentMissing),
+            "catalog.head_missing" => Ok(Self::CatalogHeadMissing),
+            "catalog.identities" => Ok(Self::CatalogIdentities),
+            "catalog.identity_changed" => Ok(Self::CatalogIdentityChanged),
+            "catalog.insufficient_role" => Ok(Self::CatalogInsufficientRole),
+            "catalog.invalid_request" => Ok(Self::CatalogInvalidRequest),
+            "catalog.model_artifact_missing" => Ok(Self::CatalogModelArtifactMissing),
+            "catalog.model_reference_invalid" => Ok(Self::CatalogModelReferenceInvalid),
+            "catalog.model_reference_missing" => Ok(Self::CatalogModelReferenceMissing),
+            "catalog.not_candidate" => Ok(Self::CatalogNotCandidate),
+            "catalog.not_found" => Ok(Self::CatalogNotFound),
+            "catalog.recipe_invalid" => Ok(Self::CatalogRecipeInvalid),
+            "catalog.reference" => Ok(Self::CatalogReference),
+            "catalog.reference_missing" => Ok(Self::CatalogReferenceMissing),
+            "catalog.request_failed" => Ok(Self::CatalogRequestFailed),
+            "catalog.revision_missing" => Ok(Self::CatalogRevisionMissing),
+            "catalog.stale_revision" => Ok(Self::CatalogStaleRevision),
+            "catalog.unavailable" => Ok(Self::CatalogUnavailable),
+            "recipe_library.document_invalid" => Ok(Self::RecipeLibraryDocumentInvalid),
+            "recipe_library.hash_mismatch" => Ok(Self::RecipeLibraryHashMismatch),
+            "recipe_library.model_document_invalid" => Ok(Self::RecipeLibraryModelDocumentInvalid),
+            "recipe_library.package_handle_invalid" => Ok(Self::RecipeLibraryPackageHandleInvalid),
+            "recipe_library.release_invalid" => Ok(Self::RecipeLibraryReleaseInvalid),
+            "recipe_library.source_invalid" => Ok(Self::RecipeLibrarySourceInvalid),
+            "recipe_release.signature_invalid" => Ok(Self::RecipeReleaseSignatureInvalid),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CatalogCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CatalogCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CatalogSyncCode {
+    #[serde(rename = "catalog.sync_actor_invalid")]
+    CatalogSyncActorInvalid,
+    #[serde(rename = "catalog.sync_commit_invalid")]
+    CatalogSyncCommitInvalid,
+    #[serde(rename = "catalog.sync_failed")]
+    CatalogSyncFailed,
+    #[serde(rename = "catalog.sync_identity_changed")]
+    CatalogSyncIdentityChanged,
+    #[serde(rename = "catalog.sync_in_progress")]
+    CatalogSyncInProgress,
+    #[serde(rename = "catalog.sync_item_failed")]
+    CatalogSyncItemFailed,
+    #[serde(rename = "catalog.sync_lease_expired")]
+    CatalogSyncLeaseExpired,
+    #[serde(rename = "catalog.sync_model_failed")]
+    CatalogSyncModelFailed,
+    #[serde(rename = "catalog.sync_not_found")]
+    CatalogSyncNotFound,
+    #[serde(rename = "catalog.sync_prebuilt_images_failed")]
+    CatalogSyncPrebuiltImagesFailed,
+    #[serde(rename = "catalog.sync_preview_changed")]
+    CatalogSyncPreviewChanged,
+    #[serde(rename = "catalog.sync_repository_changed")]
+    CatalogSyncRepositoryChanged,
+    #[serde(rename = "catalog.sync_request_invalid")]
+    CatalogSyncRequestInvalid,
+    #[serde(rename = "catalog.sync_request_reused")]
+    CatalogSyncRequestReused,
+    #[serde(rename = "catalog.sync_result_unreadable")]
+    CatalogSyncResultUnreadable,
+    #[serde(rename = "catalog.sync_revision_changed")]
+    CatalogSyncRevisionChanged,
+    #[serde(rename = "catalog.sync_state_invalid")]
+    CatalogSyncStateInvalid,
+    #[serde(rename = "catalog.sync_trigger_invalid")]
+    CatalogSyncTriggerInvalid,
+    #[serde(rename = "recipe.topology_changed")]
+    RecipeTopologyChanged,
+}
+impl ::std::fmt::Display for CatalogSyncCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CatalogSyncActorInvalid => f.write_str("catalog.sync_actor_invalid"),
+            Self::CatalogSyncCommitInvalid => f.write_str("catalog.sync_commit_invalid"),
+            Self::CatalogSyncFailed => f.write_str("catalog.sync_failed"),
+            Self::CatalogSyncIdentityChanged => f.write_str("catalog.sync_identity_changed"),
+            Self::CatalogSyncInProgress => f.write_str("catalog.sync_in_progress"),
+            Self::CatalogSyncItemFailed => f.write_str("catalog.sync_item_failed"),
+            Self::CatalogSyncLeaseExpired => f.write_str("catalog.sync_lease_expired"),
+            Self::CatalogSyncModelFailed => f.write_str("catalog.sync_model_failed"),
+            Self::CatalogSyncNotFound => f.write_str("catalog.sync_not_found"),
+            Self::CatalogSyncPrebuiltImagesFailed => {
+                f.write_str("catalog.sync_prebuilt_images_failed")
+            }
+            Self::CatalogSyncPreviewChanged => f.write_str("catalog.sync_preview_changed"),
+            Self::CatalogSyncRepositoryChanged => f.write_str("catalog.sync_repository_changed"),
+            Self::CatalogSyncRequestInvalid => f.write_str("catalog.sync_request_invalid"),
+            Self::CatalogSyncRequestReused => f.write_str("catalog.sync_request_reused"),
+            Self::CatalogSyncResultUnreadable => f.write_str("catalog.sync_result_unreadable"),
+            Self::CatalogSyncRevisionChanged => f.write_str("catalog.sync_revision_changed"),
+            Self::CatalogSyncStateInvalid => f.write_str("catalog.sync_state_invalid"),
+            Self::CatalogSyncTriggerInvalid => f.write_str("catalog.sync_trigger_invalid"),
+            Self::RecipeTopologyChanged => f.write_str("recipe.topology_changed"),
+        }
+    }
+}
+impl ::std::str::FromStr for CatalogSyncCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "catalog.sync_actor_invalid" => Ok(Self::CatalogSyncActorInvalid),
+            "catalog.sync_commit_invalid" => Ok(Self::CatalogSyncCommitInvalid),
+            "catalog.sync_failed" => Ok(Self::CatalogSyncFailed),
+            "catalog.sync_identity_changed" => Ok(Self::CatalogSyncIdentityChanged),
+            "catalog.sync_in_progress" => Ok(Self::CatalogSyncInProgress),
+            "catalog.sync_item_failed" => Ok(Self::CatalogSyncItemFailed),
+            "catalog.sync_lease_expired" => Ok(Self::CatalogSyncLeaseExpired),
+            "catalog.sync_model_failed" => Ok(Self::CatalogSyncModelFailed),
+            "catalog.sync_not_found" => Ok(Self::CatalogSyncNotFound),
+            "catalog.sync_prebuilt_images_failed" => Ok(Self::CatalogSyncPrebuiltImagesFailed),
+            "catalog.sync_preview_changed" => Ok(Self::CatalogSyncPreviewChanged),
+            "catalog.sync_repository_changed" => Ok(Self::CatalogSyncRepositoryChanged),
+            "catalog.sync_request_invalid" => Ok(Self::CatalogSyncRequestInvalid),
+            "catalog.sync_request_reused" => Ok(Self::CatalogSyncRequestReused),
+            "catalog.sync_result_unreadable" => Ok(Self::CatalogSyncResultUnreadable),
+            "catalog.sync_revision_changed" => Ok(Self::CatalogSyncRevisionChanged),
+            "catalog.sync_state_invalid" => Ok(Self::CatalogSyncStateInvalid),
+            "catalog.sync_trigger_invalid" => Ok(Self::CatalogSyncTriggerInvalid),
+            "recipe.topology_changed" => Ok(Self::RecipeTopologyChanged),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CatalogSyncCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CatalogSyncCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -726,6 +1158,98 @@ pub struct ClaimRequest {
     pub protocol_version: u32,
     pub runtime_identity: AgentRuntimeIdentity,
     pub wait_seconds: u32,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum ClusterMappingCode {
+    #[serde(rename = "mapping.actor")]
+    MappingActor,
+    #[serde(rename = "mapping.endpoint_owner")]
+    MappingEndpointOwner,
+    #[serde(rename = "mapping.node_count")]
+    MappingNodeCount,
+    #[serde(rename = "mapping.node_incompatible")]
+    MappingNodeIncompatible,
+    #[serde(rename = "mapping.node_unknown")]
+    MappingNodeUnknown,
+    #[serde(rename = "mapping.nodes_invalid")]
+    MappingNodesInvalid,
+    #[serde(rename = "mapping.option_invalid")]
+    MappingOptionInvalid,
+    #[serde(rename = "mapping.parameter_type")]
+    MappingParameterType,
+    #[serde(rename = "mapping.parameter_unknown")]
+    MappingParameterUnknown,
+    #[serde(rename = "mapping.parameter_value")]
+    MappingParameterValue,
+    #[serde(rename = "mapping.parameters_invalid")]
+    MappingParametersInvalid,
+    #[serde(rename = "mapping.ready_immutable")]
+    MappingReadyImmutable,
+    #[serde(rename = "mapping.recipe_unresolved")]
+    MappingRecipeUnresolved,
+    #[serde(rename = "mapping.stale_plan")]
+    MappingStalePlan,
+    #[serde(rename = "mapping.topology_invalid")]
+    MappingTopologyInvalid,
+}
+impl ::std::fmt::Display for ClusterMappingCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::MappingActor => f.write_str("mapping.actor"),
+            Self::MappingEndpointOwner => f.write_str("mapping.endpoint_owner"),
+            Self::MappingNodeCount => f.write_str("mapping.node_count"),
+            Self::MappingNodeIncompatible => f.write_str("mapping.node_incompatible"),
+            Self::MappingNodeUnknown => f.write_str("mapping.node_unknown"),
+            Self::MappingNodesInvalid => f.write_str("mapping.nodes_invalid"),
+            Self::MappingOptionInvalid => f.write_str("mapping.option_invalid"),
+            Self::MappingParameterType => f.write_str("mapping.parameter_type"),
+            Self::MappingParameterUnknown => f.write_str("mapping.parameter_unknown"),
+            Self::MappingParameterValue => f.write_str("mapping.parameter_value"),
+            Self::MappingParametersInvalid => f.write_str("mapping.parameters_invalid"),
+            Self::MappingReadyImmutable => f.write_str("mapping.ready_immutable"),
+            Self::MappingRecipeUnresolved => f.write_str("mapping.recipe_unresolved"),
+            Self::MappingStalePlan => f.write_str("mapping.stale_plan"),
+            Self::MappingTopologyInvalid => f.write_str("mapping.topology_invalid"),
+        }
+    }
+}
+impl ::std::str::FromStr for ClusterMappingCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "mapping.actor" => Ok(Self::MappingActor),
+            "mapping.endpoint_owner" => Ok(Self::MappingEndpointOwner),
+            "mapping.node_count" => Ok(Self::MappingNodeCount),
+            "mapping.node_incompatible" => Ok(Self::MappingNodeIncompatible),
+            "mapping.node_unknown" => Ok(Self::MappingNodeUnknown),
+            "mapping.nodes_invalid" => Ok(Self::MappingNodesInvalid),
+            "mapping.option_invalid" => Ok(Self::MappingOptionInvalid),
+            "mapping.parameter_type" => Ok(Self::MappingParameterType),
+            "mapping.parameter_unknown" => Ok(Self::MappingParameterUnknown),
+            "mapping.parameter_value" => Ok(Self::MappingParameterValue),
+            "mapping.parameters_invalid" => Ok(Self::MappingParametersInvalid),
+            "mapping.ready_immutable" => Ok(Self::MappingReadyImmutable),
+            "mapping.recipe_unresolved" => Ok(Self::MappingRecipeUnresolved),
+            "mapping.stale_plan" => Ok(Self::MappingStalePlan),
+            "mapping.topology_invalid" => Ok(Self::MappingTopologyInvalid),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ClusterMappingCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ClusterMappingCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1073,6 +1597,78 @@ pub struct ConfirmPackageActivationOperation {
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum ControllerErrorCode {
+    #[serde(rename = "controller.conflict")]
+    ControllerConflict,
+    #[serde(rename = "controller.fleet.revocation_uncertain")]
+    ControllerFleetRevocationUncertain,
+    #[serde(rename = "controller.fleet.upgrade_conflict")]
+    ControllerFleetUpgradeConflict,
+    #[serde(rename = "controller.http_")]
+    ControllerHttp,
+    #[serde(rename = "controller.internal_error")]
+    ControllerInternalError,
+    #[serde(rename = "controller.invalid_request")]
+    ControllerInvalidRequest,
+    #[serde(rename = "controller.not_found")]
+    ControllerNotFound,
+    #[serde(rename = "controller.request_too_large")]
+    ControllerRequestTooLarge,
+    #[serde(rename = "controller.unavailable")]
+    ControllerUnavailable,
+}
+impl ::std::fmt::Display for ControllerErrorCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ControllerConflict => f.write_str("controller.conflict"),
+            Self::ControllerFleetRevocationUncertain => {
+                f.write_str("controller.fleet.revocation_uncertain")
+            }
+            Self::ControllerFleetUpgradeConflict => {
+                f.write_str("controller.fleet.upgrade_conflict")
+            }
+            Self::ControllerHttp => f.write_str("controller.http_"),
+            Self::ControllerInternalError => f.write_str("controller.internal_error"),
+            Self::ControllerInvalidRequest => f.write_str("controller.invalid_request"),
+            Self::ControllerNotFound => f.write_str("controller.not_found"),
+            Self::ControllerRequestTooLarge => f.write_str("controller.request_too_large"),
+            Self::ControllerUnavailable => f.write_str("controller.unavailable"),
+        }
+    }
+}
+impl ::std::str::FromStr for ControllerErrorCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "controller.conflict" => Ok(Self::ControllerConflict),
+            "controller.fleet.revocation_uncertain" => Ok(Self::ControllerFleetRevocationUncertain),
+            "controller.fleet.upgrade_conflict" => Ok(Self::ControllerFleetUpgradeConflict),
+            "controller.http_" => Ok(Self::ControllerHttp),
+            "controller.internal_error" => Ok(Self::ControllerInternalError),
+            "controller.invalid_request" => Ok(Self::ControllerInvalidRequest),
+            "controller.not_found" => Ok(Self::ControllerNotFound),
+            "controller.request_too_large" => Ok(Self::ControllerRequestTooLarge),
+            "controller.unavailable" => Ok(Self::ControllerUnavailable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ControllerErrorCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ControllerErrorCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -1080,6 +1676,80 @@ pub struct DistributionAssignment {
     pub objects: ::std::vec::Vec<DistributionObject>,
     pub oci_image_config_digest: ::std::string::String,
     pub oci_image_digest: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum DistributionCode {
+    #[serde(rename = "distribution.assignment_conflict")]
+    DistributionAssignmentConflict,
+    #[serde(rename = "distribution.expired")]
+    DistributionExpired,
+    #[serde(rename = "distribution.model_set_identity_unavailable")]
+    DistributionModelSetIdentityUnavailable,
+    #[serde(rename = "distribution.model_set_mismatch")]
+    DistributionModelSetMismatch,
+    #[serde(rename = "distribution.object_invalid")]
+    DistributionObjectInvalid,
+    #[serde(rename = "distribution.object_unavailable")]
+    DistributionObjectUnavailable,
+    #[serde(rename = "distribution.runtime_image_mismatch")]
+    DistributionRuntimeImageMismatch,
+    #[serde(rename = "distribution.unassigned")]
+    DistributionUnassigned,
+    #[serde(rename = "distribution.wrong_node")]
+    DistributionWrongNode,
+}
+impl ::std::fmt::Display for DistributionCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::DistributionAssignmentConflict => f.write_str("distribution.assignment_conflict"),
+            Self::DistributionExpired => f.write_str("distribution.expired"),
+            Self::DistributionModelSetIdentityUnavailable => {
+                f.write_str("distribution.model_set_identity_unavailable")
+            }
+            Self::DistributionModelSetMismatch => f.write_str("distribution.model_set_mismatch"),
+            Self::DistributionObjectInvalid => f.write_str("distribution.object_invalid"),
+            Self::DistributionObjectUnavailable => f.write_str("distribution.object_unavailable"),
+            Self::DistributionRuntimeImageMismatch => {
+                f.write_str("distribution.runtime_image_mismatch")
+            }
+            Self::DistributionUnassigned => f.write_str("distribution.unassigned"),
+            Self::DistributionWrongNode => f.write_str("distribution.wrong_node"),
+        }
+    }
+}
+impl ::std::str::FromStr for DistributionCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "distribution.assignment_conflict" => Ok(Self::DistributionAssignmentConflict),
+            "distribution.expired" => Ok(Self::DistributionExpired),
+            "distribution.model_set_identity_unavailable" => {
+                Ok(Self::DistributionModelSetIdentityUnavailable)
+            }
+            "distribution.model_set_mismatch" => Ok(Self::DistributionModelSetMismatch),
+            "distribution.object_invalid" => Ok(Self::DistributionObjectInvalid),
+            "distribution.object_unavailable" => Ok(Self::DistributionObjectUnavailable),
+            "distribution.runtime_image_mismatch" => Ok(Self::DistributionRuntimeImageMismatch),
+            "distribution.unassigned" => Ok(Self::DistributionUnassigned),
+            "distribution.wrong_node" => Ok(Self::DistributionWrongNode),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for DistributionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for DistributionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1945,6 +2615,255 @@ impl ::std::convert::TryFrom<::std::string::String> for HostRuntimeRequestAction
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum ImageStoreCode {
+    #[serde(rename = "image_store.busy")]
+    ImageStoreBusy,
+    #[serde(rename = "image_store.collection_deferred")]
+    ImageStoreCollectionDeferred,
+    #[serde(rename = "image_store.copy_failed")]
+    ImageStoreCopyFailed,
+    #[serde(rename = "image_store.damaged_receipt_evicted")]
+    ImageStoreDamagedReceiptEvicted,
+    #[serde(rename = "image_store.digest_invalid")]
+    ImageStoreDigestInvalid,
+    #[serde(rename = "image_store.import_incomplete")]
+    ImageStoreImportIncomplete,
+    #[serde(rename = "image_store.manifest_corrupt")]
+    ImageStoreManifestCorrupt,
+    #[serde(rename = "image_store.manifest_invalid")]
+    ImageStoreManifestInvalid,
+    #[serde(rename = "image_store.manifest_unreadable")]
+    ImageStoreManifestUnreadable,
+    #[serde(rename = "image_store.manifest_unsupported")]
+    ImageStoreManifestUnsupported,
+    #[serde(rename = "image_store.reference_scan_failed")]
+    ImageStoreReferenceScanFailed,
+    #[serde(rename = "image_store.reference_unpinned")]
+    ImageStoreReferenceUnpinned,
+    #[serde(rename = "image_store.referenced_manifest_damaged")]
+    ImageStoreReferencedManifestDamaged,
+}
+impl ::std::fmt::Display for ImageStoreCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ImageStoreBusy => f.write_str("image_store.busy"),
+            Self::ImageStoreCollectionDeferred => f.write_str("image_store.collection_deferred"),
+            Self::ImageStoreCopyFailed => f.write_str("image_store.copy_failed"),
+            Self::ImageStoreDamagedReceiptEvicted => {
+                f.write_str("image_store.damaged_receipt_evicted")
+            }
+            Self::ImageStoreDigestInvalid => f.write_str("image_store.digest_invalid"),
+            Self::ImageStoreImportIncomplete => f.write_str("image_store.import_incomplete"),
+            Self::ImageStoreManifestCorrupt => f.write_str("image_store.manifest_corrupt"),
+            Self::ImageStoreManifestInvalid => f.write_str("image_store.manifest_invalid"),
+            Self::ImageStoreManifestUnreadable => f.write_str("image_store.manifest_unreadable"),
+            Self::ImageStoreManifestUnsupported => f.write_str("image_store.manifest_unsupported"),
+            Self::ImageStoreReferenceScanFailed => f.write_str("image_store.reference_scan_failed"),
+            Self::ImageStoreReferenceUnpinned => f.write_str("image_store.reference_unpinned"),
+            Self::ImageStoreReferencedManifestDamaged => {
+                f.write_str("image_store.referenced_manifest_damaged")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for ImageStoreCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "image_store.busy" => Ok(Self::ImageStoreBusy),
+            "image_store.collection_deferred" => Ok(Self::ImageStoreCollectionDeferred),
+            "image_store.copy_failed" => Ok(Self::ImageStoreCopyFailed),
+            "image_store.damaged_receipt_evicted" => Ok(Self::ImageStoreDamagedReceiptEvicted),
+            "image_store.digest_invalid" => Ok(Self::ImageStoreDigestInvalid),
+            "image_store.import_incomplete" => Ok(Self::ImageStoreImportIncomplete),
+            "image_store.manifest_corrupt" => Ok(Self::ImageStoreManifestCorrupt),
+            "image_store.manifest_invalid" => Ok(Self::ImageStoreManifestInvalid),
+            "image_store.manifest_unreadable" => Ok(Self::ImageStoreManifestUnreadable),
+            "image_store.manifest_unsupported" => Ok(Self::ImageStoreManifestUnsupported),
+            "image_store.reference_scan_failed" => Ok(Self::ImageStoreReferenceScanFailed),
+            "image_store.reference_unpinned" => Ok(Self::ImageStoreReferenceUnpinned),
+            "image_store.referenced_manifest_damaged" => {
+                Ok(Self::ImageStoreReferencedManifestDamaged)
+            }
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ImageStoreCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ImageStoreCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum InstallAdmissionCode {
+    #[serde(rename = "install.agent_upgrade_required")]
+    InstallAgentUpgradeRequired,
+    #[serde(rename = "install.artifact_size_underdeclared")]
+    InstallArtifactSizeUnderdeclared,
+    #[serde(rename = "install.artifact_store_read_only")]
+    InstallArtifactStoreReadOnly,
+    #[serde(rename = "install.capacity_busy")]
+    InstallCapacityBusy,
+    #[serde(rename = "install.compiled_plan_unavailable")]
+    InstallCompiledPlanUnavailable,
+    #[serde(rename = "install.dependencies_stale")]
+    InstallDependenciesStale,
+    #[serde(rename = "install.image_distribution_pending")]
+    InstallImageDistributionPending,
+    #[serde(rename = "install.image_size_underdeclared")]
+    InstallImageSizeUnderdeclared,
+    #[serde(rename = "install.insufficient_disk")]
+    InstallInsufficientDisk,
+    #[serde(rename = "install.inventory_missing")]
+    InstallInventoryMissing,
+    #[serde(rename = "install.model_identity_unavailable")]
+    InstallModelIdentityUnavailable,
+    #[serde(rename = "install.plan_invalid")]
+    InstallPlanInvalid,
+    #[serde(rename = "install.plan_stale")]
+    InstallPlanStale,
+    #[serde(rename = "install.stale_inventory")]
+    InstallStaleInventory,
+}
+impl ::std::fmt::Display for InstallAdmissionCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::InstallAgentUpgradeRequired => f.write_str("install.agent_upgrade_required"),
+            Self::InstallArtifactSizeUnderdeclared => {
+                f.write_str("install.artifact_size_underdeclared")
+            }
+            Self::InstallArtifactStoreReadOnly => f.write_str("install.artifact_store_read_only"),
+            Self::InstallCapacityBusy => f.write_str("install.capacity_busy"),
+            Self::InstallCompiledPlanUnavailable => {
+                f.write_str("install.compiled_plan_unavailable")
+            }
+            Self::InstallDependenciesStale => f.write_str("install.dependencies_stale"),
+            Self::InstallImageDistributionPending => {
+                f.write_str("install.image_distribution_pending")
+            }
+            Self::InstallImageSizeUnderdeclared => f.write_str("install.image_size_underdeclared"),
+            Self::InstallInsufficientDisk => f.write_str("install.insufficient_disk"),
+            Self::InstallInventoryMissing => f.write_str("install.inventory_missing"),
+            Self::InstallModelIdentityUnavailable => {
+                f.write_str("install.model_identity_unavailable")
+            }
+            Self::InstallPlanInvalid => f.write_str("install.plan_invalid"),
+            Self::InstallPlanStale => f.write_str("install.plan_stale"),
+            Self::InstallStaleInventory => f.write_str("install.stale_inventory"),
+        }
+    }
+}
+impl ::std::str::FromStr for InstallAdmissionCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "install.agent_upgrade_required" => Ok(Self::InstallAgentUpgradeRequired),
+            "install.artifact_size_underdeclared" => Ok(Self::InstallArtifactSizeUnderdeclared),
+            "install.artifact_store_read_only" => Ok(Self::InstallArtifactStoreReadOnly),
+            "install.capacity_busy" => Ok(Self::InstallCapacityBusy),
+            "install.compiled_plan_unavailable" => Ok(Self::InstallCompiledPlanUnavailable),
+            "install.dependencies_stale" => Ok(Self::InstallDependenciesStale),
+            "install.image_distribution_pending" => Ok(Self::InstallImageDistributionPending),
+            "install.image_size_underdeclared" => Ok(Self::InstallImageSizeUnderdeclared),
+            "install.insufficient_disk" => Ok(Self::InstallInsufficientDisk),
+            "install.inventory_missing" => Ok(Self::InstallInventoryMissing),
+            "install.model_identity_unavailable" => Ok(Self::InstallModelIdentityUnavailable),
+            "install.plan_invalid" => Ok(Self::InstallPlanInvalid),
+            "install.plan_stale" => Ok(Self::InstallPlanStale),
+            "install.stale_inventory" => Ok(Self::InstallStaleInventory),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InstallAdmissionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InstallAdmissionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum InstallDegradedReason {
+    #[serde(rename = "external-member")]
+    ExternalMember,
+    #[serde(rename = "mapping-incomplete")]
+    MappingIncomplete,
+    #[serde(rename = "missing-ranks")]
+    MissingRanks,
+    #[serde(rename = "unexpected-ranks")]
+    UnexpectedRanks,
+    #[serde(rename = "rank-membership-mismatch")]
+    RankMembershipMismatch,
+    #[serde(rename = "installation-not-installed")]
+    InstallationNotInstalled,
+    #[serde(rename = "rank-not-installed")]
+    RankNotInstalled,
+    #[serde(rename = "rank-incomplete-bytes")]
+    RankIncompleteBytes,
+}
+impl ::std::fmt::Display for InstallDegradedReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ExternalMember => f.write_str("external-member"),
+            Self::MappingIncomplete => f.write_str("mapping-incomplete"),
+            Self::MissingRanks => f.write_str("missing-ranks"),
+            Self::UnexpectedRanks => f.write_str("unexpected-ranks"),
+            Self::RankMembershipMismatch => f.write_str("rank-membership-mismatch"),
+            Self::InstallationNotInstalled => f.write_str("installation-not-installed"),
+            Self::RankNotInstalled => f.write_str("rank-not-installed"),
+            Self::RankIncompleteBytes => f.write_str("rank-incomplete-bytes"),
+        }
+    }
+}
+impl ::std::str::FromStr for InstallDegradedReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "external-member" => Ok(Self::ExternalMember),
+            "mapping-incomplete" => Ok(Self::MappingIncomplete),
+            "missing-ranks" => Ok(Self::MissingRanks),
+            "unexpected-ranks" => Ok(Self::UnexpectedRanks),
+            "rank-membership-mismatch" => Ok(Self::RankMembershipMismatch),
+            "installation-not-installed" => Ok(Self::InstallationNotInstalled),
+            "rank-not-installed" => Ok(Self::RankNotInstalled),
+            "rank-incomplete-bytes" => Ok(Self::RankIncompleteBytes),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InstallDegradedReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InstallDegradedReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -2469,6 +3388,93 @@ pub struct IssuedCertificateResponse {
     pub serial: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum LibraryAssessmentCode {
+    #[serde(rename = "library.assessment_unavailable")]
+    LibraryAssessmentUnavailable,
+    #[serde(rename = "library.cache_missing")]
+    LibraryCacheMissing,
+    #[serde(rename = "library.capacity_unavailable")]
+    LibraryCapacityUnavailable,
+    #[serde(rename = "library.insufficient_nodes")]
+    LibraryInsufficientNodes,
+}
+impl ::std::fmt::Display for LibraryAssessmentCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::LibraryAssessmentUnavailable => f.write_str("library.assessment_unavailable"),
+            Self::LibraryCacheMissing => f.write_str("library.cache_missing"),
+            Self::LibraryCapacityUnavailable => f.write_str("library.capacity_unavailable"),
+            Self::LibraryInsufficientNodes => f.write_str("library.insufficient_nodes"),
+        }
+    }
+}
+impl ::std::str::FromStr for LibraryAssessmentCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "library.assessment_unavailable" => Ok(Self::LibraryAssessmentUnavailable),
+            "library.cache_missing" => Ok(Self::LibraryCacheMissing),
+            "library.capacity_unavailable" => Ok(Self::LibraryCapacityUnavailable),
+            "library.insufficient_nodes" => Ok(Self::LibraryInsufficientNodes),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LibraryAssessmentCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LibraryAssessmentCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum LibraryProjectionCode {
+    #[serde(rename = "projection.evidence_truncated")]
+    ProjectionEvidenceTruncated,
+    #[serde(rename = "projection.reasons_truncated")]
+    ProjectionReasonsTruncated,
+}
+impl ::std::fmt::Display for LibraryProjectionCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ProjectionEvidenceTruncated => f.write_str("projection.evidence_truncated"),
+            Self::ProjectionReasonsTruncated => f.write_str("projection.reasons_truncated"),
+        }
+    }
+}
+impl ::std::str::FromStr for LibraryProjectionCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "projection.evidence_truncated" => Ok(Self::ProjectionEvidenceTruncated),
+            "projection.reasons_truncated" => Ok(Self::ProjectionReasonsTruncated),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for LibraryProjectionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for LibraryProjectionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum LifecycleEffect {
     #[serde(rename = "unknown")]
     Unknown,
@@ -2788,6 +3794,493 @@ impl ::std::convert::TryFrom<::std::string::String> for MigrationStep {
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ModelCacheBlockerCode {
+    #[serde(rename = "insufficient-reserved-storage")]
+    InsufficientReservedStorage,
+    #[serde(rename = "model-not-cached")]
+    ModelNotCached,
+    #[serde(rename = "recipe-not-cached")]
+    RecipeNotCached,
+}
+impl ::std::fmt::Display for ModelCacheBlockerCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::InsufficientReservedStorage => f.write_str("insufficient-reserved-storage"),
+            Self::ModelNotCached => f.write_str("model-not-cached"),
+            Self::RecipeNotCached => f.write_str("recipe-not-cached"),
+        }
+    }
+}
+impl ::std::str::FromStr for ModelCacheBlockerCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "insufficient-reserved-storage" => Ok(Self::InsufficientReservedStorage),
+            "model-not-cached" => Ok(Self::ModelNotCached),
+            "recipe-not-cached" => Ok(Self::RecipeNotCached),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ModelCacheBlockerCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ModelCacheBlockerCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum ModelCacheCode {
+    #[serde(rename = "model_cache.access_recheck_unavailable")]
+    ModelCacheAccessRecheckUnavailable,
+    #[serde(rename = "model_cache.artifact_count")]
+    ModelCacheArtifactCount,
+    #[serde(rename = "model_cache.artifact_duplicate")]
+    ModelCacheArtifactDuplicate,
+    #[serde(rename = "model_cache.artifact_invalid")]
+    ModelCacheArtifactInvalid,
+    #[serde(rename = "model_cache.artifact_missing")]
+    ModelCacheArtifactMissing,
+    #[serde(rename = "model_cache.artifact_unverified")]
+    ModelCacheArtifactUnverified,
+    #[serde(rename = "model_cache.cancellation_invalid")]
+    ModelCacheCancellationInvalid,
+    #[serde(rename = "model_cache.cancellation_key_reused")]
+    ModelCacheCancellationKeyReused,
+    #[serde(rename = "model_cache.capacity")]
+    ModelCacheCapacity,
+    #[serde(rename = "model_cache.coverage_incomplete")]
+    ModelCacheCoverageIncomplete,
+    #[serde(rename = "model_cache.credentials_missing")]
+    ModelCacheCredentialsMissing,
+    #[serde(rename = "model_cache.cursor_invalid")]
+    ModelCacheCursorInvalid,
+    #[serde(rename = "model_cache.dependency_count")]
+    ModelCacheDependencyCount,
+    #[serde(rename = "model_cache.digest_invalid")]
+    ModelCacheDigestInvalid,
+    #[serde(rename = "model_cache.digest_mismatch")]
+    ModelCacheDigestMismatch,
+    #[serde(rename = "model_cache.digest_size_conflict")]
+    ModelCacheDigestSizeConflict,
+    #[serde(rename = "model_cache.document_unreadable")]
+    ModelCacheDocumentUnreadable,
+    #[serde(rename = "model_cache.download_blocked")]
+    ModelCacheDownloadBlocked,
+    #[serde(rename = "model_cache.entry_missing")]
+    ModelCacheEntryMissing,
+    #[serde(rename = "model_cache.fixture_sources_forbidden")]
+    ModelCacheFixtureSourcesForbidden,
+    #[serde(rename = "model_cache.identity_conflict")]
+    ModelCacheIdentityConflict,
+    #[serde(rename = "model_cache.identity_mismatch")]
+    ModelCacheIdentityMismatch,
+    #[serde(rename = "model_cache.interrupted")]
+    ModelCacheInterrupted,
+    #[serde(rename = "model_cache.lock_unavailable")]
+    ModelCacheLockUnavailable,
+    #[serde(rename = "model_cache.manifest_identity_mismatch")]
+    ModelCacheManifestIdentityMismatch,
+    #[serde(rename = "model_cache.manifest_invalid")]
+    ModelCacheManifestInvalid,
+    #[serde(rename = "model_cache.manifest_too_large")]
+    ModelCacheManifestTooLarge,
+    #[serde(rename = "model_cache.model_content_digests_invalid")]
+    ModelCacheModelContentDigestsInvalid,
+    #[serde(rename = "model_cache.model_definition_invalid")]
+    ModelCacheModelDefinitionInvalid,
+    #[serde(rename = "model_cache.model_definition_missing")]
+    ModelCacheModelDefinitionMissing,
+    #[serde(rename = "model_cache.model_dependency_cycle")]
+    ModelCacheModelDependencyCycle,
+    #[serde(rename = "model_cache.model_pin_invalid")]
+    ModelCacheModelPinInvalid,
+    #[serde(rename = "model_cache.model_variant_invalid")]
+    ModelCacheModelVariantInvalid,
+    #[serde(rename = "model_cache.not_cancellable")]
+    ModelCacheNotCancellable,
+    #[serde(rename = "model_cache.object_busy")]
+    ModelCacheObjectBusy,
+    #[serde(rename = "model_cache.operation_failed")]
+    ModelCacheOperationFailed,
+    #[serde(rename = "model_cache.operation_missing")]
+    ModelCacheOperationMissing,
+    #[serde(rename = "model_cache.operation_not_observable")]
+    ModelCacheOperationNotObservable,
+    #[serde(rename = "model_cache.operation_not_retryable")]
+    ModelCacheOperationNotRetryable,
+    #[serde(rename = "model_cache.operation_unreadable")]
+    ModelCacheOperationUnreadable,
+    #[serde(rename = "model_cache.payload_invalid")]
+    ModelCachePayloadInvalid,
+    #[serde(rename = "model_cache.pin_mismatch")]
+    ModelCachePinMismatch,
+    #[serde(rename = "model_cache.pin_required")]
+    ModelCachePinRequired,
+    #[serde(rename = "model_cache.plan_invalid")]
+    ModelCachePlanInvalid,
+    #[serde(rename = "model_cache.range_invalid")]
+    ModelCacheRangeInvalid,
+    #[serde(rename = "model_cache.rate_limited")]
+    ModelCacheRateLimited,
+    #[serde(rename = "model_cache.recipe_identity_ambiguous")]
+    ModelCacheRecipeIdentityAmbiguous,
+    #[serde(rename = "model_cache.recipe_identity_invalid")]
+    ModelCacheRecipeIdentityInvalid,
+    #[serde(rename = "model_cache.recipe_identity_missing")]
+    ModelCacheRecipeIdentityMissing,
+    #[serde(rename = "model_cache.recipe_invalid")]
+    ModelCacheRecipeInvalid,
+    #[serde(rename = "model_cache.recipe_model_missing")]
+    ModelCacheRecipeModelMissing,
+    #[serde(rename = "model_cache.recipe_revision_invalid")]
+    ModelCacheRecipeRevisionInvalid,
+    #[serde(rename = "model_cache.recipe_revision_missing")]
+    ModelCacheRecipeRevisionMissing,
+    #[serde(rename = "model_cache.redirect_forbidden")]
+    ModelCacheRedirectForbidden,
+    #[serde(rename = "model_cache.release_asset_identity_conflict")]
+    ModelCacheReleaseAssetIdentityConflict,
+    #[serde(rename = "model_cache.release_metadata_invalid")]
+    ModelCacheReleaseMetadataInvalid,
+    #[serde(rename = "model_cache.removal_child_failed")]
+    ModelCacheRemovalChildFailed,
+    #[serde(rename = "model_cache.removal_child_invalid")]
+    ModelCacheRemovalChildInvalid,
+    #[serde(rename = "model_cache.removal_child_mismatch")]
+    ModelCacheRemovalChildMismatch,
+    #[serde(rename = "model_cache.removal_child_missing")]
+    ModelCacheRemovalChildMissing,
+    #[serde(rename = "model_cache.removal_child_pending")]
+    ModelCacheRemovalChildPending,
+    #[serde(rename = "model_cache.removal_invalid")]
+    ModelCacheRemovalInvalid,
+    #[serde(rename = "model_cache.removal_path_unsafe")]
+    ModelCacheRemovalPathUnsafe,
+    #[serde(rename = "model_cache.removal_plan_invalid")]
+    ModelCacheRemovalPlanInvalid,
+    #[serde(rename = "model_cache.removal_referenced")]
+    ModelCacheRemovalReferenced,
+    #[serde(rename = "model_cache.removal_scope_changed")]
+    ModelCacheRemovalScopeChanged,
+    #[serde(rename = "model_cache.removal_scope_invalid")]
+    ModelCacheRemovalScopeInvalid,
+    #[serde(rename = "model_cache.removal_scope_unavailable")]
+    ModelCacheRemovalScopeUnavailable,
+    #[serde(rename = "model_cache.removal_wait")]
+    ModelCacheRemovalWait,
+    #[serde(rename = "model_cache.request_key_invalid")]
+    ModelCacheRequestKeyInvalid,
+    #[serde(rename = "model_cache.request_key_reused")]
+    ModelCacheRequestKeyReused,
+    #[serde(rename = "model_cache.review_invalid")]
+    ModelCacheReviewInvalid,
+    #[serde(rename = "model_cache.review_unavailable")]
+    ModelCacheReviewUnavailable,
+    #[serde(rename = "model_cache.revision_invalid")]
+    ModelCacheRevisionInvalid,
+    #[serde(rename = "model_cache.revision_missing")]
+    ModelCacheRevisionMissing,
+    #[serde(rename = "model_cache.schema_unsupported")]
+    ModelCacheSchemaUnsupported,
+    #[serde(rename = "model_cache.selector_ambiguous")]
+    ModelCacheSelectorAmbiguous,
+    #[serde(rename = "model_cache.selector_invalid")]
+    ModelCacheSelectorInvalid,
+    #[serde(rename = "model_cache.selector_missing")]
+    ModelCacheSelectorMissing,
+    #[serde(rename = "model_cache.source_invalid")]
+    ModelCacheSourceInvalid,
+    #[serde(rename = "model_cache.source_size_mismatch")]
+    ModelCacheSourceSizeMismatch,
+    #[serde(rename = "model_cache.source_truncated")]
+    ModelCacheSourceTruncated,
+    #[serde(rename = "model_cache.source_unavailable")]
+    ModelCacheSourceUnavailable,
+    #[serde(rename = "model_cache.source_unsupported")]
+    ModelCacheSourceUnsupported,
+    #[serde(rename = "model_cache.source_untrusted")]
+    ModelCacheSourceUntrusted,
+    #[serde(rename = "model_cache.stale_plan")]
+    ModelCacheStalePlan,
+    #[serde(rename = "model_cache.unavailable")]
+    ModelCacheUnavailable,
+    #[serde(rename = "model_cache.upstream_check_budget_exhausted")]
+    ModelCacheUpstreamCheckBudgetExhausted,
+    #[serde(rename = "model_cache.upstream_check_failed")]
+    ModelCacheUpstreamCheckFailed,
+    #[serde(rename = "model_cache.upstream_revision_invalid")]
+    ModelCacheUpstreamRevisionInvalid,
+}
+impl ::std::fmt::Display for ModelCacheCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ModelCacheAccessRecheckUnavailable => {
+                f.write_str("model_cache.access_recheck_unavailable")
+            }
+            Self::ModelCacheArtifactCount => f.write_str("model_cache.artifact_count"),
+            Self::ModelCacheArtifactDuplicate => f.write_str("model_cache.artifact_duplicate"),
+            Self::ModelCacheArtifactInvalid => f.write_str("model_cache.artifact_invalid"),
+            Self::ModelCacheArtifactMissing => f.write_str("model_cache.artifact_missing"),
+            Self::ModelCacheArtifactUnverified => f.write_str("model_cache.artifact_unverified"),
+            Self::ModelCacheCancellationInvalid => f.write_str("model_cache.cancellation_invalid"),
+            Self::ModelCacheCancellationKeyReused => {
+                f.write_str("model_cache.cancellation_key_reused")
+            }
+            Self::ModelCacheCapacity => f.write_str("model_cache.capacity"),
+            Self::ModelCacheCoverageIncomplete => f.write_str("model_cache.coverage_incomplete"),
+            Self::ModelCacheCredentialsMissing => f.write_str("model_cache.credentials_missing"),
+            Self::ModelCacheCursorInvalid => f.write_str("model_cache.cursor_invalid"),
+            Self::ModelCacheDependencyCount => f.write_str("model_cache.dependency_count"),
+            Self::ModelCacheDigestInvalid => f.write_str("model_cache.digest_invalid"),
+            Self::ModelCacheDigestMismatch => f.write_str("model_cache.digest_mismatch"),
+            Self::ModelCacheDigestSizeConflict => f.write_str("model_cache.digest_size_conflict"),
+            Self::ModelCacheDocumentUnreadable => f.write_str("model_cache.document_unreadable"),
+            Self::ModelCacheDownloadBlocked => f.write_str("model_cache.download_blocked"),
+            Self::ModelCacheEntryMissing => f.write_str("model_cache.entry_missing"),
+            Self::ModelCacheFixtureSourcesForbidden => {
+                f.write_str("model_cache.fixture_sources_forbidden")
+            }
+            Self::ModelCacheIdentityConflict => f.write_str("model_cache.identity_conflict"),
+            Self::ModelCacheIdentityMismatch => f.write_str("model_cache.identity_mismatch"),
+            Self::ModelCacheInterrupted => f.write_str("model_cache.interrupted"),
+            Self::ModelCacheLockUnavailable => f.write_str("model_cache.lock_unavailable"),
+            Self::ModelCacheManifestIdentityMismatch => {
+                f.write_str("model_cache.manifest_identity_mismatch")
+            }
+            Self::ModelCacheManifestInvalid => f.write_str("model_cache.manifest_invalid"),
+            Self::ModelCacheManifestTooLarge => f.write_str("model_cache.manifest_too_large"),
+            Self::ModelCacheModelContentDigestsInvalid => {
+                f.write_str("model_cache.model_content_digests_invalid")
+            }
+            Self::ModelCacheModelDefinitionInvalid => {
+                f.write_str("model_cache.model_definition_invalid")
+            }
+            Self::ModelCacheModelDefinitionMissing => {
+                f.write_str("model_cache.model_definition_missing")
+            }
+            Self::ModelCacheModelDependencyCycle => {
+                f.write_str("model_cache.model_dependency_cycle")
+            }
+            Self::ModelCacheModelPinInvalid => f.write_str("model_cache.model_pin_invalid"),
+            Self::ModelCacheModelVariantInvalid => f.write_str("model_cache.model_variant_invalid"),
+            Self::ModelCacheNotCancellable => f.write_str("model_cache.not_cancellable"),
+            Self::ModelCacheObjectBusy => f.write_str("model_cache.object_busy"),
+            Self::ModelCacheOperationFailed => f.write_str("model_cache.operation_failed"),
+            Self::ModelCacheOperationMissing => f.write_str("model_cache.operation_missing"),
+            Self::ModelCacheOperationNotObservable => {
+                f.write_str("model_cache.operation_not_observable")
+            }
+            Self::ModelCacheOperationNotRetryable => {
+                f.write_str("model_cache.operation_not_retryable")
+            }
+            Self::ModelCacheOperationUnreadable => f.write_str("model_cache.operation_unreadable"),
+            Self::ModelCachePayloadInvalid => f.write_str("model_cache.payload_invalid"),
+            Self::ModelCachePinMismatch => f.write_str("model_cache.pin_mismatch"),
+            Self::ModelCachePinRequired => f.write_str("model_cache.pin_required"),
+            Self::ModelCachePlanInvalid => f.write_str("model_cache.plan_invalid"),
+            Self::ModelCacheRangeInvalid => f.write_str("model_cache.range_invalid"),
+            Self::ModelCacheRateLimited => f.write_str("model_cache.rate_limited"),
+            Self::ModelCacheRecipeIdentityAmbiguous => {
+                f.write_str("model_cache.recipe_identity_ambiguous")
+            }
+            Self::ModelCacheRecipeIdentityInvalid => {
+                f.write_str("model_cache.recipe_identity_invalid")
+            }
+            Self::ModelCacheRecipeIdentityMissing => {
+                f.write_str("model_cache.recipe_identity_missing")
+            }
+            Self::ModelCacheRecipeInvalid => f.write_str("model_cache.recipe_invalid"),
+            Self::ModelCacheRecipeModelMissing => f.write_str("model_cache.recipe_model_missing"),
+            Self::ModelCacheRecipeRevisionInvalid => {
+                f.write_str("model_cache.recipe_revision_invalid")
+            }
+            Self::ModelCacheRecipeRevisionMissing => {
+                f.write_str("model_cache.recipe_revision_missing")
+            }
+            Self::ModelCacheRedirectForbidden => f.write_str("model_cache.redirect_forbidden"),
+            Self::ModelCacheReleaseAssetIdentityConflict => {
+                f.write_str("model_cache.release_asset_identity_conflict")
+            }
+            Self::ModelCacheReleaseMetadataInvalid => {
+                f.write_str("model_cache.release_metadata_invalid")
+            }
+            Self::ModelCacheRemovalChildFailed => f.write_str("model_cache.removal_child_failed"),
+            Self::ModelCacheRemovalChildInvalid => f.write_str("model_cache.removal_child_invalid"),
+            Self::ModelCacheRemovalChildMismatch => {
+                f.write_str("model_cache.removal_child_mismatch")
+            }
+            Self::ModelCacheRemovalChildMissing => f.write_str("model_cache.removal_child_missing"),
+            Self::ModelCacheRemovalChildPending => f.write_str("model_cache.removal_child_pending"),
+            Self::ModelCacheRemovalInvalid => f.write_str("model_cache.removal_invalid"),
+            Self::ModelCacheRemovalPathUnsafe => f.write_str("model_cache.removal_path_unsafe"),
+            Self::ModelCacheRemovalPlanInvalid => f.write_str("model_cache.removal_plan_invalid"),
+            Self::ModelCacheRemovalReferenced => f.write_str("model_cache.removal_referenced"),
+            Self::ModelCacheRemovalScopeChanged => f.write_str("model_cache.removal_scope_changed"),
+            Self::ModelCacheRemovalScopeInvalid => f.write_str("model_cache.removal_scope_invalid"),
+            Self::ModelCacheRemovalScopeUnavailable => {
+                f.write_str("model_cache.removal_scope_unavailable")
+            }
+            Self::ModelCacheRemovalWait => f.write_str("model_cache.removal_wait"),
+            Self::ModelCacheRequestKeyInvalid => f.write_str("model_cache.request_key_invalid"),
+            Self::ModelCacheRequestKeyReused => f.write_str("model_cache.request_key_reused"),
+            Self::ModelCacheReviewInvalid => f.write_str("model_cache.review_invalid"),
+            Self::ModelCacheReviewUnavailable => f.write_str("model_cache.review_unavailable"),
+            Self::ModelCacheRevisionInvalid => f.write_str("model_cache.revision_invalid"),
+            Self::ModelCacheRevisionMissing => f.write_str("model_cache.revision_missing"),
+            Self::ModelCacheSchemaUnsupported => f.write_str("model_cache.schema_unsupported"),
+            Self::ModelCacheSelectorAmbiguous => f.write_str("model_cache.selector_ambiguous"),
+            Self::ModelCacheSelectorInvalid => f.write_str("model_cache.selector_invalid"),
+            Self::ModelCacheSelectorMissing => f.write_str("model_cache.selector_missing"),
+            Self::ModelCacheSourceInvalid => f.write_str("model_cache.source_invalid"),
+            Self::ModelCacheSourceSizeMismatch => f.write_str("model_cache.source_size_mismatch"),
+            Self::ModelCacheSourceTruncated => f.write_str("model_cache.source_truncated"),
+            Self::ModelCacheSourceUnavailable => f.write_str("model_cache.source_unavailable"),
+            Self::ModelCacheSourceUnsupported => f.write_str("model_cache.source_unsupported"),
+            Self::ModelCacheSourceUntrusted => f.write_str("model_cache.source_untrusted"),
+            Self::ModelCacheStalePlan => f.write_str("model_cache.stale_plan"),
+            Self::ModelCacheUnavailable => f.write_str("model_cache.unavailable"),
+            Self::ModelCacheUpstreamCheckBudgetExhausted => {
+                f.write_str("model_cache.upstream_check_budget_exhausted")
+            }
+            Self::ModelCacheUpstreamCheckFailed => f.write_str("model_cache.upstream_check_failed"),
+            Self::ModelCacheUpstreamRevisionInvalid => {
+                f.write_str("model_cache.upstream_revision_invalid")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for ModelCacheCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "model_cache.access_recheck_unavailable" => {
+                Ok(Self::ModelCacheAccessRecheckUnavailable)
+            }
+            "model_cache.artifact_count" => Ok(Self::ModelCacheArtifactCount),
+            "model_cache.artifact_duplicate" => Ok(Self::ModelCacheArtifactDuplicate),
+            "model_cache.artifact_invalid" => Ok(Self::ModelCacheArtifactInvalid),
+            "model_cache.artifact_missing" => Ok(Self::ModelCacheArtifactMissing),
+            "model_cache.artifact_unverified" => Ok(Self::ModelCacheArtifactUnverified),
+            "model_cache.cancellation_invalid" => Ok(Self::ModelCacheCancellationInvalid),
+            "model_cache.cancellation_key_reused" => Ok(Self::ModelCacheCancellationKeyReused),
+            "model_cache.capacity" => Ok(Self::ModelCacheCapacity),
+            "model_cache.coverage_incomplete" => Ok(Self::ModelCacheCoverageIncomplete),
+            "model_cache.credentials_missing" => Ok(Self::ModelCacheCredentialsMissing),
+            "model_cache.cursor_invalid" => Ok(Self::ModelCacheCursorInvalid),
+            "model_cache.dependency_count" => Ok(Self::ModelCacheDependencyCount),
+            "model_cache.digest_invalid" => Ok(Self::ModelCacheDigestInvalid),
+            "model_cache.digest_mismatch" => Ok(Self::ModelCacheDigestMismatch),
+            "model_cache.digest_size_conflict" => Ok(Self::ModelCacheDigestSizeConflict),
+            "model_cache.document_unreadable" => Ok(Self::ModelCacheDocumentUnreadable),
+            "model_cache.download_blocked" => Ok(Self::ModelCacheDownloadBlocked),
+            "model_cache.entry_missing" => Ok(Self::ModelCacheEntryMissing),
+            "model_cache.fixture_sources_forbidden" => Ok(Self::ModelCacheFixtureSourcesForbidden),
+            "model_cache.identity_conflict" => Ok(Self::ModelCacheIdentityConflict),
+            "model_cache.identity_mismatch" => Ok(Self::ModelCacheIdentityMismatch),
+            "model_cache.interrupted" => Ok(Self::ModelCacheInterrupted),
+            "model_cache.lock_unavailable" => Ok(Self::ModelCacheLockUnavailable),
+            "model_cache.manifest_identity_mismatch" => {
+                Ok(Self::ModelCacheManifestIdentityMismatch)
+            }
+            "model_cache.manifest_invalid" => Ok(Self::ModelCacheManifestInvalid),
+            "model_cache.manifest_too_large" => Ok(Self::ModelCacheManifestTooLarge),
+            "model_cache.model_content_digests_invalid" => {
+                Ok(Self::ModelCacheModelContentDigestsInvalid)
+            }
+            "model_cache.model_definition_invalid" => Ok(Self::ModelCacheModelDefinitionInvalid),
+            "model_cache.model_definition_missing" => Ok(Self::ModelCacheModelDefinitionMissing),
+            "model_cache.model_dependency_cycle" => Ok(Self::ModelCacheModelDependencyCycle),
+            "model_cache.model_pin_invalid" => Ok(Self::ModelCacheModelPinInvalid),
+            "model_cache.model_variant_invalid" => Ok(Self::ModelCacheModelVariantInvalid),
+            "model_cache.not_cancellable" => Ok(Self::ModelCacheNotCancellable),
+            "model_cache.object_busy" => Ok(Self::ModelCacheObjectBusy),
+            "model_cache.operation_failed" => Ok(Self::ModelCacheOperationFailed),
+            "model_cache.operation_missing" => Ok(Self::ModelCacheOperationMissing),
+            "model_cache.operation_not_observable" => Ok(Self::ModelCacheOperationNotObservable),
+            "model_cache.operation_not_retryable" => Ok(Self::ModelCacheOperationNotRetryable),
+            "model_cache.operation_unreadable" => Ok(Self::ModelCacheOperationUnreadable),
+            "model_cache.payload_invalid" => Ok(Self::ModelCachePayloadInvalid),
+            "model_cache.pin_mismatch" => Ok(Self::ModelCachePinMismatch),
+            "model_cache.pin_required" => Ok(Self::ModelCachePinRequired),
+            "model_cache.plan_invalid" => Ok(Self::ModelCachePlanInvalid),
+            "model_cache.range_invalid" => Ok(Self::ModelCacheRangeInvalid),
+            "model_cache.rate_limited" => Ok(Self::ModelCacheRateLimited),
+            "model_cache.recipe_identity_ambiguous" => Ok(Self::ModelCacheRecipeIdentityAmbiguous),
+            "model_cache.recipe_identity_invalid" => Ok(Self::ModelCacheRecipeIdentityInvalid),
+            "model_cache.recipe_identity_missing" => Ok(Self::ModelCacheRecipeIdentityMissing),
+            "model_cache.recipe_invalid" => Ok(Self::ModelCacheRecipeInvalid),
+            "model_cache.recipe_model_missing" => Ok(Self::ModelCacheRecipeModelMissing),
+            "model_cache.recipe_revision_invalid" => Ok(Self::ModelCacheRecipeRevisionInvalid),
+            "model_cache.recipe_revision_missing" => Ok(Self::ModelCacheRecipeRevisionMissing),
+            "model_cache.redirect_forbidden" => Ok(Self::ModelCacheRedirectForbidden),
+            "model_cache.release_asset_identity_conflict" => {
+                Ok(Self::ModelCacheReleaseAssetIdentityConflict)
+            }
+            "model_cache.release_metadata_invalid" => Ok(Self::ModelCacheReleaseMetadataInvalid),
+            "model_cache.removal_child_failed" => Ok(Self::ModelCacheRemovalChildFailed),
+            "model_cache.removal_child_invalid" => Ok(Self::ModelCacheRemovalChildInvalid),
+            "model_cache.removal_child_mismatch" => Ok(Self::ModelCacheRemovalChildMismatch),
+            "model_cache.removal_child_missing" => Ok(Self::ModelCacheRemovalChildMissing),
+            "model_cache.removal_child_pending" => Ok(Self::ModelCacheRemovalChildPending),
+            "model_cache.removal_invalid" => Ok(Self::ModelCacheRemovalInvalid),
+            "model_cache.removal_path_unsafe" => Ok(Self::ModelCacheRemovalPathUnsafe),
+            "model_cache.removal_plan_invalid" => Ok(Self::ModelCacheRemovalPlanInvalid),
+            "model_cache.removal_referenced" => Ok(Self::ModelCacheRemovalReferenced),
+            "model_cache.removal_scope_changed" => Ok(Self::ModelCacheRemovalScopeChanged),
+            "model_cache.removal_scope_invalid" => Ok(Self::ModelCacheRemovalScopeInvalid),
+            "model_cache.removal_scope_unavailable" => Ok(Self::ModelCacheRemovalScopeUnavailable),
+            "model_cache.removal_wait" => Ok(Self::ModelCacheRemovalWait),
+            "model_cache.request_key_invalid" => Ok(Self::ModelCacheRequestKeyInvalid),
+            "model_cache.request_key_reused" => Ok(Self::ModelCacheRequestKeyReused),
+            "model_cache.review_invalid" => Ok(Self::ModelCacheReviewInvalid),
+            "model_cache.review_unavailable" => Ok(Self::ModelCacheReviewUnavailable),
+            "model_cache.revision_invalid" => Ok(Self::ModelCacheRevisionInvalid),
+            "model_cache.revision_missing" => Ok(Self::ModelCacheRevisionMissing),
+            "model_cache.schema_unsupported" => Ok(Self::ModelCacheSchemaUnsupported),
+            "model_cache.selector_ambiguous" => Ok(Self::ModelCacheSelectorAmbiguous),
+            "model_cache.selector_invalid" => Ok(Self::ModelCacheSelectorInvalid),
+            "model_cache.selector_missing" => Ok(Self::ModelCacheSelectorMissing),
+            "model_cache.source_invalid" => Ok(Self::ModelCacheSourceInvalid),
+            "model_cache.source_size_mismatch" => Ok(Self::ModelCacheSourceSizeMismatch),
+            "model_cache.source_truncated" => Ok(Self::ModelCacheSourceTruncated),
+            "model_cache.source_unavailable" => Ok(Self::ModelCacheSourceUnavailable),
+            "model_cache.source_unsupported" => Ok(Self::ModelCacheSourceUnsupported),
+            "model_cache.source_untrusted" => Ok(Self::ModelCacheSourceUntrusted),
+            "model_cache.stale_plan" => Ok(Self::ModelCacheStalePlan),
+            "model_cache.unavailable" => Ok(Self::ModelCacheUnavailable),
+            "model_cache.upstream_check_budget_exhausted" => {
+                Ok(Self::ModelCacheUpstreamCheckBudgetExhausted)
+            }
+            "model_cache.upstream_check_failed" => Ok(Self::ModelCacheUpstreamCheckFailed),
+            "model_cache.upstream_revision_invalid" => Ok(Self::ModelCacheUpstreamRevisionInvalid),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ModelCacheCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ModelCacheCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -2857,6 +4350,81 @@ impl ::std::convert::TryFrom<::std::string::String> for NetworkInterfaceKind {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum NodeOfflineReason {
+    #[serde(rename = "unregistered")]
+    Unregistered,
+    #[serde(rename = "agent-inactive")]
+    AgentInactive,
+    #[serde(rename = "agent-revoked")]
+    AgentRevoked,
+    #[serde(rename = "never-seen")]
+    NeverSeen,
+    #[serde(rename = "last-seen-in-future")]
+    LastSeenInFuture,
+    #[serde(rename = "stale")]
+    Stale,
+    #[serde(rename = "certificate-missing")]
+    CertificateMissing,
+    #[serde(rename = "certificate-not-yet-valid")]
+    CertificateNotYetValid,
+    #[serde(rename = "certificate-expired")]
+    CertificateExpired,
+    #[serde(rename = "certificate-revoked")]
+    CertificateRevoked,
+    #[serde(rename = "certificate-inactive")]
+    CertificateInactive,
+}
+impl ::std::fmt::Display for NodeOfflineReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Unregistered => f.write_str("unregistered"),
+            Self::AgentInactive => f.write_str("agent-inactive"),
+            Self::AgentRevoked => f.write_str("agent-revoked"),
+            Self::NeverSeen => f.write_str("never-seen"),
+            Self::LastSeenInFuture => f.write_str("last-seen-in-future"),
+            Self::Stale => f.write_str("stale"),
+            Self::CertificateMissing => f.write_str("certificate-missing"),
+            Self::CertificateNotYetValid => f.write_str("certificate-not-yet-valid"),
+            Self::CertificateExpired => f.write_str("certificate-expired"),
+            Self::CertificateRevoked => f.write_str("certificate-revoked"),
+            Self::CertificateInactive => f.write_str("certificate-inactive"),
+        }
+    }
+}
+impl ::std::str::FromStr for NodeOfflineReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "unregistered" => Ok(Self::Unregistered),
+            "agent-inactive" => Ok(Self::AgentInactive),
+            "agent-revoked" => Ok(Self::AgentRevoked),
+            "never-seen" => Ok(Self::NeverSeen),
+            "last-seen-in-future" => Ok(Self::LastSeenInFuture),
+            "stale" => Ok(Self::Stale),
+            "certificate-missing" => Ok(Self::CertificateMissing),
+            "certificate-not-yet-valid" => Ok(Self::CertificateNotYetValid),
+            "certificate-expired" => Ok(Self::CertificateExpired),
+            "certificate-revoked" => Ok(Self::CertificateRevoked),
+            "certificate-inactive" => Ok(Self::CertificateInactive),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for NodeOfflineReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for NodeOfflineReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ObservationCause {
     #[serde(rename = "reported-unknown")]
     ReportedUnknown,
@@ -2905,6 +4473,45 @@ pub struct OperationCheckpoint {
     pub digest: ::std::option::Option<::std::string::String>,
     pub key: ::std::string::String,
     pub sequence: u64,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum OperationFailureCode {
+    #[serde(rename = "fleet_profile_application_failed")]
+    FleetProfileApplicationFailed,
+    #[serde(rename = "artifact_process_failed")]
+    ArtifactProcessFailed,
+}
+impl ::std::fmt::Display for OperationFailureCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::FleetProfileApplicationFailed => f.write_str("fleet_profile_application_failed"),
+            Self::ArtifactProcessFailed => f.write_str("artifact_process_failed"),
+        }
+    }
+}
+impl ::std::str::FromStr for OperationFailureCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "fleet_profile_application_failed" => Ok(Self::FleetProfileApplicationFailed),
+            "artifact_process_failed" => Ok(Self::ArtifactProcessFailed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OperationFailureCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for OperationFailureCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -3626,6 +5233,388 @@ pub struct PackageRollbackSource {
     pub package_signature: ::std::string::String,
     pub package_version: ::std::string::String,
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum PrebuiltImageCode {
+    #[serde(rename = "prebuilt.build_key_mismatch")]
+    PrebuiltBuildKeyMismatch,
+    #[serde(rename = "prebuilt.not_pinned")]
+    PrebuiltNotPinned,
+    #[serde(rename = "prebuilt.pull_failed_recently")]
+    PrebuiltPullFailedRecently,
+    #[serde(rename = "prebuilt.used")]
+    PrebuiltUsed,
+}
+impl ::std::fmt::Display for PrebuiltImageCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::PrebuiltBuildKeyMismatch => f.write_str("prebuilt.build_key_mismatch"),
+            Self::PrebuiltNotPinned => f.write_str("prebuilt.not_pinned"),
+            Self::PrebuiltPullFailedRecently => f.write_str("prebuilt.pull_failed_recently"),
+            Self::PrebuiltUsed => f.write_str("prebuilt.used"),
+        }
+    }
+}
+impl ::std::str::FromStr for PrebuiltImageCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "prebuilt.build_key_mismatch" => Ok(Self::PrebuiltBuildKeyMismatch),
+            "prebuilt.not_pinned" => Ok(Self::PrebuiltNotPinned),
+            "prebuilt.pull_failed_recently" => Ok(Self::PrebuiltPullFailedRecently),
+            "prebuilt.used" => Ok(Self::PrebuiltUsed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for PrebuiltImageCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for PrebuiltImageCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum ProfileReasonCode {
+    #[serde(rename = "profile.admission_busy")]
+    ProfileAdmissionBusy,
+    #[serde(rename = "profile.admission_effect_busy")]
+    ProfileAdmissionEffectBusy,
+    #[serde(rename = "profile.application_intent.invalid")]
+    ProfileApplicationIntentInvalid,
+    #[serde(rename = "profile.choices_unreadable")]
+    ProfileChoicesUnreadable,
+    #[serde(rename = "profile.cleanup_delegated")]
+    ProfileCleanupDelegated,
+    #[serde(rename = "profile.distributed_cross_scope")]
+    ProfileDistributedCrossScope,
+    #[serde(rename = "profile.incomplete_multi_spark_model")]
+    ProfileIncompleteMultiSparkModel,
+    #[serde(rename = "profile.interruption_expected")]
+    ProfileInterruptionExpected,
+    #[serde(rename = "profile.pending_cross_scope")]
+    ProfilePendingCrossScope,
+    #[serde(rename = "profile.preparation_not_started")]
+    ProfilePreparationNotStarted,
+    #[serde(rename = "profile.preparation_scope_mismatch")]
+    ProfilePreparationScopeMismatch,
+    #[serde(rename = "profile.preparation_unavailable")]
+    ProfilePreparationUnavailable,
+    #[serde(rename = "profile.recipe_unavailable")]
+    ProfileRecipeUnavailable,
+    #[serde(rename = "profile.recovery_assignments_changed")]
+    ProfileRecoveryAssignmentsChanged,
+    #[serde(rename = "profile.recovery_cache_pending")]
+    ProfileRecoveryCachePending,
+    #[serde(rename = "profile.recovery_scope_changed")]
+    ProfileRecoveryScopeChanged,
+    #[serde(rename = "profile.recovery_waiting")]
+    ProfileRecoveryWaiting,
+    #[serde(rename = "profile.resource_recheck_unavailable")]
+    ProfileResourceRecheckUnavailable,
+    #[serde(rename = "profile.retry_conflict")]
+    ProfileRetryConflict,
+    #[serde(rename = "profile.retry_executor_unavailable")]
+    ProfileRetryExecutorUnavailable,
+    #[serde(rename = "profile.retry_intent_unavailable")]
+    ProfileRetryIntentUnavailable,
+    #[serde(rename = "profile.retry_review_unavailable")]
+    ProfileRetryReviewUnavailable,
+    #[serde(rename = "profile.review_stale")]
+    ProfileReviewStale,
+    #[serde(rename = "profile.runtime_image_rebuild_pending")]
+    ProfileRuntimeImageRebuildPending,
+    #[serde(rename = "profile.shared_installation_scope")]
+    ProfileSharedInstallationScope,
+    #[serde(rename = "profile.spark_removed")]
+    ProfileSparkRemoved,
+    #[serde(rename = "profile.spark_unavailable")]
+    ProfileSparkUnavailable,
+    #[serde(rename = "profile.stale_plan")]
+    ProfileStalePlan,
+    #[serde(rename = "profile.switch_authority_unavailable")]
+    ProfileSwitchAuthorityUnavailable,
+    #[serde(rename = "profile.switch_scope_unresolved")]
+    ProfileSwitchScopeUnresolved,
+    #[serde(rename = "profile.topology_incomplete")]
+    ProfileTopologyIncomplete,
+    #[serde(rename = "profile.recovery_artifact_changed")]
+    ProfileRecoveryArtifactChanged,
+    #[serde(rename = "profile.runtime-image-changed")]
+    ProfileRuntimeImageChanged,
+    #[serde(rename = "profile.selection_lost")]
+    ProfileSelectionLost,
+    #[serde(rename = "profile.asset_reservation_unavailable")]
+    ProfileAssetReservationUnavailable,
+}
+impl ::std::fmt::Display for ProfileReasonCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ProfileAdmissionBusy => f.write_str("profile.admission_busy"),
+            Self::ProfileAdmissionEffectBusy => f.write_str("profile.admission_effect_busy"),
+            Self::ProfileApplicationIntentInvalid => {
+                f.write_str("profile.application_intent.invalid")
+            }
+            Self::ProfileChoicesUnreadable => f.write_str("profile.choices_unreadable"),
+            Self::ProfileCleanupDelegated => f.write_str("profile.cleanup_delegated"),
+            Self::ProfileDistributedCrossScope => f.write_str("profile.distributed_cross_scope"),
+            Self::ProfileIncompleteMultiSparkModel => {
+                f.write_str("profile.incomplete_multi_spark_model")
+            }
+            Self::ProfileInterruptionExpected => f.write_str("profile.interruption_expected"),
+            Self::ProfilePendingCrossScope => f.write_str("profile.pending_cross_scope"),
+            Self::ProfilePreparationNotStarted => f.write_str("profile.preparation_not_started"),
+            Self::ProfilePreparationScopeMismatch => {
+                f.write_str("profile.preparation_scope_mismatch")
+            }
+            Self::ProfilePreparationUnavailable => f.write_str("profile.preparation_unavailable"),
+            Self::ProfileRecipeUnavailable => f.write_str("profile.recipe_unavailable"),
+            Self::ProfileRecoveryAssignmentsChanged => {
+                f.write_str("profile.recovery_assignments_changed")
+            }
+            Self::ProfileRecoveryCachePending => f.write_str("profile.recovery_cache_pending"),
+            Self::ProfileRecoveryScopeChanged => f.write_str("profile.recovery_scope_changed"),
+            Self::ProfileRecoveryWaiting => f.write_str("profile.recovery_waiting"),
+            Self::ProfileResourceRecheckUnavailable => {
+                f.write_str("profile.resource_recheck_unavailable")
+            }
+            Self::ProfileRetryConflict => f.write_str("profile.retry_conflict"),
+            Self::ProfileRetryExecutorUnavailable => {
+                f.write_str("profile.retry_executor_unavailable")
+            }
+            Self::ProfileRetryIntentUnavailable => f.write_str("profile.retry_intent_unavailable"),
+            Self::ProfileRetryReviewUnavailable => f.write_str("profile.retry_review_unavailable"),
+            Self::ProfileReviewStale => f.write_str("profile.review_stale"),
+            Self::ProfileRuntimeImageRebuildPending => {
+                f.write_str("profile.runtime_image_rebuild_pending")
+            }
+            Self::ProfileSharedInstallationScope => {
+                f.write_str("profile.shared_installation_scope")
+            }
+            Self::ProfileSparkRemoved => f.write_str("profile.spark_removed"),
+            Self::ProfileSparkUnavailable => f.write_str("profile.spark_unavailable"),
+            Self::ProfileStalePlan => f.write_str("profile.stale_plan"),
+            Self::ProfileSwitchAuthorityUnavailable => {
+                f.write_str("profile.switch_authority_unavailable")
+            }
+            Self::ProfileSwitchScopeUnresolved => f.write_str("profile.switch_scope_unresolved"),
+            Self::ProfileTopologyIncomplete => f.write_str("profile.topology_incomplete"),
+            Self::ProfileRecoveryArtifactChanged => {
+                f.write_str("profile.recovery_artifact_changed")
+            }
+            Self::ProfileRuntimeImageChanged => f.write_str("profile.runtime-image-changed"),
+            Self::ProfileSelectionLost => f.write_str("profile.selection_lost"),
+            Self::ProfileAssetReservationUnavailable => {
+                f.write_str("profile.asset_reservation_unavailable")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileReasonCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "profile.admission_busy" => Ok(Self::ProfileAdmissionBusy),
+            "profile.admission_effect_busy" => Ok(Self::ProfileAdmissionEffectBusy),
+            "profile.application_intent.invalid" => Ok(Self::ProfileApplicationIntentInvalid),
+            "profile.choices_unreadable" => Ok(Self::ProfileChoicesUnreadable),
+            "profile.cleanup_delegated" => Ok(Self::ProfileCleanupDelegated),
+            "profile.distributed_cross_scope" => Ok(Self::ProfileDistributedCrossScope),
+            "profile.incomplete_multi_spark_model" => Ok(Self::ProfileIncompleteMultiSparkModel),
+            "profile.interruption_expected" => Ok(Self::ProfileInterruptionExpected),
+            "profile.pending_cross_scope" => Ok(Self::ProfilePendingCrossScope),
+            "profile.preparation_not_started" => Ok(Self::ProfilePreparationNotStarted),
+            "profile.preparation_scope_mismatch" => Ok(Self::ProfilePreparationScopeMismatch),
+            "profile.preparation_unavailable" => Ok(Self::ProfilePreparationUnavailable),
+            "profile.recipe_unavailable" => Ok(Self::ProfileRecipeUnavailable),
+            "profile.recovery_assignments_changed" => Ok(Self::ProfileRecoveryAssignmentsChanged),
+            "profile.recovery_cache_pending" => Ok(Self::ProfileRecoveryCachePending),
+            "profile.recovery_scope_changed" => Ok(Self::ProfileRecoveryScopeChanged),
+            "profile.recovery_waiting" => Ok(Self::ProfileRecoveryWaiting),
+            "profile.resource_recheck_unavailable" => Ok(Self::ProfileResourceRecheckUnavailable),
+            "profile.retry_conflict" => Ok(Self::ProfileRetryConflict),
+            "profile.retry_executor_unavailable" => Ok(Self::ProfileRetryExecutorUnavailable),
+            "profile.retry_intent_unavailable" => Ok(Self::ProfileRetryIntentUnavailable),
+            "profile.retry_review_unavailable" => Ok(Self::ProfileRetryReviewUnavailable),
+            "profile.review_stale" => Ok(Self::ProfileReviewStale),
+            "profile.runtime_image_rebuild_pending" => Ok(Self::ProfileRuntimeImageRebuildPending),
+            "profile.shared_installation_scope" => Ok(Self::ProfileSharedInstallationScope),
+            "profile.spark_removed" => Ok(Self::ProfileSparkRemoved),
+            "profile.spark_unavailable" => Ok(Self::ProfileSparkUnavailable),
+            "profile.stale_plan" => Ok(Self::ProfileStalePlan),
+            "profile.switch_authority_unavailable" => Ok(Self::ProfileSwitchAuthorityUnavailable),
+            "profile.switch_scope_unresolved" => Ok(Self::ProfileSwitchScopeUnresolved),
+            "profile.topology_incomplete" => Ok(Self::ProfileTopologyIncomplete),
+            "profile.recovery_artifact_changed" => Ok(Self::ProfileRecoveryArtifactChanged),
+            "profile.runtime-image-changed" => Ok(Self::ProfileRuntimeImageChanged),
+            "profile.selection_lost" => Ok(Self::ProfileSelectionLost),
+            "profile.asset_reservation_unavailable" => Ok(Self::ProfileAssetReservationUnavailable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileReasonCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileReasonCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProjectionCode {
+    #[serde(rename = "cpu.low-clock")]
+    CpuLowClock,
+    #[serde(rename = "install.partial")]
+    InstallPartial,
+    #[serde(rename = "inventory.missing")]
+    InventoryMissing,
+    #[serde(rename = "inventory.stale")]
+    InventoryStale,
+    #[serde(rename = "network.nas-route-wifi-no-wired-port")]
+    NetworkNasRouteWifiNoWiredPort,
+    #[serde(rename = "network.nas-route-wifi-wired-port-down")]
+    NetworkNasRouteWifiWiredPortDown,
+    #[serde(rename = "network.nas-route-wifi-wired-port-unused")]
+    NetworkNasRouteWifiWiredPortUnused,
+    #[serde(rename = "node.offline")]
+    NodeOffline,
+    #[serde(rename = "profile.retrying")]
+    ProfileRetrying,
+    #[serde(rename = "recipe.update_available")]
+    RecipeUpdateAvailable,
+    #[serde(rename = "run.degraded")]
+    RunDegraded,
+    #[serde(rename = "telemetry.delayed")]
+    TelemetryDelayed,
+    #[serde(rename = "telemetry.missing")]
+    TelemetryMissing,
+    #[serde(rename = "telemetry.stale")]
+    TelemetryStale,
+}
+impl ::std::fmt::Display for ProjectionCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CpuLowClock => f.write_str("cpu.low-clock"),
+            Self::InstallPartial => f.write_str("install.partial"),
+            Self::InventoryMissing => f.write_str("inventory.missing"),
+            Self::InventoryStale => f.write_str("inventory.stale"),
+            Self::NetworkNasRouteWifiNoWiredPort => {
+                f.write_str("network.nas-route-wifi-no-wired-port")
+            }
+            Self::NetworkNasRouteWifiWiredPortDown => {
+                f.write_str("network.nas-route-wifi-wired-port-down")
+            }
+            Self::NetworkNasRouteWifiWiredPortUnused => {
+                f.write_str("network.nas-route-wifi-wired-port-unused")
+            }
+            Self::NodeOffline => f.write_str("node.offline"),
+            Self::ProfileRetrying => f.write_str("profile.retrying"),
+            Self::RecipeUpdateAvailable => f.write_str("recipe.update_available"),
+            Self::RunDegraded => f.write_str("run.degraded"),
+            Self::TelemetryDelayed => f.write_str("telemetry.delayed"),
+            Self::TelemetryMissing => f.write_str("telemetry.missing"),
+            Self::TelemetryStale => f.write_str("telemetry.stale"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProjectionCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "cpu.low-clock" => Ok(Self::CpuLowClock),
+            "install.partial" => Ok(Self::InstallPartial),
+            "inventory.missing" => Ok(Self::InventoryMissing),
+            "inventory.stale" => Ok(Self::InventoryStale),
+            "network.nas-route-wifi-no-wired-port" => Ok(Self::NetworkNasRouteWifiNoWiredPort),
+            "network.nas-route-wifi-wired-port-down" => Ok(Self::NetworkNasRouteWifiWiredPortDown),
+            "network.nas-route-wifi-wired-port-unused" => {
+                Ok(Self::NetworkNasRouteWifiWiredPortUnused)
+            }
+            "node.offline" => Ok(Self::NodeOffline),
+            "profile.retrying" => Ok(Self::ProfileRetrying),
+            "recipe.update_available" => Ok(Self::RecipeUpdateAvailable),
+            "run.degraded" => Ok(Self::RunDegraded),
+            "telemetry.delayed" => Ok(Self::TelemetryDelayed),
+            "telemetry.missing" => Ok(Self::TelemetryMissing),
+            "telemetry.stale" => Ok(Self::TelemetryStale),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProjectionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProjectionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct ReasonCodeVocabulary {
+    pub admission_code: AdmissionCode,
+    pub artifact_lifecycle_code: ArtifactLifecycleCode,
+    pub cache_reference_reason: CacheReferenceReason,
+    pub catalog_code: CatalogCode,
+    pub catalog_sync_code: CatalogSyncCode,
+    pub cluster_mapping_code: ClusterMappingCode,
+    pub controller_error_code: ControllerErrorCode,
+    pub distribution_code: DistributionCode,
+    pub image_store_code: ImageStoreCode,
+    pub install_admission_code: InstallAdmissionCode,
+    pub install_degraded_reason: InstallDegradedReason,
+    pub library_assessment_code: LibraryAssessmentCode,
+    pub library_projection_code: LibraryProjectionCode,
+    pub model_cache_blocker_code: ModelCacheBlockerCode,
+    pub model_cache_code: ModelCacheCode,
+    pub node_offline_reason: NodeOfflineReason,
+    pub operation_failure_code: OperationFailureCode,
+    pub prebuilt_image_code: PrebuiltImageCode,
+    pub profile_reason_code: ProfileReasonCode,
+    pub projection_code: ProjectionCode,
+    pub recipe_build_code: RecipeBuildCode,
+    pub recipe_image_code: RecipeImageCode,
+    pub recipe_operation_code: RecipeOperationCode,
+    pub recipe_package_code: RecipePackageCode,
+    pub recipe_update_code: RecipeUpdateCode,
+    pub reconcile_code: ReconcileCode,
+    pub resource_planning_code: ResourcePlanningCode,
+    pub resource_term: ResourceTerm,
+    pub resource_term_problem: ResourceTermProblem,
+    pub run_degraded_reason: RunDegradedReason,
+    pub run_switch_code: RunSwitchCode,
+    pub runtime_image_code: RuntimeImageCode,
+    pub runtime_preflight_code: RuntimePreflightCode,
+    pub source_bundle_code: SourceBundleCode,
+    pub source_policy_code: SourcePolicyCode,
+    pub stop_plan_code: StopPlanCode,
+    pub storage_demand_code: StorageDemandCode,
+    pub supersede_code: SupersedeCode,
+    pub topology_code: TopologyCode,
+    pub uninstall_plan_code: UninstallPlanCode,
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -3666,6 +5655,162 @@ pub struct RecipeBuildCleanupEvidence {}
 pub struct RecipeBuildCleanupRequest {
     pub build_id: ::uuid::Uuid,
     pub operation_id: ::uuid::Uuid,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum RecipeBuildCode {
+    #[serde(rename = "build.adapter_unavailable")]
+    BuildAdapterUnavailable,
+    #[serde(rename = "build.cancellation_pending")]
+    BuildCancellationPending,
+    #[serde(rename = "build.capability_missing")]
+    BuildCapabilityMissing,
+    #[serde(rename = "build.capacity_busy")]
+    BuildCapacityBusy,
+    #[serde(rename = "build.capacity_contract_invalid")]
+    BuildCapacityContractInvalid,
+    #[serde(rename = "build.consumer_busy")]
+    BuildConsumerBusy,
+    #[serde(rename = "build.consumer_invalid")]
+    BuildConsumerInvalid,
+    #[serde(rename = "build.contract_invalid")]
+    BuildContractInvalid,
+    #[serde(rename = "build.dependencies_stale")]
+    BuildDependenciesStale,
+    #[serde(rename = "build.evidence_invalid")]
+    BuildEvidenceInvalid,
+    #[serde(rename = "build.image_size_invalid")]
+    BuildImageSizeInvalid,
+    #[serde(rename = "build.input_mismatch")]
+    BuildInputMismatch,
+    #[serde(rename = "build.insufficient_disk")]
+    BuildInsufficientDisk,
+    #[serde(rename = "build.insufficient_memory")]
+    BuildInsufficientMemory,
+    #[serde(rename = "build.inventory_missing")]
+    BuildInventoryMissing,
+    #[serde(rename = "build.inventory_stale")]
+    BuildInventoryStale,
+    #[serde(rename = "build.network_capability_missing")]
+    BuildNetworkCapabilityMissing,
+    #[serde(rename = "build.node_incompatible")]
+    BuildNodeIncompatible,
+    #[serde(rename = "build.node_unknown")]
+    BuildNodeUnknown,
+    #[serde(rename = "build.plan_invalid")]
+    BuildPlanInvalid,
+    #[serde(rename = "build.producer_invalid")]
+    BuildProducerInvalid,
+    #[serde(rename = "build.recipe_unresolved")]
+    BuildRecipeUnresolved,
+    #[serde(rename = "build.resolution_stale")]
+    BuildResolutionStale,
+    #[serde(rename = "build.resources_invalid")]
+    BuildResourcesInvalid,
+    #[serde(rename = "build.result_conflict")]
+    BuildResultConflict,
+    #[serde(rename = "build.runtime_changed")]
+    BuildRuntimeChanged,
+    #[serde(rename = "build.security_invalid")]
+    BuildSecurityInvalid,
+    #[serde(rename = "build.source_invalid")]
+    BuildSourceInvalid,
+    #[serde(rename = "build.source_unavailable")]
+    BuildSourceUnavailable,
+    #[serde(rename = "build.state")]
+    BuildState,
+    #[serde(rename = "build.shared_consumers")]
+    BuildSharedConsumers,
+}
+impl ::std::fmt::Display for RecipeBuildCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::BuildAdapterUnavailable => f.write_str("build.adapter_unavailable"),
+            Self::BuildCancellationPending => f.write_str("build.cancellation_pending"),
+            Self::BuildCapabilityMissing => f.write_str("build.capability_missing"),
+            Self::BuildCapacityBusy => f.write_str("build.capacity_busy"),
+            Self::BuildCapacityContractInvalid => f.write_str("build.capacity_contract_invalid"),
+            Self::BuildConsumerBusy => f.write_str("build.consumer_busy"),
+            Self::BuildConsumerInvalid => f.write_str("build.consumer_invalid"),
+            Self::BuildContractInvalid => f.write_str("build.contract_invalid"),
+            Self::BuildDependenciesStale => f.write_str("build.dependencies_stale"),
+            Self::BuildEvidenceInvalid => f.write_str("build.evidence_invalid"),
+            Self::BuildImageSizeInvalid => f.write_str("build.image_size_invalid"),
+            Self::BuildInputMismatch => f.write_str("build.input_mismatch"),
+            Self::BuildInsufficientDisk => f.write_str("build.insufficient_disk"),
+            Self::BuildInsufficientMemory => f.write_str("build.insufficient_memory"),
+            Self::BuildInventoryMissing => f.write_str("build.inventory_missing"),
+            Self::BuildInventoryStale => f.write_str("build.inventory_stale"),
+            Self::BuildNetworkCapabilityMissing => f.write_str("build.network_capability_missing"),
+            Self::BuildNodeIncompatible => f.write_str("build.node_incompatible"),
+            Self::BuildNodeUnknown => f.write_str("build.node_unknown"),
+            Self::BuildPlanInvalid => f.write_str("build.plan_invalid"),
+            Self::BuildProducerInvalid => f.write_str("build.producer_invalid"),
+            Self::BuildRecipeUnresolved => f.write_str("build.recipe_unresolved"),
+            Self::BuildResolutionStale => f.write_str("build.resolution_stale"),
+            Self::BuildResourcesInvalid => f.write_str("build.resources_invalid"),
+            Self::BuildResultConflict => f.write_str("build.result_conflict"),
+            Self::BuildRuntimeChanged => f.write_str("build.runtime_changed"),
+            Self::BuildSecurityInvalid => f.write_str("build.security_invalid"),
+            Self::BuildSourceInvalid => f.write_str("build.source_invalid"),
+            Self::BuildSourceUnavailable => f.write_str("build.source_unavailable"),
+            Self::BuildState => f.write_str("build.state"),
+            Self::BuildSharedConsumers => f.write_str("build.shared_consumers"),
+        }
+    }
+}
+impl ::std::str::FromStr for RecipeBuildCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "build.adapter_unavailable" => Ok(Self::BuildAdapterUnavailable),
+            "build.cancellation_pending" => Ok(Self::BuildCancellationPending),
+            "build.capability_missing" => Ok(Self::BuildCapabilityMissing),
+            "build.capacity_busy" => Ok(Self::BuildCapacityBusy),
+            "build.capacity_contract_invalid" => Ok(Self::BuildCapacityContractInvalid),
+            "build.consumer_busy" => Ok(Self::BuildConsumerBusy),
+            "build.consumer_invalid" => Ok(Self::BuildConsumerInvalid),
+            "build.contract_invalid" => Ok(Self::BuildContractInvalid),
+            "build.dependencies_stale" => Ok(Self::BuildDependenciesStale),
+            "build.evidence_invalid" => Ok(Self::BuildEvidenceInvalid),
+            "build.image_size_invalid" => Ok(Self::BuildImageSizeInvalid),
+            "build.input_mismatch" => Ok(Self::BuildInputMismatch),
+            "build.insufficient_disk" => Ok(Self::BuildInsufficientDisk),
+            "build.insufficient_memory" => Ok(Self::BuildInsufficientMemory),
+            "build.inventory_missing" => Ok(Self::BuildInventoryMissing),
+            "build.inventory_stale" => Ok(Self::BuildInventoryStale),
+            "build.network_capability_missing" => Ok(Self::BuildNetworkCapabilityMissing),
+            "build.node_incompatible" => Ok(Self::BuildNodeIncompatible),
+            "build.node_unknown" => Ok(Self::BuildNodeUnknown),
+            "build.plan_invalid" => Ok(Self::BuildPlanInvalid),
+            "build.producer_invalid" => Ok(Self::BuildProducerInvalid),
+            "build.recipe_unresolved" => Ok(Self::BuildRecipeUnresolved),
+            "build.resolution_stale" => Ok(Self::BuildResolutionStale),
+            "build.resources_invalid" => Ok(Self::BuildResourcesInvalid),
+            "build.result_conflict" => Ok(Self::BuildResultConflict),
+            "build.runtime_changed" => Ok(Self::BuildRuntimeChanged),
+            "build.security_invalid" => Ok(Self::BuildSecurityInvalid),
+            "build.source_invalid" => Ok(Self::BuildSourceInvalid),
+            "build.source_unavailable" => Ok(Self::BuildSourceUnavailable),
+            "build.state" => Ok(Self::BuildState),
+            "build.shared_consumers" => Ok(Self::BuildSharedConsumers),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RecipeBuildCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RecipeBuildCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -3909,6 +6054,254 @@ pub struct RecipeBuildRequest {
     pub source_bundle_bytes: u32,
     pub source_bundle_sha256: ::std::string::String,
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum RecipeImageCode {
+    #[serde(rename = "recipe_image.action_invalid")]
+    RecipeImageActionInvalid,
+    #[serde(rename = "recipe_image.build_cancelled")]
+    RecipeImageBuildCancelled,
+    #[serde(rename = "recipe_image.build_capacity_wait")]
+    RecipeImageBuildCapacityWait,
+    #[serde(rename = "recipe_image.build_failed")]
+    RecipeImageBuildFailed,
+    #[serde(rename = "recipe_image.build_input_missing")]
+    RecipeImageBuildInputMissing,
+    #[serde(rename = "recipe_image.build_invalid")]
+    RecipeImageBuildInvalid,
+    #[serde(rename = "recipe_image.build_unavailable")]
+    RecipeImageBuildUnavailable,
+    #[serde(rename = "recipe_image.build_wait")]
+    RecipeImageBuildWait,
+    #[serde(rename = "recipe_image.builder_busy")]
+    RecipeImageBuilderBusy,
+    #[serde(rename = "recipe_image.builder_occupied")]
+    RecipeImageBuilderOccupied,
+    #[serde(rename = "recipe_image.cancel_busy")]
+    RecipeImageCancelBusy,
+    #[serde(rename = "recipe_image.cancel_request_key_reused")]
+    RecipeImageCancelRequestKeyReused,
+    #[serde(rename = "recipe_image.cancellation_invalid")]
+    RecipeImageCancellationInvalid,
+    #[serde(rename = "recipe_image.claim_lost")]
+    RecipeImageClaimLost,
+    #[serde(rename = "recipe_image.database_busy")]
+    RecipeImageDatabaseBusy,
+    #[serde(rename = "recipe_image.identity_conflict")]
+    RecipeImageIdentityConflict,
+    #[serde(rename = "recipe_image.identity_invalid")]
+    RecipeImageIdentityInvalid,
+    #[serde(rename = "recipe_image.insufficient_disk")]
+    RecipeImageInsufficientDisk,
+    #[serde(rename = "recipe_image.insufficient_memory")]
+    RecipeImageInsufficientMemory,
+    #[serde(rename = "recipe_image.metadata_refresh_failed")]
+    RecipeImageMetadataRefreshFailed,
+    #[serde(rename = "recipe_image.metadata_refresh_unavailable")]
+    RecipeImageMetadataRefreshUnavailable,
+    #[serde(rename = "recipe_image.model_cache_failed")]
+    RecipeImageModelCacheFailed,
+    #[serde(rename = "recipe_image.model_cache_invalid")]
+    RecipeImageModelCacheInvalid,
+    #[serde(rename = "recipe_image.model_cache_unavailable")]
+    RecipeImageModelCacheUnavailable,
+    #[serde(rename = "recipe_image.model_child_cancelled")]
+    RecipeImageModelChildCancelled,
+    #[serde(rename = "recipe_image.model_child_missing")]
+    RecipeImageModelChildMissing,
+    #[serde(rename = "recipe_image.no_builder")]
+    RecipeImageNoBuilder,
+    #[serde(rename = "recipe_image.not_cancellable")]
+    RecipeImageNotCancellable,
+    #[serde(rename = "recipe_image.not_retryable")]
+    RecipeImageNotRetryable,
+    #[serde(rename = "recipe_image.operation_invalid")]
+    RecipeImageOperationInvalid,
+    #[serde(rename = "recipe_image.operation_missing")]
+    RecipeImageOperationMissing,
+    #[serde(rename = "recipe_image.preparation_failed")]
+    RecipeImagePreparationFailed,
+    #[serde(rename = "recipe_image.preparing")]
+    RecipeImagePreparing,
+    #[serde(rename = "recipe_image.recipe_invalid")]
+    RecipeImageRecipeInvalid,
+    #[serde(rename = "recipe_image.recipe_unavailable")]
+    RecipeImageRecipeUnavailable,
+    #[serde(rename = "recipe_image.removal_choice_invalid")]
+    RecipeImageRemovalChoiceInvalid,
+    #[serde(rename = "recipe_image.removal_failed")]
+    RecipeImageRemovalFailed,
+    #[serde(rename = "recipe_image.removal_referenced")]
+    RecipeImageRemovalReferenced,
+    #[serde(rename = "recipe_image.removal_scope_limited")]
+    RecipeImageRemovalScopeLimited,
+    #[serde(rename = "recipe_image.request_key_reused")]
+    RecipeImageRequestKeyReused,
+    #[serde(rename = "recipe_image.runtime_invalid")]
+    RecipeImageRuntimeInvalid,
+    #[serde(rename = "recipe_image.selector_ambiguous")]
+    RecipeImageSelectorAmbiguous,
+    #[serde(rename = "recipe_image.selector_invalid")]
+    RecipeImageSelectorInvalid,
+    #[serde(rename = "recipe_image.selector_missing")]
+    RecipeImageSelectorMissing,
+    #[serde(rename = "recipe_image.source_policy_refused")]
+    RecipeImageSourcePolicyRefused,
+    #[serde(rename = "recipe_image.superseded_by_newer_revision")]
+    RecipeImageSupersededByNewerRevision,
+    #[serde(rename = "recipe_image.waiting_for_model")]
+    RecipeImageWaitingForModel,
+    #[serde(rename = "recipe_image.waiting_for_worker")]
+    RecipeImageWaitingForWorker,
+}
+impl ::std::fmt::Display for RecipeImageCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RecipeImageActionInvalid => f.write_str("recipe_image.action_invalid"),
+            Self::RecipeImageBuildCancelled => f.write_str("recipe_image.build_cancelled"),
+            Self::RecipeImageBuildCapacityWait => f.write_str("recipe_image.build_capacity_wait"),
+            Self::RecipeImageBuildFailed => f.write_str("recipe_image.build_failed"),
+            Self::RecipeImageBuildInputMissing => f.write_str("recipe_image.build_input_missing"),
+            Self::RecipeImageBuildInvalid => f.write_str("recipe_image.build_invalid"),
+            Self::RecipeImageBuildUnavailable => f.write_str("recipe_image.build_unavailable"),
+            Self::RecipeImageBuildWait => f.write_str("recipe_image.build_wait"),
+            Self::RecipeImageBuilderBusy => f.write_str("recipe_image.builder_busy"),
+            Self::RecipeImageBuilderOccupied => f.write_str("recipe_image.builder_occupied"),
+            Self::RecipeImageCancelBusy => f.write_str("recipe_image.cancel_busy"),
+            Self::RecipeImageCancelRequestKeyReused => {
+                f.write_str("recipe_image.cancel_request_key_reused")
+            }
+            Self::RecipeImageCancellationInvalid => {
+                f.write_str("recipe_image.cancellation_invalid")
+            }
+            Self::RecipeImageClaimLost => f.write_str("recipe_image.claim_lost"),
+            Self::RecipeImageDatabaseBusy => f.write_str("recipe_image.database_busy"),
+            Self::RecipeImageIdentityConflict => f.write_str("recipe_image.identity_conflict"),
+            Self::RecipeImageIdentityInvalid => f.write_str("recipe_image.identity_invalid"),
+            Self::RecipeImageInsufficientDisk => f.write_str("recipe_image.insufficient_disk"),
+            Self::RecipeImageInsufficientMemory => f.write_str("recipe_image.insufficient_memory"),
+            Self::RecipeImageMetadataRefreshFailed => {
+                f.write_str("recipe_image.metadata_refresh_failed")
+            }
+            Self::RecipeImageMetadataRefreshUnavailable => {
+                f.write_str("recipe_image.metadata_refresh_unavailable")
+            }
+            Self::RecipeImageModelCacheFailed => f.write_str("recipe_image.model_cache_failed"),
+            Self::RecipeImageModelCacheInvalid => f.write_str("recipe_image.model_cache_invalid"),
+            Self::RecipeImageModelCacheUnavailable => {
+                f.write_str("recipe_image.model_cache_unavailable")
+            }
+            Self::RecipeImageModelChildCancelled => {
+                f.write_str("recipe_image.model_child_cancelled")
+            }
+            Self::RecipeImageModelChildMissing => f.write_str("recipe_image.model_child_missing"),
+            Self::RecipeImageNoBuilder => f.write_str("recipe_image.no_builder"),
+            Self::RecipeImageNotCancellable => f.write_str("recipe_image.not_cancellable"),
+            Self::RecipeImageNotRetryable => f.write_str("recipe_image.not_retryable"),
+            Self::RecipeImageOperationInvalid => f.write_str("recipe_image.operation_invalid"),
+            Self::RecipeImageOperationMissing => f.write_str("recipe_image.operation_missing"),
+            Self::RecipeImagePreparationFailed => f.write_str("recipe_image.preparation_failed"),
+            Self::RecipeImagePreparing => f.write_str("recipe_image.preparing"),
+            Self::RecipeImageRecipeInvalid => f.write_str("recipe_image.recipe_invalid"),
+            Self::RecipeImageRecipeUnavailable => f.write_str("recipe_image.recipe_unavailable"),
+            Self::RecipeImageRemovalChoiceInvalid => {
+                f.write_str("recipe_image.removal_choice_invalid")
+            }
+            Self::RecipeImageRemovalFailed => f.write_str("recipe_image.removal_failed"),
+            Self::RecipeImageRemovalReferenced => f.write_str("recipe_image.removal_referenced"),
+            Self::RecipeImageRemovalScopeLimited => {
+                f.write_str("recipe_image.removal_scope_limited")
+            }
+            Self::RecipeImageRequestKeyReused => f.write_str("recipe_image.request_key_reused"),
+            Self::RecipeImageRuntimeInvalid => f.write_str("recipe_image.runtime_invalid"),
+            Self::RecipeImageSelectorAmbiguous => f.write_str("recipe_image.selector_ambiguous"),
+            Self::RecipeImageSelectorInvalid => f.write_str("recipe_image.selector_invalid"),
+            Self::RecipeImageSelectorMissing => f.write_str("recipe_image.selector_missing"),
+            Self::RecipeImageSourcePolicyRefused => {
+                f.write_str("recipe_image.source_policy_refused")
+            }
+            Self::RecipeImageSupersededByNewerRevision => {
+                f.write_str("recipe_image.superseded_by_newer_revision")
+            }
+            Self::RecipeImageWaitingForModel => f.write_str("recipe_image.waiting_for_model"),
+            Self::RecipeImageWaitingForWorker => f.write_str("recipe_image.waiting_for_worker"),
+        }
+    }
+}
+impl ::std::str::FromStr for RecipeImageCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "recipe_image.action_invalid" => Ok(Self::RecipeImageActionInvalid),
+            "recipe_image.build_cancelled" => Ok(Self::RecipeImageBuildCancelled),
+            "recipe_image.build_capacity_wait" => Ok(Self::RecipeImageBuildCapacityWait),
+            "recipe_image.build_failed" => Ok(Self::RecipeImageBuildFailed),
+            "recipe_image.build_input_missing" => Ok(Self::RecipeImageBuildInputMissing),
+            "recipe_image.build_invalid" => Ok(Self::RecipeImageBuildInvalid),
+            "recipe_image.build_unavailable" => Ok(Self::RecipeImageBuildUnavailable),
+            "recipe_image.build_wait" => Ok(Self::RecipeImageBuildWait),
+            "recipe_image.builder_busy" => Ok(Self::RecipeImageBuilderBusy),
+            "recipe_image.builder_occupied" => Ok(Self::RecipeImageBuilderOccupied),
+            "recipe_image.cancel_busy" => Ok(Self::RecipeImageCancelBusy),
+            "recipe_image.cancel_request_key_reused" => Ok(Self::RecipeImageCancelRequestKeyReused),
+            "recipe_image.cancellation_invalid" => Ok(Self::RecipeImageCancellationInvalid),
+            "recipe_image.claim_lost" => Ok(Self::RecipeImageClaimLost),
+            "recipe_image.database_busy" => Ok(Self::RecipeImageDatabaseBusy),
+            "recipe_image.identity_conflict" => Ok(Self::RecipeImageIdentityConflict),
+            "recipe_image.identity_invalid" => Ok(Self::RecipeImageIdentityInvalid),
+            "recipe_image.insufficient_disk" => Ok(Self::RecipeImageInsufficientDisk),
+            "recipe_image.insufficient_memory" => Ok(Self::RecipeImageInsufficientMemory),
+            "recipe_image.metadata_refresh_failed" => Ok(Self::RecipeImageMetadataRefreshFailed),
+            "recipe_image.metadata_refresh_unavailable" => {
+                Ok(Self::RecipeImageMetadataRefreshUnavailable)
+            }
+            "recipe_image.model_cache_failed" => Ok(Self::RecipeImageModelCacheFailed),
+            "recipe_image.model_cache_invalid" => Ok(Self::RecipeImageModelCacheInvalid),
+            "recipe_image.model_cache_unavailable" => Ok(Self::RecipeImageModelCacheUnavailable),
+            "recipe_image.model_child_cancelled" => Ok(Self::RecipeImageModelChildCancelled),
+            "recipe_image.model_child_missing" => Ok(Self::RecipeImageModelChildMissing),
+            "recipe_image.no_builder" => Ok(Self::RecipeImageNoBuilder),
+            "recipe_image.not_cancellable" => Ok(Self::RecipeImageNotCancellable),
+            "recipe_image.not_retryable" => Ok(Self::RecipeImageNotRetryable),
+            "recipe_image.operation_invalid" => Ok(Self::RecipeImageOperationInvalid),
+            "recipe_image.operation_missing" => Ok(Self::RecipeImageOperationMissing),
+            "recipe_image.preparation_failed" => Ok(Self::RecipeImagePreparationFailed),
+            "recipe_image.preparing" => Ok(Self::RecipeImagePreparing),
+            "recipe_image.recipe_invalid" => Ok(Self::RecipeImageRecipeInvalid),
+            "recipe_image.recipe_unavailable" => Ok(Self::RecipeImageRecipeUnavailable),
+            "recipe_image.removal_choice_invalid" => Ok(Self::RecipeImageRemovalChoiceInvalid),
+            "recipe_image.removal_failed" => Ok(Self::RecipeImageRemovalFailed),
+            "recipe_image.removal_referenced" => Ok(Self::RecipeImageRemovalReferenced),
+            "recipe_image.removal_scope_limited" => Ok(Self::RecipeImageRemovalScopeLimited),
+            "recipe_image.request_key_reused" => Ok(Self::RecipeImageRequestKeyReused),
+            "recipe_image.runtime_invalid" => Ok(Self::RecipeImageRuntimeInvalid),
+            "recipe_image.selector_ambiguous" => Ok(Self::RecipeImageSelectorAmbiguous),
+            "recipe_image.selector_invalid" => Ok(Self::RecipeImageSelectorInvalid),
+            "recipe_image.selector_missing" => Ok(Self::RecipeImageSelectorMissing),
+            "recipe_image.source_policy_refused" => Ok(Self::RecipeImageSourcePolicyRefused),
+            "recipe_image.superseded_by_newer_revision" => {
+                Ok(Self::RecipeImageSupersededByNewerRevision)
+            }
+            "recipe_image.waiting_for_model" => Ok(Self::RecipeImageWaitingForModel),
+            "recipe_image.waiting_for_worker" => Ok(Self::RecipeImageWaitingForWorker),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RecipeImageCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RecipeImageCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -4019,6 +6412,41 @@ pub struct RecipeJobRunResult {
     pub reason: ::std::option::Option<::std::string::String>,
     pub run_id: ::uuid::Uuid,
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RecipeOperationCode {
+    #[serde(rename = "recipe.operation_conflict")]
+    RecipeOperationConflict,
+}
+impl ::std::fmt::Display for RecipeOperationCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RecipeOperationConflict => f.write_str("recipe.operation_conflict"),
+        }
+    }
+}
+impl ::std::str::FromStr for RecipeOperationCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "recipe.operation_conflict" => Ok(Self::RecipeOperationConflict),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RecipeOperationCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RecipeOperationCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -4060,6 +6488,104 @@ impl ::std::convert::From<RecipeUninstallPayload> for RecipeOperationRequestPayl
 impl ::std::convert::From<RecipeReconcilePayload> for RecipeOperationRequestPayload {
     fn from(value: RecipeReconcilePayload) -> Self {
         Self::ReconcilePayload(value)
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum RecipePackageCode {
+    #[serde(rename = "recipe_package.cache_unavailable")]
+    RecipePackageCacheUnavailable,
+    #[serde(rename = "recipe_package.digest_mismatch")]
+    RecipePackageDigestMismatch,
+    #[serde(rename = "recipe_package.document_incompatible")]
+    RecipePackageDocumentIncompatible,
+    #[serde(rename = "recipe_package.extract_invalid")]
+    RecipePackageExtractInvalid,
+    #[serde(rename = "recipe_package.not_found")]
+    RecipePackageNotFound,
+    #[serde(rename = "recipe_package.package_invalid")]
+    RecipePackagePackageInvalid,
+    #[serde(rename = "recipe_package.release_incomplete")]
+    RecipePackageReleaseIncomplete,
+    #[serde(rename = "recipe_package.release_invalid")]
+    RecipePackageReleaseInvalid,
+    #[serde(rename = "recipe_package.response_invalid")]
+    RecipePackageResponseInvalid,
+    #[serde(rename = "recipe_package.schema_incompatible")]
+    RecipePackageSchemaIncompatible,
+    #[serde(rename = "recipe_package.snapshot_changed")]
+    RecipePackageSnapshotChanged,
+    #[serde(rename = "recipe_package.unavailable")]
+    RecipePackageUnavailable,
+    #[serde(rename = "recipe_package.uri_invalid")]
+    RecipePackageUriInvalid,
+    #[serde(rename = "recipe_package.url_insecure")]
+    RecipePackageUrlInsecure,
+    #[serde(rename = "recipe_package.url_invalid")]
+    RecipePackageUrlInvalid,
+}
+impl ::std::fmt::Display for RecipePackageCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RecipePackageCacheUnavailable => f.write_str("recipe_package.cache_unavailable"),
+            Self::RecipePackageDigestMismatch => f.write_str("recipe_package.digest_mismatch"),
+            Self::RecipePackageDocumentIncompatible => {
+                f.write_str("recipe_package.document_incompatible")
+            }
+            Self::RecipePackageExtractInvalid => f.write_str("recipe_package.extract_invalid"),
+            Self::RecipePackageNotFound => f.write_str("recipe_package.not_found"),
+            Self::RecipePackagePackageInvalid => f.write_str("recipe_package.package_invalid"),
+            Self::RecipePackageReleaseIncomplete => {
+                f.write_str("recipe_package.release_incomplete")
+            }
+            Self::RecipePackageReleaseInvalid => f.write_str("recipe_package.release_invalid"),
+            Self::RecipePackageResponseInvalid => f.write_str("recipe_package.response_invalid"),
+            Self::RecipePackageSchemaIncompatible => {
+                f.write_str("recipe_package.schema_incompatible")
+            }
+            Self::RecipePackageSnapshotChanged => f.write_str("recipe_package.snapshot_changed"),
+            Self::RecipePackageUnavailable => f.write_str("recipe_package.unavailable"),
+            Self::RecipePackageUriInvalid => f.write_str("recipe_package.uri_invalid"),
+            Self::RecipePackageUrlInsecure => f.write_str("recipe_package.url_insecure"),
+            Self::RecipePackageUrlInvalid => f.write_str("recipe_package.url_invalid"),
+        }
+    }
+}
+impl ::std::str::FromStr for RecipePackageCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "recipe_package.cache_unavailable" => Ok(Self::RecipePackageCacheUnavailable),
+            "recipe_package.digest_mismatch" => Ok(Self::RecipePackageDigestMismatch),
+            "recipe_package.document_incompatible" => Ok(Self::RecipePackageDocumentIncompatible),
+            "recipe_package.extract_invalid" => Ok(Self::RecipePackageExtractInvalid),
+            "recipe_package.not_found" => Ok(Self::RecipePackageNotFound),
+            "recipe_package.package_invalid" => Ok(Self::RecipePackagePackageInvalid),
+            "recipe_package.release_incomplete" => Ok(Self::RecipePackageReleaseIncomplete),
+            "recipe_package.release_invalid" => Ok(Self::RecipePackageReleaseInvalid),
+            "recipe_package.response_invalid" => Ok(Self::RecipePackageResponseInvalid),
+            "recipe_package.schema_incompatible" => Ok(Self::RecipePackageSchemaIncompatible),
+            "recipe_package.snapshot_changed" => Ok(Self::RecipePackageSnapshotChanged),
+            "recipe_package.unavailable" => Ok(Self::RecipePackageUnavailable),
+            "recipe_package.uri_invalid" => Ok(Self::RecipePackageUriInvalid),
+            "recipe_package.url_insecure" => Ok(Self::RecipePackageUrlInsecure),
+            "recipe_package.url_invalid" => Ok(Self::RecipePackageUrlInvalid),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RecipePackageCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RecipePackageCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
     }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -4213,6 +6739,170 @@ pub struct RecipeUninstallPayload {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeUninstallResult {}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum RecipeUpdateCode {
+    #[serde(rename = "recipe_update.claim_lost")]
+    RecipeUpdateClaimLost,
+    #[serde(rename = "recipe_update.observation_invalid")]
+    RecipeUpdateObservationInvalid,
+    #[serde(rename = "recipe_update.operation_invalid")]
+    RecipeUpdateOperationInvalid,
+    #[serde(rename = "recipe_update.request_key_reused")]
+    RecipeUpdateRequestKeyReused,
+    #[serde(rename = "recipe_update.scope_invalid")]
+    RecipeUpdateScopeInvalid,
+    #[serde(rename = "recipe-update.cancel-effect-unknown")]
+    RecipeUpdateCancelEffectUnknown,
+}
+impl ::std::fmt::Display for RecipeUpdateCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RecipeUpdateClaimLost => f.write_str("recipe_update.claim_lost"),
+            Self::RecipeUpdateObservationInvalid => {
+                f.write_str("recipe_update.observation_invalid")
+            }
+            Self::RecipeUpdateOperationInvalid => f.write_str("recipe_update.operation_invalid"),
+            Self::RecipeUpdateRequestKeyReused => f.write_str("recipe_update.request_key_reused"),
+            Self::RecipeUpdateScopeInvalid => f.write_str("recipe_update.scope_invalid"),
+            Self::RecipeUpdateCancelEffectUnknown => {
+                f.write_str("recipe-update.cancel-effect-unknown")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for RecipeUpdateCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "recipe_update.claim_lost" => Ok(Self::RecipeUpdateClaimLost),
+            "recipe_update.observation_invalid" => Ok(Self::RecipeUpdateObservationInvalid),
+            "recipe_update.operation_invalid" => Ok(Self::RecipeUpdateOperationInvalid),
+            "recipe_update.request_key_reused" => Ok(Self::RecipeUpdateRequestKeyReused),
+            "recipe_update.scope_invalid" => Ok(Self::RecipeUpdateScopeInvalid),
+            "recipe-update.cancel-effect-unknown" => Ok(Self::RecipeUpdateCancelEffectUnknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RecipeUpdateCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RecipeUpdateCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum ReconcileCode {
+    #[serde(rename = "reconcile.active_effect_unknown")]
+    ReconcileActiveEffectUnknown,
+    #[serde(rename = "reconcile.agent_unavailable")]
+    ReconcileAgentUnavailable,
+    #[serde(rename = "reconcile.capacity_busy")]
+    ReconcileCapacityBusy,
+    #[serde(rename = "reconcile.install_provenance_mismatch")]
+    ReconcileInstallProvenanceMismatch,
+    #[serde(rename = "reconcile.install_provenance_unavailable")]
+    ReconcileInstallProvenanceUnavailable,
+    #[serde(rename = "reconcile.installation_effect_unknown")]
+    ReconcileInstallationEffectUnknown,
+    #[serde(rename = "reconcile.installation_identity_mismatch")]
+    ReconcileInstallationIdentityMismatch,
+    #[serde(rename = "reconcile.installation_identity_unavailable")]
+    ReconcileInstallationIdentityUnavailable,
+    #[serde(rename = "reconcile.membership_changed")]
+    ReconcileMembershipChanged,
+    #[serde(rename = "reconcile.operation_active")]
+    ReconcileOperationActive,
+    #[serde(rename = "reconcile.rank_membership_changed")]
+    ReconcileRankMembershipChanged,
+    #[serde(rename = "reconcile.recipe_revision_unavailable")]
+    ReconcileRecipeRevisionUnavailable,
+    #[serde(rename = "reconcile.spec_identity_mismatch")]
+    ReconcileSpecIdentityMismatch,
+}
+impl ::std::fmt::Display for ReconcileCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ReconcileActiveEffectUnknown => f.write_str("reconcile.active_effect_unknown"),
+            Self::ReconcileAgentUnavailable => f.write_str("reconcile.agent_unavailable"),
+            Self::ReconcileCapacityBusy => f.write_str("reconcile.capacity_busy"),
+            Self::ReconcileInstallProvenanceMismatch => {
+                f.write_str("reconcile.install_provenance_mismatch")
+            }
+            Self::ReconcileInstallProvenanceUnavailable => {
+                f.write_str("reconcile.install_provenance_unavailable")
+            }
+            Self::ReconcileInstallationEffectUnknown => {
+                f.write_str("reconcile.installation_effect_unknown")
+            }
+            Self::ReconcileInstallationIdentityMismatch => {
+                f.write_str("reconcile.installation_identity_mismatch")
+            }
+            Self::ReconcileInstallationIdentityUnavailable => {
+                f.write_str("reconcile.installation_identity_unavailable")
+            }
+            Self::ReconcileMembershipChanged => f.write_str("reconcile.membership_changed"),
+            Self::ReconcileOperationActive => f.write_str("reconcile.operation_active"),
+            Self::ReconcileRankMembershipChanged => {
+                f.write_str("reconcile.rank_membership_changed")
+            }
+            Self::ReconcileRecipeRevisionUnavailable => {
+                f.write_str("reconcile.recipe_revision_unavailable")
+            }
+            Self::ReconcileSpecIdentityMismatch => f.write_str("reconcile.spec_identity_mismatch"),
+        }
+    }
+}
+impl ::std::str::FromStr for ReconcileCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "reconcile.active_effect_unknown" => Ok(Self::ReconcileActiveEffectUnknown),
+            "reconcile.agent_unavailable" => Ok(Self::ReconcileAgentUnavailable),
+            "reconcile.capacity_busy" => Ok(Self::ReconcileCapacityBusy),
+            "reconcile.install_provenance_mismatch" => Ok(Self::ReconcileInstallProvenanceMismatch),
+            "reconcile.install_provenance_unavailable" => {
+                Ok(Self::ReconcileInstallProvenanceUnavailable)
+            }
+            "reconcile.installation_effect_unknown" => Ok(Self::ReconcileInstallationEffectUnknown),
+            "reconcile.installation_identity_mismatch" => {
+                Ok(Self::ReconcileInstallationIdentityMismatch)
+            }
+            "reconcile.installation_identity_unavailable" => {
+                Ok(Self::ReconcileInstallationIdentityUnavailable)
+            }
+            "reconcile.membership_changed" => Ok(Self::ReconcileMembershipChanged),
+            "reconcile.operation_active" => Ok(Self::ReconcileOperationActive),
+            "reconcile.rank_membership_changed" => Ok(Self::ReconcileRankMembershipChanged),
+            "reconcile.recipe_revision_unavailable" => Ok(Self::ReconcileRecipeRevisionUnavailable),
+            "reconcile.spec_identity_mismatch" => Ok(Self::ReconcileSpecIdentityMismatch),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ReconcileCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ReconcileCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -4306,6 +6996,234 @@ impl ::std::convert::TryFrom<::std::string::String> for ResourceBlockerCode {
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
+pub enum ResourcePlanningCode {
+    #[serde(rename = "resource.estimate_uncertain")]
+    ResourceEstimateUncertain,
+    #[serde(rename = "resource.evidence_invalid")]
+    ResourceEvidenceInvalid,
+    #[serde(rename = "resource.evidence_unknown")]
+    ResourceEvidenceUnknown,
+    #[serde(rename = "resource.knobs_invalid")]
+    ResourceKnobsInvalid,
+    #[serde(rename = "resource.parallelism_duplicate")]
+    ResourceParallelismDuplicate,
+    #[serde(rename = "resource.parallelism_inconsistent")]
+    ResourceParallelismInconsistent,
+    #[serde(rename = "resource.parallelism_type")]
+    ResourceParallelismType,
+    #[serde(rename = "resource.parallelism_unknown")]
+    ResourceParallelismUnknown,
+    #[serde(rename = "resource.settings_kind_unknown")]
+    ResourceSettingsKindUnknown,
+    #[serde(rename = "resource.settings_type")]
+    ResourceSettingsType,
+    #[serde(rename = "resource.settings_unknown")]
+    ResourceSettingsUnknown,
+    #[serde(rename = "resource.stop_release_unknown")]
+    ResourceStopReleaseUnknown,
+    #[serde(rename = "resource.context_unknown")]
+    ResourceContextUnknown,
+    #[serde(rename = "resource.context_evidence_invalid")]
+    ResourceContextEvidenceInvalid,
+    #[serde(rename = "resource.context_unsupported")]
+    ResourceContextUnsupported,
+    #[serde(rename = "resource.context_evidence_unknown")]
+    ResourceContextEvidenceUnknown,
+    #[serde(rename = "resource.concurrency_unknown")]
+    ResourceConcurrencyUnknown,
+    #[serde(rename = "resource.concurrency_evidence_invalid")]
+    ResourceConcurrencyEvidenceInvalid,
+    #[serde(rename = "resource.concurrency_unsupported")]
+    ResourceConcurrencyUnsupported,
+    #[serde(rename = "resource.concurrency_evidence_unknown")]
+    ResourceConcurrencyEvidenceUnknown,
+    #[serde(rename = "resource.batch_unknown")]
+    ResourceBatchUnknown,
+    #[serde(rename = "resource.batch_evidence_invalid")]
+    ResourceBatchEvidenceInvalid,
+    #[serde(rename = "resource.batch_unsupported")]
+    ResourceBatchUnsupported,
+    #[serde(rename = "resource.batch_evidence_unknown")]
+    ResourceBatchEvidenceUnknown,
+}
+impl ::std::fmt::Display for ResourcePlanningCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ResourceEstimateUncertain => f.write_str("resource.estimate_uncertain"),
+            Self::ResourceEvidenceInvalid => f.write_str("resource.evidence_invalid"),
+            Self::ResourceEvidenceUnknown => f.write_str("resource.evidence_unknown"),
+            Self::ResourceKnobsInvalid => f.write_str("resource.knobs_invalid"),
+            Self::ResourceParallelismDuplicate => f.write_str("resource.parallelism_duplicate"),
+            Self::ResourceParallelismInconsistent => {
+                f.write_str("resource.parallelism_inconsistent")
+            }
+            Self::ResourceParallelismType => f.write_str("resource.parallelism_type"),
+            Self::ResourceParallelismUnknown => f.write_str("resource.parallelism_unknown"),
+            Self::ResourceSettingsKindUnknown => f.write_str("resource.settings_kind_unknown"),
+            Self::ResourceSettingsType => f.write_str("resource.settings_type"),
+            Self::ResourceSettingsUnknown => f.write_str("resource.settings_unknown"),
+            Self::ResourceStopReleaseUnknown => f.write_str("resource.stop_release_unknown"),
+            Self::ResourceContextUnknown => f.write_str("resource.context_unknown"),
+            Self::ResourceContextEvidenceInvalid => {
+                f.write_str("resource.context_evidence_invalid")
+            }
+            Self::ResourceContextUnsupported => f.write_str("resource.context_unsupported"),
+            Self::ResourceContextEvidenceUnknown => {
+                f.write_str("resource.context_evidence_unknown")
+            }
+            Self::ResourceConcurrencyUnknown => f.write_str("resource.concurrency_unknown"),
+            Self::ResourceConcurrencyEvidenceInvalid => {
+                f.write_str("resource.concurrency_evidence_invalid")
+            }
+            Self::ResourceConcurrencyUnsupported => f.write_str("resource.concurrency_unsupported"),
+            Self::ResourceConcurrencyEvidenceUnknown => {
+                f.write_str("resource.concurrency_evidence_unknown")
+            }
+            Self::ResourceBatchUnknown => f.write_str("resource.batch_unknown"),
+            Self::ResourceBatchEvidenceInvalid => f.write_str("resource.batch_evidence_invalid"),
+            Self::ResourceBatchUnsupported => f.write_str("resource.batch_unsupported"),
+            Self::ResourceBatchEvidenceUnknown => f.write_str("resource.batch_evidence_unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for ResourcePlanningCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "resource.estimate_uncertain" => Ok(Self::ResourceEstimateUncertain),
+            "resource.evidence_invalid" => Ok(Self::ResourceEvidenceInvalid),
+            "resource.evidence_unknown" => Ok(Self::ResourceEvidenceUnknown),
+            "resource.knobs_invalid" => Ok(Self::ResourceKnobsInvalid),
+            "resource.parallelism_duplicate" => Ok(Self::ResourceParallelismDuplicate),
+            "resource.parallelism_inconsistent" => Ok(Self::ResourceParallelismInconsistent),
+            "resource.parallelism_type" => Ok(Self::ResourceParallelismType),
+            "resource.parallelism_unknown" => Ok(Self::ResourceParallelismUnknown),
+            "resource.settings_kind_unknown" => Ok(Self::ResourceSettingsKindUnknown),
+            "resource.settings_type" => Ok(Self::ResourceSettingsType),
+            "resource.settings_unknown" => Ok(Self::ResourceSettingsUnknown),
+            "resource.stop_release_unknown" => Ok(Self::ResourceStopReleaseUnknown),
+            "resource.context_unknown" => Ok(Self::ResourceContextUnknown),
+            "resource.context_evidence_invalid" => Ok(Self::ResourceContextEvidenceInvalid),
+            "resource.context_unsupported" => Ok(Self::ResourceContextUnsupported),
+            "resource.context_evidence_unknown" => Ok(Self::ResourceContextEvidenceUnknown),
+            "resource.concurrency_unknown" => Ok(Self::ResourceConcurrencyUnknown),
+            "resource.concurrency_evidence_invalid" => Ok(Self::ResourceConcurrencyEvidenceInvalid),
+            "resource.concurrency_unsupported" => Ok(Self::ResourceConcurrencyUnsupported),
+            "resource.concurrency_evidence_unknown" => Ok(Self::ResourceConcurrencyEvidenceUnknown),
+            "resource.batch_unknown" => Ok(Self::ResourceBatchUnknown),
+            "resource.batch_evidence_invalid" => Ok(Self::ResourceBatchEvidenceInvalid),
+            "resource.batch_unsupported" => Ok(Self::ResourceBatchUnsupported),
+            "resource.batch_evidence_unknown" => Ok(Self::ResourceBatchEvidenceUnknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ResourcePlanningCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ResourcePlanningCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ResourceTerm {
+    #[serde(rename = "context")]
+    Context,
+    #[serde(rename = "concurrency")]
+    Concurrency,
+    #[serde(rename = "batch")]
+    Batch,
+}
+impl ::std::fmt::Display for ResourceTerm {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Context => f.write_str("context"),
+            Self::Concurrency => f.write_str("concurrency"),
+            Self::Batch => f.write_str("batch"),
+        }
+    }
+}
+impl ::std::str::FromStr for ResourceTerm {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "context" => Ok(Self::Context),
+            "concurrency" => Ok(Self::Concurrency),
+            "batch" => Ok(Self::Batch),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ResourceTerm {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ResourceTerm {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ResourceTermProblem {
+    #[serde(rename = "unknown")]
+    Unknown,
+    #[serde(rename = "evidence_invalid")]
+    EvidenceInvalid,
+    #[serde(rename = "unsupported")]
+    Unsupported,
+    #[serde(rename = "evidence_unknown")]
+    EvidenceUnknown,
+}
+impl ::std::fmt::Display for ResourceTermProblem {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Unknown => f.write_str("unknown"),
+            Self::EvidenceInvalid => f.write_str("evidence_invalid"),
+            Self::Unsupported => f.write_str("unsupported"),
+            Self::EvidenceUnknown => f.write_str("evidence_unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for ResourceTermProblem {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "unknown" => Ok(Self::Unknown),
+            "evidence_invalid" => Ok(Self::EvidenceInvalid),
+            "unsupported" => Ok(Self::Unsupported),
+            "evidence_unknown" => Ok(Self::EvidenceUnknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ResourceTermProblem {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ResourceTermProblem {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
 pub enum RunAdmissionCode {
     #[serde(rename = "run.plan_invalid")]
     RunPlanInvalid,
@@ -4389,6 +7307,1694 @@ impl ::std::convert::TryFrom<&str> for RunAdmissionCode {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for RunAdmissionCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RunDegradedReason {
+    #[serde(rename = "external-member")]
+    ExternalMember,
+    #[serde(rename = "mapping-incomplete")]
+    MappingIncomplete,
+    #[serde(rename = "missing-ranks")]
+    MissingRanks,
+    #[serde(rename = "unexpected-ranks")]
+    UnexpectedRanks,
+    #[serde(rename = "rank-membership-mismatch")]
+    RankMembershipMismatch,
+    #[serde(rename = "run-not-running")]
+    RunNotRunning,
+    #[serde(rename = "rank-not-running")]
+    RankNotRunning,
+    #[serde(rename = "rank-stale")]
+    RankStale,
+    #[serde(rename = "route-not-published")]
+    RouteNotPublished,
+}
+impl ::std::fmt::Display for RunDegradedReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ExternalMember => f.write_str("external-member"),
+            Self::MappingIncomplete => f.write_str("mapping-incomplete"),
+            Self::MissingRanks => f.write_str("missing-ranks"),
+            Self::UnexpectedRanks => f.write_str("unexpected-ranks"),
+            Self::RankMembershipMismatch => f.write_str("rank-membership-mismatch"),
+            Self::RunNotRunning => f.write_str("run-not-running"),
+            Self::RankNotRunning => f.write_str("rank-not-running"),
+            Self::RankStale => f.write_str("rank-stale"),
+            Self::RouteNotPublished => f.write_str("route-not-published"),
+        }
+    }
+}
+impl ::std::str::FromStr for RunDegradedReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "external-member" => Ok(Self::ExternalMember),
+            "mapping-incomplete" => Ok(Self::MappingIncomplete),
+            "missing-ranks" => Ok(Self::MissingRanks),
+            "unexpected-ranks" => Ok(Self::UnexpectedRanks),
+            "rank-membership-mismatch" => Ok(Self::RankMembershipMismatch),
+            "run-not-running" => Ok(Self::RunNotRunning),
+            "rank-not-running" => Ok(Self::RankNotRunning),
+            "rank-stale" => Ok(Self::RankStale),
+            "route-not-published" => Ok(Self::RouteNotPublished),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RunDegradedReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RunDegradedReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum RunSwitchCode {
+    #[serde(rename = "run-switch.active-run-conflict")]
+    RunSwitchActiveRunConflict,
+    #[serde(rename = "run-switch.advance-failed")]
+    RunSwitchAdvanceFailed,
+    #[serde(rename = "run-switch.agent-upgrade-required")]
+    RunSwitchAgentUpgradeRequired,
+    #[serde(rename = "run-switch.artifact-identity-unknown")]
+    RunSwitchArtifactIdentityUnknown,
+    #[serde(rename = "run-switch.artifact-inspection-unavailable")]
+    RunSwitchArtifactInspectionUnavailable,
+    #[serde(rename = "run-switch.artifact-manifest-unknown")]
+    RunSwitchArtifactManifestUnknown,
+    #[serde(rename = "run-switch.artifact-phase-executor-unavailable")]
+    RunSwitchArtifactPhaseExecutorUnavailable,
+    #[serde(rename = "run-switch.artifact-verification-result-invalid")]
+    RunSwitchArtifactVerificationResultInvalid,
+    #[serde(rename = "run-switch.cleanup-reclaim-evidence-invalid")]
+    RunSwitchCleanupReclaimEvidenceInvalid,
+    #[serde(rename = "run-switch.cleanup-reclaimed-bytes-exceed-plan")]
+    RunSwitchCleanupReclaimedBytesExceedPlan,
+    #[serde(rename = "run-switch.cleanup-reference-protection-evidence-invalid")]
+    RunSwitchCleanupReferenceProtectionEvidenceInvalid,
+    #[serde(rename = "run-switch.cleanup-reference-protection-overlap")]
+    RunSwitchCleanupReferenceProtectionOverlap,
+    #[serde(rename = "run-switch.cleanup-scope-invalid")]
+    RunSwitchCleanupScopeInvalid,
+    #[serde(rename = "run-switch.container-build-evidence-invalid")]
+    RunSwitchContainerBuildEvidenceInvalid,
+    #[serde(rename = "run-switch.container-build-executor-unavailable")]
+    RunSwitchContainerBuildExecutorUnavailable,
+    #[serde(rename = "run-switch.container-build-identity-unavailable")]
+    RunSwitchContainerBuildIdentityUnavailable,
+    #[serde(rename = "run-switch.container-build-parent-changed")]
+    RunSwitchContainerBuildParentChanged,
+    #[serde(rename = "run-switch.container-build-parent-invalid")]
+    RunSwitchContainerBuildParentInvalid,
+    #[serde(rename = "run-switch.container-build-plan-invalid")]
+    RunSwitchContainerBuildPlanInvalid,
+    #[serde(rename = "run-switch.container-build-receipt-unavailable")]
+    RunSwitchContainerBuildReceiptUnavailable,
+    #[serde(rename = "run-switch.container-build-required")]
+    RunSwitchContainerBuildRequired,
+    #[serde(rename = "run-switch.container-build-state-invalid")]
+    RunSwitchContainerBuildStateInvalid,
+    #[serde(rename = "run-switch.container-build-unavailable")]
+    RunSwitchContainerBuildUnavailable,
+    #[serde(rename = "run-switch.cross-group_conflict")]
+    RunSwitchCrossGroupConflict,
+    #[serde(rename = "run-switch.disk-envelope-invalid")]
+    RunSwitchDiskEnvelopeInvalid,
+    #[serde(rename = "run-switch.disk-eviction-planned")]
+    RunSwitchDiskEvictionPlanned,
+    #[serde(rename = "run-switch.effect-uncertain")]
+    RunSwitchEffectUncertain,
+    #[serde(rename = "run-switch.final-verification")]
+    RunSwitchFinalVerification,
+    #[serde(rename = "run-switch.final-verification-clock-invalid")]
+    RunSwitchFinalVerificationClockInvalid,
+    #[serde(rename = "run-switch.final-verification-failed")]
+    RunSwitchFinalVerificationFailed,
+    #[serde(rename = "run-switch.final-verification-timeout")]
+    RunSwitchFinalVerificationTimeout,
+    #[serde(rename = "run-switch.final-verification-unavailable")]
+    RunSwitchFinalVerificationUnavailable,
+    #[serde(rename = "run-switch.install-executor-unavailable")]
+    RunSwitchInstallExecutorUnavailable,
+    #[serde(rename = "run-switch.install-preparation-unavailable")]
+    RunSwitchInstallPreparationUnavailable,
+    #[serde(rename = "run-switch.installation-handoff-unavailable")]
+    RunSwitchInstallationHandoffUnavailable,
+    #[serde(rename = "run-switch.installation-identity-changed")]
+    RunSwitchInstallationIdentityChanged,
+    #[serde(rename = "run-switch.installation-identity-unavailable")]
+    RunSwitchInstallationIdentityUnavailable,
+    #[serde(rename = "run-switch.installation-membership-changed")]
+    RunSwitchInstallationMembershipChanged,
+    #[serde(rename = "run-switch.installation-preparation-unavailable")]
+    RunSwitchInstallationPreparationUnavailable,
+    #[serde(rename = "run-switch.installation-verification-failed")]
+    RunSwitchInstallationVerificationFailed,
+    #[serde(rename = "run-switch.installation-verification-unavailable")]
+    RunSwitchInstallationVerificationUnavailable,
+    #[serde(rename = "run-switch.insufficient-disk")]
+    RunSwitchInsufficientDisk,
+    #[serde(rename = "run-switch.insufficient-memory")]
+    RunSwitchInsufficientMemory,
+    #[serde(rename = "run-switch.interface-invalid")]
+    RunSwitchInterfaceInvalid,
+    #[serde(rename = "run-switch.inventory-stale")]
+    RunSwitchInventoryStale,
+    #[serde(rename = "run-switch.inventory-unknown")]
+    RunSwitchInventoryUnknown,
+    #[serde(rename = "run-switch.mapping_group_mismatch")]
+    RunSwitchMappingGroupMismatch,
+    #[serde(rename = "run-switch.mapping_invalid")]
+    RunSwitchMappingInvalid,
+    #[serde(rename = "run-switch.mapping_materialization_unavailable")]
+    RunSwitchMappingMaterializationUnavailable,
+    #[serde(rename = "run-switch.memory-envelope-invalid")]
+    RunSwitchMemoryEnvelopeInvalid,
+    #[serde(rename = "run-switch.model-download-artifact-set-mismatch")]
+    RunSwitchModelDownloadArtifactSetMismatch,
+    #[serde(rename = "run-switch.model-download-byte-evidence-mismatch")]
+    RunSwitchModelDownloadByteEvidenceMismatch,
+    #[serde(rename = "run-switch.model-download-coverage-incomplete")]
+    RunSwitchModelDownloadCoverageIncomplete,
+    #[serde(rename = "run-switch.model_recipe_mismatch")]
+    RunSwitchModelRecipeMismatch,
+    #[serde(rename = "run-switch.model_revision_unavailable")]
+    RunSwitchModelRevisionUnavailable,
+    #[serde(rename = "run-switch.nas-coverage-unknown")]
+    RunSwitchNasCoverageUnknown,
+    #[serde(rename = "run-switch.nas-download-blocked")]
+    RunSwitchNasDownloadBlocked,
+    #[serde(rename = "run-switch.nas-download-required")]
+    RunSwitchNasDownloadRequired,
+    #[serde(rename = "run-switch.option_invalid")]
+    RunSwitchOptionInvalid,
+    #[serde(rename = "run-switch.phase-retry")]
+    RunSwitchPhaseRetry,
+    #[serde(rename = "run-switch.plan-refresh-unavailable")]
+    RunSwitchPlanRefreshUnavailable,
+    #[serde(rename = "run-switch.plan-targets-changed")]
+    RunSwitchPlanTargetsChanged,
+    #[serde(rename = "run-switch.post-stop-inventory-pending")]
+    RunSwitchPostStopInventoryPending,
+    #[serde(rename = "run-switch.post-stop-memory-pool-changed")]
+    RunSwitchPostStopMemoryPoolChanged,
+    #[serde(rename = "run-switch.preflight-recipe-changed")]
+    RunSwitchPreflightRecipeChanged,
+    #[serde(rename = "run-switch.prepare-subphase-unsupported")]
+    RunSwitchPrepareSubphaseUnsupported,
+    #[serde(rename = "run-switch.profile.incomplete_multi_spark_model")]
+    RunSwitchProfileIncompleteMultiSparkModel,
+    #[serde(rename = "run-switch.profile_stop_scope_changed")]
+    RunSwitchProfileStopScopeChanged,
+    #[serde(rename = "run-switch.receipt_invalid")]
+    RunSwitchReceiptInvalid,
+    #[serde(rename = "run-switch.recipe-build-compatibility-unknown")]
+    RunSwitchRecipeBuildCompatibilityUnknown,
+    #[serde(rename = "run-switch.recipe-build-incompatible")]
+    RunSwitchRecipeBuildIncompatible,
+    #[serde(rename = "run-switch.recipe-build-unavailable")]
+    RunSwitchRecipeBuildUnavailable,
+    #[serde(rename = "run-switch.recipe_dependencies_unavailable")]
+    RunSwitchRecipeDependenciesUnavailable,
+    #[serde(rename = "run-switch.recipe_digest_changed")]
+    RunSwitchRecipeDigestChanged,
+    #[serde(rename = "run-switch.recipe_unresolved")]
+    RunSwitchRecipeUnresolved,
+    #[serde(rename = "run-switch.reconciliation-assessment-unavailable")]
+    RunSwitchReconciliationAssessmentUnavailable,
+    #[serde(rename = "run-switch.reconciliation-authority-unavailable")]
+    RunSwitchReconciliationAuthorityUnavailable,
+    #[serde(rename = "run-switch.reconciliation-prerequisite")]
+    RunSwitchReconciliationPrerequisite,
+    #[serde(rename = "run-switch.reconciliation-receipts-retained")]
+    RunSwitchReconciliationReceiptsRetained,
+    #[serde(rename = "run-switch.reconciliation-state-verification-failed")]
+    RunSwitchReconciliationStateVerificationFailed,
+    #[serde(rename = "run-switch.reconciliation-verification-failed")]
+    RunSwitchReconciliationVerificationFailed,
+    #[serde(rename = "run-switch.request_key_reused_differently")]
+    RunSwitchRequestKeyReusedDifferently,
+    #[serde(rename = "run-switch.resource-contract-invalid")]
+    RunSwitchResourceContractInvalid,
+    #[serde(rename = "run-switch.resource.insufficient")]
+    RunSwitchResourceInsufficient,
+    #[serde(rename = "run-switch.resource.insufficient_capacity")]
+    RunSwitchResourceInsufficientCapacity,
+    #[serde(rename = "run-switch.resource.insufficient_capacity_after_stop")]
+    RunSwitchResourceInsufficientCapacityAfterStop,
+    #[serde(rename = "run-switch.resource.insufficient_reservation_budget")]
+    RunSwitchResourceInsufficientReservationBudget,
+    #[serde(rename = "run-switch.resource.resident_usage_unknown")]
+    RunSwitchResourceResidentUsageUnknown,
+    #[serde(rename = "run-switch.run-not-active")]
+    RunSwitchRunNotActive,
+    #[serde(rename = "run-switch.run_admission_blocked")]
+    RunSwitchRunAdmissionBlocked,
+    #[serde(rename = "run-switch.run_admission_unavailable")]
+    RunSwitchRunAdmissionUnavailable,
+    #[serde(rename = "run-switch.runtime-build-verification-mismatch")]
+    RunSwitchRuntimeBuildVerificationMismatch,
+    #[serde(rename = "run-switch.runtime-image-authorization-mismatch")]
+    RunSwitchRuntimeImageAuthorizationMismatch,
+    #[serde(rename = "run-switch.runtime-image-executor-unavailable")]
+    RunSwitchRuntimeImageExecutorUnavailable,
+    #[serde(rename = "run-switch.runtime-image-owner-changed")]
+    RunSwitchRuntimeImageOwnerChanged,
+    #[serde(rename = "run-switch.runtime-image-preparation-layout-mismatch")]
+    RunSwitchRuntimeImagePreparationLayoutMismatch,
+    #[serde(rename = "run-switch.runtime-image-preparation-receipt-invalid")]
+    RunSwitchRuntimeImagePreparationReceiptInvalid,
+    #[serde(rename = "run-switch.runtime-image-preparing")]
+    RunSwitchRuntimeImagePreparing,
+    #[serde(rename = "run-switch.runtime-image-reference-identity-mismatch")]
+    RunSwitchRuntimeImageReferenceIdentityMismatch,
+    #[serde(rename = "run-switch.runtime-image-waiting-without-child")]
+    RunSwitchRuntimeImageWaitingWithoutChild,
+    #[serde(rename = "run-switch.spark-unavailable")]
+    RunSwitchSparkUnavailable,
+    #[serde(rename = "run-switch.start-observation")]
+    RunSwitchStartObservation,
+    #[serde(rename = "run-switch.start-observation-expired")]
+    RunSwitchStartObservationExpired,
+    #[serde(rename = "run-switch.start_installation_unavailable")]
+    RunSwitchStartInstallationUnavailable,
+    #[serde(rename = "run-switch.stop-plan-unavailable")]
+    RunSwitchStopPlanUnavailable,
+    #[serde(rename = "run-switch.stop-still-unresolved-after-cancellation")]
+    RunSwitchStopStillUnresolvedAfterCancellation,
+    #[serde(rename = "run-switch.stop-target-disappeared")]
+    RunSwitchStopTargetDisappeared,
+    #[serde(rename = "run-switch.stopped-run-identity-changed")]
+    RunSwitchStoppedRunIdentityChanged,
+    #[serde(rename = "run-switch.stopped-run-membership-changed")]
+    RunSwitchStoppedRunMembershipChanged,
+    #[serde(rename = "run-switch.target-not-active")]
+    RunSwitchTargetNotActive,
+    #[serde(rename = "run-switch.transfer-byte-evidence-invalid")]
+    RunSwitchTransferByteEvidenceInvalid,
+    #[serde(rename = "run-switch.uninstall-assessment-unavailable")]
+    RunSwitchUninstallAssessmentUnavailable,
+    #[serde(rename = "run-switch.uninstall-blocked")]
+    RunSwitchUninstallBlocked,
+    #[serde(rename = "run-switch.uninstall-issued-prerequisite")]
+    RunSwitchUninstallIssuedPrerequisite,
+    #[serde(rename = "run-switch.uninstall_target_unavailable")]
+    RunSwitchUninstallTargetUnavailable,
+    #[serde(rename = "run-switch.waiting")]
+    RunSwitchWaiting,
+    #[serde(rename = "run-switch.reason-unclassified")]
+    RunSwitchReasonUnclassified,
+    #[serde(rename = "run-switch.cancel-effect-unknown")]
+    RunSwitchCancelEffectUnknown,
+    #[serde(rename = "run-switch.container-build-start-unavailable")]
+    RunSwitchContainerBuildStartUnavailable,
+    #[serde(rename = "run-switch.distributed-recovery-active")]
+    RunSwitchDistributedRecoveryActive,
+    #[serde(rename = "run-switch.final-owner-state-unknown")]
+    RunSwitchFinalOwnerStateUnknown,
+    #[serde(rename = "run-switch.final-verification-expired")]
+    RunSwitchFinalVerificationExpired,
+    #[serde(rename = "run-switch.install-plan-unavailable")]
+    RunSwitchInstallPlanUnavailable,
+    #[serde(rename = "run-switch.install-preflight-expired")]
+    RunSwitchInstallPreflightExpired,
+    #[serde(rename = "run-switch.install-preparation-failed")]
+    RunSwitchInstallPreparationFailed,
+    #[serde(rename = "run-switch.install-start-failed")]
+    RunSwitchInstallStartFailed,
+    #[serde(rename = "run-switch.installation-handoff-inconsistent")]
+    RunSwitchInstallationHandoffInconsistent,
+    #[serde(rename = "run-switch.plan_blocked")]
+    RunSwitchPlanBlocked,
+    #[serde(rename = "run-switch.reconciliation-start-failed")]
+    RunSwitchReconciliationStartFailed,
+    #[serde(rename = "run-switch.route-health-recovery-active")]
+    RunSwitchRouteHealthRecoveryActive,
+    #[serde(rename = "run-switch.route-owner-failed")]
+    RunSwitchRouteOwnerFailed,
+    #[serde(rename = "run-switch.route-publication-pending")]
+    RunSwitchRoutePublicationPending,
+    #[serde(rename = "run-switch.route-withdrawn-owner-unknown")]
+    RunSwitchRouteWithdrawnOwnerUnknown,
+    #[serde(rename = "run-switch.run-owner-active")]
+    RunSwitchRunOwnerActive,
+    #[serde(rename = "run-switch.run-owner-terminal")]
+    RunSwitchRunOwnerTerminal,
+    #[serde(rename = "run-switch.stale_plan")]
+    RunSwitchStalePlan,
+    #[serde(rename = "run-switch.stop-verification-pending")]
+    RunSwitchStopVerificationPending,
+    #[serde(rename = "run-switch.superseded")]
+    RunSwitchSuperseded,
+    #[serde(rename = "run-switch.uninstall-abandon-failed")]
+    RunSwitchUninstallAbandonFailed,
+    #[serde(rename = "run-switch.uninstall-start-failed")]
+    RunSwitchUninstallStartFailed,
+    #[serde(rename = "run-switch.recipe.stop-issued-pending")]
+    RunSwitchRecipeStopIssuedPending,
+    #[serde(rename = "run-switch.recipe.install-issued-pending")]
+    RunSwitchRecipeInstallIssuedPending,
+    #[serde(rename = "run-switch.recipe.uninstall-issued-pending")]
+    RunSwitchRecipeUninstallIssuedPending,
+    #[serde(rename = "run-switch.recipe.reconcile-issued-pending")]
+    RunSwitchRecipeReconcileIssuedPending,
+    #[serde(rename = "run-switch.artifact-job-cancellation-issued-pending")]
+    RunSwitchArtifactJobCancellationIssuedPending,
+    #[serde(rename = "run-switch.transfer-executor-unavailable")]
+    RunSwitchTransferExecutorUnavailable,
+    #[serde(rename = "run-switch.transfer-waiting-without-child")]
+    RunSwitchTransferWaitingWithoutChild,
+    #[serde(rename = "run-switch.transfer-returned-no-evidence")]
+    RunSwitchTransferReturnedNoEvidence,
+    #[serde(rename = "run-switch.verify-executor-unavailable")]
+    RunSwitchVerifyExecutorUnavailable,
+    #[serde(rename = "run-switch.verify-waiting-without-child")]
+    RunSwitchVerifyWaitingWithoutChild,
+    #[serde(rename = "run-switch.verify-returned-no-evidence")]
+    RunSwitchVerifyReturnedNoEvidence,
+    #[serde(rename = "run-switch.cleanup-executor-unavailable")]
+    RunSwitchCleanupExecutorUnavailable,
+    #[serde(rename = "run-switch.cleanup-waiting-without-child")]
+    RunSwitchCleanupWaitingWithoutChild,
+    #[serde(rename = "run-switch.cleanup-returned-no-evidence")]
+    RunSwitchCleanupReturnedNoEvidence,
+    #[serde(rename = "run-switch.resource.capacity_unknown")]
+    RunSwitchResourceCapacityUnknown,
+    #[serde(rename = "run-switch.resource.estimate_uncertain")]
+    RunSwitchResourceEstimateUncertain,
+    #[serde(rename = "run-switch.resource.evidence_invalid")]
+    RunSwitchResourceEvidenceInvalid,
+    #[serde(rename = "run-switch.resource.evidence_unknown")]
+    RunSwitchResourceEvidenceUnknown,
+    #[serde(rename = "run-switch.resource.knobs_invalid")]
+    RunSwitchResourceKnobsInvalid,
+    #[serde(rename = "run-switch.resource.parallelism_duplicate")]
+    RunSwitchResourceParallelismDuplicate,
+    #[serde(rename = "run-switch.resource.parallelism_inconsistent")]
+    RunSwitchResourceParallelismInconsistent,
+    #[serde(rename = "run-switch.resource.parallelism_type")]
+    RunSwitchResourceParallelismType,
+    #[serde(rename = "run-switch.resource.parallelism_unknown")]
+    RunSwitchResourceParallelismUnknown,
+    #[serde(rename = "run-switch.resource.settings_kind_unknown")]
+    RunSwitchResourceSettingsKindUnknown,
+    #[serde(rename = "run-switch.resource.settings_type")]
+    RunSwitchResourceSettingsType,
+    #[serde(rename = "run-switch.resource.settings_unknown")]
+    RunSwitchResourceSettingsUnknown,
+    #[serde(rename = "run-switch.resource.stop_release_unknown")]
+    RunSwitchResourceStopReleaseUnknown,
+    #[serde(rename = "run-switch.reconcile.active_effect_unknown")]
+    RunSwitchReconcileActiveEffectUnknown,
+    #[serde(rename = "run-switch.reconcile.agent_unavailable")]
+    RunSwitchReconcileAgentUnavailable,
+    #[serde(rename = "run-switch.reconcile.capacity_busy")]
+    RunSwitchReconcileCapacityBusy,
+    #[serde(rename = "run-switch.reconcile.install_provenance_mismatch")]
+    RunSwitchReconcileInstallProvenanceMismatch,
+    #[serde(rename = "run-switch.reconcile.install_provenance_unavailable")]
+    RunSwitchReconcileInstallProvenanceUnavailable,
+    #[serde(rename = "run-switch.reconcile.installation_effect_unknown")]
+    RunSwitchReconcileInstallationEffectUnknown,
+    #[serde(rename = "run-switch.reconcile.installation_identity_mismatch")]
+    RunSwitchReconcileInstallationIdentityMismatch,
+    #[serde(rename = "run-switch.reconcile.installation_identity_unavailable")]
+    RunSwitchReconcileInstallationIdentityUnavailable,
+    #[serde(rename = "run-switch.reconcile.membership_changed")]
+    RunSwitchReconcileMembershipChanged,
+    #[serde(rename = "run-switch.reconcile.operation_active")]
+    RunSwitchReconcileOperationActive,
+    #[serde(rename = "run-switch.reconcile.rank_membership_changed")]
+    RunSwitchReconcileRankMembershipChanged,
+    #[serde(rename = "run-switch.reconcile.recipe_revision_unavailable")]
+    RunSwitchReconcileRecipeRevisionUnavailable,
+    #[serde(rename = "run-switch.reconcile.spec_identity_mismatch")]
+    RunSwitchReconcileSpecIdentityMismatch,
+    #[serde(rename = "run-switch.stop.capacity_release_deferred")]
+    RunSwitchStopCapacityReleaseDeferred,
+    #[serde(rename = "run-switch.stop.rank_membership_changed")]
+    RunSwitchStopRankMembershipChanged,
+    #[serde(rename = "run-switch.stop.reservation_membership_changed")]
+    RunSwitchStopReservationMembershipChanged,
+    #[serde(rename = "run-switch.stop.run_not_stoppable")]
+    RunSwitchStopRunNotStoppable,
+    #[serde(rename = "run-switch.stop.target_scope_changed")]
+    RunSwitchStopTargetScopeChanged,
+    #[serde(rename = "run-switch.uninstall.abandon-never-installed")]
+    RunSwitchUninstallAbandonNeverInstalled,
+    #[serde(rename = "run-switch.uninstall.active_run")]
+    RunSwitchUninstallActiveRun,
+    #[serde(rename = "run-switch.uninstall.active_runs_truncated")]
+    RunSwitchUninstallActiveRunsTruncated,
+    #[serde(rename = "run-switch.uninstall.bytes_unknown")]
+    RunSwitchUninstallBytesUnknown,
+    #[serde(rename = "run-switch.uninstall.installation_not_uninstallable")]
+    RunSwitchUninstallInstallationNotUninstallable,
+    #[serde(rename = "run-switch.uninstall.operation_active")]
+    RunSwitchUninstallOperationActive,
+    #[serde(rename = "run-switch.uninstall.rank_membership_changed")]
+    RunSwitchUninstallRankMembershipChanged,
+}
+impl ::std::fmt::Display for RunSwitchCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RunSwitchActiveRunConflict => f.write_str("run-switch.active-run-conflict"),
+            Self::RunSwitchAdvanceFailed => f.write_str("run-switch.advance-failed"),
+            Self::RunSwitchAgentUpgradeRequired => f.write_str("run-switch.agent-upgrade-required"),
+            Self::RunSwitchArtifactIdentityUnknown => {
+                f.write_str("run-switch.artifact-identity-unknown")
+            }
+            Self::RunSwitchArtifactInspectionUnavailable => {
+                f.write_str("run-switch.artifact-inspection-unavailable")
+            }
+            Self::RunSwitchArtifactManifestUnknown => {
+                f.write_str("run-switch.artifact-manifest-unknown")
+            }
+            Self::RunSwitchArtifactPhaseExecutorUnavailable => {
+                f.write_str("run-switch.artifact-phase-executor-unavailable")
+            }
+            Self::RunSwitchArtifactVerificationResultInvalid => {
+                f.write_str("run-switch.artifact-verification-result-invalid")
+            }
+            Self::RunSwitchCleanupReclaimEvidenceInvalid => {
+                f.write_str("run-switch.cleanup-reclaim-evidence-invalid")
+            }
+            Self::RunSwitchCleanupReclaimedBytesExceedPlan => {
+                f.write_str("run-switch.cleanup-reclaimed-bytes-exceed-plan")
+            }
+            Self::RunSwitchCleanupReferenceProtectionEvidenceInvalid => {
+                f.write_str("run-switch.cleanup-reference-protection-evidence-invalid")
+            }
+            Self::RunSwitchCleanupReferenceProtectionOverlap => {
+                f.write_str("run-switch.cleanup-reference-protection-overlap")
+            }
+            Self::RunSwitchCleanupScopeInvalid => f.write_str("run-switch.cleanup-scope-invalid"),
+            Self::RunSwitchContainerBuildEvidenceInvalid => {
+                f.write_str("run-switch.container-build-evidence-invalid")
+            }
+            Self::RunSwitchContainerBuildExecutorUnavailable => {
+                f.write_str("run-switch.container-build-executor-unavailable")
+            }
+            Self::RunSwitchContainerBuildIdentityUnavailable => {
+                f.write_str("run-switch.container-build-identity-unavailable")
+            }
+            Self::RunSwitchContainerBuildParentChanged => {
+                f.write_str("run-switch.container-build-parent-changed")
+            }
+            Self::RunSwitchContainerBuildParentInvalid => {
+                f.write_str("run-switch.container-build-parent-invalid")
+            }
+            Self::RunSwitchContainerBuildPlanInvalid => {
+                f.write_str("run-switch.container-build-plan-invalid")
+            }
+            Self::RunSwitchContainerBuildReceiptUnavailable => {
+                f.write_str("run-switch.container-build-receipt-unavailable")
+            }
+            Self::RunSwitchContainerBuildRequired => {
+                f.write_str("run-switch.container-build-required")
+            }
+            Self::RunSwitchContainerBuildStateInvalid => {
+                f.write_str("run-switch.container-build-state-invalid")
+            }
+            Self::RunSwitchContainerBuildUnavailable => {
+                f.write_str("run-switch.container-build-unavailable")
+            }
+            Self::RunSwitchCrossGroupConflict => f.write_str("run-switch.cross-group_conflict"),
+            Self::RunSwitchDiskEnvelopeInvalid => f.write_str("run-switch.disk-envelope-invalid"),
+            Self::RunSwitchDiskEvictionPlanned => f.write_str("run-switch.disk-eviction-planned"),
+            Self::RunSwitchEffectUncertain => f.write_str("run-switch.effect-uncertain"),
+            Self::RunSwitchFinalVerification => f.write_str("run-switch.final-verification"),
+            Self::RunSwitchFinalVerificationClockInvalid => {
+                f.write_str("run-switch.final-verification-clock-invalid")
+            }
+            Self::RunSwitchFinalVerificationFailed => {
+                f.write_str("run-switch.final-verification-failed")
+            }
+            Self::RunSwitchFinalVerificationTimeout => {
+                f.write_str("run-switch.final-verification-timeout")
+            }
+            Self::RunSwitchFinalVerificationUnavailable => {
+                f.write_str("run-switch.final-verification-unavailable")
+            }
+            Self::RunSwitchInstallExecutorUnavailable => {
+                f.write_str("run-switch.install-executor-unavailable")
+            }
+            Self::RunSwitchInstallPreparationUnavailable => {
+                f.write_str("run-switch.install-preparation-unavailable")
+            }
+            Self::RunSwitchInstallationHandoffUnavailable => {
+                f.write_str("run-switch.installation-handoff-unavailable")
+            }
+            Self::RunSwitchInstallationIdentityChanged => {
+                f.write_str("run-switch.installation-identity-changed")
+            }
+            Self::RunSwitchInstallationIdentityUnavailable => {
+                f.write_str("run-switch.installation-identity-unavailable")
+            }
+            Self::RunSwitchInstallationMembershipChanged => {
+                f.write_str("run-switch.installation-membership-changed")
+            }
+            Self::RunSwitchInstallationPreparationUnavailable => {
+                f.write_str("run-switch.installation-preparation-unavailable")
+            }
+            Self::RunSwitchInstallationVerificationFailed => {
+                f.write_str("run-switch.installation-verification-failed")
+            }
+            Self::RunSwitchInstallationVerificationUnavailable => {
+                f.write_str("run-switch.installation-verification-unavailable")
+            }
+            Self::RunSwitchInsufficientDisk => f.write_str("run-switch.insufficient-disk"),
+            Self::RunSwitchInsufficientMemory => f.write_str("run-switch.insufficient-memory"),
+            Self::RunSwitchInterfaceInvalid => f.write_str("run-switch.interface-invalid"),
+            Self::RunSwitchInventoryStale => f.write_str("run-switch.inventory-stale"),
+            Self::RunSwitchInventoryUnknown => f.write_str("run-switch.inventory-unknown"),
+            Self::RunSwitchMappingGroupMismatch => f.write_str("run-switch.mapping_group_mismatch"),
+            Self::RunSwitchMappingInvalid => f.write_str("run-switch.mapping_invalid"),
+            Self::RunSwitchMappingMaterializationUnavailable => {
+                f.write_str("run-switch.mapping_materialization_unavailable")
+            }
+            Self::RunSwitchMemoryEnvelopeInvalid => {
+                f.write_str("run-switch.memory-envelope-invalid")
+            }
+            Self::RunSwitchModelDownloadArtifactSetMismatch => {
+                f.write_str("run-switch.model-download-artifact-set-mismatch")
+            }
+            Self::RunSwitchModelDownloadByteEvidenceMismatch => {
+                f.write_str("run-switch.model-download-byte-evidence-mismatch")
+            }
+            Self::RunSwitchModelDownloadCoverageIncomplete => {
+                f.write_str("run-switch.model-download-coverage-incomplete")
+            }
+            Self::RunSwitchModelRecipeMismatch => f.write_str("run-switch.model_recipe_mismatch"),
+            Self::RunSwitchModelRevisionUnavailable => {
+                f.write_str("run-switch.model_revision_unavailable")
+            }
+            Self::RunSwitchNasCoverageUnknown => f.write_str("run-switch.nas-coverage-unknown"),
+            Self::RunSwitchNasDownloadBlocked => f.write_str("run-switch.nas-download-blocked"),
+            Self::RunSwitchNasDownloadRequired => f.write_str("run-switch.nas-download-required"),
+            Self::RunSwitchOptionInvalid => f.write_str("run-switch.option_invalid"),
+            Self::RunSwitchPhaseRetry => f.write_str("run-switch.phase-retry"),
+            Self::RunSwitchPlanRefreshUnavailable => {
+                f.write_str("run-switch.plan-refresh-unavailable")
+            }
+            Self::RunSwitchPlanTargetsChanged => f.write_str("run-switch.plan-targets-changed"),
+            Self::RunSwitchPostStopInventoryPending => {
+                f.write_str("run-switch.post-stop-inventory-pending")
+            }
+            Self::RunSwitchPostStopMemoryPoolChanged => {
+                f.write_str("run-switch.post-stop-memory-pool-changed")
+            }
+            Self::RunSwitchPreflightRecipeChanged => {
+                f.write_str("run-switch.preflight-recipe-changed")
+            }
+            Self::RunSwitchPrepareSubphaseUnsupported => {
+                f.write_str("run-switch.prepare-subphase-unsupported")
+            }
+            Self::RunSwitchProfileIncompleteMultiSparkModel => {
+                f.write_str("run-switch.profile.incomplete_multi_spark_model")
+            }
+            Self::RunSwitchProfileStopScopeChanged => {
+                f.write_str("run-switch.profile_stop_scope_changed")
+            }
+            Self::RunSwitchReceiptInvalid => f.write_str("run-switch.receipt_invalid"),
+            Self::RunSwitchRecipeBuildCompatibilityUnknown => {
+                f.write_str("run-switch.recipe-build-compatibility-unknown")
+            }
+            Self::RunSwitchRecipeBuildIncompatible => {
+                f.write_str("run-switch.recipe-build-incompatible")
+            }
+            Self::RunSwitchRecipeBuildUnavailable => {
+                f.write_str("run-switch.recipe-build-unavailable")
+            }
+            Self::RunSwitchRecipeDependenciesUnavailable => {
+                f.write_str("run-switch.recipe_dependencies_unavailable")
+            }
+            Self::RunSwitchRecipeDigestChanged => f.write_str("run-switch.recipe_digest_changed"),
+            Self::RunSwitchRecipeUnresolved => f.write_str("run-switch.recipe_unresolved"),
+            Self::RunSwitchReconciliationAssessmentUnavailable => {
+                f.write_str("run-switch.reconciliation-assessment-unavailable")
+            }
+            Self::RunSwitchReconciliationAuthorityUnavailable => {
+                f.write_str("run-switch.reconciliation-authority-unavailable")
+            }
+            Self::RunSwitchReconciliationPrerequisite => {
+                f.write_str("run-switch.reconciliation-prerequisite")
+            }
+            Self::RunSwitchReconciliationReceiptsRetained => {
+                f.write_str("run-switch.reconciliation-receipts-retained")
+            }
+            Self::RunSwitchReconciliationStateVerificationFailed => {
+                f.write_str("run-switch.reconciliation-state-verification-failed")
+            }
+            Self::RunSwitchReconciliationVerificationFailed => {
+                f.write_str("run-switch.reconciliation-verification-failed")
+            }
+            Self::RunSwitchRequestKeyReusedDifferently => {
+                f.write_str("run-switch.request_key_reused_differently")
+            }
+            Self::RunSwitchResourceContractInvalid => {
+                f.write_str("run-switch.resource-contract-invalid")
+            }
+            Self::RunSwitchResourceInsufficient => f.write_str("run-switch.resource.insufficient"),
+            Self::RunSwitchResourceInsufficientCapacity => {
+                f.write_str("run-switch.resource.insufficient_capacity")
+            }
+            Self::RunSwitchResourceInsufficientCapacityAfterStop => {
+                f.write_str("run-switch.resource.insufficient_capacity_after_stop")
+            }
+            Self::RunSwitchResourceInsufficientReservationBudget => {
+                f.write_str("run-switch.resource.insufficient_reservation_budget")
+            }
+            Self::RunSwitchResourceResidentUsageUnknown => {
+                f.write_str("run-switch.resource.resident_usage_unknown")
+            }
+            Self::RunSwitchRunNotActive => f.write_str("run-switch.run-not-active"),
+            Self::RunSwitchRunAdmissionBlocked => f.write_str("run-switch.run_admission_blocked"),
+            Self::RunSwitchRunAdmissionUnavailable => {
+                f.write_str("run-switch.run_admission_unavailable")
+            }
+            Self::RunSwitchRuntimeBuildVerificationMismatch => {
+                f.write_str("run-switch.runtime-build-verification-mismatch")
+            }
+            Self::RunSwitchRuntimeImageAuthorizationMismatch => {
+                f.write_str("run-switch.runtime-image-authorization-mismatch")
+            }
+            Self::RunSwitchRuntimeImageExecutorUnavailable => {
+                f.write_str("run-switch.runtime-image-executor-unavailable")
+            }
+            Self::RunSwitchRuntimeImageOwnerChanged => {
+                f.write_str("run-switch.runtime-image-owner-changed")
+            }
+            Self::RunSwitchRuntimeImagePreparationLayoutMismatch => {
+                f.write_str("run-switch.runtime-image-preparation-layout-mismatch")
+            }
+            Self::RunSwitchRuntimeImagePreparationReceiptInvalid => {
+                f.write_str("run-switch.runtime-image-preparation-receipt-invalid")
+            }
+            Self::RunSwitchRuntimeImagePreparing => {
+                f.write_str("run-switch.runtime-image-preparing")
+            }
+            Self::RunSwitchRuntimeImageReferenceIdentityMismatch => {
+                f.write_str("run-switch.runtime-image-reference-identity-mismatch")
+            }
+            Self::RunSwitchRuntimeImageWaitingWithoutChild => {
+                f.write_str("run-switch.runtime-image-waiting-without-child")
+            }
+            Self::RunSwitchSparkUnavailable => f.write_str("run-switch.spark-unavailable"),
+            Self::RunSwitchStartObservation => f.write_str("run-switch.start-observation"),
+            Self::RunSwitchStartObservationExpired => {
+                f.write_str("run-switch.start-observation-expired")
+            }
+            Self::RunSwitchStartInstallationUnavailable => {
+                f.write_str("run-switch.start_installation_unavailable")
+            }
+            Self::RunSwitchStopPlanUnavailable => f.write_str("run-switch.stop-plan-unavailable"),
+            Self::RunSwitchStopStillUnresolvedAfterCancellation => {
+                f.write_str("run-switch.stop-still-unresolved-after-cancellation")
+            }
+            Self::RunSwitchStopTargetDisappeared => {
+                f.write_str("run-switch.stop-target-disappeared")
+            }
+            Self::RunSwitchStoppedRunIdentityChanged => {
+                f.write_str("run-switch.stopped-run-identity-changed")
+            }
+            Self::RunSwitchStoppedRunMembershipChanged => {
+                f.write_str("run-switch.stopped-run-membership-changed")
+            }
+            Self::RunSwitchTargetNotActive => f.write_str("run-switch.target-not-active"),
+            Self::RunSwitchTransferByteEvidenceInvalid => {
+                f.write_str("run-switch.transfer-byte-evidence-invalid")
+            }
+            Self::RunSwitchUninstallAssessmentUnavailable => {
+                f.write_str("run-switch.uninstall-assessment-unavailable")
+            }
+            Self::RunSwitchUninstallBlocked => f.write_str("run-switch.uninstall-blocked"),
+            Self::RunSwitchUninstallIssuedPrerequisite => {
+                f.write_str("run-switch.uninstall-issued-prerequisite")
+            }
+            Self::RunSwitchUninstallTargetUnavailable => {
+                f.write_str("run-switch.uninstall_target_unavailable")
+            }
+            Self::RunSwitchWaiting => f.write_str("run-switch.waiting"),
+            Self::RunSwitchReasonUnclassified => f.write_str("run-switch.reason-unclassified"),
+            Self::RunSwitchCancelEffectUnknown => f.write_str("run-switch.cancel-effect-unknown"),
+            Self::RunSwitchContainerBuildStartUnavailable => {
+                f.write_str("run-switch.container-build-start-unavailable")
+            }
+            Self::RunSwitchDistributedRecoveryActive => {
+                f.write_str("run-switch.distributed-recovery-active")
+            }
+            Self::RunSwitchFinalOwnerStateUnknown => {
+                f.write_str("run-switch.final-owner-state-unknown")
+            }
+            Self::RunSwitchFinalVerificationExpired => {
+                f.write_str("run-switch.final-verification-expired")
+            }
+            Self::RunSwitchInstallPlanUnavailable => {
+                f.write_str("run-switch.install-plan-unavailable")
+            }
+            Self::RunSwitchInstallPreflightExpired => {
+                f.write_str("run-switch.install-preflight-expired")
+            }
+            Self::RunSwitchInstallPreparationFailed => {
+                f.write_str("run-switch.install-preparation-failed")
+            }
+            Self::RunSwitchInstallStartFailed => f.write_str("run-switch.install-start-failed"),
+            Self::RunSwitchInstallationHandoffInconsistent => {
+                f.write_str("run-switch.installation-handoff-inconsistent")
+            }
+            Self::RunSwitchPlanBlocked => f.write_str("run-switch.plan_blocked"),
+            Self::RunSwitchReconciliationStartFailed => {
+                f.write_str("run-switch.reconciliation-start-failed")
+            }
+            Self::RunSwitchRouteHealthRecoveryActive => {
+                f.write_str("run-switch.route-health-recovery-active")
+            }
+            Self::RunSwitchRouteOwnerFailed => f.write_str("run-switch.route-owner-failed"),
+            Self::RunSwitchRoutePublicationPending => {
+                f.write_str("run-switch.route-publication-pending")
+            }
+            Self::RunSwitchRouteWithdrawnOwnerUnknown => {
+                f.write_str("run-switch.route-withdrawn-owner-unknown")
+            }
+            Self::RunSwitchRunOwnerActive => f.write_str("run-switch.run-owner-active"),
+            Self::RunSwitchRunOwnerTerminal => f.write_str("run-switch.run-owner-terminal"),
+            Self::RunSwitchStalePlan => f.write_str("run-switch.stale_plan"),
+            Self::RunSwitchStopVerificationPending => {
+                f.write_str("run-switch.stop-verification-pending")
+            }
+            Self::RunSwitchSuperseded => f.write_str("run-switch.superseded"),
+            Self::RunSwitchUninstallAbandonFailed => {
+                f.write_str("run-switch.uninstall-abandon-failed")
+            }
+            Self::RunSwitchUninstallStartFailed => f.write_str("run-switch.uninstall-start-failed"),
+            Self::RunSwitchRecipeStopIssuedPending => {
+                f.write_str("run-switch.recipe.stop-issued-pending")
+            }
+            Self::RunSwitchRecipeInstallIssuedPending => {
+                f.write_str("run-switch.recipe.install-issued-pending")
+            }
+            Self::RunSwitchRecipeUninstallIssuedPending => {
+                f.write_str("run-switch.recipe.uninstall-issued-pending")
+            }
+            Self::RunSwitchRecipeReconcileIssuedPending => {
+                f.write_str("run-switch.recipe.reconcile-issued-pending")
+            }
+            Self::RunSwitchArtifactJobCancellationIssuedPending => {
+                f.write_str("run-switch.artifact-job-cancellation-issued-pending")
+            }
+            Self::RunSwitchTransferExecutorUnavailable => {
+                f.write_str("run-switch.transfer-executor-unavailable")
+            }
+            Self::RunSwitchTransferWaitingWithoutChild => {
+                f.write_str("run-switch.transfer-waiting-without-child")
+            }
+            Self::RunSwitchTransferReturnedNoEvidence => {
+                f.write_str("run-switch.transfer-returned-no-evidence")
+            }
+            Self::RunSwitchVerifyExecutorUnavailable => {
+                f.write_str("run-switch.verify-executor-unavailable")
+            }
+            Self::RunSwitchVerifyWaitingWithoutChild => {
+                f.write_str("run-switch.verify-waiting-without-child")
+            }
+            Self::RunSwitchVerifyReturnedNoEvidence => {
+                f.write_str("run-switch.verify-returned-no-evidence")
+            }
+            Self::RunSwitchCleanupExecutorUnavailable => {
+                f.write_str("run-switch.cleanup-executor-unavailable")
+            }
+            Self::RunSwitchCleanupWaitingWithoutChild => {
+                f.write_str("run-switch.cleanup-waiting-without-child")
+            }
+            Self::RunSwitchCleanupReturnedNoEvidence => {
+                f.write_str("run-switch.cleanup-returned-no-evidence")
+            }
+            Self::RunSwitchResourceCapacityUnknown => {
+                f.write_str("run-switch.resource.capacity_unknown")
+            }
+            Self::RunSwitchResourceEstimateUncertain => {
+                f.write_str("run-switch.resource.estimate_uncertain")
+            }
+            Self::RunSwitchResourceEvidenceInvalid => {
+                f.write_str("run-switch.resource.evidence_invalid")
+            }
+            Self::RunSwitchResourceEvidenceUnknown => {
+                f.write_str("run-switch.resource.evidence_unknown")
+            }
+            Self::RunSwitchResourceKnobsInvalid => f.write_str("run-switch.resource.knobs_invalid"),
+            Self::RunSwitchResourceParallelismDuplicate => {
+                f.write_str("run-switch.resource.parallelism_duplicate")
+            }
+            Self::RunSwitchResourceParallelismInconsistent => {
+                f.write_str("run-switch.resource.parallelism_inconsistent")
+            }
+            Self::RunSwitchResourceParallelismType => {
+                f.write_str("run-switch.resource.parallelism_type")
+            }
+            Self::RunSwitchResourceParallelismUnknown => {
+                f.write_str("run-switch.resource.parallelism_unknown")
+            }
+            Self::RunSwitchResourceSettingsKindUnknown => {
+                f.write_str("run-switch.resource.settings_kind_unknown")
+            }
+            Self::RunSwitchResourceSettingsType => f.write_str("run-switch.resource.settings_type"),
+            Self::RunSwitchResourceSettingsUnknown => {
+                f.write_str("run-switch.resource.settings_unknown")
+            }
+            Self::RunSwitchResourceStopReleaseUnknown => {
+                f.write_str("run-switch.resource.stop_release_unknown")
+            }
+            Self::RunSwitchReconcileActiveEffectUnknown => {
+                f.write_str("run-switch.reconcile.active_effect_unknown")
+            }
+            Self::RunSwitchReconcileAgentUnavailable => {
+                f.write_str("run-switch.reconcile.agent_unavailable")
+            }
+            Self::RunSwitchReconcileCapacityBusy => {
+                f.write_str("run-switch.reconcile.capacity_busy")
+            }
+            Self::RunSwitchReconcileInstallProvenanceMismatch => {
+                f.write_str("run-switch.reconcile.install_provenance_mismatch")
+            }
+            Self::RunSwitchReconcileInstallProvenanceUnavailable => {
+                f.write_str("run-switch.reconcile.install_provenance_unavailable")
+            }
+            Self::RunSwitchReconcileInstallationEffectUnknown => {
+                f.write_str("run-switch.reconcile.installation_effect_unknown")
+            }
+            Self::RunSwitchReconcileInstallationIdentityMismatch => {
+                f.write_str("run-switch.reconcile.installation_identity_mismatch")
+            }
+            Self::RunSwitchReconcileInstallationIdentityUnavailable => {
+                f.write_str("run-switch.reconcile.installation_identity_unavailable")
+            }
+            Self::RunSwitchReconcileMembershipChanged => {
+                f.write_str("run-switch.reconcile.membership_changed")
+            }
+            Self::RunSwitchReconcileOperationActive => {
+                f.write_str("run-switch.reconcile.operation_active")
+            }
+            Self::RunSwitchReconcileRankMembershipChanged => {
+                f.write_str("run-switch.reconcile.rank_membership_changed")
+            }
+            Self::RunSwitchReconcileRecipeRevisionUnavailable => {
+                f.write_str("run-switch.reconcile.recipe_revision_unavailable")
+            }
+            Self::RunSwitchReconcileSpecIdentityMismatch => {
+                f.write_str("run-switch.reconcile.spec_identity_mismatch")
+            }
+            Self::RunSwitchStopCapacityReleaseDeferred => {
+                f.write_str("run-switch.stop.capacity_release_deferred")
+            }
+            Self::RunSwitchStopRankMembershipChanged => {
+                f.write_str("run-switch.stop.rank_membership_changed")
+            }
+            Self::RunSwitchStopReservationMembershipChanged => {
+                f.write_str("run-switch.stop.reservation_membership_changed")
+            }
+            Self::RunSwitchStopRunNotStoppable => f.write_str("run-switch.stop.run_not_stoppable"),
+            Self::RunSwitchStopTargetScopeChanged => {
+                f.write_str("run-switch.stop.target_scope_changed")
+            }
+            Self::RunSwitchUninstallAbandonNeverInstalled => {
+                f.write_str("run-switch.uninstall.abandon-never-installed")
+            }
+            Self::RunSwitchUninstallActiveRun => f.write_str("run-switch.uninstall.active_run"),
+            Self::RunSwitchUninstallActiveRunsTruncated => {
+                f.write_str("run-switch.uninstall.active_runs_truncated")
+            }
+            Self::RunSwitchUninstallBytesUnknown => {
+                f.write_str("run-switch.uninstall.bytes_unknown")
+            }
+            Self::RunSwitchUninstallInstallationNotUninstallable => {
+                f.write_str("run-switch.uninstall.installation_not_uninstallable")
+            }
+            Self::RunSwitchUninstallOperationActive => {
+                f.write_str("run-switch.uninstall.operation_active")
+            }
+            Self::RunSwitchUninstallRankMembershipChanged => {
+                f.write_str("run-switch.uninstall.rank_membership_changed")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for RunSwitchCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "run-switch.active-run-conflict" => Ok(Self::RunSwitchActiveRunConflict),
+            "run-switch.advance-failed" => Ok(Self::RunSwitchAdvanceFailed),
+            "run-switch.agent-upgrade-required" => Ok(Self::RunSwitchAgentUpgradeRequired),
+            "run-switch.artifact-identity-unknown" => Ok(Self::RunSwitchArtifactIdentityUnknown),
+            "run-switch.artifact-inspection-unavailable" => {
+                Ok(Self::RunSwitchArtifactInspectionUnavailable)
+            }
+            "run-switch.artifact-manifest-unknown" => Ok(Self::RunSwitchArtifactManifestUnknown),
+            "run-switch.artifact-phase-executor-unavailable" => {
+                Ok(Self::RunSwitchArtifactPhaseExecutorUnavailable)
+            }
+            "run-switch.artifact-verification-result-invalid" => {
+                Ok(Self::RunSwitchArtifactVerificationResultInvalid)
+            }
+            "run-switch.cleanup-reclaim-evidence-invalid" => {
+                Ok(Self::RunSwitchCleanupReclaimEvidenceInvalid)
+            }
+            "run-switch.cleanup-reclaimed-bytes-exceed-plan" => {
+                Ok(Self::RunSwitchCleanupReclaimedBytesExceedPlan)
+            }
+            "run-switch.cleanup-reference-protection-evidence-invalid" => {
+                Ok(Self::RunSwitchCleanupReferenceProtectionEvidenceInvalid)
+            }
+            "run-switch.cleanup-reference-protection-overlap" => {
+                Ok(Self::RunSwitchCleanupReferenceProtectionOverlap)
+            }
+            "run-switch.cleanup-scope-invalid" => Ok(Self::RunSwitchCleanupScopeInvalid),
+            "run-switch.container-build-evidence-invalid" => {
+                Ok(Self::RunSwitchContainerBuildEvidenceInvalid)
+            }
+            "run-switch.container-build-executor-unavailable" => {
+                Ok(Self::RunSwitchContainerBuildExecutorUnavailable)
+            }
+            "run-switch.container-build-identity-unavailable" => {
+                Ok(Self::RunSwitchContainerBuildIdentityUnavailable)
+            }
+            "run-switch.container-build-parent-changed" => {
+                Ok(Self::RunSwitchContainerBuildParentChanged)
+            }
+            "run-switch.container-build-parent-invalid" => {
+                Ok(Self::RunSwitchContainerBuildParentInvalid)
+            }
+            "run-switch.container-build-plan-invalid" => {
+                Ok(Self::RunSwitchContainerBuildPlanInvalid)
+            }
+            "run-switch.container-build-receipt-unavailable" => {
+                Ok(Self::RunSwitchContainerBuildReceiptUnavailable)
+            }
+            "run-switch.container-build-required" => Ok(Self::RunSwitchContainerBuildRequired),
+            "run-switch.container-build-state-invalid" => {
+                Ok(Self::RunSwitchContainerBuildStateInvalid)
+            }
+            "run-switch.container-build-unavailable" => {
+                Ok(Self::RunSwitchContainerBuildUnavailable)
+            }
+            "run-switch.cross-group_conflict" => Ok(Self::RunSwitchCrossGroupConflict),
+            "run-switch.disk-envelope-invalid" => Ok(Self::RunSwitchDiskEnvelopeInvalid),
+            "run-switch.disk-eviction-planned" => Ok(Self::RunSwitchDiskEvictionPlanned),
+            "run-switch.effect-uncertain" => Ok(Self::RunSwitchEffectUncertain),
+            "run-switch.final-verification" => Ok(Self::RunSwitchFinalVerification),
+            "run-switch.final-verification-clock-invalid" => {
+                Ok(Self::RunSwitchFinalVerificationClockInvalid)
+            }
+            "run-switch.final-verification-failed" => Ok(Self::RunSwitchFinalVerificationFailed),
+            "run-switch.final-verification-timeout" => Ok(Self::RunSwitchFinalVerificationTimeout),
+            "run-switch.final-verification-unavailable" => {
+                Ok(Self::RunSwitchFinalVerificationUnavailable)
+            }
+            "run-switch.install-executor-unavailable" => {
+                Ok(Self::RunSwitchInstallExecutorUnavailable)
+            }
+            "run-switch.install-preparation-unavailable" => {
+                Ok(Self::RunSwitchInstallPreparationUnavailable)
+            }
+            "run-switch.installation-handoff-unavailable" => {
+                Ok(Self::RunSwitchInstallationHandoffUnavailable)
+            }
+            "run-switch.installation-identity-changed" => {
+                Ok(Self::RunSwitchInstallationIdentityChanged)
+            }
+            "run-switch.installation-identity-unavailable" => {
+                Ok(Self::RunSwitchInstallationIdentityUnavailable)
+            }
+            "run-switch.installation-membership-changed" => {
+                Ok(Self::RunSwitchInstallationMembershipChanged)
+            }
+            "run-switch.installation-preparation-unavailable" => {
+                Ok(Self::RunSwitchInstallationPreparationUnavailable)
+            }
+            "run-switch.installation-verification-failed" => {
+                Ok(Self::RunSwitchInstallationVerificationFailed)
+            }
+            "run-switch.installation-verification-unavailable" => {
+                Ok(Self::RunSwitchInstallationVerificationUnavailable)
+            }
+            "run-switch.insufficient-disk" => Ok(Self::RunSwitchInsufficientDisk),
+            "run-switch.insufficient-memory" => Ok(Self::RunSwitchInsufficientMemory),
+            "run-switch.interface-invalid" => Ok(Self::RunSwitchInterfaceInvalid),
+            "run-switch.inventory-stale" => Ok(Self::RunSwitchInventoryStale),
+            "run-switch.inventory-unknown" => Ok(Self::RunSwitchInventoryUnknown),
+            "run-switch.mapping_group_mismatch" => Ok(Self::RunSwitchMappingGroupMismatch),
+            "run-switch.mapping_invalid" => Ok(Self::RunSwitchMappingInvalid),
+            "run-switch.mapping_materialization_unavailable" => {
+                Ok(Self::RunSwitchMappingMaterializationUnavailable)
+            }
+            "run-switch.memory-envelope-invalid" => Ok(Self::RunSwitchMemoryEnvelopeInvalid),
+            "run-switch.model-download-artifact-set-mismatch" => {
+                Ok(Self::RunSwitchModelDownloadArtifactSetMismatch)
+            }
+            "run-switch.model-download-byte-evidence-mismatch" => {
+                Ok(Self::RunSwitchModelDownloadByteEvidenceMismatch)
+            }
+            "run-switch.model-download-coverage-incomplete" => {
+                Ok(Self::RunSwitchModelDownloadCoverageIncomplete)
+            }
+            "run-switch.model_recipe_mismatch" => Ok(Self::RunSwitchModelRecipeMismatch),
+            "run-switch.model_revision_unavailable" => Ok(Self::RunSwitchModelRevisionUnavailable),
+            "run-switch.nas-coverage-unknown" => Ok(Self::RunSwitchNasCoverageUnknown),
+            "run-switch.nas-download-blocked" => Ok(Self::RunSwitchNasDownloadBlocked),
+            "run-switch.nas-download-required" => Ok(Self::RunSwitchNasDownloadRequired),
+            "run-switch.option_invalid" => Ok(Self::RunSwitchOptionInvalid),
+            "run-switch.phase-retry" => Ok(Self::RunSwitchPhaseRetry),
+            "run-switch.plan-refresh-unavailable" => Ok(Self::RunSwitchPlanRefreshUnavailable),
+            "run-switch.plan-targets-changed" => Ok(Self::RunSwitchPlanTargetsChanged),
+            "run-switch.post-stop-inventory-pending" => Ok(Self::RunSwitchPostStopInventoryPending),
+            "run-switch.post-stop-memory-pool-changed" => {
+                Ok(Self::RunSwitchPostStopMemoryPoolChanged)
+            }
+            "run-switch.preflight-recipe-changed" => Ok(Self::RunSwitchPreflightRecipeChanged),
+            "run-switch.prepare-subphase-unsupported" => {
+                Ok(Self::RunSwitchPrepareSubphaseUnsupported)
+            }
+            "run-switch.profile.incomplete_multi_spark_model" => {
+                Ok(Self::RunSwitchProfileIncompleteMultiSparkModel)
+            }
+            "run-switch.profile_stop_scope_changed" => Ok(Self::RunSwitchProfileStopScopeChanged),
+            "run-switch.receipt_invalid" => Ok(Self::RunSwitchReceiptInvalid),
+            "run-switch.recipe-build-compatibility-unknown" => {
+                Ok(Self::RunSwitchRecipeBuildCompatibilityUnknown)
+            }
+            "run-switch.recipe-build-incompatible" => Ok(Self::RunSwitchRecipeBuildIncompatible),
+            "run-switch.recipe-build-unavailable" => Ok(Self::RunSwitchRecipeBuildUnavailable),
+            "run-switch.recipe_dependencies_unavailable" => {
+                Ok(Self::RunSwitchRecipeDependenciesUnavailable)
+            }
+            "run-switch.recipe_digest_changed" => Ok(Self::RunSwitchRecipeDigestChanged),
+            "run-switch.recipe_unresolved" => Ok(Self::RunSwitchRecipeUnresolved),
+            "run-switch.reconciliation-assessment-unavailable" => {
+                Ok(Self::RunSwitchReconciliationAssessmentUnavailable)
+            }
+            "run-switch.reconciliation-authority-unavailable" => {
+                Ok(Self::RunSwitchReconciliationAuthorityUnavailable)
+            }
+            "run-switch.reconciliation-prerequisite" => {
+                Ok(Self::RunSwitchReconciliationPrerequisite)
+            }
+            "run-switch.reconciliation-receipts-retained" => {
+                Ok(Self::RunSwitchReconciliationReceiptsRetained)
+            }
+            "run-switch.reconciliation-state-verification-failed" => {
+                Ok(Self::RunSwitchReconciliationStateVerificationFailed)
+            }
+            "run-switch.reconciliation-verification-failed" => {
+                Ok(Self::RunSwitchReconciliationVerificationFailed)
+            }
+            "run-switch.request_key_reused_differently" => {
+                Ok(Self::RunSwitchRequestKeyReusedDifferently)
+            }
+            "run-switch.resource-contract-invalid" => Ok(Self::RunSwitchResourceContractInvalid),
+            "run-switch.resource.insufficient" => Ok(Self::RunSwitchResourceInsufficient),
+            "run-switch.resource.insufficient_capacity" => {
+                Ok(Self::RunSwitchResourceInsufficientCapacity)
+            }
+            "run-switch.resource.insufficient_capacity_after_stop" => {
+                Ok(Self::RunSwitchResourceInsufficientCapacityAfterStop)
+            }
+            "run-switch.resource.insufficient_reservation_budget" => {
+                Ok(Self::RunSwitchResourceInsufficientReservationBudget)
+            }
+            "run-switch.resource.resident_usage_unknown" => {
+                Ok(Self::RunSwitchResourceResidentUsageUnknown)
+            }
+            "run-switch.run-not-active" => Ok(Self::RunSwitchRunNotActive),
+            "run-switch.run_admission_blocked" => Ok(Self::RunSwitchRunAdmissionBlocked),
+            "run-switch.run_admission_unavailable" => Ok(Self::RunSwitchRunAdmissionUnavailable),
+            "run-switch.runtime-build-verification-mismatch" => {
+                Ok(Self::RunSwitchRuntimeBuildVerificationMismatch)
+            }
+            "run-switch.runtime-image-authorization-mismatch" => {
+                Ok(Self::RunSwitchRuntimeImageAuthorizationMismatch)
+            }
+            "run-switch.runtime-image-executor-unavailable" => {
+                Ok(Self::RunSwitchRuntimeImageExecutorUnavailable)
+            }
+            "run-switch.runtime-image-owner-changed" => Ok(Self::RunSwitchRuntimeImageOwnerChanged),
+            "run-switch.runtime-image-preparation-layout-mismatch" => {
+                Ok(Self::RunSwitchRuntimeImagePreparationLayoutMismatch)
+            }
+            "run-switch.runtime-image-preparation-receipt-invalid" => {
+                Ok(Self::RunSwitchRuntimeImagePreparationReceiptInvalid)
+            }
+            "run-switch.runtime-image-preparing" => Ok(Self::RunSwitchRuntimeImagePreparing),
+            "run-switch.runtime-image-reference-identity-mismatch" => {
+                Ok(Self::RunSwitchRuntimeImageReferenceIdentityMismatch)
+            }
+            "run-switch.runtime-image-waiting-without-child" => {
+                Ok(Self::RunSwitchRuntimeImageWaitingWithoutChild)
+            }
+            "run-switch.spark-unavailable" => Ok(Self::RunSwitchSparkUnavailable),
+            "run-switch.start-observation" => Ok(Self::RunSwitchStartObservation),
+            "run-switch.start-observation-expired" => Ok(Self::RunSwitchStartObservationExpired),
+            "run-switch.start_installation_unavailable" => {
+                Ok(Self::RunSwitchStartInstallationUnavailable)
+            }
+            "run-switch.stop-plan-unavailable" => Ok(Self::RunSwitchStopPlanUnavailable),
+            "run-switch.stop-still-unresolved-after-cancellation" => {
+                Ok(Self::RunSwitchStopStillUnresolvedAfterCancellation)
+            }
+            "run-switch.stop-target-disappeared" => Ok(Self::RunSwitchStopTargetDisappeared),
+            "run-switch.stopped-run-identity-changed" => {
+                Ok(Self::RunSwitchStoppedRunIdentityChanged)
+            }
+            "run-switch.stopped-run-membership-changed" => {
+                Ok(Self::RunSwitchStoppedRunMembershipChanged)
+            }
+            "run-switch.target-not-active" => Ok(Self::RunSwitchTargetNotActive),
+            "run-switch.transfer-byte-evidence-invalid" => {
+                Ok(Self::RunSwitchTransferByteEvidenceInvalid)
+            }
+            "run-switch.uninstall-assessment-unavailable" => {
+                Ok(Self::RunSwitchUninstallAssessmentUnavailable)
+            }
+            "run-switch.uninstall-blocked" => Ok(Self::RunSwitchUninstallBlocked),
+            "run-switch.uninstall-issued-prerequisite" => {
+                Ok(Self::RunSwitchUninstallIssuedPrerequisite)
+            }
+            "run-switch.uninstall_target_unavailable" => {
+                Ok(Self::RunSwitchUninstallTargetUnavailable)
+            }
+            "run-switch.waiting" => Ok(Self::RunSwitchWaiting),
+            "run-switch.reason-unclassified" => Ok(Self::RunSwitchReasonUnclassified),
+            "run-switch.cancel-effect-unknown" => Ok(Self::RunSwitchCancelEffectUnknown),
+            "run-switch.container-build-start-unavailable" => {
+                Ok(Self::RunSwitchContainerBuildStartUnavailable)
+            }
+            "run-switch.distributed-recovery-active" => {
+                Ok(Self::RunSwitchDistributedRecoveryActive)
+            }
+            "run-switch.final-owner-state-unknown" => Ok(Self::RunSwitchFinalOwnerStateUnknown),
+            "run-switch.final-verification-expired" => Ok(Self::RunSwitchFinalVerificationExpired),
+            "run-switch.install-plan-unavailable" => Ok(Self::RunSwitchInstallPlanUnavailable),
+            "run-switch.install-preflight-expired" => Ok(Self::RunSwitchInstallPreflightExpired),
+            "run-switch.install-preparation-failed" => Ok(Self::RunSwitchInstallPreparationFailed),
+            "run-switch.install-start-failed" => Ok(Self::RunSwitchInstallStartFailed),
+            "run-switch.installation-handoff-inconsistent" => {
+                Ok(Self::RunSwitchInstallationHandoffInconsistent)
+            }
+            "run-switch.plan_blocked" => Ok(Self::RunSwitchPlanBlocked),
+            "run-switch.reconciliation-start-failed" => {
+                Ok(Self::RunSwitchReconciliationStartFailed)
+            }
+            "run-switch.route-health-recovery-active" => {
+                Ok(Self::RunSwitchRouteHealthRecoveryActive)
+            }
+            "run-switch.route-owner-failed" => Ok(Self::RunSwitchRouteOwnerFailed),
+            "run-switch.route-publication-pending" => Ok(Self::RunSwitchRoutePublicationPending),
+            "run-switch.route-withdrawn-owner-unknown" => {
+                Ok(Self::RunSwitchRouteWithdrawnOwnerUnknown)
+            }
+            "run-switch.run-owner-active" => Ok(Self::RunSwitchRunOwnerActive),
+            "run-switch.run-owner-terminal" => Ok(Self::RunSwitchRunOwnerTerminal),
+            "run-switch.stale_plan" => Ok(Self::RunSwitchStalePlan),
+            "run-switch.stop-verification-pending" => Ok(Self::RunSwitchStopVerificationPending),
+            "run-switch.superseded" => Ok(Self::RunSwitchSuperseded),
+            "run-switch.uninstall-abandon-failed" => Ok(Self::RunSwitchUninstallAbandonFailed),
+            "run-switch.uninstall-start-failed" => Ok(Self::RunSwitchUninstallStartFailed),
+            "run-switch.recipe.stop-issued-pending" => Ok(Self::RunSwitchRecipeStopIssuedPending),
+            "run-switch.recipe.install-issued-pending" => {
+                Ok(Self::RunSwitchRecipeInstallIssuedPending)
+            }
+            "run-switch.recipe.uninstall-issued-pending" => {
+                Ok(Self::RunSwitchRecipeUninstallIssuedPending)
+            }
+            "run-switch.recipe.reconcile-issued-pending" => {
+                Ok(Self::RunSwitchRecipeReconcileIssuedPending)
+            }
+            "run-switch.artifact-job-cancellation-issued-pending" => {
+                Ok(Self::RunSwitchArtifactJobCancellationIssuedPending)
+            }
+            "run-switch.transfer-executor-unavailable" => {
+                Ok(Self::RunSwitchTransferExecutorUnavailable)
+            }
+            "run-switch.transfer-waiting-without-child" => {
+                Ok(Self::RunSwitchTransferWaitingWithoutChild)
+            }
+            "run-switch.transfer-returned-no-evidence" => {
+                Ok(Self::RunSwitchTransferReturnedNoEvidence)
+            }
+            "run-switch.verify-executor-unavailable" => {
+                Ok(Self::RunSwitchVerifyExecutorUnavailable)
+            }
+            "run-switch.verify-waiting-without-child" => {
+                Ok(Self::RunSwitchVerifyWaitingWithoutChild)
+            }
+            "run-switch.verify-returned-no-evidence" => Ok(Self::RunSwitchVerifyReturnedNoEvidence),
+            "run-switch.cleanup-executor-unavailable" => {
+                Ok(Self::RunSwitchCleanupExecutorUnavailable)
+            }
+            "run-switch.cleanup-waiting-without-child" => {
+                Ok(Self::RunSwitchCleanupWaitingWithoutChild)
+            }
+            "run-switch.cleanup-returned-no-evidence" => {
+                Ok(Self::RunSwitchCleanupReturnedNoEvidence)
+            }
+            "run-switch.resource.capacity_unknown" => Ok(Self::RunSwitchResourceCapacityUnknown),
+            "run-switch.resource.estimate_uncertain" => {
+                Ok(Self::RunSwitchResourceEstimateUncertain)
+            }
+            "run-switch.resource.evidence_invalid" => Ok(Self::RunSwitchResourceEvidenceInvalid),
+            "run-switch.resource.evidence_unknown" => Ok(Self::RunSwitchResourceEvidenceUnknown),
+            "run-switch.resource.knobs_invalid" => Ok(Self::RunSwitchResourceKnobsInvalid),
+            "run-switch.resource.parallelism_duplicate" => {
+                Ok(Self::RunSwitchResourceParallelismDuplicate)
+            }
+            "run-switch.resource.parallelism_inconsistent" => {
+                Ok(Self::RunSwitchResourceParallelismInconsistent)
+            }
+            "run-switch.resource.parallelism_type" => Ok(Self::RunSwitchResourceParallelismType),
+            "run-switch.resource.parallelism_unknown" => {
+                Ok(Self::RunSwitchResourceParallelismUnknown)
+            }
+            "run-switch.resource.settings_kind_unknown" => {
+                Ok(Self::RunSwitchResourceSettingsKindUnknown)
+            }
+            "run-switch.resource.settings_type" => Ok(Self::RunSwitchResourceSettingsType),
+            "run-switch.resource.settings_unknown" => Ok(Self::RunSwitchResourceSettingsUnknown),
+            "run-switch.resource.stop_release_unknown" => {
+                Ok(Self::RunSwitchResourceStopReleaseUnknown)
+            }
+            "run-switch.reconcile.active_effect_unknown" => {
+                Ok(Self::RunSwitchReconcileActiveEffectUnknown)
+            }
+            "run-switch.reconcile.agent_unavailable" => {
+                Ok(Self::RunSwitchReconcileAgentUnavailable)
+            }
+            "run-switch.reconcile.capacity_busy" => Ok(Self::RunSwitchReconcileCapacityBusy),
+            "run-switch.reconcile.install_provenance_mismatch" => {
+                Ok(Self::RunSwitchReconcileInstallProvenanceMismatch)
+            }
+            "run-switch.reconcile.install_provenance_unavailable" => {
+                Ok(Self::RunSwitchReconcileInstallProvenanceUnavailable)
+            }
+            "run-switch.reconcile.installation_effect_unknown" => {
+                Ok(Self::RunSwitchReconcileInstallationEffectUnknown)
+            }
+            "run-switch.reconcile.installation_identity_mismatch" => {
+                Ok(Self::RunSwitchReconcileInstallationIdentityMismatch)
+            }
+            "run-switch.reconcile.installation_identity_unavailable" => {
+                Ok(Self::RunSwitchReconcileInstallationIdentityUnavailable)
+            }
+            "run-switch.reconcile.membership_changed" => {
+                Ok(Self::RunSwitchReconcileMembershipChanged)
+            }
+            "run-switch.reconcile.operation_active" => Ok(Self::RunSwitchReconcileOperationActive),
+            "run-switch.reconcile.rank_membership_changed" => {
+                Ok(Self::RunSwitchReconcileRankMembershipChanged)
+            }
+            "run-switch.reconcile.recipe_revision_unavailable" => {
+                Ok(Self::RunSwitchReconcileRecipeRevisionUnavailable)
+            }
+            "run-switch.reconcile.spec_identity_mismatch" => {
+                Ok(Self::RunSwitchReconcileSpecIdentityMismatch)
+            }
+            "run-switch.stop.capacity_release_deferred" => {
+                Ok(Self::RunSwitchStopCapacityReleaseDeferred)
+            }
+            "run-switch.stop.rank_membership_changed" => {
+                Ok(Self::RunSwitchStopRankMembershipChanged)
+            }
+            "run-switch.stop.reservation_membership_changed" => {
+                Ok(Self::RunSwitchStopReservationMembershipChanged)
+            }
+            "run-switch.stop.run_not_stoppable" => Ok(Self::RunSwitchStopRunNotStoppable),
+            "run-switch.stop.target_scope_changed" => Ok(Self::RunSwitchStopTargetScopeChanged),
+            "run-switch.uninstall.abandon-never-installed" => {
+                Ok(Self::RunSwitchUninstallAbandonNeverInstalled)
+            }
+            "run-switch.uninstall.active_run" => Ok(Self::RunSwitchUninstallActiveRun),
+            "run-switch.uninstall.active_runs_truncated" => {
+                Ok(Self::RunSwitchUninstallActiveRunsTruncated)
+            }
+            "run-switch.uninstall.bytes_unknown" => Ok(Self::RunSwitchUninstallBytesUnknown),
+            "run-switch.uninstall.installation_not_uninstallable" => {
+                Ok(Self::RunSwitchUninstallInstallationNotUninstallable)
+            }
+            "run-switch.uninstall.operation_active" => Ok(Self::RunSwitchUninstallOperationActive),
+            "run-switch.uninstall.rank_membership_changed" => {
+                Ok(Self::RunSwitchUninstallRankMembershipChanged)
+            }
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RunSwitchCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RunSwitchCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RuntimeImageCode {
+    #[serde(rename = "registry.destination_forbidden")]
+    RegistryDestinationForbidden,
+    #[serde(rename = "registry.digest_mismatch")]
+    RegistryDigestMismatch,
+    #[serde(rename = "registry.redirect_forbidden")]
+    RegistryRedirectForbidden,
+    #[serde(rename = "runtime_image.architecture_mismatch")]
+    RuntimeImageArchitectureMismatch,
+    #[serde(rename = "runtime_image.architecture_missing")]
+    RuntimeImageArchitectureMissing,
+    #[serde(rename = "runtime_image.archive_conflict")]
+    RuntimeImageArchiveConflict,
+    #[serde(rename = "runtime_image.archive_invalid")]
+    RuntimeImageArchiveInvalid,
+    #[serde(rename = "runtime_image.archive_mismatch")]
+    RuntimeImageArchiveMismatch,
+    #[serde(rename = "runtime_image.archive_size_mismatch")]
+    RuntimeImageArchiveSizeMismatch,
+    #[serde(rename = "runtime_image.archive_unavailable")]
+    RuntimeImageArchiveUnavailable,
+    #[serde(rename = "runtime_image.build_archive_digest")]
+    RuntimeImageBuildArchiveDigest,
+    #[serde(rename = "runtime_image.build_digest")]
+    RuntimeImageBuildDigest,
+    #[serde(rename = "runtime_image.build_id")]
+    RuntimeImageBuildId,
+    #[serde(rename = "runtime_image.build_incomplete")]
+    RuntimeImageBuildIncomplete,
+    #[serde(rename = "runtime_image.cache_missing")]
+    RuntimeImageCacheMissing,
+    #[serde(rename = "runtime_image.config_missing")]
+    RuntimeImageConfigMissing,
+    #[serde(rename = "runtime_image.digest_invalid")]
+    RuntimeImageDigestInvalid,
+    #[serde(rename = "runtime_image.digest_mismatch")]
+    RuntimeImageDigestMismatch,
+    #[serde(rename = "runtime_image.evidence_invalid")]
+    RuntimeImageEvidenceInvalid,
+    #[serde(rename = "runtime_image.identity_invalid")]
+    RuntimeImageIdentityInvalid,
+    #[serde(rename = "runtime_image.image_unpinned")]
+    RuntimeImageImageUnpinned,
+    #[serde(rename = "runtime_image.inspect_invalid")]
+    RuntimeImageInspectInvalid,
+    #[serde(rename = "runtime_image.insufficient_disk")]
+    RuntimeImageInsufficientDisk,
+    #[serde(rename = "runtime_image.interface_mismatch")]
+    RuntimeImageInterfaceMismatch,
+    #[serde(rename = "runtime_image.interface_missing")]
+    RuntimeImageInterfaceMissing,
+    #[serde(rename = "runtime_image.lock_unavailable")]
+    RuntimeImageLockUnavailable,
+    #[serde(rename = "runtime_image.publication_contended")]
+    RuntimeImagePublicationContended,
+    #[serde(rename = "runtime_image.receipt_contract_newer")]
+    RuntimeImageReceiptContractNewer,
+    #[serde(rename = "runtime_image.receipt_identity_conflict")]
+    RuntimeImageReceiptIdentityConflict,
+    #[serde(rename = "runtime_image.receipt_identity_invalid")]
+    RuntimeImageReceiptIdentityInvalid,
+    #[serde(rename = "runtime_image.receipt_invalid")]
+    RuntimeImageReceiptInvalid,
+    #[serde(rename = "runtime_image.receipt_persistence_failed")]
+    RuntimeImageReceiptPersistenceFailed,
+    #[serde(rename = "runtime_image.receipt_unavailable")]
+    RuntimeImageReceiptUnavailable,
+    #[serde(rename = "runtime_image.receipt_write_failed")]
+    RuntimeImageReceiptWriteFailed,
+    #[serde(rename = "runtime_image.recipe_invalid")]
+    RuntimeImageRecipeInvalid,
+    #[serde(rename = "runtime_image.reference_intent_invalid")]
+    RuntimeImageReferenceIntentInvalid,
+    #[serde(rename = "runtime_image.removal_storage_failed")]
+    RuntimeImageRemovalStorageFailed,
+    #[serde(rename = "runtime_image.runtime_invalid")]
+    RuntimeImageRuntimeInvalid,
+    #[serde(rename = "runtime_image.source_mismatch")]
+    RuntimeImageSourceMismatch,
+    #[serde(rename = "runtime_image.transfer_contended")]
+    RuntimeImageTransferContended,
+}
+impl ::std::fmt::Display for RuntimeImageCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RegistryDestinationForbidden => f.write_str("registry.destination_forbidden"),
+            Self::RegistryDigestMismatch => f.write_str("registry.digest_mismatch"),
+            Self::RegistryRedirectForbidden => f.write_str("registry.redirect_forbidden"),
+            Self::RuntimeImageArchitectureMismatch => {
+                f.write_str("runtime_image.architecture_mismatch")
+            }
+            Self::RuntimeImageArchitectureMissing => {
+                f.write_str("runtime_image.architecture_missing")
+            }
+            Self::RuntimeImageArchiveConflict => f.write_str("runtime_image.archive_conflict"),
+            Self::RuntimeImageArchiveInvalid => f.write_str("runtime_image.archive_invalid"),
+            Self::RuntimeImageArchiveMismatch => f.write_str("runtime_image.archive_mismatch"),
+            Self::RuntimeImageArchiveSizeMismatch => {
+                f.write_str("runtime_image.archive_size_mismatch")
+            }
+            Self::RuntimeImageArchiveUnavailable => {
+                f.write_str("runtime_image.archive_unavailable")
+            }
+            Self::RuntimeImageBuildArchiveDigest => {
+                f.write_str("runtime_image.build_archive_digest")
+            }
+            Self::RuntimeImageBuildDigest => f.write_str("runtime_image.build_digest"),
+            Self::RuntimeImageBuildId => f.write_str("runtime_image.build_id"),
+            Self::RuntimeImageBuildIncomplete => f.write_str("runtime_image.build_incomplete"),
+            Self::RuntimeImageCacheMissing => f.write_str("runtime_image.cache_missing"),
+            Self::RuntimeImageConfigMissing => f.write_str("runtime_image.config_missing"),
+            Self::RuntimeImageDigestInvalid => f.write_str("runtime_image.digest_invalid"),
+            Self::RuntimeImageDigestMismatch => f.write_str("runtime_image.digest_mismatch"),
+            Self::RuntimeImageEvidenceInvalid => f.write_str("runtime_image.evidence_invalid"),
+            Self::RuntimeImageIdentityInvalid => f.write_str("runtime_image.identity_invalid"),
+            Self::RuntimeImageImageUnpinned => f.write_str("runtime_image.image_unpinned"),
+            Self::RuntimeImageInspectInvalid => f.write_str("runtime_image.inspect_invalid"),
+            Self::RuntimeImageInsufficientDisk => f.write_str("runtime_image.insufficient_disk"),
+            Self::RuntimeImageInterfaceMismatch => f.write_str("runtime_image.interface_mismatch"),
+            Self::RuntimeImageInterfaceMissing => f.write_str("runtime_image.interface_missing"),
+            Self::RuntimeImageLockUnavailable => f.write_str("runtime_image.lock_unavailable"),
+            Self::RuntimeImagePublicationContended => {
+                f.write_str("runtime_image.publication_contended")
+            }
+            Self::RuntimeImageReceiptContractNewer => {
+                f.write_str("runtime_image.receipt_contract_newer")
+            }
+            Self::RuntimeImageReceiptIdentityConflict => {
+                f.write_str("runtime_image.receipt_identity_conflict")
+            }
+            Self::RuntimeImageReceiptIdentityInvalid => {
+                f.write_str("runtime_image.receipt_identity_invalid")
+            }
+            Self::RuntimeImageReceiptInvalid => f.write_str("runtime_image.receipt_invalid"),
+            Self::RuntimeImageReceiptPersistenceFailed => {
+                f.write_str("runtime_image.receipt_persistence_failed")
+            }
+            Self::RuntimeImageReceiptUnavailable => {
+                f.write_str("runtime_image.receipt_unavailable")
+            }
+            Self::RuntimeImageReceiptWriteFailed => {
+                f.write_str("runtime_image.receipt_write_failed")
+            }
+            Self::RuntimeImageRecipeInvalid => f.write_str("runtime_image.recipe_invalid"),
+            Self::RuntimeImageReferenceIntentInvalid => {
+                f.write_str("runtime_image.reference_intent_invalid")
+            }
+            Self::RuntimeImageRemovalStorageFailed => {
+                f.write_str("runtime_image.removal_storage_failed")
+            }
+            Self::RuntimeImageRuntimeInvalid => f.write_str("runtime_image.runtime_invalid"),
+            Self::RuntimeImageSourceMismatch => f.write_str("runtime_image.source_mismatch"),
+            Self::RuntimeImageTransferContended => f.write_str("runtime_image.transfer_contended"),
+        }
+    }
+}
+impl ::std::str::FromStr for RuntimeImageCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "registry.destination_forbidden" => Ok(Self::RegistryDestinationForbidden),
+            "registry.digest_mismatch" => Ok(Self::RegistryDigestMismatch),
+            "registry.redirect_forbidden" => Ok(Self::RegistryRedirectForbidden),
+            "runtime_image.architecture_mismatch" => Ok(Self::RuntimeImageArchitectureMismatch),
+            "runtime_image.architecture_missing" => Ok(Self::RuntimeImageArchitectureMissing),
+            "runtime_image.archive_conflict" => Ok(Self::RuntimeImageArchiveConflict),
+            "runtime_image.archive_invalid" => Ok(Self::RuntimeImageArchiveInvalid),
+            "runtime_image.archive_mismatch" => Ok(Self::RuntimeImageArchiveMismatch),
+            "runtime_image.archive_size_mismatch" => Ok(Self::RuntimeImageArchiveSizeMismatch),
+            "runtime_image.archive_unavailable" => Ok(Self::RuntimeImageArchiveUnavailable),
+            "runtime_image.build_archive_digest" => Ok(Self::RuntimeImageBuildArchiveDigest),
+            "runtime_image.build_digest" => Ok(Self::RuntimeImageBuildDigest),
+            "runtime_image.build_id" => Ok(Self::RuntimeImageBuildId),
+            "runtime_image.build_incomplete" => Ok(Self::RuntimeImageBuildIncomplete),
+            "runtime_image.cache_missing" => Ok(Self::RuntimeImageCacheMissing),
+            "runtime_image.config_missing" => Ok(Self::RuntimeImageConfigMissing),
+            "runtime_image.digest_invalid" => Ok(Self::RuntimeImageDigestInvalid),
+            "runtime_image.digest_mismatch" => Ok(Self::RuntimeImageDigestMismatch),
+            "runtime_image.evidence_invalid" => Ok(Self::RuntimeImageEvidenceInvalid),
+            "runtime_image.identity_invalid" => Ok(Self::RuntimeImageIdentityInvalid),
+            "runtime_image.image_unpinned" => Ok(Self::RuntimeImageImageUnpinned),
+            "runtime_image.inspect_invalid" => Ok(Self::RuntimeImageInspectInvalid),
+            "runtime_image.insufficient_disk" => Ok(Self::RuntimeImageInsufficientDisk),
+            "runtime_image.interface_mismatch" => Ok(Self::RuntimeImageInterfaceMismatch),
+            "runtime_image.interface_missing" => Ok(Self::RuntimeImageInterfaceMissing),
+            "runtime_image.lock_unavailable" => Ok(Self::RuntimeImageLockUnavailable),
+            "runtime_image.publication_contended" => Ok(Self::RuntimeImagePublicationContended),
+            "runtime_image.receipt_contract_newer" => Ok(Self::RuntimeImageReceiptContractNewer),
+            "runtime_image.receipt_identity_conflict" => {
+                Ok(Self::RuntimeImageReceiptIdentityConflict)
+            }
+            "runtime_image.receipt_identity_invalid" => {
+                Ok(Self::RuntimeImageReceiptIdentityInvalid)
+            }
+            "runtime_image.receipt_invalid" => Ok(Self::RuntimeImageReceiptInvalid),
+            "runtime_image.receipt_persistence_failed" => {
+                Ok(Self::RuntimeImageReceiptPersistenceFailed)
+            }
+            "runtime_image.receipt_unavailable" => Ok(Self::RuntimeImageReceiptUnavailable),
+            "runtime_image.receipt_write_failed" => Ok(Self::RuntimeImageReceiptWriteFailed),
+            "runtime_image.recipe_invalid" => Ok(Self::RuntimeImageRecipeInvalid),
+            "runtime_image.reference_intent_invalid" => {
+                Ok(Self::RuntimeImageReferenceIntentInvalid)
+            }
+            "runtime_image.removal_storage_failed" => Ok(Self::RuntimeImageRemovalStorageFailed),
+            "runtime_image.runtime_invalid" => Ok(Self::RuntimeImageRuntimeInvalid),
+            "runtime_image.source_mismatch" => Ok(Self::RuntimeImageSourceMismatch),
+            "runtime_image.transfer_contended" => Ok(Self::RuntimeImageTransferContended),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RuntimeImageCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RuntimeImageCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum RuntimePreflightCode {
+    #[serde(rename = "runtime_preflight.child_missing")]
+    RuntimePreflightChildMissing,
+    #[serde(rename = "runtime_preflight.execution_failed")]
+    RuntimePreflightExecutionFailed,
+    #[serde(rename = "runtime_preflight.host_changed")]
+    RuntimePreflightHostChanged,
+    #[serde(rename = "runtime_preflight.node_revoked")]
+    RuntimePreflightNodeRevoked,
+    #[serde(rename = "runtime_preflight.operation_missing")]
+    RuntimePreflightOperationMissing,
+    #[serde(rename = "runtime_preflight.receipt_invalid")]
+    RuntimePreflightReceiptInvalid,
+    #[serde(rename = "runtime_preflight.receipt_missing")]
+    RuntimePreflightReceiptMissing,
+    #[serde(rename = "runtime_preflight.required")]
+    RuntimePreflightRequired,
+    #[serde(rename = "runtime_preflight.requirement_unknown")]
+    RuntimePreflightRequirementUnknown,
+    #[serde(rename = "runtime_preflight.requirements_changed")]
+    RuntimePreflightRequirementsChanged,
+    #[serde(rename = "runtime_preflight.stale")]
+    RuntimePreflightStale,
+    #[serde(rename = "runtime_preflight.node_missing")]
+    RuntimePreflightNodeMissing,
+    #[serde(rename = "runtime_preflight.capability_failed")]
+    RuntimePreflightCapabilityFailed,
+}
+impl ::std::fmt::Display for RuntimePreflightCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RuntimePreflightChildMissing => f.write_str("runtime_preflight.child_missing"),
+            Self::RuntimePreflightExecutionFailed => {
+                f.write_str("runtime_preflight.execution_failed")
+            }
+            Self::RuntimePreflightHostChanged => f.write_str("runtime_preflight.host_changed"),
+            Self::RuntimePreflightNodeRevoked => f.write_str("runtime_preflight.node_revoked"),
+            Self::RuntimePreflightOperationMissing => {
+                f.write_str("runtime_preflight.operation_missing")
+            }
+            Self::RuntimePreflightReceiptInvalid => {
+                f.write_str("runtime_preflight.receipt_invalid")
+            }
+            Self::RuntimePreflightReceiptMissing => {
+                f.write_str("runtime_preflight.receipt_missing")
+            }
+            Self::RuntimePreflightRequired => f.write_str("runtime_preflight.required"),
+            Self::RuntimePreflightRequirementUnknown => {
+                f.write_str("runtime_preflight.requirement_unknown")
+            }
+            Self::RuntimePreflightRequirementsChanged => {
+                f.write_str("runtime_preflight.requirements_changed")
+            }
+            Self::RuntimePreflightStale => f.write_str("runtime_preflight.stale"),
+            Self::RuntimePreflightNodeMissing => f.write_str("runtime_preflight.node_missing"),
+            Self::RuntimePreflightCapabilityFailed => {
+                f.write_str("runtime_preflight.capability_failed")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for RuntimePreflightCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "runtime_preflight.child_missing" => Ok(Self::RuntimePreflightChildMissing),
+            "runtime_preflight.execution_failed" => Ok(Self::RuntimePreflightExecutionFailed),
+            "runtime_preflight.host_changed" => Ok(Self::RuntimePreflightHostChanged),
+            "runtime_preflight.node_revoked" => Ok(Self::RuntimePreflightNodeRevoked),
+            "runtime_preflight.operation_missing" => Ok(Self::RuntimePreflightOperationMissing),
+            "runtime_preflight.receipt_invalid" => Ok(Self::RuntimePreflightReceiptInvalid),
+            "runtime_preflight.receipt_missing" => Ok(Self::RuntimePreflightReceiptMissing),
+            "runtime_preflight.required" => Ok(Self::RuntimePreflightRequired),
+            "runtime_preflight.requirement_unknown" => Ok(Self::RuntimePreflightRequirementUnknown),
+            "runtime_preflight.requirements_changed" => {
+                Ok(Self::RuntimePreflightRequirementsChanged)
+            }
+            "runtime_preflight.stale" => Ok(Self::RuntimePreflightStale),
+            "runtime_preflight.node_missing" => Ok(Self::RuntimePreflightNodeMissing),
+            "runtime_preflight.capability_failed" => Ok(Self::RuntimePreflightCapabilityFailed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RuntimePreflightCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RuntimePreflightCode {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -4837,6 +9443,125 @@ pub struct SignedHostHelperGrant {
     pub schema_version: u8,
     pub signature: HostHelperSignature,
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SourceBundleCode {
+    #[serde(rename = "bundle.archive_too_large")]
+    BundleArchiveTooLarge,
+    #[serde(rename = "bundle.digest_invalid")]
+    BundleDigestInvalid,
+    #[serde(rename = "bundle.digest_mismatch")]
+    BundleDigestMismatch,
+    #[serde(rename = "bundle.duplicate_path")]
+    BundleDuplicatePath,
+    #[serde(rename = "bundle.empty")]
+    BundleEmpty,
+    #[serde(rename = "bundle.entry_forbidden")]
+    BundleEntryForbidden,
+    #[serde(rename = "bundle.expanded_too_large")]
+    BundleExpandedTooLarge,
+    #[serde(rename = "bundle.file_invalid")]
+    BundleFileInvalid,
+    #[serde(rename = "bundle.file_too_large")]
+    BundleFileTooLarge,
+    #[serde(rename = "bundle.invalid_archive")]
+    BundleInvalidArchive,
+    #[serde(rename = "bundle.manifest_invalid")]
+    BundleManifestInvalid,
+    #[serde(rename = "bundle.metadata_mismatch")]
+    BundleMetadataMismatch,
+    #[serde(rename = "bundle.not_found")]
+    BundleNotFound,
+    #[serde(rename = "bundle.path_forbidden")]
+    BundlePathForbidden,
+    #[serde(rename = "bundle.path_too_long")]
+    BundlePathTooLong,
+    #[serde(rename = "bundle.read_failed")]
+    BundleReadFailed,
+    #[serde(rename = "bundle.size_mismatch")]
+    BundleSizeMismatch,
+    #[serde(rename = "bundle.storage_collision")]
+    BundleStorageCollision,
+    #[serde(rename = "bundle.storage_conflict")]
+    BundleStorageConflict,
+    #[serde(rename = "bundle.storage_unavailable")]
+    BundleStorageUnavailable,
+    #[serde(rename = "bundle.too_many_files")]
+    BundleTooManyFiles,
+    #[serde(rename = "source.digest_mismatch")]
+    SourceDigestMismatch,
+}
+impl ::std::fmt::Display for SourceBundleCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::BundleArchiveTooLarge => f.write_str("bundle.archive_too_large"),
+            Self::BundleDigestInvalid => f.write_str("bundle.digest_invalid"),
+            Self::BundleDigestMismatch => f.write_str("bundle.digest_mismatch"),
+            Self::BundleDuplicatePath => f.write_str("bundle.duplicate_path"),
+            Self::BundleEmpty => f.write_str("bundle.empty"),
+            Self::BundleEntryForbidden => f.write_str("bundle.entry_forbidden"),
+            Self::BundleExpandedTooLarge => f.write_str("bundle.expanded_too_large"),
+            Self::BundleFileInvalid => f.write_str("bundle.file_invalid"),
+            Self::BundleFileTooLarge => f.write_str("bundle.file_too_large"),
+            Self::BundleInvalidArchive => f.write_str("bundle.invalid_archive"),
+            Self::BundleManifestInvalid => f.write_str("bundle.manifest_invalid"),
+            Self::BundleMetadataMismatch => f.write_str("bundle.metadata_mismatch"),
+            Self::BundleNotFound => f.write_str("bundle.not_found"),
+            Self::BundlePathForbidden => f.write_str("bundle.path_forbidden"),
+            Self::BundlePathTooLong => f.write_str("bundle.path_too_long"),
+            Self::BundleReadFailed => f.write_str("bundle.read_failed"),
+            Self::BundleSizeMismatch => f.write_str("bundle.size_mismatch"),
+            Self::BundleStorageCollision => f.write_str("bundle.storage_collision"),
+            Self::BundleStorageConflict => f.write_str("bundle.storage_conflict"),
+            Self::BundleStorageUnavailable => f.write_str("bundle.storage_unavailable"),
+            Self::BundleTooManyFiles => f.write_str("bundle.too_many_files"),
+            Self::SourceDigestMismatch => f.write_str("source.digest_mismatch"),
+        }
+    }
+}
+impl ::std::str::FromStr for SourceBundleCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "bundle.archive_too_large" => Ok(Self::BundleArchiveTooLarge),
+            "bundle.digest_invalid" => Ok(Self::BundleDigestInvalid),
+            "bundle.digest_mismatch" => Ok(Self::BundleDigestMismatch),
+            "bundle.duplicate_path" => Ok(Self::BundleDuplicatePath),
+            "bundle.empty" => Ok(Self::BundleEmpty),
+            "bundle.entry_forbidden" => Ok(Self::BundleEntryForbidden),
+            "bundle.expanded_too_large" => Ok(Self::BundleExpandedTooLarge),
+            "bundle.file_invalid" => Ok(Self::BundleFileInvalid),
+            "bundle.file_too_large" => Ok(Self::BundleFileTooLarge),
+            "bundle.invalid_archive" => Ok(Self::BundleInvalidArchive),
+            "bundle.manifest_invalid" => Ok(Self::BundleManifestInvalid),
+            "bundle.metadata_mismatch" => Ok(Self::BundleMetadataMismatch),
+            "bundle.not_found" => Ok(Self::BundleNotFound),
+            "bundle.path_forbidden" => Ok(Self::BundlePathForbidden),
+            "bundle.path_too_long" => Ok(Self::BundlePathTooLong),
+            "bundle.read_failed" => Ok(Self::BundleReadFailed),
+            "bundle.size_mismatch" => Ok(Self::BundleSizeMismatch),
+            "bundle.storage_collision" => Ok(Self::BundleStorageCollision),
+            "bundle.storage_conflict" => Ok(Self::BundleStorageConflict),
+            "bundle.storage_unavailable" => Ok(Self::BundleStorageUnavailable),
+            "bundle.too_many_files" => Ok(Self::BundleTooManyFiles),
+            "source.digest_mismatch" => Ok(Self::SourceDigestMismatch),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for SourceBundleCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for SourceBundleCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -4896,6 +9621,141 @@ pub struct SourceBundleManifest {
     pub schema_version: u8,
     pub sha256: ::std::string::String,
     pub total_bytes: u32,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SourcePolicyCode {
+    #[serde(rename = "compose.capabilities")]
+    ComposeCapabilities,
+    #[serde(rename = "compose.devices")]
+    ComposeDevices,
+    #[serde(rename = "compose.host_bind")]
+    ComposeHostBind,
+    #[serde(rename = "compose.host_namespace")]
+    ComposeHostNamespace,
+    #[serde(rename = "compose.invalid")]
+    ComposeInvalid,
+    #[serde(rename = "compose.privileged")]
+    ComposePrivileged,
+    #[serde(rename = "compose.service_invalid")]
+    ComposeServiceInvalid,
+    #[serde(rename = "compose.too_large")]
+    ComposeTooLarge,
+    #[serde(rename = "compose.unconfined")]
+    ComposeUnconfined,
+    #[serde(rename = "compose.volumes_invalid")]
+    ComposeVolumesInvalid,
+    #[serde(rename = "dockerfile.add_forbidden")]
+    DockerfileAddForbidden,
+    #[serde(rename = "dockerfile.base_placeholder")]
+    DockerfileBasePlaceholder,
+    #[serde(rename = "dockerfile.base_unpinned")]
+    DockerfileBaseUnpinned,
+    #[serde(rename = "dockerfile.build_privilege")]
+    DockerfileBuildPrivilege,
+    #[serde(rename = "dockerfile.copy_base_placeholder")]
+    DockerfileCopyBasePlaceholder,
+    #[serde(rename = "dockerfile.copy_base_unpinned")]
+    DockerfileCopyBaseUnpinned,
+    #[serde(rename = "dockerfile.copy_invalid")]
+    DockerfileCopyInvalid,
+    #[serde(rename = "dockerfile.copy_path")]
+    DockerfileCopyPath,
+    #[serde(rename = "dockerfile.from_missing")]
+    DockerfileFromMissing,
+    #[serde(rename = "dockerfile.heredoc_forbidden")]
+    DockerfileHeredocForbidden,
+    #[serde(rename = "dockerfile.invalid_utf8")]
+    DockerfileInvalidUtf8,
+    #[serde(rename = "dockerfile.missing")]
+    DockerfileMissing,
+    #[serde(rename = "dockerfile.network_host")]
+    DockerfileNetworkHost,
+    #[serde(rename = "dockerfile.onbuild_forbidden")]
+    DockerfileOnbuildForbidden,
+    #[serde(rename = "dockerfile.root_user")]
+    DockerfileRootUser,
+    #[serde(rename = "dockerfile.secret_mount")]
+    DockerfileSecretMount,
+}
+impl ::std::fmt::Display for SourcePolicyCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ComposeCapabilities => f.write_str("compose.capabilities"),
+            Self::ComposeDevices => f.write_str("compose.devices"),
+            Self::ComposeHostBind => f.write_str("compose.host_bind"),
+            Self::ComposeHostNamespace => f.write_str("compose.host_namespace"),
+            Self::ComposeInvalid => f.write_str("compose.invalid"),
+            Self::ComposePrivileged => f.write_str("compose.privileged"),
+            Self::ComposeServiceInvalid => f.write_str("compose.service_invalid"),
+            Self::ComposeTooLarge => f.write_str("compose.too_large"),
+            Self::ComposeUnconfined => f.write_str("compose.unconfined"),
+            Self::ComposeVolumesInvalid => f.write_str("compose.volumes_invalid"),
+            Self::DockerfileAddForbidden => f.write_str("dockerfile.add_forbidden"),
+            Self::DockerfileBasePlaceholder => f.write_str("dockerfile.base_placeholder"),
+            Self::DockerfileBaseUnpinned => f.write_str("dockerfile.base_unpinned"),
+            Self::DockerfileBuildPrivilege => f.write_str("dockerfile.build_privilege"),
+            Self::DockerfileCopyBasePlaceholder => f.write_str("dockerfile.copy_base_placeholder"),
+            Self::DockerfileCopyBaseUnpinned => f.write_str("dockerfile.copy_base_unpinned"),
+            Self::DockerfileCopyInvalid => f.write_str("dockerfile.copy_invalid"),
+            Self::DockerfileCopyPath => f.write_str("dockerfile.copy_path"),
+            Self::DockerfileFromMissing => f.write_str("dockerfile.from_missing"),
+            Self::DockerfileHeredocForbidden => f.write_str("dockerfile.heredoc_forbidden"),
+            Self::DockerfileInvalidUtf8 => f.write_str("dockerfile.invalid_utf8"),
+            Self::DockerfileMissing => f.write_str("dockerfile.missing"),
+            Self::DockerfileNetworkHost => f.write_str("dockerfile.network_host"),
+            Self::DockerfileOnbuildForbidden => f.write_str("dockerfile.onbuild_forbidden"),
+            Self::DockerfileRootUser => f.write_str("dockerfile.root_user"),
+            Self::DockerfileSecretMount => f.write_str("dockerfile.secret_mount"),
+        }
+    }
+}
+impl ::std::str::FromStr for SourcePolicyCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "compose.capabilities" => Ok(Self::ComposeCapabilities),
+            "compose.devices" => Ok(Self::ComposeDevices),
+            "compose.host_bind" => Ok(Self::ComposeHostBind),
+            "compose.host_namespace" => Ok(Self::ComposeHostNamespace),
+            "compose.invalid" => Ok(Self::ComposeInvalid),
+            "compose.privileged" => Ok(Self::ComposePrivileged),
+            "compose.service_invalid" => Ok(Self::ComposeServiceInvalid),
+            "compose.too_large" => Ok(Self::ComposeTooLarge),
+            "compose.unconfined" => Ok(Self::ComposeUnconfined),
+            "compose.volumes_invalid" => Ok(Self::ComposeVolumesInvalid),
+            "dockerfile.add_forbidden" => Ok(Self::DockerfileAddForbidden),
+            "dockerfile.base_placeholder" => Ok(Self::DockerfileBasePlaceholder),
+            "dockerfile.base_unpinned" => Ok(Self::DockerfileBaseUnpinned),
+            "dockerfile.build_privilege" => Ok(Self::DockerfileBuildPrivilege),
+            "dockerfile.copy_base_placeholder" => Ok(Self::DockerfileCopyBasePlaceholder),
+            "dockerfile.copy_base_unpinned" => Ok(Self::DockerfileCopyBaseUnpinned),
+            "dockerfile.copy_invalid" => Ok(Self::DockerfileCopyInvalid),
+            "dockerfile.copy_path" => Ok(Self::DockerfileCopyPath),
+            "dockerfile.from_missing" => Ok(Self::DockerfileFromMissing),
+            "dockerfile.heredoc_forbidden" => Ok(Self::DockerfileHeredocForbidden),
+            "dockerfile.invalid_utf8" => Ok(Self::DockerfileInvalidUtf8),
+            "dockerfile.missing" => Ok(Self::DockerfileMissing),
+            "dockerfile.network_host" => Ok(Self::DockerfileNetworkHost),
+            "dockerfile.onbuild_forbidden" => Ok(Self::DockerfileOnbuildForbidden),
+            "dockerfile.root_user" => Ok(Self::DockerfileRootUser),
+            "dockerfile.secret_mount" => Ok(Self::DockerfileSecretMount),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for SourcePolicyCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for SourcePolicyCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum StateAlias {
@@ -5038,6 +9898,144 @@ impl ::std::convert::TryFrom<::std::string::String> for StopOutcome {
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum StopPlanCode {
+    #[serde(rename = "stop.capacity_release_deferred")]
+    StopCapacityReleaseDeferred,
+    #[serde(rename = "stop.rank_membership_changed")]
+    StopRankMembershipChanged,
+    #[serde(rename = "stop.reservation_membership_changed")]
+    StopReservationMembershipChanged,
+    #[serde(rename = "stop.run_not_stoppable")]
+    StopRunNotStoppable,
+    #[serde(rename = "stop.target_scope_changed")]
+    StopTargetScopeChanged,
+}
+impl ::std::fmt::Display for StopPlanCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::StopCapacityReleaseDeferred => f.write_str("stop.capacity_release_deferred"),
+            Self::StopRankMembershipChanged => f.write_str("stop.rank_membership_changed"),
+            Self::StopReservationMembershipChanged => {
+                f.write_str("stop.reservation_membership_changed")
+            }
+            Self::StopRunNotStoppable => f.write_str("stop.run_not_stoppable"),
+            Self::StopTargetScopeChanged => f.write_str("stop.target_scope_changed"),
+        }
+    }
+}
+impl ::std::str::FromStr for StopPlanCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "stop.capacity_release_deferred" => Ok(Self::StopCapacityReleaseDeferred),
+            "stop.rank_membership_changed" => Ok(Self::StopRankMembershipChanged),
+            "stop.reservation_membership_changed" => Ok(Self::StopReservationMembershipChanged),
+            "stop.run_not_stoppable" => Ok(Self::StopRunNotStoppable),
+            "stop.target_scope_changed" => Ok(Self::StopTargetScopeChanged),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for StopPlanCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for StopPlanCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum StorageDemandCode {
+    #[serde(rename = "storage.evicting")]
+    StorageEvicting,
+    #[serde(rename = "storage.insufficient_after_eviction")]
+    StorageInsufficientAfterEviction,
+}
+impl ::std::fmt::Display for StorageDemandCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::StorageEvicting => f.write_str("storage.evicting"),
+            Self::StorageInsufficientAfterEviction => {
+                f.write_str("storage.insufficient_after_eviction")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for StorageDemandCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "storage.evicting" => Ok(Self::StorageEvicting),
+            "storage.insufficient_after_eviction" => Ok(Self::StorageInsufficientAfterEviction),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for StorageDemandCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for StorageDemandCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SupersedeCode {
+    #[serde(rename = "superseded-by-intent")]
+    SupersededByIntent,
+    #[serde(rename = "superseded-by-retry")]
+    SupersededByRetry,
+    #[serde(rename = "effects-changed-during-admission")]
+    EffectsChangedDuringAdmission,
+}
+impl ::std::fmt::Display for SupersedeCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::SupersededByIntent => f.write_str("superseded-by-intent"),
+            Self::SupersededByRetry => f.write_str("superseded-by-retry"),
+            Self::EffectsChangedDuringAdmission => f.write_str("effects-changed-during-admission"),
+        }
+    }
+}
+impl ::std::str::FromStr for SupersedeCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "superseded-by-intent" => Ok(Self::SupersededByIntent),
+            "superseded-by-retry" => Ok(Self::SupersededByRetry),
+            "effects-changed-during-admission" => Ok(Self::EffectsChangedDuringAdmission),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for SupersedeCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for SupersedeCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -5136,6 +10134,128 @@ pub struct TelemetrySample {
         deserialize_with = "crate::wire_datetime::deserialize"
     )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum TopologyCode {
+    #[serde(rename = "topology.fabric_insufficient")]
+    TopologyFabricInsufficient,
+    #[serde(rename = "topology.invalid")]
+    TopologyInvalid,
+    #[serde(rename = "topology.placement_invalid")]
+    TopologyPlacementInvalid,
+    #[serde(rename = "topology.role_mismatch")]
+    TopologyRoleMismatch,
+    #[serde(rename = "topology.runtime_capability_missing")]
+    TopologyRuntimeCapabilityMissing,
+}
+impl ::std::fmt::Display for TopologyCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::TopologyFabricInsufficient => f.write_str("topology.fabric_insufficient"),
+            Self::TopologyInvalid => f.write_str("topology.invalid"),
+            Self::TopologyPlacementInvalid => f.write_str("topology.placement_invalid"),
+            Self::TopologyRoleMismatch => f.write_str("topology.role_mismatch"),
+            Self::TopologyRuntimeCapabilityMissing => {
+                f.write_str("topology.runtime_capability_missing")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for TopologyCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "topology.fabric_insufficient" => Ok(Self::TopologyFabricInsufficient),
+            "topology.invalid" => Ok(Self::TopologyInvalid),
+            "topology.placement_invalid" => Ok(Self::TopologyPlacementInvalid),
+            "topology.role_mismatch" => Ok(Self::TopologyRoleMismatch),
+            "topology.runtime_capability_missing" => Ok(Self::TopologyRuntimeCapabilityMissing),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for TopologyCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for TopologyCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum UninstallPlanCode {
+    #[serde(rename = "uninstall.abandon-never-installed")]
+    UninstallAbandonNeverInstalled,
+    #[serde(rename = "uninstall.active_run")]
+    UninstallActiveRun,
+    #[serde(rename = "uninstall.active_runs_truncated")]
+    UninstallActiveRunsTruncated,
+    #[serde(rename = "uninstall.bytes_unknown")]
+    UninstallBytesUnknown,
+    #[serde(rename = "uninstall.installation_not_uninstallable")]
+    UninstallInstallationNotUninstallable,
+    #[serde(rename = "uninstall.operation_active")]
+    UninstallOperationActive,
+    #[serde(rename = "uninstall.rank_membership_changed")]
+    UninstallRankMembershipChanged,
+}
+impl ::std::fmt::Display for UninstallPlanCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::UninstallAbandonNeverInstalled => {
+                f.write_str("uninstall.abandon-never-installed")
+            }
+            Self::UninstallActiveRun => f.write_str("uninstall.active_run"),
+            Self::UninstallActiveRunsTruncated => f.write_str("uninstall.active_runs_truncated"),
+            Self::UninstallBytesUnknown => f.write_str("uninstall.bytes_unknown"),
+            Self::UninstallInstallationNotUninstallable => {
+                f.write_str("uninstall.installation_not_uninstallable")
+            }
+            Self::UninstallOperationActive => f.write_str("uninstall.operation_active"),
+            Self::UninstallRankMembershipChanged => {
+                f.write_str("uninstall.rank_membership_changed")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for UninstallPlanCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "uninstall.abandon-never-installed" => Ok(Self::UninstallAbandonNeverInstalled),
+            "uninstall.active_run" => Ok(Self::UninstallActiveRun),
+            "uninstall.active_runs_truncated" => Ok(Self::UninstallActiveRunsTruncated),
+            "uninstall.bytes_unknown" => Ok(Self::UninstallBytesUnknown),
+            "uninstall.installation_not_uninstallable" => {
+                Ok(Self::UninstallInstallationNotUninstallable)
+            }
+            "uninstall.operation_active" => Ok(Self::UninstallOperationActive),
+            "uninstall.rank_membership_changed" => Ok(Self::UninstallRankMembershipChanged),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for UninstallPlanCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for UninstallPlanCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -5444,6 +10564,57 @@ impl ::std::cmp::PartialEq<str> for ActivationMarkerState {
 impl ::std::cmp::PartialEq<&str> for ActivationMarkerState {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl AdmissionCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AdmissionCapacityBusy => "admission.capacity_busy",
+        }
+    }
+}
+impl ::std::ops::Deref for AdmissionCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for AdmissionCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for AdmissionCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AdmissionCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("AdmissionCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "admission.capacity_busy")]
+            AdmissionCapacityBusy,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::AdmissionCapacityBusy => Self::AdmissionCapacityBusy,
+        })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for AgentClaim {
@@ -6058,6 +11229,106 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
         })
     }
 }
+impl ArtifactLifecycleCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ArtifactAssetAvailabilityUnknown => "artifact.asset_availability_unknown",
+            Self::ArtifactDeletionBusy => "artifact.deletion_busy",
+            Self::ArtifactDeletionFenceLost => "artifact.deletion_fence_lost",
+            Self::ArtifactDeletionInProgress => "artifact.deletion_in_progress",
+            Self::ArtifactReferenceBusy => "artifact.reference_busy",
+            Self::ArtifactReferenceChanged => "artifact.reference_changed",
+            Self::ArtifactReferenceIdentityMismatch => "artifact.reference_identity_mismatch",
+            Self::ArtifactReferenceScanFailed => "artifact.reference_scan_failed",
+            Self::ArtifactReferenceScanLimited => "artifact.reference_scan_limited",
+            Self::ArtifactReferenceTimeout => "artifact.reference_timeout",
+            Self::ArtifactReferenceUnavailable => "artifact.reference_unavailable",
+            Self::ArtifactRemovalOwnerInvalid => "artifact.removal_owner_invalid",
+            Self::ArtifactRemovalOwnerUnresolved => "artifact.removal_owner_unresolved",
+        }
+    }
+}
+impl ::std::ops::Deref for ArtifactLifecycleCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ArtifactLifecycleCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ArtifactLifecycleCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ArtifactLifecycleCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ArtifactLifecycleCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "artifact.asset_availability_unknown")]
+            ArtifactAssetAvailabilityUnknown,
+            #[serde(rename = "artifact.deletion_busy")]
+            ArtifactDeletionBusy,
+            #[serde(rename = "artifact.deletion_fence_lost")]
+            ArtifactDeletionFenceLost,
+            #[serde(rename = "artifact.deletion_in_progress")]
+            ArtifactDeletionInProgress,
+            #[serde(rename = "artifact.reference_busy")]
+            ArtifactReferenceBusy,
+            #[serde(rename = "artifact.reference_changed")]
+            ArtifactReferenceChanged,
+            #[serde(rename = "artifact.reference_identity_mismatch")]
+            ArtifactReferenceIdentityMismatch,
+            #[serde(rename = "artifact.reference_scan_failed")]
+            ArtifactReferenceScanFailed,
+            #[serde(rename = "artifact.reference_scan_limited")]
+            ArtifactReferenceScanLimited,
+            #[serde(rename = "artifact.reference_timeout")]
+            ArtifactReferenceTimeout,
+            #[serde(rename = "artifact.reference_unavailable")]
+            ArtifactReferenceUnavailable,
+            #[serde(rename = "artifact.removal_owner_invalid")]
+            ArtifactRemovalOwnerInvalid,
+            #[serde(rename = "artifact.removal_owner_unresolved")]
+            ArtifactRemovalOwnerUnresolved,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ArtifactAssetAvailabilityUnknown => Self::ArtifactAssetAvailabilityUnknown,
+            Raw::ArtifactDeletionBusy => Self::ArtifactDeletionBusy,
+            Raw::ArtifactDeletionFenceLost => Self::ArtifactDeletionFenceLost,
+            Raw::ArtifactDeletionInProgress => Self::ArtifactDeletionInProgress,
+            Raw::ArtifactReferenceBusy => Self::ArtifactReferenceBusy,
+            Raw::ArtifactReferenceChanged => Self::ArtifactReferenceChanged,
+            Raw::ArtifactReferenceIdentityMismatch => Self::ArtifactReferenceIdentityMismatch,
+            Raw::ArtifactReferenceScanFailed => Self::ArtifactReferenceScanFailed,
+            Raw::ArtifactReferenceScanLimited => Self::ArtifactReferenceScanLimited,
+            Raw::ArtifactReferenceTimeout => Self::ArtifactReferenceTimeout,
+            Raw::ArtifactReferenceUnavailable => Self::ArtifactReferenceUnavailable,
+            Raw::ArtifactRemovalOwnerInvalid => Self::ArtifactRemovalOwnerInvalid,
+            Raw::ArtifactRemovalOwnerUnresolved => Self::ArtifactRemovalOwnerUnresolved,
+        })
+    }
+}
 impl ArtifactPreparation {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -6197,6 +11468,355 @@ impl<'de> ::serde::Deserialize<'de> for BoundedErrorResponse {
         })
     }
 }
+impl CacheReferenceReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RecipeInstallation => "recipe-installation",
+            Self::RunningModel => "running-model",
+            Self::SavedProfile => "saved-profile",
+        }
+    }
+}
+impl ::std::ops::Deref for CacheReferenceReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CacheReferenceReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CacheReferenceReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CacheReferenceReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("CacheReferenceReason", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "recipe-installation")]
+            RecipeInstallation,
+            #[serde(rename = "running-model")]
+            RunningModel,
+            #[serde(rename = "saved-profile")]
+            SavedProfile,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RecipeInstallation => Self::RecipeInstallation,
+            Raw::RunningModel => Self::RunningModel,
+            Raw::SavedProfile => Self::SavedProfile,
+        })
+    }
+}
+impl CatalogCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CatalogActor => "catalog.actor",
+            Self::CatalogCandidateExists => "catalog.candidate_exists",
+            Self::CatalogConflict => "catalog.conflict",
+            Self::CatalogDocumentExists => "catalog.document_exists",
+            Self::CatalogDocumentInvalid => "catalog.document_invalid",
+            Self::CatalogDocumentMissing => "catalog.document_missing",
+            Self::CatalogHeadMissing => "catalog.head_missing",
+            Self::CatalogIdentities => "catalog.identities",
+            Self::CatalogIdentityChanged => "catalog.identity_changed",
+            Self::CatalogInsufficientRole => "catalog.insufficient_role",
+            Self::CatalogInvalidRequest => "catalog.invalid_request",
+            Self::CatalogModelArtifactMissing => "catalog.model_artifact_missing",
+            Self::CatalogModelReferenceInvalid => "catalog.model_reference_invalid",
+            Self::CatalogModelReferenceMissing => "catalog.model_reference_missing",
+            Self::CatalogNotCandidate => "catalog.not_candidate",
+            Self::CatalogNotFound => "catalog.not_found",
+            Self::CatalogRecipeInvalid => "catalog.recipe_invalid",
+            Self::CatalogReference => "catalog.reference",
+            Self::CatalogReferenceMissing => "catalog.reference_missing",
+            Self::CatalogRequestFailed => "catalog.request_failed",
+            Self::CatalogRevisionMissing => "catalog.revision_missing",
+            Self::CatalogStaleRevision => "catalog.stale_revision",
+            Self::CatalogUnavailable => "catalog.unavailable",
+            Self::RecipeLibraryDocumentInvalid => "recipe_library.document_invalid",
+            Self::RecipeLibraryHashMismatch => "recipe_library.hash_mismatch",
+            Self::RecipeLibraryModelDocumentInvalid => "recipe_library.model_document_invalid",
+            Self::RecipeLibraryPackageHandleInvalid => "recipe_library.package_handle_invalid",
+            Self::RecipeLibraryReleaseInvalid => "recipe_library.release_invalid",
+            Self::RecipeLibrarySourceInvalid => "recipe_library.source_invalid",
+            Self::RecipeReleaseSignatureInvalid => "recipe_release.signature_invalid",
+        }
+    }
+}
+impl ::std::ops::Deref for CatalogCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CatalogCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CatalogCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CatalogCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("CatalogCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "catalog.actor")]
+            CatalogActor,
+            #[serde(rename = "catalog.candidate_exists")]
+            CatalogCandidateExists,
+            #[serde(rename = "catalog.conflict")]
+            CatalogConflict,
+            #[serde(rename = "catalog.document_exists")]
+            CatalogDocumentExists,
+            #[serde(rename = "catalog.document_invalid")]
+            CatalogDocumentInvalid,
+            #[serde(rename = "catalog.document_missing")]
+            CatalogDocumentMissing,
+            #[serde(rename = "catalog.head_missing")]
+            CatalogHeadMissing,
+            #[serde(rename = "catalog.identities")]
+            CatalogIdentities,
+            #[serde(rename = "catalog.identity_changed")]
+            CatalogIdentityChanged,
+            #[serde(rename = "catalog.insufficient_role")]
+            CatalogInsufficientRole,
+            #[serde(rename = "catalog.invalid_request")]
+            CatalogInvalidRequest,
+            #[serde(rename = "catalog.model_artifact_missing")]
+            CatalogModelArtifactMissing,
+            #[serde(rename = "catalog.model_reference_invalid")]
+            CatalogModelReferenceInvalid,
+            #[serde(rename = "catalog.model_reference_missing")]
+            CatalogModelReferenceMissing,
+            #[serde(rename = "catalog.not_candidate")]
+            CatalogNotCandidate,
+            #[serde(rename = "catalog.not_found")]
+            CatalogNotFound,
+            #[serde(rename = "catalog.recipe_invalid")]
+            CatalogRecipeInvalid,
+            #[serde(rename = "catalog.reference")]
+            CatalogReference,
+            #[serde(rename = "catalog.reference_missing")]
+            CatalogReferenceMissing,
+            #[serde(rename = "catalog.request_failed")]
+            CatalogRequestFailed,
+            #[serde(rename = "catalog.revision_missing")]
+            CatalogRevisionMissing,
+            #[serde(rename = "catalog.stale_revision")]
+            CatalogStaleRevision,
+            #[serde(rename = "catalog.unavailable")]
+            CatalogUnavailable,
+            #[serde(rename = "recipe_library.document_invalid")]
+            RecipeLibraryDocumentInvalid,
+            #[serde(rename = "recipe_library.hash_mismatch")]
+            RecipeLibraryHashMismatch,
+            #[serde(rename = "recipe_library.model_document_invalid")]
+            RecipeLibraryModelDocumentInvalid,
+            #[serde(rename = "recipe_library.package_handle_invalid")]
+            RecipeLibraryPackageHandleInvalid,
+            #[serde(rename = "recipe_library.release_invalid")]
+            RecipeLibraryReleaseInvalid,
+            #[serde(rename = "recipe_library.source_invalid")]
+            RecipeLibrarySourceInvalid,
+            #[serde(rename = "recipe_release.signature_invalid")]
+            RecipeReleaseSignatureInvalid,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CatalogActor => Self::CatalogActor,
+            Raw::CatalogCandidateExists => Self::CatalogCandidateExists,
+            Raw::CatalogConflict => Self::CatalogConflict,
+            Raw::CatalogDocumentExists => Self::CatalogDocumentExists,
+            Raw::CatalogDocumentInvalid => Self::CatalogDocumentInvalid,
+            Raw::CatalogDocumentMissing => Self::CatalogDocumentMissing,
+            Raw::CatalogHeadMissing => Self::CatalogHeadMissing,
+            Raw::CatalogIdentities => Self::CatalogIdentities,
+            Raw::CatalogIdentityChanged => Self::CatalogIdentityChanged,
+            Raw::CatalogInsufficientRole => Self::CatalogInsufficientRole,
+            Raw::CatalogInvalidRequest => Self::CatalogInvalidRequest,
+            Raw::CatalogModelArtifactMissing => Self::CatalogModelArtifactMissing,
+            Raw::CatalogModelReferenceInvalid => Self::CatalogModelReferenceInvalid,
+            Raw::CatalogModelReferenceMissing => Self::CatalogModelReferenceMissing,
+            Raw::CatalogNotCandidate => Self::CatalogNotCandidate,
+            Raw::CatalogNotFound => Self::CatalogNotFound,
+            Raw::CatalogRecipeInvalid => Self::CatalogRecipeInvalid,
+            Raw::CatalogReference => Self::CatalogReference,
+            Raw::CatalogReferenceMissing => Self::CatalogReferenceMissing,
+            Raw::CatalogRequestFailed => Self::CatalogRequestFailed,
+            Raw::CatalogRevisionMissing => Self::CatalogRevisionMissing,
+            Raw::CatalogStaleRevision => Self::CatalogStaleRevision,
+            Raw::CatalogUnavailable => Self::CatalogUnavailable,
+            Raw::RecipeLibraryDocumentInvalid => Self::RecipeLibraryDocumentInvalid,
+            Raw::RecipeLibraryHashMismatch => Self::RecipeLibraryHashMismatch,
+            Raw::RecipeLibraryModelDocumentInvalid => Self::RecipeLibraryModelDocumentInvalid,
+            Raw::RecipeLibraryPackageHandleInvalid => Self::RecipeLibraryPackageHandleInvalid,
+            Raw::RecipeLibraryReleaseInvalid => Self::RecipeLibraryReleaseInvalid,
+            Raw::RecipeLibrarySourceInvalid => Self::RecipeLibrarySourceInvalid,
+            Raw::RecipeReleaseSignatureInvalid => Self::RecipeReleaseSignatureInvalid,
+        })
+    }
+}
+impl CatalogSyncCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CatalogSyncActorInvalid => "catalog.sync_actor_invalid",
+            Self::CatalogSyncCommitInvalid => "catalog.sync_commit_invalid",
+            Self::CatalogSyncFailed => "catalog.sync_failed",
+            Self::CatalogSyncIdentityChanged => "catalog.sync_identity_changed",
+            Self::CatalogSyncInProgress => "catalog.sync_in_progress",
+            Self::CatalogSyncItemFailed => "catalog.sync_item_failed",
+            Self::CatalogSyncLeaseExpired => "catalog.sync_lease_expired",
+            Self::CatalogSyncModelFailed => "catalog.sync_model_failed",
+            Self::CatalogSyncNotFound => "catalog.sync_not_found",
+            Self::CatalogSyncPrebuiltImagesFailed => "catalog.sync_prebuilt_images_failed",
+            Self::CatalogSyncPreviewChanged => "catalog.sync_preview_changed",
+            Self::CatalogSyncRepositoryChanged => "catalog.sync_repository_changed",
+            Self::CatalogSyncRequestInvalid => "catalog.sync_request_invalid",
+            Self::CatalogSyncRequestReused => "catalog.sync_request_reused",
+            Self::CatalogSyncResultUnreadable => "catalog.sync_result_unreadable",
+            Self::CatalogSyncRevisionChanged => "catalog.sync_revision_changed",
+            Self::CatalogSyncStateInvalid => "catalog.sync_state_invalid",
+            Self::CatalogSyncTriggerInvalid => "catalog.sync_trigger_invalid",
+            Self::RecipeTopologyChanged => "recipe.topology_changed",
+        }
+    }
+}
+impl ::std::ops::Deref for CatalogSyncCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CatalogSyncCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CatalogSyncCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CatalogSyncCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("CatalogSyncCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "catalog.sync_actor_invalid")]
+            CatalogSyncActorInvalid,
+            #[serde(rename = "catalog.sync_commit_invalid")]
+            CatalogSyncCommitInvalid,
+            #[serde(rename = "catalog.sync_failed")]
+            CatalogSyncFailed,
+            #[serde(rename = "catalog.sync_identity_changed")]
+            CatalogSyncIdentityChanged,
+            #[serde(rename = "catalog.sync_in_progress")]
+            CatalogSyncInProgress,
+            #[serde(rename = "catalog.sync_item_failed")]
+            CatalogSyncItemFailed,
+            #[serde(rename = "catalog.sync_lease_expired")]
+            CatalogSyncLeaseExpired,
+            #[serde(rename = "catalog.sync_model_failed")]
+            CatalogSyncModelFailed,
+            #[serde(rename = "catalog.sync_not_found")]
+            CatalogSyncNotFound,
+            #[serde(rename = "catalog.sync_prebuilt_images_failed")]
+            CatalogSyncPrebuiltImagesFailed,
+            #[serde(rename = "catalog.sync_preview_changed")]
+            CatalogSyncPreviewChanged,
+            #[serde(rename = "catalog.sync_repository_changed")]
+            CatalogSyncRepositoryChanged,
+            #[serde(rename = "catalog.sync_request_invalid")]
+            CatalogSyncRequestInvalid,
+            #[serde(rename = "catalog.sync_request_reused")]
+            CatalogSyncRequestReused,
+            #[serde(rename = "catalog.sync_result_unreadable")]
+            CatalogSyncResultUnreadable,
+            #[serde(rename = "catalog.sync_revision_changed")]
+            CatalogSyncRevisionChanged,
+            #[serde(rename = "catalog.sync_state_invalid")]
+            CatalogSyncStateInvalid,
+            #[serde(rename = "catalog.sync_trigger_invalid")]
+            CatalogSyncTriggerInvalid,
+            #[serde(rename = "recipe.topology_changed")]
+            RecipeTopologyChanged,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CatalogSyncActorInvalid => Self::CatalogSyncActorInvalid,
+            Raw::CatalogSyncCommitInvalid => Self::CatalogSyncCommitInvalid,
+            Raw::CatalogSyncFailed => Self::CatalogSyncFailed,
+            Raw::CatalogSyncIdentityChanged => Self::CatalogSyncIdentityChanged,
+            Raw::CatalogSyncInProgress => Self::CatalogSyncInProgress,
+            Raw::CatalogSyncItemFailed => Self::CatalogSyncItemFailed,
+            Raw::CatalogSyncLeaseExpired => Self::CatalogSyncLeaseExpired,
+            Raw::CatalogSyncModelFailed => Self::CatalogSyncModelFailed,
+            Raw::CatalogSyncNotFound => Self::CatalogSyncNotFound,
+            Raw::CatalogSyncPrebuiltImagesFailed => Self::CatalogSyncPrebuiltImagesFailed,
+            Raw::CatalogSyncPreviewChanged => Self::CatalogSyncPreviewChanged,
+            Raw::CatalogSyncRepositoryChanged => Self::CatalogSyncRepositoryChanged,
+            Raw::CatalogSyncRequestInvalid => Self::CatalogSyncRequestInvalid,
+            Raw::CatalogSyncRequestReused => Self::CatalogSyncRequestReused,
+            Raw::CatalogSyncResultUnreadable => Self::CatalogSyncResultUnreadable,
+            Raw::CatalogSyncRevisionChanged => Self::CatalogSyncRevisionChanged,
+            Raw::CatalogSyncStateInvalid => Self::CatalogSyncStateInvalid,
+            Raw::CatalogSyncTriggerInvalid => Self::CatalogSyncTriggerInvalid,
+            Raw::RecipeTopologyChanged => Self::RecipeTopologyChanged,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for ClaimRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -6222,6 +11842,114 @@ impl<'de> ::serde::Deserialize<'de> for ClaimRequest {
             protocol_version: raw.protocol_version,
             runtime_identity: raw.runtime_identity,
             wait_seconds: raw.wait_seconds,
+        })
+    }
+}
+impl ClusterMappingCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::MappingActor => "mapping.actor",
+            Self::MappingEndpointOwner => "mapping.endpoint_owner",
+            Self::MappingNodeCount => "mapping.node_count",
+            Self::MappingNodeIncompatible => "mapping.node_incompatible",
+            Self::MappingNodeUnknown => "mapping.node_unknown",
+            Self::MappingNodesInvalid => "mapping.nodes_invalid",
+            Self::MappingOptionInvalid => "mapping.option_invalid",
+            Self::MappingParameterType => "mapping.parameter_type",
+            Self::MappingParameterUnknown => "mapping.parameter_unknown",
+            Self::MappingParameterValue => "mapping.parameter_value",
+            Self::MappingParametersInvalid => "mapping.parameters_invalid",
+            Self::MappingReadyImmutable => "mapping.ready_immutable",
+            Self::MappingRecipeUnresolved => "mapping.recipe_unresolved",
+            Self::MappingStalePlan => "mapping.stale_plan",
+            Self::MappingTopologyInvalid => "mapping.topology_invalid",
+        }
+    }
+}
+impl ::std::ops::Deref for ClusterMappingCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ClusterMappingCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ClusterMappingCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ClusterMappingCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ClusterMappingCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "mapping.actor")]
+            MappingActor,
+            #[serde(rename = "mapping.endpoint_owner")]
+            MappingEndpointOwner,
+            #[serde(rename = "mapping.node_count")]
+            MappingNodeCount,
+            #[serde(rename = "mapping.node_incompatible")]
+            MappingNodeIncompatible,
+            #[serde(rename = "mapping.node_unknown")]
+            MappingNodeUnknown,
+            #[serde(rename = "mapping.nodes_invalid")]
+            MappingNodesInvalid,
+            #[serde(rename = "mapping.option_invalid")]
+            MappingOptionInvalid,
+            #[serde(rename = "mapping.parameter_type")]
+            MappingParameterType,
+            #[serde(rename = "mapping.parameter_unknown")]
+            MappingParameterUnknown,
+            #[serde(rename = "mapping.parameter_value")]
+            MappingParameterValue,
+            #[serde(rename = "mapping.parameters_invalid")]
+            MappingParametersInvalid,
+            #[serde(rename = "mapping.ready_immutable")]
+            MappingReadyImmutable,
+            #[serde(rename = "mapping.recipe_unresolved")]
+            MappingRecipeUnresolved,
+            #[serde(rename = "mapping.stale_plan")]
+            MappingStalePlan,
+            #[serde(rename = "mapping.topology_invalid")]
+            MappingTopologyInvalid,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::MappingActor => Self::MappingActor,
+            Raw::MappingEndpointOwner => Self::MappingEndpointOwner,
+            Raw::MappingNodeCount => Self::MappingNodeCount,
+            Raw::MappingNodeIncompatible => Self::MappingNodeIncompatible,
+            Raw::MappingNodeUnknown => Self::MappingNodeUnknown,
+            Raw::MappingNodesInvalid => Self::MappingNodesInvalid,
+            Raw::MappingOptionInvalid => Self::MappingOptionInvalid,
+            Raw::MappingParameterType => Self::MappingParameterType,
+            Raw::MappingParameterUnknown => Self::MappingParameterUnknown,
+            Raw::MappingParameterValue => Self::MappingParameterValue,
+            Raw::MappingParametersInvalid => Self::MappingParametersInvalid,
+            Raw::MappingReadyImmutable => Self::MappingReadyImmutable,
+            Raw::MappingRecipeUnresolved => Self::MappingRecipeUnresolved,
+            Raw::MappingStalePlan => Self::MappingStalePlan,
+            Raw::MappingTopologyInvalid => Self::MappingTopologyInvalid,
         })
     }
 }
@@ -6753,6 +12481,90 @@ impl<'de> ::serde::Deserialize<'de> for ConfirmPackageActivationOperation {
         })
     }
 }
+impl ControllerErrorCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ControllerConflict => "controller.conflict",
+            Self::ControllerFleetRevocationUncertain => "controller.fleet.revocation_uncertain",
+            Self::ControllerFleetUpgradeConflict => "controller.fleet.upgrade_conflict",
+            Self::ControllerHttp => "controller.http_",
+            Self::ControllerInternalError => "controller.internal_error",
+            Self::ControllerInvalidRequest => "controller.invalid_request",
+            Self::ControllerNotFound => "controller.not_found",
+            Self::ControllerRequestTooLarge => "controller.request_too_large",
+            Self::ControllerUnavailable => "controller.unavailable",
+        }
+    }
+}
+impl ::std::ops::Deref for ControllerErrorCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ControllerErrorCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ControllerErrorCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ControllerErrorCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "controller.conflict")]
+            ControllerConflict,
+            #[serde(rename = "controller.fleet.revocation_uncertain")]
+            ControllerFleetRevocationUncertain,
+            #[serde(rename = "controller.fleet.upgrade_conflict")]
+            ControllerFleetUpgradeConflict,
+            #[serde(rename = "controller.http_")]
+            ControllerHttp,
+            #[serde(rename = "controller.internal_error")]
+            ControllerInternalError,
+            #[serde(rename = "controller.invalid_request")]
+            ControllerInvalidRequest,
+            #[serde(rename = "controller.not_found")]
+            ControllerNotFound,
+            #[serde(rename = "controller.request_too_large")]
+            ControllerRequestTooLarge,
+            #[serde(rename = "controller.unavailable")]
+            ControllerUnavailable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ControllerConflict => Self::ControllerConflict,
+            Raw::ControllerFleetRevocationUncertain => Self::ControllerFleetRevocationUncertain,
+            Raw::ControllerFleetUpgradeConflict => Self::ControllerFleetUpgradeConflict,
+            Raw::ControllerHttp => Self::ControllerHttp,
+            Raw::ControllerInternalError => Self::ControllerInternalError,
+            Raw::ControllerInvalidRequest => Self::ControllerInvalidRequest,
+            Raw::ControllerNotFound => Self::ControllerNotFound,
+            Raw::ControllerRequestTooLarge => Self::ControllerRequestTooLarge,
+            Raw::ControllerUnavailable => Self::ControllerUnavailable,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for DistributionAssignment {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -6772,6 +12584,94 @@ impl<'de> ::serde::Deserialize<'de> for DistributionAssignment {
             objects: raw.objects,
             oci_image_config_digest: raw.oci_image_config_digest,
             oci_image_digest: raw.oci_image_digest,
+        })
+    }
+}
+impl DistributionCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::DistributionAssignmentConflict => "distribution.assignment_conflict",
+            Self::DistributionExpired => "distribution.expired",
+            Self::DistributionModelSetIdentityUnavailable => {
+                "distribution.model_set_identity_unavailable"
+            }
+            Self::DistributionModelSetMismatch => "distribution.model_set_mismatch",
+            Self::DistributionObjectInvalid => "distribution.object_invalid",
+            Self::DistributionObjectUnavailable => "distribution.object_unavailable",
+            Self::DistributionRuntimeImageMismatch => "distribution.runtime_image_mismatch",
+            Self::DistributionUnassigned => "distribution.unassigned",
+            Self::DistributionWrongNode => "distribution.wrong_node",
+        }
+    }
+}
+impl ::std::ops::Deref for DistributionCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for DistributionCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for DistributionCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for DistributionCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("DistributionCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "distribution.assignment_conflict")]
+            DistributionAssignmentConflict,
+            #[serde(rename = "distribution.expired")]
+            DistributionExpired,
+            #[serde(rename = "distribution.model_set_identity_unavailable")]
+            DistributionModelSetIdentityUnavailable,
+            #[serde(rename = "distribution.model_set_mismatch")]
+            DistributionModelSetMismatch,
+            #[serde(rename = "distribution.object_invalid")]
+            DistributionObjectInvalid,
+            #[serde(rename = "distribution.object_unavailable")]
+            DistributionObjectUnavailable,
+            #[serde(rename = "distribution.runtime_image_mismatch")]
+            DistributionRuntimeImageMismatch,
+            #[serde(rename = "distribution.unassigned")]
+            DistributionUnassigned,
+            #[serde(rename = "distribution.wrong_node")]
+            DistributionWrongNode,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::DistributionAssignmentConflict => Self::DistributionAssignmentConflict,
+            Raw::DistributionExpired => Self::DistributionExpired,
+            Raw::DistributionModelSetIdentityUnavailable => {
+                Self::DistributionModelSetIdentityUnavailable
+            }
+            Raw::DistributionModelSetMismatch => Self::DistributionModelSetMismatch,
+            Raw::DistributionObjectInvalid => Self::DistributionObjectInvalid,
+            Raw::DistributionObjectUnavailable => Self::DistributionObjectUnavailable,
+            Raw::DistributionRuntimeImageMismatch => Self::DistributionRuntimeImageMismatch,
+            Raw::DistributionUnassigned => Self::DistributionUnassigned,
+            Raw::DistributionWrongNode => Self::DistributionWrongNode,
         })
     }
 }
@@ -7669,6 +13569,289 @@ impl ::std::cmp::PartialEq<&str> for HostRuntimeRequestAction {
         self.as_str() == *other
     }
 }
+impl ImageStoreCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ImageStoreBusy => "image_store.busy",
+            Self::ImageStoreCollectionDeferred => "image_store.collection_deferred",
+            Self::ImageStoreCopyFailed => "image_store.copy_failed",
+            Self::ImageStoreDamagedReceiptEvicted => "image_store.damaged_receipt_evicted",
+            Self::ImageStoreDigestInvalid => "image_store.digest_invalid",
+            Self::ImageStoreImportIncomplete => "image_store.import_incomplete",
+            Self::ImageStoreManifestCorrupt => "image_store.manifest_corrupt",
+            Self::ImageStoreManifestInvalid => "image_store.manifest_invalid",
+            Self::ImageStoreManifestUnreadable => "image_store.manifest_unreadable",
+            Self::ImageStoreManifestUnsupported => "image_store.manifest_unsupported",
+            Self::ImageStoreReferenceScanFailed => "image_store.reference_scan_failed",
+            Self::ImageStoreReferenceUnpinned => "image_store.reference_unpinned",
+            Self::ImageStoreReferencedManifestDamaged => "image_store.referenced_manifest_damaged",
+        }
+    }
+}
+impl ::std::ops::Deref for ImageStoreCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ImageStoreCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ImageStoreCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ImageStoreCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ImageStoreCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "image_store.busy")]
+            ImageStoreBusy,
+            #[serde(rename = "image_store.collection_deferred")]
+            ImageStoreCollectionDeferred,
+            #[serde(rename = "image_store.copy_failed")]
+            ImageStoreCopyFailed,
+            #[serde(rename = "image_store.damaged_receipt_evicted")]
+            ImageStoreDamagedReceiptEvicted,
+            #[serde(rename = "image_store.digest_invalid")]
+            ImageStoreDigestInvalid,
+            #[serde(rename = "image_store.import_incomplete")]
+            ImageStoreImportIncomplete,
+            #[serde(rename = "image_store.manifest_corrupt")]
+            ImageStoreManifestCorrupt,
+            #[serde(rename = "image_store.manifest_invalid")]
+            ImageStoreManifestInvalid,
+            #[serde(rename = "image_store.manifest_unreadable")]
+            ImageStoreManifestUnreadable,
+            #[serde(rename = "image_store.manifest_unsupported")]
+            ImageStoreManifestUnsupported,
+            #[serde(rename = "image_store.reference_scan_failed")]
+            ImageStoreReferenceScanFailed,
+            #[serde(rename = "image_store.reference_unpinned")]
+            ImageStoreReferenceUnpinned,
+            #[serde(rename = "image_store.referenced_manifest_damaged")]
+            ImageStoreReferencedManifestDamaged,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ImageStoreBusy => Self::ImageStoreBusy,
+            Raw::ImageStoreCollectionDeferred => Self::ImageStoreCollectionDeferred,
+            Raw::ImageStoreCopyFailed => Self::ImageStoreCopyFailed,
+            Raw::ImageStoreDamagedReceiptEvicted => Self::ImageStoreDamagedReceiptEvicted,
+            Raw::ImageStoreDigestInvalid => Self::ImageStoreDigestInvalid,
+            Raw::ImageStoreImportIncomplete => Self::ImageStoreImportIncomplete,
+            Raw::ImageStoreManifestCorrupt => Self::ImageStoreManifestCorrupt,
+            Raw::ImageStoreManifestInvalid => Self::ImageStoreManifestInvalid,
+            Raw::ImageStoreManifestUnreadable => Self::ImageStoreManifestUnreadable,
+            Raw::ImageStoreManifestUnsupported => Self::ImageStoreManifestUnsupported,
+            Raw::ImageStoreReferenceScanFailed => Self::ImageStoreReferenceScanFailed,
+            Raw::ImageStoreReferenceUnpinned => Self::ImageStoreReferenceUnpinned,
+            Raw::ImageStoreReferencedManifestDamaged => Self::ImageStoreReferencedManifestDamaged,
+        })
+    }
+}
+impl InstallAdmissionCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::InstallAgentUpgradeRequired => "install.agent_upgrade_required",
+            Self::InstallArtifactSizeUnderdeclared => "install.artifact_size_underdeclared",
+            Self::InstallArtifactStoreReadOnly => "install.artifact_store_read_only",
+            Self::InstallCapacityBusy => "install.capacity_busy",
+            Self::InstallCompiledPlanUnavailable => "install.compiled_plan_unavailable",
+            Self::InstallDependenciesStale => "install.dependencies_stale",
+            Self::InstallImageDistributionPending => "install.image_distribution_pending",
+            Self::InstallImageSizeUnderdeclared => "install.image_size_underdeclared",
+            Self::InstallInsufficientDisk => "install.insufficient_disk",
+            Self::InstallInventoryMissing => "install.inventory_missing",
+            Self::InstallModelIdentityUnavailable => "install.model_identity_unavailable",
+            Self::InstallPlanInvalid => "install.plan_invalid",
+            Self::InstallPlanStale => "install.plan_stale",
+            Self::InstallStaleInventory => "install.stale_inventory",
+        }
+    }
+}
+impl ::std::ops::Deref for InstallAdmissionCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InstallAdmissionCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InstallAdmissionCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallAdmissionCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallAdmissionCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "install.agent_upgrade_required")]
+            InstallAgentUpgradeRequired,
+            #[serde(rename = "install.artifact_size_underdeclared")]
+            InstallArtifactSizeUnderdeclared,
+            #[serde(rename = "install.artifact_store_read_only")]
+            InstallArtifactStoreReadOnly,
+            #[serde(rename = "install.capacity_busy")]
+            InstallCapacityBusy,
+            #[serde(rename = "install.compiled_plan_unavailable")]
+            InstallCompiledPlanUnavailable,
+            #[serde(rename = "install.dependencies_stale")]
+            InstallDependenciesStale,
+            #[serde(rename = "install.image_distribution_pending")]
+            InstallImageDistributionPending,
+            #[serde(rename = "install.image_size_underdeclared")]
+            InstallImageSizeUnderdeclared,
+            #[serde(rename = "install.insufficient_disk")]
+            InstallInsufficientDisk,
+            #[serde(rename = "install.inventory_missing")]
+            InstallInventoryMissing,
+            #[serde(rename = "install.model_identity_unavailable")]
+            InstallModelIdentityUnavailable,
+            #[serde(rename = "install.plan_invalid")]
+            InstallPlanInvalid,
+            #[serde(rename = "install.plan_stale")]
+            InstallPlanStale,
+            #[serde(rename = "install.stale_inventory")]
+            InstallStaleInventory,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::InstallAgentUpgradeRequired => Self::InstallAgentUpgradeRequired,
+            Raw::InstallArtifactSizeUnderdeclared => Self::InstallArtifactSizeUnderdeclared,
+            Raw::InstallArtifactStoreReadOnly => Self::InstallArtifactStoreReadOnly,
+            Raw::InstallCapacityBusy => Self::InstallCapacityBusy,
+            Raw::InstallCompiledPlanUnavailable => Self::InstallCompiledPlanUnavailable,
+            Raw::InstallDependenciesStale => Self::InstallDependenciesStale,
+            Raw::InstallImageDistributionPending => Self::InstallImageDistributionPending,
+            Raw::InstallImageSizeUnderdeclared => Self::InstallImageSizeUnderdeclared,
+            Raw::InstallInsufficientDisk => Self::InstallInsufficientDisk,
+            Raw::InstallInventoryMissing => Self::InstallInventoryMissing,
+            Raw::InstallModelIdentityUnavailable => Self::InstallModelIdentityUnavailable,
+            Raw::InstallPlanInvalid => Self::InstallPlanInvalid,
+            Raw::InstallPlanStale => Self::InstallPlanStale,
+            Raw::InstallStaleInventory => Self::InstallStaleInventory,
+        })
+    }
+}
+impl InstallDegradedReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ExternalMember => "external-member",
+            Self::MappingIncomplete => "mapping-incomplete",
+            Self::MissingRanks => "missing-ranks",
+            Self::UnexpectedRanks => "unexpected-ranks",
+            Self::RankMembershipMismatch => "rank-membership-mismatch",
+            Self::InstallationNotInstalled => "installation-not-installed",
+            Self::RankNotInstalled => "rank-not-installed",
+            Self::RankIncompleteBytes => "rank-incomplete-bytes",
+        }
+    }
+}
+impl ::std::ops::Deref for InstallDegradedReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InstallDegradedReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InstallDegradedReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallDegradedReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallDegradedReason", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "external-member")]
+            ExternalMember,
+            #[serde(rename = "mapping-incomplete")]
+            MappingIncomplete,
+            #[serde(rename = "missing-ranks")]
+            MissingRanks,
+            #[serde(rename = "unexpected-ranks")]
+            UnexpectedRanks,
+            #[serde(rename = "rank-membership-mismatch")]
+            RankMembershipMismatch,
+            #[serde(rename = "installation-not-installed")]
+            InstallationNotInstalled,
+            #[serde(rename = "rank-not-installed")]
+            RankNotInstalled,
+            #[serde(rename = "rank-incomplete-bytes")]
+            RankIncompleteBytes,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ExternalMember => Self::ExternalMember,
+            Raw::MappingIncomplete => Self::MappingIncomplete,
+            Raw::MissingRanks => Self::MissingRanks,
+            Raw::UnexpectedRanks => Self::UnexpectedRanks,
+            Raw::RankMembershipMismatch => Self::RankMembershipMismatch,
+            Raw::InstallationNotInstalled => Self::InstallationNotInstalled,
+            Raw::RankNotInstalled => Self::RankNotInstalled,
+            Raw::RankIncompleteBytes => Self::RankIncompleteBytes,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for InstallVonkDebOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -8326,6 +14509,125 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
         })
     }
 }
+impl LibraryAssessmentCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::LibraryAssessmentUnavailable => "library.assessment_unavailable",
+            Self::LibraryCacheMissing => "library.cache_missing",
+            Self::LibraryCapacityUnavailable => "library.capacity_unavailable",
+            Self::LibraryInsufficientNodes => "library.insufficient_nodes",
+        }
+    }
+}
+impl ::std::ops::Deref for LibraryAssessmentCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for LibraryAssessmentCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for LibraryAssessmentCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LibraryAssessmentCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("LibraryAssessmentCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "library.assessment_unavailable")]
+            LibraryAssessmentUnavailable,
+            #[serde(rename = "library.cache_missing")]
+            LibraryCacheMissing,
+            #[serde(rename = "library.capacity_unavailable")]
+            LibraryCapacityUnavailable,
+            #[serde(rename = "library.insufficient_nodes")]
+            LibraryInsufficientNodes,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::LibraryAssessmentUnavailable => Self::LibraryAssessmentUnavailable,
+            Raw::LibraryCacheMissing => Self::LibraryCacheMissing,
+            Raw::LibraryCapacityUnavailable => Self::LibraryCapacityUnavailable,
+            Raw::LibraryInsufficientNodes => Self::LibraryInsufficientNodes,
+        })
+    }
+}
+impl LibraryProjectionCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProjectionEvidenceTruncated => "projection.evidence_truncated",
+            Self::ProjectionReasonsTruncated => "projection.reasons_truncated",
+        }
+    }
+}
+impl ::std::ops::Deref for LibraryProjectionCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for LibraryProjectionCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for LibraryProjectionCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for LibraryProjectionCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("LibraryProjectionCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "projection.evidence_truncated")]
+            ProjectionEvidenceTruncated,
+            #[serde(rename = "projection.reasons_truncated")]
+            ProjectionReasonsTruncated,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ProjectionEvidenceTruncated => Self::ProjectionEvidenceTruncated,
+            Raw::ProjectionReasonsTruncated => Self::ProjectionReasonsTruncated,
+        })
+    }
+}
 impl LifecycleEffect {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -8760,6 +15062,483 @@ impl<'de> ::serde::Deserialize<'de> for MigrationStep {
         })
     }
 }
+impl ModelCacheBlockerCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::InsufficientReservedStorage => "insufficient-reserved-storage",
+            Self::ModelNotCached => "model-not-cached",
+            Self::RecipeNotCached => "recipe-not-cached",
+        }
+    }
+}
+impl ::std::ops::Deref for ModelCacheBlockerCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ModelCacheBlockerCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ModelCacheBlockerCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ModelCacheBlockerCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ModelCacheBlockerCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "insufficient-reserved-storage")]
+            InsufficientReservedStorage,
+            #[serde(rename = "model-not-cached")]
+            ModelNotCached,
+            #[serde(rename = "recipe-not-cached")]
+            RecipeNotCached,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::InsufficientReservedStorage => Self::InsufficientReservedStorage,
+            Raw::ModelNotCached => Self::ModelNotCached,
+            Raw::RecipeNotCached => Self::RecipeNotCached,
+        })
+    }
+}
+impl ModelCacheCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ModelCacheAccessRecheckUnavailable => "model_cache.access_recheck_unavailable",
+            Self::ModelCacheArtifactCount => "model_cache.artifact_count",
+            Self::ModelCacheArtifactDuplicate => "model_cache.artifact_duplicate",
+            Self::ModelCacheArtifactInvalid => "model_cache.artifact_invalid",
+            Self::ModelCacheArtifactMissing => "model_cache.artifact_missing",
+            Self::ModelCacheArtifactUnverified => "model_cache.artifact_unverified",
+            Self::ModelCacheCancellationInvalid => "model_cache.cancellation_invalid",
+            Self::ModelCacheCancellationKeyReused => "model_cache.cancellation_key_reused",
+            Self::ModelCacheCapacity => "model_cache.capacity",
+            Self::ModelCacheCoverageIncomplete => "model_cache.coverage_incomplete",
+            Self::ModelCacheCredentialsMissing => "model_cache.credentials_missing",
+            Self::ModelCacheCursorInvalid => "model_cache.cursor_invalid",
+            Self::ModelCacheDependencyCount => "model_cache.dependency_count",
+            Self::ModelCacheDigestInvalid => "model_cache.digest_invalid",
+            Self::ModelCacheDigestMismatch => "model_cache.digest_mismatch",
+            Self::ModelCacheDigestSizeConflict => "model_cache.digest_size_conflict",
+            Self::ModelCacheDocumentUnreadable => "model_cache.document_unreadable",
+            Self::ModelCacheDownloadBlocked => "model_cache.download_blocked",
+            Self::ModelCacheEntryMissing => "model_cache.entry_missing",
+            Self::ModelCacheFixtureSourcesForbidden => "model_cache.fixture_sources_forbidden",
+            Self::ModelCacheIdentityConflict => "model_cache.identity_conflict",
+            Self::ModelCacheIdentityMismatch => "model_cache.identity_mismatch",
+            Self::ModelCacheInterrupted => "model_cache.interrupted",
+            Self::ModelCacheLockUnavailable => "model_cache.lock_unavailable",
+            Self::ModelCacheManifestIdentityMismatch => "model_cache.manifest_identity_mismatch",
+            Self::ModelCacheManifestInvalid => "model_cache.manifest_invalid",
+            Self::ModelCacheManifestTooLarge => "model_cache.manifest_too_large",
+            Self::ModelCacheModelContentDigestsInvalid => {
+                "model_cache.model_content_digests_invalid"
+            }
+            Self::ModelCacheModelDefinitionInvalid => "model_cache.model_definition_invalid",
+            Self::ModelCacheModelDefinitionMissing => "model_cache.model_definition_missing",
+            Self::ModelCacheModelDependencyCycle => "model_cache.model_dependency_cycle",
+            Self::ModelCacheModelPinInvalid => "model_cache.model_pin_invalid",
+            Self::ModelCacheModelVariantInvalid => "model_cache.model_variant_invalid",
+            Self::ModelCacheNotCancellable => "model_cache.not_cancellable",
+            Self::ModelCacheObjectBusy => "model_cache.object_busy",
+            Self::ModelCacheOperationFailed => "model_cache.operation_failed",
+            Self::ModelCacheOperationMissing => "model_cache.operation_missing",
+            Self::ModelCacheOperationNotObservable => "model_cache.operation_not_observable",
+            Self::ModelCacheOperationNotRetryable => "model_cache.operation_not_retryable",
+            Self::ModelCacheOperationUnreadable => "model_cache.operation_unreadable",
+            Self::ModelCachePayloadInvalid => "model_cache.payload_invalid",
+            Self::ModelCachePinMismatch => "model_cache.pin_mismatch",
+            Self::ModelCachePinRequired => "model_cache.pin_required",
+            Self::ModelCachePlanInvalid => "model_cache.plan_invalid",
+            Self::ModelCacheRangeInvalid => "model_cache.range_invalid",
+            Self::ModelCacheRateLimited => "model_cache.rate_limited",
+            Self::ModelCacheRecipeIdentityAmbiguous => "model_cache.recipe_identity_ambiguous",
+            Self::ModelCacheRecipeIdentityInvalid => "model_cache.recipe_identity_invalid",
+            Self::ModelCacheRecipeIdentityMissing => "model_cache.recipe_identity_missing",
+            Self::ModelCacheRecipeInvalid => "model_cache.recipe_invalid",
+            Self::ModelCacheRecipeModelMissing => "model_cache.recipe_model_missing",
+            Self::ModelCacheRecipeRevisionInvalid => "model_cache.recipe_revision_invalid",
+            Self::ModelCacheRecipeRevisionMissing => "model_cache.recipe_revision_missing",
+            Self::ModelCacheRedirectForbidden => "model_cache.redirect_forbidden",
+            Self::ModelCacheReleaseAssetIdentityConflict => {
+                "model_cache.release_asset_identity_conflict"
+            }
+            Self::ModelCacheReleaseMetadataInvalid => "model_cache.release_metadata_invalid",
+            Self::ModelCacheRemovalChildFailed => "model_cache.removal_child_failed",
+            Self::ModelCacheRemovalChildInvalid => "model_cache.removal_child_invalid",
+            Self::ModelCacheRemovalChildMismatch => "model_cache.removal_child_mismatch",
+            Self::ModelCacheRemovalChildMissing => "model_cache.removal_child_missing",
+            Self::ModelCacheRemovalChildPending => "model_cache.removal_child_pending",
+            Self::ModelCacheRemovalInvalid => "model_cache.removal_invalid",
+            Self::ModelCacheRemovalPathUnsafe => "model_cache.removal_path_unsafe",
+            Self::ModelCacheRemovalPlanInvalid => "model_cache.removal_plan_invalid",
+            Self::ModelCacheRemovalReferenced => "model_cache.removal_referenced",
+            Self::ModelCacheRemovalScopeChanged => "model_cache.removal_scope_changed",
+            Self::ModelCacheRemovalScopeInvalid => "model_cache.removal_scope_invalid",
+            Self::ModelCacheRemovalScopeUnavailable => "model_cache.removal_scope_unavailable",
+            Self::ModelCacheRemovalWait => "model_cache.removal_wait",
+            Self::ModelCacheRequestKeyInvalid => "model_cache.request_key_invalid",
+            Self::ModelCacheRequestKeyReused => "model_cache.request_key_reused",
+            Self::ModelCacheReviewInvalid => "model_cache.review_invalid",
+            Self::ModelCacheReviewUnavailable => "model_cache.review_unavailable",
+            Self::ModelCacheRevisionInvalid => "model_cache.revision_invalid",
+            Self::ModelCacheRevisionMissing => "model_cache.revision_missing",
+            Self::ModelCacheSchemaUnsupported => "model_cache.schema_unsupported",
+            Self::ModelCacheSelectorAmbiguous => "model_cache.selector_ambiguous",
+            Self::ModelCacheSelectorInvalid => "model_cache.selector_invalid",
+            Self::ModelCacheSelectorMissing => "model_cache.selector_missing",
+            Self::ModelCacheSourceInvalid => "model_cache.source_invalid",
+            Self::ModelCacheSourceSizeMismatch => "model_cache.source_size_mismatch",
+            Self::ModelCacheSourceTruncated => "model_cache.source_truncated",
+            Self::ModelCacheSourceUnavailable => "model_cache.source_unavailable",
+            Self::ModelCacheSourceUnsupported => "model_cache.source_unsupported",
+            Self::ModelCacheSourceUntrusted => "model_cache.source_untrusted",
+            Self::ModelCacheStalePlan => "model_cache.stale_plan",
+            Self::ModelCacheUnavailable => "model_cache.unavailable",
+            Self::ModelCacheUpstreamCheckBudgetExhausted => {
+                "model_cache.upstream_check_budget_exhausted"
+            }
+            Self::ModelCacheUpstreamCheckFailed => "model_cache.upstream_check_failed",
+            Self::ModelCacheUpstreamRevisionInvalid => "model_cache.upstream_revision_invalid",
+        }
+    }
+}
+impl ::std::ops::Deref for ModelCacheCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ModelCacheCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ModelCacheCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ModelCacheCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ModelCacheCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "model_cache.access_recheck_unavailable")]
+            ModelCacheAccessRecheckUnavailable,
+            #[serde(rename = "model_cache.artifact_count")]
+            ModelCacheArtifactCount,
+            #[serde(rename = "model_cache.artifact_duplicate")]
+            ModelCacheArtifactDuplicate,
+            #[serde(rename = "model_cache.artifact_invalid")]
+            ModelCacheArtifactInvalid,
+            #[serde(rename = "model_cache.artifact_missing")]
+            ModelCacheArtifactMissing,
+            #[serde(rename = "model_cache.artifact_unverified")]
+            ModelCacheArtifactUnverified,
+            #[serde(rename = "model_cache.cancellation_invalid")]
+            ModelCacheCancellationInvalid,
+            #[serde(rename = "model_cache.cancellation_key_reused")]
+            ModelCacheCancellationKeyReused,
+            #[serde(rename = "model_cache.capacity")]
+            ModelCacheCapacity,
+            #[serde(rename = "model_cache.coverage_incomplete")]
+            ModelCacheCoverageIncomplete,
+            #[serde(rename = "model_cache.credentials_missing")]
+            ModelCacheCredentialsMissing,
+            #[serde(rename = "model_cache.cursor_invalid")]
+            ModelCacheCursorInvalid,
+            #[serde(rename = "model_cache.dependency_count")]
+            ModelCacheDependencyCount,
+            #[serde(rename = "model_cache.digest_invalid")]
+            ModelCacheDigestInvalid,
+            #[serde(rename = "model_cache.digest_mismatch")]
+            ModelCacheDigestMismatch,
+            #[serde(rename = "model_cache.digest_size_conflict")]
+            ModelCacheDigestSizeConflict,
+            #[serde(rename = "model_cache.document_unreadable")]
+            ModelCacheDocumentUnreadable,
+            #[serde(rename = "model_cache.download_blocked")]
+            ModelCacheDownloadBlocked,
+            #[serde(rename = "model_cache.entry_missing")]
+            ModelCacheEntryMissing,
+            #[serde(rename = "model_cache.fixture_sources_forbidden")]
+            ModelCacheFixtureSourcesForbidden,
+            #[serde(rename = "model_cache.identity_conflict")]
+            ModelCacheIdentityConflict,
+            #[serde(rename = "model_cache.identity_mismatch")]
+            ModelCacheIdentityMismatch,
+            #[serde(rename = "model_cache.interrupted")]
+            ModelCacheInterrupted,
+            #[serde(rename = "model_cache.lock_unavailable")]
+            ModelCacheLockUnavailable,
+            #[serde(rename = "model_cache.manifest_identity_mismatch")]
+            ModelCacheManifestIdentityMismatch,
+            #[serde(rename = "model_cache.manifest_invalid")]
+            ModelCacheManifestInvalid,
+            #[serde(rename = "model_cache.manifest_too_large")]
+            ModelCacheManifestTooLarge,
+            #[serde(rename = "model_cache.model_content_digests_invalid")]
+            ModelCacheModelContentDigestsInvalid,
+            #[serde(rename = "model_cache.model_definition_invalid")]
+            ModelCacheModelDefinitionInvalid,
+            #[serde(rename = "model_cache.model_definition_missing")]
+            ModelCacheModelDefinitionMissing,
+            #[serde(rename = "model_cache.model_dependency_cycle")]
+            ModelCacheModelDependencyCycle,
+            #[serde(rename = "model_cache.model_pin_invalid")]
+            ModelCacheModelPinInvalid,
+            #[serde(rename = "model_cache.model_variant_invalid")]
+            ModelCacheModelVariantInvalid,
+            #[serde(rename = "model_cache.not_cancellable")]
+            ModelCacheNotCancellable,
+            #[serde(rename = "model_cache.object_busy")]
+            ModelCacheObjectBusy,
+            #[serde(rename = "model_cache.operation_failed")]
+            ModelCacheOperationFailed,
+            #[serde(rename = "model_cache.operation_missing")]
+            ModelCacheOperationMissing,
+            #[serde(rename = "model_cache.operation_not_observable")]
+            ModelCacheOperationNotObservable,
+            #[serde(rename = "model_cache.operation_not_retryable")]
+            ModelCacheOperationNotRetryable,
+            #[serde(rename = "model_cache.operation_unreadable")]
+            ModelCacheOperationUnreadable,
+            #[serde(rename = "model_cache.payload_invalid")]
+            ModelCachePayloadInvalid,
+            #[serde(rename = "model_cache.pin_mismatch")]
+            ModelCachePinMismatch,
+            #[serde(rename = "model_cache.pin_required")]
+            ModelCachePinRequired,
+            #[serde(rename = "model_cache.plan_invalid")]
+            ModelCachePlanInvalid,
+            #[serde(rename = "model_cache.range_invalid")]
+            ModelCacheRangeInvalid,
+            #[serde(rename = "model_cache.rate_limited")]
+            ModelCacheRateLimited,
+            #[serde(rename = "model_cache.recipe_identity_ambiguous")]
+            ModelCacheRecipeIdentityAmbiguous,
+            #[serde(rename = "model_cache.recipe_identity_invalid")]
+            ModelCacheRecipeIdentityInvalid,
+            #[serde(rename = "model_cache.recipe_identity_missing")]
+            ModelCacheRecipeIdentityMissing,
+            #[serde(rename = "model_cache.recipe_invalid")]
+            ModelCacheRecipeInvalid,
+            #[serde(rename = "model_cache.recipe_model_missing")]
+            ModelCacheRecipeModelMissing,
+            #[serde(rename = "model_cache.recipe_revision_invalid")]
+            ModelCacheRecipeRevisionInvalid,
+            #[serde(rename = "model_cache.recipe_revision_missing")]
+            ModelCacheRecipeRevisionMissing,
+            #[serde(rename = "model_cache.redirect_forbidden")]
+            ModelCacheRedirectForbidden,
+            #[serde(rename = "model_cache.release_asset_identity_conflict")]
+            ModelCacheReleaseAssetIdentityConflict,
+            #[serde(rename = "model_cache.release_metadata_invalid")]
+            ModelCacheReleaseMetadataInvalid,
+            #[serde(rename = "model_cache.removal_child_failed")]
+            ModelCacheRemovalChildFailed,
+            #[serde(rename = "model_cache.removal_child_invalid")]
+            ModelCacheRemovalChildInvalid,
+            #[serde(rename = "model_cache.removal_child_mismatch")]
+            ModelCacheRemovalChildMismatch,
+            #[serde(rename = "model_cache.removal_child_missing")]
+            ModelCacheRemovalChildMissing,
+            #[serde(rename = "model_cache.removal_child_pending")]
+            ModelCacheRemovalChildPending,
+            #[serde(rename = "model_cache.removal_invalid")]
+            ModelCacheRemovalInvalid,
+            #[serde(rename = "model_cache.removal_path_unsafe")]
+            ModelCacheRemovalPathUnsafe,
+            #[serde(rename = "model_cache.removal_plan_invalid")]
+            ModelCacheRemovalPlanInvalid,
+            #[serde(rename = "model_cache.removal_referenced")]
+            ModelCacheRemovalReferenced,
+            #[serde(rename = "model_cache.removal_scope_changed")]
+            ModelCacheRemovalScopeChanged,
+            #[serde(rename = "model_cache.removal_scope_invalid")]
+            ModelCacheRemovalScopeInvalid,
+            #[serde(rename = "model_cache.removal_scope_unavailable")]
+            ModelCacheRemovalScopeUnavailable,
+            #[serde(rename = "model_cache.removal_wait")]
+            ModelCacheRemovalWait,
+            #[serde(rename = "model_cache.request_key_invalid")]
+            ModelCacheRequestKeyInvalid,
+            #[serde(rename = "model_cache.request_key_reused")]
+            ModelCacheRequestKeyReused,
+            #[serde(rename = "model_cache.review_invalid")]
+            ModelCacheReviewInvalid,
+            #[serde(rename = "model_cache.review_unavailable")]
+            ModelCacheReviewUnavailable,
+            #[serde(rename = "model_cache.revision_invalid")]
+            ModelCacheRevisionInvalid,
+            #[serde(rename = "model_cache.revision_missing")]
+            ModelCacheRevisionMissing,
+            #[serde(rename = "model_cache.schema_unsupported")]
+            ModelCacheSchemaUnsupported,
+            #[serde(rename = "model_cache.selector_ambiguous")]
+            ModelCacheSelectorAmbiguous,
+            #[serde(rename = "model_cache.selector_invalid")]
+            ModelCacheSelectorInvalid,
+            #[serde(rename = "model_cache.selector_missing")]
+            ModelCacheSelectorMissing,
+            #[serde(rename = "model_cache.source_invalid")]
+            ModelCacheSourceInvalid,
+            #[serde(rename = "model_cache.source_size_mismatch")]
+            ModelCacheSourceSizeMismatch,
+            #[serde(rename = "model_cache.source_truncated")]
+            ModelCacheSourceTruncated,
+            #[serde(rename = "model_cache.source_unavailable")]
+            ModelCacheSourceUnavailable,
+            #[serde(rename = "model_cache.source_unsupported")]
+            ModelCacheSourceUnsupported,
+            #[serde(rename = "model_cache.source_untrusted")]
+            ModelCacheSourceUntrusted,
+            #[serde(rename = "model_cache.stale_plan")]
+            ModelCacheStalePlan,
+            #[serde(rename = "model_cache.unavailable")]
+            ModelCacheUnavailable,
+            #[serde(rename = "model_cache.upstream_check_budget_exhausted")]
+            ModelCacheUpstreamCheckBudgetExhausted,
+            #[serde(rename = "model_cache.upstream_check_failed")]
+            ModelCacheUpstreamCheckFailed,
+            #[serde(rename = "model_cache.upstream_revision_invalid")]
+            ModelCacheUpstreamRevisionInvalid,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ModelCacheAccessRecheckUnavailable => Self::ModelCacheAccessRecheckUnavailable,
+            Raw::ModelCacheArtifactCount => Self::ModelCacheArtifactCount,
+            Raw::ModelCacheArtifactDuplicate => Self::ModelCacheArtifactDuplicate,
+            Raw::ModelCacheArtifactInvalid => Self::ModelCacheArtifactInvalid,
+            Raw::ModelCacheArtifactMissing => Self::ModelCacheArtifactMissing,
+            Raw::ModelCacheArtifactUnverified => Self::ModelCacheArtifactUnverified,
+            Raw::ModelCacheCancellationInvalid => Self::ModelCacheCancellationInvalid,
+            Raw::ModelCacheCancellationKeyReused => Self::ModelCacheCancellationKeyReused,
+            Raw::ModelCacheCapacity => Self::ModelCacheCapacity,
+            Raw::ModelCacheCoverageIncomplete => Self::ModelCacheCoverageIncomplete,
+            Raw::ModelCacheCredentialsMissing => Self::ModelCacheCredentialsMissing,
+            Raw::ModelCacheCursorInvalid => Self::ModelCacheCursorInvalid,
+            Raw::ModelCacheDependencyCount => Self::ModelCacheDependencyCount,
+            Raw::ModelCacheDigestInvalid => Self::ModelCacheDigestInvalid,
+            Raw::ModelCacheDigestMismatch => Self::ModelCacheDigestMismatch,
+            Raw::ModelCacheDigestSizeConflict => Self::ModelCacheDigestSizeConflict,
+            Raw::ModelCacheDocumentUnreadable => Self::ModelCacheDocumentUnreadable,
+            Raw::ModelCacheDownloadBlocked => Self::ModelCacheDownloadBlocked,
+            Raw::ModelCacheEntryMissing => Self::ModelCacheEntryMissing,
+            Raw::ModelCacheFixtureSourcesForbidden => Self::ModelCacheFixtureSourcesForbidden,
+            Raw::ModelCacheIdentityConflict => Self::ModelCacheIdentityConflict,
+            Raw::ModelCacheIdentityMismatch => Self::ModelCacheIdentityMismatch,
+            Raw::ModelCacheInterrupted => Self::ModelCacheInterrupted,
+            Raw::ModelCacheLockUnavailable => Self::ModelCacheLockUnavailable,
+            Raw::ModelCacheManifestIdentityMismatch => Self::ModelCacheManifestIdentityMismatch,
+            Raw::ModelCacheManifestInvalid => Self::ModelCacheManifestInvalid,
+            Raw::ModelCacheManifestTooLarge => Self::ModelCacheManifestTooLarge,
+            Raw::ModelCacheModelContentDigestsInvalid => Self::ModelCacheModelContentDigestsInvalid,
+            Raw::ModelCacheModelDefinitionInvalid => Self::ModelCacheModelDefinitionInvalid,
+            Raw::ModelCacheModelDefinitionMissing => Self::ModelCacheModelDefinitionMissing,
+            Raw::ModelCacheModelDependencyCycle => Self::ModelCacheModelDependencyCycle,
+            Raw::ModelCacheModelPinInvalid => Self::ModelCacheModelPinInvalid,
+            Raw::ModelCacheModelVariantInvalid => Self::ModelCacheModelVariantInvalid,
+            Raw::ModelCacheNotCancellable => Self::ModelCacheNotCancellable,
+            Raw::ModelCacheObjectBusy => Self::ModelCacheObjectBusy,
+            Raw::ModelCacheOperationFailed => Self::ModelCacheOperationFailed,
+            Raw::ModelCacheOperationMissing => Self::ModelCacheOperationMissing,
+            Raw::ModelCacheOperationNotObservable => Self::ModelCacheOperationNotObservable,
+            Raw::ModelCacheOperationNotRetryable => Self::ModelCacheOperationNotRetryable,
+            Raw::ModelCacheOperationUnreadable => Self::ModelCacheOperationUnreadable,
+            Raw::ModelCachePayloadInvalid => Self::ModelCachePayloadInvalid,
+            Raw::ModelCachePinMismatch => Self::ModelCachePinMismatch,
+            Raw::ModelCachePinRequired => Self::ModelCachePinRequired,
+            Raw::ModelCachePlanInvalid => Self::ModelCachePlanInvalid,
+            Raw::ModelCacheRangeInvalid => Self::ModelCacheRangeInvalid,
+            Raw::ModelCacheRateLimited => Self::ModelCacheRateLimited,
+            Raw::ModelCacheRecipeIdentityAmbiguous => Self::ModelCacheRecipeIdentityAmbiguous,
+            Raw::ModelCacheRecipeIdentityInvalid => Self::ModelCacheRecipeIdentityInvalid,
+            Raw::ModelCacheRecipeIdentityMissing => Self::ModelCacheRecipeIdentityMissing,
+            Raw::ModelCacheRecipeInvalid => Self::ModelCacheRecipeInvalid,
+            Raw::ModelCacheRecipeModelMissing => Self::ModelCacheRecipeModelMissing,
+            Raw::ModelCacheRecipeRevisionInvalid => Self::ModelCacheRecipeRevisionInvalid,
+            Raw::ModelCacheRecipeRevisionMissing => Self::ModelCacheRecipeRevisionMissing,
+            Raw::ModelCacheRedirectForbidden => Self::ModelCacheRedirectForbidden,
+            Raw::ModelCacheReleaseAssetIdentityConflict => {
+                Self::ModelCacheReleaseAssetIdentityConflict
+            }
+            Raw::ModelCacheReleaseMetadataInvalid => Self::ModelCacheReleaseMetadataInvalid,
+            Raw::ModelCacheRemovalChildFailed => Self::ModelCacheRemovalChildFailed,
+            Raw::ModelCacheRemovalChildInvalid => Self::ModelCacheRemovalChildInvalid,
+            Raw::ModelCacheRemovalChildMismatch => Self::ModelCacheRemovalChildMismatch,
+            Raw::ModelCacheRemovalChildMissing => Self::ModelCacheRemovalChildMissing,
+            Raw::ModelCacheRemovalChildPending => Self::ModelCacheRemovalChildPending,
+            Raw::ModelCacheRemovalInvalid => Self::ModelCacheRemovalInvalid,
+            Raw::ModelCacheRemovalPathUnsafe => Self::ModelCacheRemovalPathUnsafe,
+            Raw::ModelCacheRemovalPlanInvalid => Self::ModelCacheRemovalPlanInvalid,
+            Raw::ModelCacheRemovalReferenced => Self::ModelCacheRemovalReferenced,
+            Raw::ModelCacheRemovalScopeChanged => Self::ModelCacheRemovalScopeChanged,
+            Raw::ModelCacheRemovalScopeInvalid => Self::ModelCacheRemovalScopeInvalid,
+            Raw::ModelCacheRemovalScopeUnavailable => Self::ModelCacheRemovalScopeUnavailable,
+            Raw::ModelCacheRemovalWait => Self::ModelCacheRemovalWait,
+            Raw::ModelCacheRequestKeyInvalid => Self::ModelCacheRequestKeyInvalid,
+            Raw::ModelCacheRequestKeyReused => Self::ModelCacheRequestKeyReused,
+            Raw::ModelCacheReviewInvalid => Self::ModelCacheReviewInvalid,
+            Raw::ModelCacheReviewUnavailable => Self::ModelCacheReviewUnavailable,
+            Raw::ModelCacheRevisionInvalid => Self::ModelCacheRevisionInvalid,
+            Raw::ModelCacheRevisionMissing => Self::ModelCacheRevisionMissing,
+            Raw::ModelCacheSchemaUnsupported => Self::ModelCacheSchemaUnsupported,
+            Raw::ModelCacheSelectorAmbiguous => Self::ModelCacheSelectorAmbiguous,
+            Raw::ModelCacheSelectorInvalid => Self::ModelCacheSelectorInvalid,
+            Raw::ModelCacheSelectorMissing => Self::ModelCacheSelectorMissing,
+            Raw::ModelCacheSourceInvalid => Self::ModelCacheSourceInvalid,
+            Raw::ModelCacheSourceSizeMismatch => Self::ModelCacheSourceSizeMismatch,
+            Raw::ModelCacheSourceTruncated => Self::ModelCacheSourceTruncated,
+            Raw::ModelCacheSourceUnavailable => Self::ModelCacheSourceUnavailable,
+            Raw::ModelCacheSourceUnsupported => Self::ModelCacheSourceUnsupported,
+            Raw::ModelCacheSourceUntrusted => Self::ModelCacheSourceUntrusted,
+            Raw::ModelCacheStalePlan => Self::ModelCacheStalePlan,
+            Raw::ModelCacheUnavailable => Self::ModelCacheUnavailable,
+            Raw::ModelCacheUpstreamCheckBudgetExhausted => {
+                Self::ModelCacheUpstreamCheckBudgetExhausted
+            }
+            Raw::ModelCacheUpstreamCheckFailed => Self::ModelCacheUpstreamCheckFailed,
+            Raw::ModelCacheUpstreamRevisionInvalid => Self::ModelCacheUpstreamRevisionInvalid,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for NetworkInterface {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -8809,6 +15588,97 @@ impl ::std::cmp::PartialEq<str> for NetworkInterfaceKind {
 impl ::std::cmp::PartialEq<&str> for NetworkInterfaceKind {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl NodeOfflineReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unregistered => "unregistered",
+            Self::AgentInactive => "agent-inactive",
+            Self::AgentRevoked => "agent-revoked",
+            Self::NeverSeen => "never-seen",
+            Self::LastSeenInFuture => "last-seen-in-future",
+            Self::Stale => "stale",
+            Self::CertificateMissing => "certificate-missing",
+            Self::CertificateNotYetValid => "certificate-not-yet-valid",
+            Self::CertificateExpired => "certificate-expired",
+            Self::CertificateRevoked => "certificate-revoked",
+            Self::CertificateInactive => "certificate-inactive",
+        }
+    }
+}
+impl ::std::ops::Deref for NodeOfflineReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for NodeOfflineReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for NodeOfflineReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NodeOfflineReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("NodeOfflineReason", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "unregistered")]
+            Unregistered,
+            #[serde(rename = "agent-inactive")]
+            AgentInactive,
+            #[serde(rename = "agent-revoked")]
+            AgentRevoked,
+            #[serde(rename = "never-seen")]
+            NeverSeen,
+            #[serde(rename = "last-seen-in-future")]
+            LastSeenInFuture,
+            #[serde(rename = "stale")]
+            Stale,
+            #[serde(rename = "certificate-missing")]
+            CertificateMissing,
+            #[serde(rename = "certificate-not-yet-valid")]
+            CertificateNotYetValid,
+            #[serde(rename = "certificate-expired")]
+            CertificateExpired,
+            #[serde(rename = "certificate-revoked")]
+            CertificateRevoked,
+            #[serde(rename = "certificate-inactive")]
+            CertificateInactive,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Unregistered => Self::Unregistered,
+            Raw::AgentInactive => Self::AgentInactive,
+            Raw::AgentRevoked => Self::AgentRevoked,
+            Raw::NeverSeen => Self::NeverSeen,
+            Raw::LastSeenInFuture => Self::LastSeenInFuture,
+            Raw::Stale => Self::Stale,
+            Raw::CertificateMissing => Self::CertificateMissing,
+            Raw::CertificateNotYetValid => Self::CertificateNotYetValid,
+            Raw::CertificateExpired => Self::CertificateExpired,
+            Raw::CertificateRevoked => Self::CertificateRevoked,
+            Raw::CertificateInactive => Self::CertificateInactive,
+        })
     }
 }
 impl ObservationCause {
@@ -8889,6 +15759,61 @@ impl<'de> ::serde::Deserialize<'de> for OperationCheckpoint {
             digest: raw.digest,
             key: raw.key,
             sequence: raw.sequence,
+        })
+    }
+}
+impl OperationFailureCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::FleetProfileApplicationFailed => "fleet_profile_application_failed",
+            Self::ArtifactProcessFailed => "artifact_process_failed",
+        }
+    }
+}
+impl ::std::ops::Deref for OperationFailureCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for OperationFailureCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for OperationFailureCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OperationFailureCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("OperationFailureCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "fleet_profile_application_failed")]
+            FleetProfileApplicationFailed,
+            #[serde(rename = "artifact_process_failed")]
+            ArtifactProcessFailed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::FleetProfileApplicationFailed => Self::FleetProfileApplicationFailed,
+            Raw::ArtifactProcessFailed => Self::ArtifactProcessFailed,
         })
     }
 }
@@ -9598,6 +16523,457 @@ impl<'de> ::serde::Deserialize<'de> for PackageRollbackSource {
         })
     }
 }
+impl PrebuiltImageCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PrebuiltBuildKeyMismatch => "prebuilt.build_key_mismatch",
+            Self::PrebuiltNotPinned => "prebuilt.not_pinned",
+            Self::PrebuiltPullFailedRecently => "prebuilt.pull_failed_recently",
+            Self::PrebuiltUsed => "prebuilt.used",
+        }
+    }
+}
+impl ::std::ops::Deref for PrebuiltImageCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for PrebuiltImageCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for PrebuiltImageCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for PrebuiltImageCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("PrebuiltImageCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "prebuilt.build_key_mismatch")]
+            PrebuiltBuildKeyMismatch,
+            #[serde(rename = "prebuilt.not_pinned")]
+            PrebuiltNotPinned,
+            #[serde(rename = "prebuilt.pull_failed_recently")]
+            PrebuiltPullFailedRecently,
+            #[serde(rename = "prebuilt.used")]
+            PrebuiltUsed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::PrebuiltBuildKeyMismatch => Self::PrebuiltBuildKeyMismatch,
+            Raw::PrebuiltNotPinned => Self::PrebuiltNotPinned,
+            Raw::PrebuiltPullFailedRecently => Self::PrebuiltPullFailedRecently,
+            Raw::PrebuiltUsed => Self::PrebuiltUsed,
+        })
+    }
+}
+impl ProfileReasonCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ProfileAdmissionBusy => "profile.admission_busy",
+            Self::ProfileAdmissionEffectBusy => "profile.admission_effect_busy",
+            Self::ProfileApplicationIntentInvalid => "profile.application_intent.invalid",
+            Self::ProfileChoicesUnreadable => "profile.choices_unreadable",
+            Self::ProfileCleanupDelegated => "profile.cleanup_delegated",
+            Self::ProfileDistributedCrossScope => "profile.distributed_cross_scope",
+            Self::ProfileIncompleteMultiSparkModel => "profile.incomplete_multi_spark_model",
+            Self::ProfileInterruptionExpected => "profile.interruption_expected",
+            Self::ProfilePendingCrossScope => "profile.pending_cross_scope",
+            Self::ProfilePreparationNotStarted => "profile.preparation_not_started",
+            Self::ProfilePreparationScopeMismatch => "profile.preparation_scope_mismatch",
+            Self::ProfilePreparationUnavailable => "profile.preparation_unavailable",
+            Self::ProfileRecipeUnavailable => "profile.recipe_unavailable",
+            Self::ProfileRecoveryAssignmentsChanged => "profile.recovery_assignments_changed",
+            Self::ProfileRecoveryCachePending => "profile.recovery_cache_pending",
+            Self::ProfileRecoveryScopeChanged => "profile.recovery_scope_changed",
+            Self::ProfileRecoveryWaiting => "profile.recovery_waiting",
+            Self::ProfileResourceRecheckUnavailable => "profile.resource_recheck_unavailable",
+            Self::ProfileRetryConflict => "profile.retry_conflict",
+            Self::ProfileRetryExecutorUnavailable => "profile.retry_executor_unavailable",
+            Self::ProfileRetryIntentUnavailable => "profile.retry_intent_unavailable",
+            Self::ProfileRetryReviewUnavailable => "profile.retry_review_unavailable",
+            Self::ProfileReviewStale => "profile.review_stale",
+            Self::ProfileRuntimeImageRebuildPending => "profile.runtime_image_rebuild_pending",
+            Self::ProfileSharedInstallationScope => "profile.shared_installation_scope",
+            Self::ProfileSparkRemoved => "profile.spark_removed",
+            Self::ProfileSparkUnavailable => "profile.spark_unavailable",
+            Self::ProfileStalePlan => "profile.stale_plan",
+            Self::ProfileSwitchAuthorityUnavailable => "profile.switch_authority_unavailable",
+            Self::ProfileSwitchScopeUnresolved => "profile.switch_scope_unresolved",
+            Self::ProfileTopologyIncomplete => "profile.topology_incomplete",
+            Self::ProfileRecoveryArtifactChanged => "profile.recovery_artifact_changed",
+            Self::ProfileRuntimeImageChanged => "profile.runtime-image-changed",
+            Self::ProfileSelectionLost => "profile.selection_lost",
+            Self::ProfileAssetReservationUnavailable => "profile.asset_reservation_unavailable",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileReasonCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileReasonCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileReasonCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileReasonCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ProfileReasonCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "profile.admission_busy")]
+            ProfileAdmissionBusy,
+            #[serde(rename = "profile.admission_effect_busy")]
+            ProfileAdmissionEffectBusy,
+            #[serde(rename = "profile.application_intent.invalid")]
+            ProfileApplicationIntentInvalid,
+            #[serde(rename = "profile.choices_unreadable")]
+            ProfileChoicesUnreadable,
+            #[serde(rename = "profile.cleanup_delegated")]
+            ProfileCleanupDelegated,
+            #[serde(rename = "profile.distributed_cross_scope")]
+            ProfileDistributedCrossScope,
+            #[serde(rename = "profile.incomplete_multi_spark_model")]
+            ProfileIncompleteMultiSparkModel,
+            #[serde(rename = "profile.interruption_expected")]
+            ProfileInterruptionExpected,
+            #[serde(rename = "profile.pending_cross_scope")]
+            ProfilePendingCrossScope,
+            #[serde(rename = "profile.preparation_not_started")]
+            ProfilePreparationNotStarted,
+            #[serde(rename = "profile.preparation_scope_mismatch")]
+            ProfilePreparationScopeMismatch,
+            #[serde(rename = "profile.preparation_unavailable")]
+            ProfilePreparationUnavailable,
+            #[serde(rename = "profile.recipe_unavailable")]
+            ProfileRecipeUnavailable,
+            #[serde(rename = "profile.recovery_assignments_changed")]
+            ProfileRecoveryAssignmentsChanged,
+            #[serde(rename = "profile.recovery_cache_pending")]
+            ProfileRecoveryCachePending,
+            #[serde(rename = "profile.recovery_scope_changed")]
+            ProfileRecoveryScopeChanged,
+            #[serde(rename = "profile.recovery_waiting")]
+            ProfileRecoveryWaiting,
+            #[serde(rename = "profile.resource_recheck_unavailable")]
+            ProfileResourceRecheckUnavailable,
+            #[serde(rename = "profile.retry_conflict")]
+            ProfileRetryConflict,
+            #[serde(rename = "profile.retry_executor_unavailable")]
+            ProfileRetryExecutorUnavailable,
+            #[serde(rename = "profile.retry_intent_unavailable")]
+            ProfileRetryIntentUnavailable,
+            #[serde(rename = "profile.retry_review_unavailable")]
+            ProfileRetryReviewUnavailable,
+            #[serde(rename = "profile.review_stale")]
+            ProfileReviewStale,
+            #[serde(rename = "profile.runtime_image_rebuild_pending")]
+            ProfileRuntimeImageRebuildPending,
+            #[serde(rename = "profile.shared_installation_scope")]
+            ProfileSharedInstallationScope,
+            #[serde(rename = "profile.spark_removed")]
+            ProfileSparkRemoved,
+            #[serde(rename = "profile.spark_unavailable")]
+            ProfileSparkUnavailable,
+            #[serde(rename = "profile.stale_plan")]
+            ProfileStalePlan,
+            #[serde(rename = "profile.switch_authority_unavailable")]
+            ProfileSwitchAuthorityUnavailable,
+            #[serde(rename = "profile.switch_scope_unresolved")]
+            ProfileSwitchScopeUnresolved,
+            #[serde(rename = "profile.topology_incomplete")]
+            ProfileTopologyIncomplete,
+            #[serde(rename = "profile.recovery_artifact_changed")]
+            ProfileRecoveryArtifactChanged,
+            #[serde(rename = "profile.runtime-image-changed")]
+            ProfileRuntimeImageChanged,
+            #[serde(rename = "profile.selection_lost")]
+            ProfileSelectionLost,
+            #[serde(rename = "profile.asset_reservation_unavailable")]
+            ProfileAssetReservationUnavailable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ProfileAdmissionBusy => Self::ProfileAdmissionBusy,
+            Raw::ProfileAdmissionEffectBusy => Self::ProfileAdmissionEffectBusy,
+            Raw::ProfileApplicationIntentInvalid => Self::ProfileApplicationIntentInvalid,
+            Raw::ProfileChoicesUnreadable => Self::ProfileChoicesUnreadable,
+            Raw::ProfileCleanupDelegated => Self::ProfileCleanupDelegated,
+            Raw::ProfileDistributedCrossScope => Self::ProfileDistributedCrossScope,
+            Raw::ProfileIncompleteMultiSparkModel => Self::ProfileIncompleteMultiSparkModel,
+            Raw::ProfileInterruptionExpected => Self::ProfileInterruptionExpected,
+            Raw::ProfilePendingCrossScope => Self::ProfilePendingCrossScope,
+            Raw::ProfilePreparationNotStarted => Self::ProfilePreparationNotStarted,
+            Raw::ProfilePreparationScopeMismatch => Self::ProfilePreparationScopeMismatch,
+            Raw::ProfilePreparationUnavailable => Self::ProfilePreparationUnavailable,
+            Raw::ProfileRecipeUnavailable => Self::ProfileRecipeUnavailable,
+            Raw::ProfileRecoveryAssignmentsChanged => Self::ProfileRecoveryAssignmentsChanged,
+            Raw::ProfileRecoveryCachePending => Self::ProfileRecoveryCachePending,
+            Raw::ProfileRecoveryScopeChanged => Self::ProfileRecoveryScopeChanged,
+            Raw::ProfileRecoveryWaiting => Self::ProfileRecoveryWaiting,
+            Raw::ProfileResourceRecheckUnavailable => Self::ProfileResourceRecheckUnavailable,
+            Raw::ProfileRetryConflict => Self::ProfileRetryConflict,
+            Raw::ProfileRetryExecutorUnavailable => Self::ProfileRetryExecutorUnavailable,
+            Raw::ProfileRetryIntentUnavailable => Self::ProfileRetryIntentUnavailable,
+            Raw::ProfileRetryReviewUnavailable => Self::ProfileRetryReviewUnavailable,
+            Raw::ProfileReviewStale => Self::ProfileReviewStale,
+            Raw::ProfileRuntimeImageRebuildPending => Self::ProfileRuntimeImageRebuildPending,
+            Raw::ProfileSharedInstallationScope => Self::ProfileSharedInstallationScope,
+            Raw::ProfileSparkRemoved => Self::ProfileSparkRemoved,
+            Raw::ProfileSparkUnavailable => Self::ProfileSparkUnavailable,
+            Raw::ProfileStalePlan => Self::ProfileStalePlan,
+            Raw::ProfileSwitchAuthorityUnavailable => Self::ProfileSwitchAuthorityUnavailable,
+            Raw::ProfileSwitchScopeUnresolved => Self::ProfileSwitchScopeUnresolved,
+            Raw::ProfileTopologyIncomplete => Self::ProfileTopologyIncomplete,
+            Raw::ProfileRecoveryArtifactChanged => Self::ProfileRecoveryArtifactChanged,
+            Raw::ProfileRuntimeImageChanged => Self::ProfileRuntimeImageChanged,
+            Raw::ProfileSelectionLost => Self::ProfileSelectionLost,
+            Raw::ProfileAssetReservationUnavailable => Self::ProfileAssetReservationUnavailable,
+        })
+    }
+}
+impl ProjectionCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CpuLowClock => "cpu.low-clock",
+            Self::InstallPartial => "install.partial",
+            Self::InventoryMissing => "inventory.missing",
+            Self::InventoryStale => "inventory.stale",
+            Self::NetworkNasRouteWifiNoWiredPort => "network.nas-route-wifi-no-wired-port",
+            Self::NetworkNasRouteWifiWiredPortDown => "network.nas-route-wifi-wired-port-down",
+            Self::NetworkNasRouteWifiWiredPortUnused => "network.nas-route-wifi-wired-port-unused",
+            Self::NodeOffline => "node.offline",
+            Self::ProfileRetrying => "profile.retrying",
+            Self::RecipeUpdateAvailable => "recipe.update_available",
+            Self::RunDegraded => "run.degraded",
+            Self::TelemetryDelayed => "telemetry.delayed",
+            Self::TelemetryMissing => "telemetry.missing",
+            Self::TelemetryStale => "telemetry.stale",
+        }
+    }
+}
+impl ::std::ops::Deref for ProjectionCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProjectionCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProjectionCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProjectionCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ProjectionCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "cpu.low-clock")]
+            CpuLowClock,
+            #[serde(rename = "install.partial")]
+            InstallPartial,
+            #[serde(rename = "inventory.missing")]
+            InventoryMissing,
+            #[serde(rename = "inventory.stale")]
+            InventoryStale,
+            #[serde(rename = "network.nas-route-wifi-no-wired-port")]
+            NetworkNasRouteWifiNoWiredPort,
+            #[serde(rename = "network.nas-route-wifi-wired-port-down")]
+            NetworkNasRouteWifiWiredPortDown,
+            #[serde(rename = "network.nas-route-wifi-wired-port-unused")]
+            NetworkNasRouteWifiWiredPortUnused,
+            #[serde(rename = "node.offline")]
+            NodeOffline,
+            #[serde(rename = "profile.retrying")]
+            ProfileRetrying,
+            #[serde(rename = "recipe.update_available")]
+            RecipeUpdateAvailable,
+            #[serde(rename = "run.degraded")]
+            RunDegraded,
+            #[serde(rename = "telemetry.delayed")]
+            TelemetryDelayed,
+            #[serde(rename = "telemetry.missing")]
+            TelemetryMissing,
+            #[serde(rename = "telemetry.stale")]
+            TelemetryStale,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CpuLowClock => Self::CpuLowClock,
+            Raw::InstallPartial => Self::InstallPartial,
+            Raw::InventoryMissing => Self::InventoryMissing,
+            Raw::InventoryStale => Self::InventoryStale,
+            Raw::NetworkNasRouteWifiNoWiredPort => Self::NetworkNasRouteWifiNoWiredPort,
+            Raw::NetworkNasRouteWifiWiredPortDown => Self::NetworkNasRouteWifiWiredPortDown,
+            Raw::NetworkNasRouteWifiWiredPortUnused => Self::NetworkNasRouteWifiWiredPortUnused,
+            Raw::NodeOffline => Self::NodeOffline,
+            Raw::ProfileRetrying => Self::ProfileRetrying,
+            Raw::RecipeUpdateAvailable => Self::RecipeUpdateAvailable,
+            Raw::RunDegraded => Self::RunDegraded,
+            Raw::TelemetryDelayed => Self::TelemetryDelayed,
+            Raw::TelemetryMissing => Self::TelemetryMissing,
+            Raw::TelemetryStale => Self::TelemetryStale,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ReasonCodeVocabulary", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub admission_code: AdmissionCode,
+            pub artifact_lifecycle_code: ArtifactLifecycleCode,
+            pub cache_reference_reason: CacheReferenceReason,
+            pub catalog_code: CatalogCode,
+            pub catalog_sync_code: CatalogSyncCode,
+            pub cluster_mapping_code: ClusterMappingCode,
+            pub controller_error_code: ControllerErrorCode,
+            pub distribution_code: DistributionCode,
+            pub image_store_code: ImageStoreCode,
+            pub install_admission_code: InstallAdmissionCode,
+            pub install_degraded_reason: InstallDegradedReason,
+            pub library_assessment_code: LibraryAssessmentCode,
+            pub library_projection_code: LibraryProjectionCode,
+            pub model_cache_blocker_code: ModelCacheBlockerCode,
+            pub model_cache_code: ModelCacheCode,
+            pub node_offline_reason: NodeOfflineReason,
+            pub operation_failure_code: OperationFailureCode,
+            pub prebuilt_image_code: PrebuiltImageCode,
+            pub profile_reason_code: ProfileReasonCode,
+            pub projection_code: ProjectionCode,
+            pub recipe_build_code: RecipeBuildCode,
+            pub recipe_image_code: RecipeImageCode,
+            pub recipe_operation_code: RecipeOperationCode,
+            pub recipe_package_code: RecipePackageCode,
+            pub recipe_update_code: RecipeUpdateCode,
+            pub reconcile_code: ReconcileCode,
+            pub resource_planning_code: ResourcePlanningCode,
+            pub resource_term: ResourceTerm,
+            pub resource_term_problem: ResourceTermProblem,
+            pub run_degraded_reason: RunDegradedReason,
+            pub run_switch_code: RunSwitchCode,
+            pub runtime_image_code: RuntimeImageCode,
+            pub runtime_preflight_code: RuntimePreflightCode,
+            pub source_bundle_code: SourceBundleCode,
+            pub source_policy_code: SourcePolicyCode,
+            pub stop_plan_code: StopPlanCode,
+            pub storage_demand_code: StorageDemandCode,
+            pub supersede_code: SupersedeCode,
+            pub topology_code: TopologyCode,
+            pub uninstall_plan_code: UninstallPlanCode,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            admission_code: raw.admission_code,
+            artifact_lifecycle_code: raw.artifact_lifecycle_code,
+            cache_reference_reason: raw.cache_reference_reason,
+            catalog_code: raw.catalog_code,
+            catalog_sync_code: raw.catalog_sync_code,
+            cluster_mapping_code: raw.cluster_mapping_code,
+            controller_error_code: raw.controller_error_code,
+            distribution_code: raw.distribution_code,
+            image_store_code: raw.image_store_code,
+            install_admission_code: raw.install_admission_code,
+            install_degraded_reason: raw.install_degraded_reason,
+            library_assessment_code: raw.library_assessment_code,
+            library_projection_code: raw.library_projection_code,
+            model_cache_blocker_code: raw.model_cache_blocker_code,
+            model_cache_code: raw.model_cache_code,
+            node_offline_reason: raw.node_offline_reason,
+            operation_failure_code: raw.operation_failure_code,
+            prebuilt_image_code: raw.prebuilt_image_code,
+            profile_reason_code: raw.profile_reason_code,
+            projection_code: raw.projection_code,
+            recipe_build_code: raw.recipe_build_code,
+            recipe_image_code: raw.recipe_image_code,
+            recipe_operation_code: raw.recipe_operation_code,
+            recipe_package_code: raw.recipe_package_code,
+            recipe_update_code: raw.recipe_update_code,
+            reconcile_code: raw.reconcile_code,
+            resource_planning_code: raw.resource_planning_code,
+            resource_term: raw.resource_term,
+            resource_term_problem: raw.resource_term_problem,
+            run_degraded_reason: raw.run_degraded_reason,
+            run_switch_code: raw.run_switch_code,
+            runtime_image_code: raw.runtime_image_code,
+            runtime_preflight_code: raw.runtime_preflight_code,
+            source_bundle_code: raw.source_bundle_code,
+            source_policy_code: raw.source_policy_code,
+            stop_plan_code: raw.stop_plan_code,
+            storage_demand_code: raw.storage_demand_code,
+            supersede_code: raw.supersede_code,
+            topology_code: raw.topology_code,
+            uninstall_plan_code: raw.uninstall_plan_code,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdapter {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -9713,6 +17089,178 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupRequest {
         Ok(Self {
             build_id: raw.build_id,
             operation_id: raw.operation_id,
+        })
+    }
+}
+impl RecipeBuildCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::BuildAdapterUnavailable => "build.adapter_unavailable",
+            Self::BuildCancellationPending => "build.cancellation_pending",
+            Self::BuildCapabilityMissing => "build.capability_missing",
+            Self::BuildCapacityBusy => "build.capacity_busy",
+            Self::BuildCapacityContractInvalid => "build.capacity_contract_invalid",
+            Self::BuildConsumerBusy => "build.consumer_busy",
+            Self::BuildConsumerInvalid => "build.consumer_invalid",
+            Self::BuildContractInvalid => "build.contract_invalid",
+            Self::BuildDependenciesStale => "build.dependencies_stale",
+            Self::BuildEvidenceInvalid => "build.evidence_invalid",
+            Self::BuildImageSizeInvalid => "build.image_size_invalid",
+            Self::BuildInputMismatch => "build.input_mismatch",
+            Self::BuildInsufficientDisk => "build.insufficient_disk",
+            Self::BuildInsufficientMemory => "build.insufficient_memory",
+            Self::BuildInventoryMissing => "build.inventory_missing",
+            Self::BuildInventoryStale => "build.inventory_stale",
+            Self::BuildNetworkCapabilityMissing => "build.network_capability_missing",
+            Self::BuildNodeIncompatible => "build.node_incompatible",
+            Self::BuildNodeUnknown => "build.node_unknown",
+            Self::BuildPlanInvalid => "build.plan_invalid",
+            Self::BuildProducerInvalid => "build.producer_invalid",
+            Self::BuildRecipeUnresolved => "build.recipe_unresolved",
+            Self::BuildResolutionStale => "build.resolution_stale",
+            Self::BuildResourcesInvalid => "build.resources_invalid",
+            Self::BuildResultConflict => "build.result_conflict",
+            Self::BuildRuntimeChanged => "build.runtime_changed",
+            Self::BuildSecurityInvalid => "build.security_invalid",
+            Self::BuildSourceInvalid => "build.source_invalid",
+            Self::BuildSourceUnavailable => "build.source_unavailable",
+            Self::BuildState => "build.state",
+            Self::BuildSharedConsumers => "build.shared_consumers",
+        }
+    }
+}
+impl ::std::ops::Deref for RecipeBuildCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RecipeBuildCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RecipeBuildCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeBuildCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeBuildCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "build.adapter_unavailable")]
+            BuildAdapterUnavailable,
+            #[serde(rename = "build.cancellation_pending")]
+            BuildCancellationPending,
+            #[serde(rename = "build.capability_missing")]
+            BuildCapabilityMissing,
+            #[serde(rename = "build.capacity_busy")]
+            BuildCapacityBusy,
+            #[serde(rename = "build.capacity_contract_invalid")]
+            BuildCapacityContractInvalid,
+            #[serde(rename = "build.consumer_busy")]
+            BuildConsumerBusy,
+            #[serde(rename = "build.consumer_invalid")]
+            BuildConsumerInvalid,
+            #[serde(rename = "build.contract_invalid")]
+            BuildContractInvalid,
+            #[serde(rename = "build.dependencies_stale")]
+            BuildDependenciesStale,
+            #[serde(rename = "build.evidence_invalid")]
+            BuildEvidenceInvalid,
+            #[serde(rename = "build.image_size_invalid")]
+            BuildImageSizeInvalid,
+            #[serde(rename = "build.input_mismatch")]
+            BuildInputMismatch,
+            #[serde(rename = "build.insufficient_disk")]
+            BuildInsufficientDisk,
+            #[serde(rename = "build.insufficient_memory")]
+            BuildInsufficientMemory,
+            #[serde(rename = "build.inventory_missing")]
+            BuildInventoryMissing,
+            #[serde(rename = "build.inventory_stale")]
+            BuildInventoryStale,
+            #[serde(rename = "build.network_capability_missing")]
+            BuildNetworkCapabilityMissing,
+            #[serde(rename = "build.node_incompatible")]
+            BuildNodeIncompatible,
+            #[serde(rename = "build.node_unknown")]
+            BuildNodeUnknown,
+            #[serde(rename = "build.plan_invalid")]
+            BuildPlanInvalid,
+            #[serde(rename = "build.producer_invalid")]
+            BuildProducerInvalid,
+            #[serde(rename = "build.recipe_unresolved")]
+            BuildRecipeUnresolved,
+            #[serde(rename = "build.resolution_stale")]
+            BuildResolutionStale,
+            #[serde(rename = "build.resources_invalid")]
+            BuildResourcesInvalid,
+            #[serde(rename = "build.result_conflict")]
+            BuildResultConflict,
+            #[serde(rename = "build.runtime_changed")]
+            BuildRuntimeChanged,
+            #[serde(rename = "build.security_invalid")]
+            BuildSecurityInvalid,
+            #[serde(rename = "build.source_invalid")]
+            BuildSourceInvalid,
+            #[serde(rename = "build.source_unavailable")]
+            BuildSourceUnavailable,
+            #[serde(rename = "build.state")]
+            BuildState,
+            #[serde(rename = "build.shared_consumers")]
+            BuildSharedConsumers,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::BuildAdapterUnavailable => Self::BuildAdapterUnavailable,
+            Raw::BuildCancellationPending => Self::BuildCancellationPending,
+            Raw::BuildCapabilityMissing => Self::BuildCapabilityMissing,
+            Raw::BuildCapacityBusy => Self::BuildCapacityBusy,
+            Raw::BuildCapacityContractInvalid => Self::BuildCapacityContractInvalid,
+            Raw::BuildConsumerBusy => Self::BuildConsumerBusy,
+            Raw::BuildConsumerInvalid => Self::BuildConsumerInvalid,
+            Raw::BuildContractInvalid => Self::BuildContractInvalid,
+            Raw::BuildDependenciesStale => Self::BuildDependenciesStale,
+            Raw::BuildEvidenceInvalid => Self::BuildEvidenceInvalid,
+            Raw::BuildImageSizeInvalid => Self::BuildImageSizeInvalid,
+            Raw::BuildInputMismatch => Self::BuildInputMismatch,
+            Raw::BuildInsufficientDisk => Self::BuildInsufficientDisk,
+            Raw::BuildInsufficientMemory => Self::BuildInsufficientMemory,
+            Raw::BuildInventoryMissing => Self::BuildInventoryMissing,
+            Raw::BuildInventoryStale => Self::BuildInventoryStale,
+            Raw::BuildNetworkCapabilityMissing => Self::BuildNetworkCapabilityMissing,
+            Raw::BuildNodeIncompatible => Self::BuildNodeIncompatible,
+            Raw::BuildNodeUnknown => Self::BuildNodeUnknown,
+            Raw::BuildPlanInvalid => Self::BuildPlanInvalid,
+            Raw::BuildProducerInvalid => Self::BuildProducerInvalid,
+            Raw::BuildRecipeUnresolved => Self::BuildRecipeUnresolved,
+            Raw::BuildResolutionStale => Self::BuildResolutionStale,
+            Raw::BuildResourcesInvalid => Self::BuildResourcesInvalid,
+            Raw::BuildResultConflict => Self::BuildResultConflict,
+            Raw::BuildRuntimeChanged => Self::BuildRuntimeChanged,
+            Raw::BuildSecurityInvalid => Self::BuildSecurityInvalid,
+            Raw::BuildSourceInvalid => Self::BuildSourceInvalid,
+            Raw::BuildSourceUnavailable => Self::BuildSourceUnavailable,
+            Raw::BuildState => Self::BuildState,
+            Raw::BuildSharedConsumers => Self::BuildSharedConsumers,
         })
     }
 }
@@ -10002,6 +17550,252 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildRequest {
         })
     }
 }
+impl RecipeImageCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RecipeImageActionInvalid => "recipe_image.action_invalid",
+            Self::RecipeImageBuildCancelled => "recipe_image.build_cancelled",
+            Self::RecipeImageBuildCapacityWait => "recipe_image.build_capacity_wait",
+            Self::RecipeImageBuildFailed => "recipe_image.build_failed",
+            Self::RecipeImageBuildInputMissing => "recipe_image.build_input_missing",
+            Self::RecipeImageBuildInvalid => "recipe_image.build_invalid",
+            Self::RecipeImageBuildUnavailable => "recipe_image.build_unavailable",
+            Self::RecipeImageBuildWait => "recipe_image.build_wait",
+            Self::RecipeImageBuilderBusy => "recipe_image.builder_busy",
+            Self::RecipeImageBuilderOccupied => "recipe_image.builder_occupied",
+            Self::RecipeImageCancelBusy => "recipe_image.cancel_busy",
+            Self::RecipeImageCancelRequestKeyReused => "recipe_image.cancel_request_key_reused",
+            Self::RecipeImageCancellationInvalid => "recipe_image.cancellation_invalid",
+            Self::RecipeImageClaimLost => "recipe_image.claim_lost",
+            Self::RecipeImageDatabaseBusy => "recipe_image.database_busy",
+            Self::RecipeImageIdentityConflict => "recipe_image.identity_conflict",
+            Self::RecipeImageIdentityInvalid => "recipe_image.identity_invalid",
+            Self::RecipeImageInsufficientDisk => "recipe_image.insufficient_disk",
+            Self::RecipeImageInsufficientMemory => "recipe_image.insufficient_memory",
+            Self::RecipeImageMetadataRefreshFailed => "recipe_image.metadata_refresh_failed",
+            Self::RecipeImageMetadataRefreshUnavailable => {
+                "recipe_image.metadata_refresh_unavailable"
+            }
+            Self::RecipeImageModelCacheFailed => "recipe_image.model_cache_failed",
+            Self::RecipeImageModelCacheInvalid => "recipe_image.model_cache_invalid",
+            Self::RecipeImageModelCacheUnavailable => "recipe_image.model_cache_unavailable",
+            Self::RecipeImageModelChildCancelled => "recipe_image.model_child_cancelled",
+            Self::RecipeImageModelChildMissing => "recipe_image.model_child_missing",
+            Self::RecipeImageNoBuilder => "recipe_image.no_builder",
+            Self::RecipeImageNotCancellable => "recipe_image.not_cancellable",
+            Self::RecipeImageNotRetryable => "recipe_image.not_retryable",
+            Self::RecipeImageOperationInvalid => "recipe_image.operation_invalid",
+            Self::RecipeImageOperationMissing => "recipe_image.operation_missing",
+            Self::RecipeImagePreparationFailed => "recipe_image.preparation_failed",
+            Self::RecipeImagePreparing => "recipe_image.preparing",
+            Self::RecipeImageRecipeInvalid => "recipe_image.recipe_invalid",
+            Self::RecipeImageRecipeUnavailable => "recipe_image.recipe_unavailable",
+            Self::RecipeImageRemovalChoiceInvalid => "recipe_image.removal_choice_invalid",
+            Self::RecipeImageRemovalFailed => "recipe_image.removal_failed",
+            Self::RecipeImageRemovalReferenced => "recipe_image.removal_referenced",
+            Self::RecipeImageRemovalScopeLimited => "recipe_image.removal_scope_limited",
+            Self::RecipeImageRequestKeyReused => "recipe_image.request_key_reused",
+            Self::RecipeImageRuntimeInvalid => "recipe_image.runtime_invalid",
+            Self::RecipeImageSelectorAmbiguous => "recipe_image.selector_ambiguous",
+            Self::RecipeImageSelectorInvalid => "recipe_image.selector_invalid",
+            Self::RecipeImageSelectorMissing => "recipe_image.selector_missing",
+            Self::RecipeImageSourcePolicyRefused => "recipe_image.source_policy_refused",
+            Self::RecipeImageSupersededByNewerRevision => {
+                "recipe_image.superseded_by_newer_revision"
+            }
+            Self::RecipeImageWaitingForModel => "recipe_image.waiting_for_model",
+            Self::RecipeImageWaitingForWorker => "recipe_image.waiting_for_worker",
+        }
+    }
+}
+impl ::std::ops::Deref for RecipeImageCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RecipeImageCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RecipeImageCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeImageCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeImageCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "recipe_image.action_invalid")]
+            RecipeImageActionInvalid,
+            #[serde(rename = "recipe_image.build_cancelled")]
+            RecipeImageBuildCancelled,
+            #[serde(rename = "recipe_image.build_capacity_wait")]
+            RecipeImageBuildCapacityWait,
+            #[serde(rename = "recipe_image.build_failed")]
+            RecipeImageBuildFailed,
+            #[serde(rename = "recipe_image.build_input_missing")]
+            RecipeImageBuildInputMissing,
+            #[serde(rename = "recipe_image.build_invalid")]
+            RecipeImageBuildInvalid,
+            #[serde(rename = "recipe_image.build_unavailable")]
+            RecipeImageBuildUnavailable,
+            #[serde(rename = "recipe_image.build_wait")]
+            RecipeImageBuildWait,
+            #[serde(rename = "recipe_image.builder_busy")]
+            RecipeImageBuilderBusy,
+            #[serde(rename = "recipe_image.builder_occupied")]
+            RecipeImageBuilderOccupied,
+            #[serde(rename = "recipe_image.cancel_busy")]
+            RecipeImageCancelBusy,
+            #[serde(rename = "recipe_image.cancel_request_key_reused")]
+            RecipeImageCancelRequestKeyReused,
+            #[serde(rename = "recipe_image.cancellation_invalid")]
+            RecipeImageCancellationInvalid,
+            #[serde(rename = "recipe_image.claim_lost")]
+            RecipeImageClaimLost,
+            #[serde(rename = "recipe_image.database_busy")]
+            RecipeImageDatabaseBusy,
+            #[serde(rename = "recipe_image.identity_conflict")]
+            RecipeImageIdentityConflict,
+            #[serde(rename = "recipe_image.identity_invalid")]
+            RecipeImageIdentityInvalid,
+            #[serde(rename = "recipe_image.insufficient_disk")]
+            RecipeImageInsufficientDisk,
+            #[serde(rename = "recipe_image.insufficient_memory")]
+            RecipeImageInsufficientMemory,
+            #[serde(rename = "recipe_image.metadata_refresh_failed")]
+            RecipeImageMetadataRefreshFailed,
+            #[serde(rename = "recipe_image.metadata_refresh_unavailable")]
+            RecipeImageMetadataRefreshUnavailable,
+            #[serde(rename = "recipe_image.model_cache_failed")]
+            RecipeImageModelCacheFailed,
+            #[serde(rename = "recipe_image.model_cache_invalid")]
+            RecipeImageModelCacheInvalid,
+            #[serde(rename = "recipe_image.model_cache_unavailable")]
+            RecipeImageModelCacheUnavailable,
+            #[serde(rename = "recipe_image.model_child_cancelled")]
+            RecipeImageModelChildCancelled,
+            #[serde(rename = "recipe_image.model_child_missing")]
+            RecipeImageModelChildMissing,
+            #[serde(rename = "recipe_image.no_builder")]
+            RecipeImageNoBuilder,
+            #[serde(rename = "recipe_image.not_cancellable")]
+            RecipeImageNotCancellable,
+            #[serde(rename = "recipe_image.not_retryable")]
+            RecipeImageNotRetryable,
+            #[serde(rename = "recipe_image.operation_invalid")]
+            RecipeImageOperationInvalid,
+            #[serde(rename = "recipe_image.operation_missing")]
+            RecipeImageOperationMissing,
+            #[serde(rename = "recipe_image.preparation_failed")]
+            RecipeImagePreparationFailed,
+            #[serde(rename = "recipe_image.preparing")]
+            RecipeImagePreparing,
+            #[serde(rename = "recipe_image.recipe_invalid")]
+            RecipeImageRecipeInvalid,
+            #[serde(rename = "recipe_image.recipe_unavailable")]
+            RecipeImageRecipeUnavailable,
+            #[serde(rename = "recipe_image.removal_choice_invalid")]
+            RecipeImageRemovalChoiceInvalid,
+            #[serde(rename = "recipe_image.removal_failed")]
+            RecipeImageRemovalFailed,
+            #[serde(rename = "recipe_image.removal_referenced")]
+            RecipeImageRemovalReferenced,
+            #[serde(rename = "recipe_image.removal_scope_limited")]
+            RecipeImageRemovalScopeLimited,
+            #[serde(rename = "recipe_image.request_key_reused")]
+            RecipeImageRequestKeyReused,
+            #[serde(rename = "recipe_image.runtime_invalid")]
+            RecipeImageRuntimeInvalid,
+            #[serde(rename = "recipe_image.selector_ambiguous")]
+            RecipeImageSelectorAmbiguous,
+            #[serde(rename = "recipe_image.selector_invalid")]
+            RecipeImageSelectorInvalid,
+            #[serde(rename = "recipe_image.selector_missing")]
+            RecipeImageSelectorMissing,
+            #[serde(rename = "recipe_image.source_policy_refused")]
+            RecipeImageSourcePolicyRefused,
+            #[serde(rename = "recipe_image.superseded_by_newer_revision")]
+            RecipeImageSupersededByNewerRevision,
+            #[serde(rename = "recipe_image.waiting_for_model")]
+            RecipeImageWaitingForModel,
+            #[serde(rename = "recipe_image.waiting_for_worker")]
+            RecipeImageWaitingForWorker,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RecipeImageActionInvalid => Self::RecipeImageActionInvalid,
+            Raw::RecipeImageBuildCancelled => Self::RecipeImageBuildCancelled,
+            Raw::RecipeImageBuildCapacityWait => Self::RecipeImageBuildCapacityWait,
+            Raw::RecipeImageBuildFailed => Self::RecipeImageBuildFailed,
+            Raw::RecipeImageBuildInputMissing => Self::RecipeImageBuildInputMissing,
+            Raw::RecipeImageBuildInvalid => Self::RecipeImageBuildInvalid,
+            Raw::RecipeImageBuildUnavailable => Self::RecipeImageBuildUnavailable,
+            Raw::RecipeImageBuildWait => Self::RecipeImageBuildWait,
+            Raw::RecipeImageBuilderBusy => Self::RecipeImageBuilderBusy,
+            Raw::RecipeImageBuilderOccupied => Self::RecipeImageBuilderOccupied,
+            Raw::RecipeImageCancelBusy => Self::RecipeImageCancelBusy,
+            Raw::RecipeImageCancelRequestKeyReused => Self::RecipeImageCancelRequestKeyReused,
+            Raw::RecipeImageCancellationInvalid => Self::RecipeImageCancellationInvalid,
+            Raw::RecipeImageClaimLost => Self::RecipeImageClaimLost,
+            Raw::RecipeImageDatabaseBusy => Self::RecipeImageDatabaseBusy,
+            Raw::RecipeImageIdentityConflict => Self::RecipeImageIdentityConflict,
+            Raw::RecipeImageIdentityInvalid => Self::RecipeImageIdentityInvalid,
+            Raw::RecipeImageInsufficientDisk => Self::RecipeImageInsufficientDisk,
+            Raw::RecipeImageInsufficientMemory => Self::RecipeImageInsufficientMemory,
+            Raw::RecipeImageMetadataRefreshFailed => Self::RecipeImageMetadataRefreshFailed,
+            Raw::RecipeImageMetadataRefreshUnavailable => {
+                Self::RecipeImageMetadataRefreshUnavailable
+            }
+            Raw::RecipeImageModelCacheFailed => Self::RecipeImageModelCacheFailed,
+            Raw::RecipeImageModelCacheInvalid => Self::RecipeImageModelCacheInvalid,
+            Raw::RecipeImageModelCacheUnavailable => Self::RecipeImageModelCacheUnavailable,
+            Raw::RecipeImageModelChildCancelled => Self::RecipeImageModelChildCancelled,
+            Raw::RecipeImageModelChildMissing => Self::RecipeImageModelChildMissing,
+            Raw::RecipeImageNoBuilder => Self::RecipeImageNoBuilder,
+            Raw::RecipeImageNotCancellable => Self::RecipeImageNotCancellable,
+            Raw::RecipeImageNotRetryable => Self::RecipeImageNotRetryable,
+            Raw::RecipeImageOperationInvalid => Self::RecipeImageOperationInvalid,
+            Raw::RecipeImageOperationMissing => Self::RecipeImageOperationMissing,
+            Raw::RecipeImagePreparationFailed => Self::RecipeImagePreparationFailed,
+            Raw::RecipeImagePreparing => Self::RecipeImagePreparing,
+            Raw::RecipeImageRecipeInvalid => Self::RecipeImageRecipeInvalid,
+            Raw::RecipeImageRecipeUnavailable => Self::RecipeImageRecipeUnavailable,
+            Raw::RecipeImageRemovalChoiceInvalid => Self::RecipeImageRemovalChoiceInvalid,
+            Raw::RecipeImageRemovalFailed => Self::RecipeImageRemovalFailed,
+            Raw::RecipeImageRemovalReferenced => Self::RecipeImageRemovalReferenced,
+            Raw::RecipeImageRemovalScopeLimited => Self::RecipeImageRemovalScopeLimited,
+            Raw::RecipeImageRequestKeyReused => Self::RecipeImageRequestKeyReused,
+            Raw::RecipeImageRuntimeInvalid => Self::RecipeImageRuntimeInvalid,
+            Raw::RecipeImageSelectorAmbiguous => Self::RecipeImageSelectorAmbiguous,
+            Raw::RecipeImageSelectorInvalid => Self::RecipeImageSelectorInvalid,
+            Raw::RecipeImageSelectorMissing => Self::RecipeImageSelectorMissing,
+            Raw::RecipeImageSourcePolicyRefused => Self::RecipeImageSourcePolicyRefused,
+            Raw::RecipeImageSupersededByNewerRevision => Self::RecipeImageSupersededByNewerRevision,
+            Raw::RecipeImageWaitingForModel => Self::RecipeImageWaitingForModel,
+            Raw::RecipeImageWaitingForWorker => Self::RecipeImageWaitingForWorker,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RecipeInstallPayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -10285,6 +18079,57 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunResult {
         })
     }
 }
+impl RecipeOperationCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RecipeOperationConflict => "recipe.operation_conflict",
+        }
+    }
+}
+impl ::std::ops::Deref for RecipeOperationCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RecipeOperationCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RecipeOperationCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeOperationCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeOperationCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "recipe.operation_conflict")]
+            RecipeOperationConflict,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RecipeOperationConflict => Self::RecipeOperationConflict,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -10302,6 +18147,114 @@ impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequest {
         Ok(Self {
             operation: raw.operation,
             payload: raw.payload,
+        })
+    }
+}
+impl RecipePackageCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RecipePackageCacheUnavailable => "recipe_package.cache_unavailable",
+            Self::RecipePackageDigestMismatch => "recipe_package.digest_mismatch",
+            Self::RecipePackageDocumentIncompatible => "recipe_package.document_incompatible",
+            Self::RecipePackageExtractInvalid => "recipe_package.extract_invalid",
+            Self::RecipePackageNotFound => "recipe_package.not_found",
+            Self::RecipePackagePackageInvalid => "recipe_package.package_invalid",
+            Self::RecipePackageReleaseIncomplete => "recipe_package.release_incomplete",
+            Self::RecipePackageReleaseInvalid => "recipe_package.release_invalid",
+            Self::RecipePackageResponseInvalid => "recipe_package.response_invalid",
+            Self::RecipePackageSchemaIncompatible => "recipe_package.schema_incompatible",
+            Self::RecipePackageSnapshotChanged => "recipe_package.snapshot_changed",
+            Self::RecipePackageUnavailable => "recipe_package.unavailable",
+            Self::RecipePackageUriInvalid => "recipe_package.uri_invalid",
+            Self::RecipePackageUrlInsecure => "recipe_package.url_insecure",
+            Self::RecipePackageUrlInvalid => "recipe_package.url_invalid",
+        }
+    }
+}
+impl ::std::ops::Deref for RecipePackageCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RecipePackageCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RecipePackageCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipePackageCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipePackageCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "recipe_package.cache_unavailable")]
+            RecipePackageCacheUnavailable,
+            #[serde(rename = "recipe_package.digest_mismatch")]
+            RecipePackageDigestMismatch,
+            #[serde(rename = "recipe_package.document_incompatible")]
+            RecipePackageDocumentIncompatible,
+            #[serde(rename = "recipe_package.extract_invalid")]
+            RecipePackageExtractInvalid,
+            #[serde(rename = "recipe_package.not_found")]
+            RecipePackageNotFound,
+            #[serde(rename = "recipe_package.package_invalid")]
+            RecipePackagePackageInvalid,
+            #[serde(rename = "recipe_package.release_incomplete")]
+            RecipePackageReleaseIncomplete,
+            #[serde(rename = "recipe_package.release_invalid")]
+            RecipePackageReleaseInvalid,
+            #[serde(rename = "recipe_package.response_invalid")]
+            RecipePackageResponseInvalid,
+            #[serde(rename = "recipe_package.schema_incompatible")]
+            RecipePackageSchemaIncompatible,
+            #[serde(rename = "recipe_package.snapshot_changed")]
+            RecipePackageSnapshotChanged,
+            #[serde(rename = "recipe_package.unavailable")]
+            RecipePackageUnavailable,
+            #[serde(rename = "recipe_package.uri_invalid")]
+            RecipePackageUriInvalid,
+            #[serde(rename = "recipe_package.url_insecure")]
+            RecipePackageUrlInsecure,
+            #[serde(rename = "recipe_package.url_invalid")]
+            RecipePackageUrlInvalid,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RecipePackageCacheUnavailable => Self::RecipePackageCacheUnavailable,
+            Raw::RecipePackageDigestMismatch => Self::RecipePackageDigestMismatch,
+            Raw::RecipePackageDocumentIncompatible => Self::RecipePackageDocumentIncompatible,
+            Raw::RecipePackageExtractInvalid => Self::RecipePackageExtractInvalid,
+            Raw::RecipePackageNotFound => Self::RecipePackageNotFound,
+            Raw::RecipePackagePackageInvalid => Self::RecipePackagePackageInvalid,
+            Raw::RecipePackageReleaseIncomplete => Self::RecipePackageReleaseIncomplete,
+            Raw::RecipePackageReleaseInvalid => Self::RecipePackageReleaseInvalid,
+            Raw::RecipePackageResponseInvalid => Self::RecipePackageResponseInvalid,
+            Raw::RecipePackageSchemaIncompatible => Self::RecipePackageSchemaIncompatible,
+            Raw::RecipePackageSnapshotChanged => Self::RecipePackageSnapshotChanged,
+            Raw::RecipePackageUnavailable => Self::RecipePackageUnavailable,
+            Raw::RecipePackageUriInvalid => Self::RecipePackageUriInvalid,
+            Raw::RecipePackageUrlInsecure => Self::RecipePackageUrlInsecure,
+            Raw::RecipePackageUrlInvalid => Self::RecipePackageUrlInvalid,
         })
     }
 }
@@ -10594,6 +18547,190 @@ impl<'de> ::serde::Deserialize<'de> for RecipeUninstallResult {
         Ok(Self {})
     }
 }
+impl RecipeUpdateCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RecipeUpdateClaimLost => "recipe_update.claim_lost",
+            Self::RecipeUpdateObservationInvalid => "recipe_update.observation_invalid",
+            Self::RecipeUpdateOperationInvalid => "recipe_update.operation_invalid",
+            Self::RecipeUpdateRequestKeyReused => "recipe_update.request_key_reused",
+            Self::RecipeUpdateScopeInvalid => "recipe_update.scope_invalid",
+            Self::RecipeUpdateCancelEffectUnknown => "recipe-update.cancel-effect-unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for RecipeUpdateCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RecipeUpdateCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RecipeUpdateCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeUpdateCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeUpdateCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "recipe_update.claim_lost")]
+            RecipeUpdateClaimLost,
+            #[serde(rename = "recipe_update.observation_invalid")]
+            RecipeUpdateObservationInvalid,
+            #[serde(rename = "recipe_update.operation_invalid")]
+            RecipeUpdateOperationInvalid,
+            #[serde(rename = "recipe_update.request_key_reused")]
+            RecipeUpdateRequestKeyReused,
+            #[serde(rename = "recipe_update.scope_invalid")]
+            RecipeUpdateScopeInvalid,
+            #[serde(rename = "recipe-update.cancel-effect-unknown")]
+            RecipeUpdateCancelEffectUnknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RecipeUpdateClaimLost => Self::RecipeUpdateClaimLost,
+            Raw::RecipeUpdateObservationInvalid => Self::RecipeUpdateObservationInvalid,
+            Raw::RecipeUpdateOperationInvalid => Self::RecipeUpdateOperationInvalid,
+            Raw::RecipeUpdateRequestKeyReused => Self::RecipeUpdateRequestKeyReused,
+            Raw::RecipeUpdateScopeInvalid => Self::RecipeUpdateScopeInvalid,
+            Raw::RecipeUpdateCancelEffectUnknown => Self::RecipeUpdateCancelEffectUnknown,
+        })
+    }
+}
+impl ReconcileCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ReconcileActiveEffectUnknown => "reconcile.active_effect_unknown",
+            Self::ReconcileAgentUnavailable => "reconcile.agent_unavailable",
+            Self::ReconcileCapacityBusy => "reconcile.capacity_busy",
+            Self::ReconcileInstallProvenanceMismatch => "reconcile.install_provenance_mismatch",
+            Self::ReconcileInstallProvenanceUnavailable => {
+                "reconcile.install_provenance_unavailable"
+            }
+            Self::ReconcileInstallationEffectUnknown => "reconcile.installation_effect_unknown",
+            Self::ReconcileInstallationIdentityMismatch => {
+                "reconcile.installation_identity_mismatch"
+            }
+            Self::ReconcileInstallationIdentityUnavailable => {
+                "reconcile.installation_identity_unavailable"
+            }
+            Self::ReconcileMembershipChanged => "reconcile.membership_changed",
+            Self::ReconcileOperationActive => "reconcile.operation_active",
+            Self::ReconcileRankMembershipChanged => "reconcile.rank_membership_changed",
+            Self::ReconcileRecipeRevisionUnavailable => "reconcile.recipe_revision_unavailable",
+            Self::ReconcileSpecIdentityMismatch => "reconcile.spec_identity_mismatch",
+        }
+    }
+}
+impl ::std::ops::Deref for ReconcileCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ReconcileCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ReconcileCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ReconcileCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ReconcileCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "reconcile.active_effect_unknown")]
+            ReconcileActiveEffectUnknown,
+            #[serde(rename = "reconcile.agent_unavailable")]
+            ReconcileAgentUnavailable,
+            #[serde(rename = "reconcile.capacity_busy")]
+            ReconcileCapacityBusy,
+            #[serde(rename = "reconcile.install_provenance_mismatch")]
+            ReconcileInstallProvenanceMismatch,
+            #[serde(rename = "reconcile.install_provenance_unavailable")]
+            ReconcileInstallProvenanceUnavailable,
+            #[serde(rename = "reconcile.installation_effect_unknown")]
+            ReconcileInstallationEffectUnknown,
+            #[serde(rename = "reconcile.installation_identity_mismatch")]
+            ReconcileInstallationIdentityMismatch,
+            #[serde(rename = "reconcile.installation_identity_unavailable")]
+            ReconcileInstallationIdentityUnavailable,
+            #[serde(rename = "reconcile.membership_changed")]
+            ReconcileMembershipChanged,
+            #[serde(rename = "reconcile.operation_active")]
+            ReconcileOperationActive,
+            #[serde(rename = "reconcile.rank_membership_changed")]
+            ReconcileRankMembershipChanged,
+            #[serde(rename = "reconcile.recipe_revision_unavailable")]
+            ReconcileRecipeRevisionUnavailable,
+            #[serde(rename = "reconcile.spec_identity_mismatch")]
+            ReconcileSpecIdentityMismatch,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ReconcileActiveEffectUnknown => Self::ReconcileActiveEffectUnknown,
+            Raw::ReconcileAgentUnavailable => Self::ReconcileAgentUnavailable,
+            Raw::ReconcileCapacityBusy => Self::ReconcileCapacityBusy,
+            Raw::ReconcileInstallProvenanceMismatch => Self::ReconcileInstallProvenanceMismatch,
+            Raw::ReconcileInstallProvenanceUnavailable => {
+                Self::ReconcileInstallProvenanceUnavailable
+            }
+            Raw::ReconcileInstallationEffectUnknown => Self::ReconcileInstallationEffectUnknown,
+            Raw::ReconcileInstallationIdentityMismatch => {
+                Self::ReconcileInstallationIdentityMismatch
+            }
+            Raw::ReconcileInstallationIdentityUnavailable => {
+                Self::ReconcileInstallationIdentityUnavailable
+            }
+            Raw::ReconcileMembershipChanged => Self::ReconcileMembershipChanged,
+            Raw::ReconcileOperationActive => Self::ReconcileOperationActive,
+            Raw::ReconcileRankMembershipChanged => Self::ReconcileRankMembershipChanged,
+            Raw::ReconcileRecipeRevisionUnavailable => Self::ReconcileRecipeRevisionUnavailable,
+            Raw::ReconcileSpecIdentityMismatch => Self::ReconcileSpecIdentityMismatch,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RenewRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -10743,6 +18880,272 @@ impl<'de> ::serde::Deserialize<'de> for ResourceBlockerCode {
         })
     }
 }
+impl ResourcePlanningCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ResourceEstimateUncertain => "resource.estimate_uncertain",
+            Self::ResourceEvidenceInvalid => "resource.evidence_invalid",
+            Self::ResourceEvidenceUnknown => "resource.evidence_unknown",
+            Self::ResourceKnobsInvalid => "resource.knobs_invalid",
+            Self::ResourceParallelismDuplicate => "resource.parallelism_duplicate",
+            Self::ResourceParallelismInconsistent => "resource.parallelism_inconsistent",
+            Self::ResourceParallelismType => "resource.parallelism_type",
+            Self::ResourceParallelismUnknown => "resource.parallelism_unknown",
+            Self::ResourceSettingsKindUnknown => "resource.settings_kind_unknown",
+            Self::ResourceSettingsType => "resource.settings_type",
+            Self::ResourceSettingsUnknown => "resource.settings_unknown",
+            Self::ResourceStopReleaseUnknown => "resource.stop_release_unknown",
+            Self::ResourceContextUnknown => "resource.context_unknown",
+            Self::ResourceContextEvidenceInvalid => "resource.context_evidence_invalid",
+            Self::ResourceContextUnsupported => "resource.context_unsupported",
+            Self::ResourceContextEvidenceUnknown => "resource.context_evidence_unknown",
+            Self::ResourceConcurrencyUnknown => "resource.concurrency_unknown",
+            Self::ResourceConcurrencyEvidenceInvalid => "resource.concurrency_evidence_invalid",
+            Self::ResourceConcurrencyUnsupported => "resource.concurrency_unsupported",
+            Self::ResourceConcurrencyEvidenceUnknown => "resource.concurrency_evidence_unknown",
+            Self::ResourceBatchUnknown => "resource.batch_unknown",
+            Self::ResourceBatchEvidenceInvalid => "resource.batch_evidence_invalid",
+            Self::ResourceBatchUnsupported => "resource.batch_unsupported",
+            Self::ResourceBatchEvidenceUnknown => "resource.batch_evidence_unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for ResourcePlanningCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ResourcePlanningCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ResourcePlanningCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ResourcePlanningCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ResourcePlanningCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "resource.estimate_uncertain")]
+            ResourceEstimateUncertain,
+            #[serde(rename = "resource.evidence_invalid")]
+            ResourceEvidenceInvalid,
+            #[serde(rename = "resource.evidence_unknown")]
+            ResourceEvidenceUnknown,
+            #[serde(rename = "resource.knobs_invalid")]
+            ResourceKnobsInvalid,
+            #[serde(rename = "resource.parallelism_duplicate")]
+            ResourceParallelismDuplicate,
+            #[serde(rename = "resource.parallelism_inconsistent")]
+            ResourceParallelismInconsistent,
+            #[serde(rename = "resource.parallelism_type")]
+            ResourceParallelismType,
+            #[serde(rename = "resource.parallelism_unknown")]
+            ResourceParallelismUnknown,
+            #[serde(rename = "resource.settings_kind_unknown")]
+            ResourceSettingsKindUnknown,
+            #[serde(rename = "resource.settings_type")]
+            ResourceSettingsType,
+            #[serde(rename = "resource.settings_unknown")]
+            ResourceSettingsUnknown,
+            #[serde(rename = "resource.stop_release_unknown")]
+            ResourceStopReleaseUnknown,
+            #[serde(rename = "resource.context_unknown")]
+            ResourceContextUnknown,
+            #[serde(rename = "resource.context_evidence_invalid")]
+            ResourceContextEvidenceInvalid,
+            #[serde(rename = "resource.context_unsupported")]
+            ResourceContextUnsupported,
+            #[serde(rename = "resource.context_evidence_unknown")]
+            ResourceContextEvidenceUnknown,
+            #[serde(rename = "resource.concurrency_unknown")]
+            ResourceConcurrencyUnknown,
+            #[serde(rename = "resource.concurrency_evidence_invalid")]
+            ResourceConcurrencyEvidenceInvalid,
+            #[serde(rename = "resource.concurrency_unsupported")]
+            ResourceConcurrencyUnsupported,
+            #[serde(rename = "resource.concurrency_evidence_unknown")]
+            ResourceConcurrencyEvidenceUnknown,
+            #[serde(rename = "resource.batch_unknown")]
+            ResourceBatchUnknown,
+            #[serde(rename = "resource.batch_evidence_invalid")]
+            ResourceBatchEvidenceInvalid,
+            #[serde(rename = "resource.batch_unsupported")]
+            ResourceBatchUnsupported,
+            #[serde(rename = "resource.batch_evidence_unknown")]
+            ResourceBatchEvidenceUnknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ResourceEstimateUncertain => Self::ResourceEstimateUncertain,
+            Raw::ResourceEvidenceInvalid => Self::ResourceEvidenceInvalid,
+            Raw::ResourceEvidenceUnknown => Self::ResourceEvidenceUnknown,
+            Raw::ResourceKnobsInvalid => Self::ResourceKnobsInvalid,
+            Raw::ResourceParallelismDuplicate => Self::ResourceParallelismDuplicate,
+            Raw::ResourceParallelismInconsistent => Self::ResourceParallelismInconsistent,
+            Raw::ResourceParallelismType => Self::ResourceParallelismType,
+            Raw::ResourceParallelismUnknown => Self::ResourceParallelismUnknown,
+            Raw::ResourceSettingsKindUnknown => Self::ResourceSettingsKindUnknown,
+            Raw::ResourceSettingsType => Self::ResourceSettingsType,
+            Raw::ResourceSettingsUnknown => Self::ResourceSettingsUnknown,
+            Raw::ResourceStopReleaseUnknown => Self::ResourceStopReleaseUnknown,
+            Raw::ResourceContextUnknown => Self::ResourceContextUnknown,
+            Raw::ResourceContextEvidenceInvalid => Self::ResourceContextEvidenceInvalid,
+            Raw::ResourceContextUnsupported => Self::ResourceContextUnsupported,
+            Raw::ResourceContextEvidenceUnknown => Self::ResourceContextEvidenceUnknown,
+            Raw::ResourceConcurrencyUnknown => Self::ResourceConcurrencyUnknown,
+            Raw::ResourceConcurrencyEvidenceInvalid => Self::ResourceConcurrencyEvidenceInvalid,
+            Raw::ResourceConcurrencyUnsupported => Self::ResourceConcurrencyUnsupported,
+            Raw::ResourceConcurrencyEvidenceUnknown => Self::ResourceConcurrencyEvidenceUnknown,
+            Raw::ResourceBatchUnknown => Self::ResourceBatchUnknown,
+            Raw::ResourceBatchEvidenceInvalid => Self::ResourceBatchEvidenceInvalid,
+            Raw::ResourceBatchUnsupported => Self::ResourceBatchUnsupported,
+            Raw::ResourceBatchEvidenceUnknown => Self::ResourceBatchEvidenceUnknown,
+        })
+    }
+}
+impl ResourceTerm {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Context => "context",
+            Self::Concurrency => "concurrency",
+            Self::Batch => "batch",
+        }
+    }
+}
+impl ::std::ops::Deref for ResourceTerm {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ResourceTerm {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ResourceTerm {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ResourceTerm {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ResourceTerm", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "context")]
+            Context,
+            #[serde(rename = "concurrency")]
+            Concurrency,
+            #[serde(rename = "batch")]
+            Batch,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Context => Self::Context,
+            Raw::Concurrency => Self::Concurrency,
+            Raw::Batch => Self::Batch,
+        })
+    }
+}
+impl ResourceTermProblem {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::EvidenceInvalid => "evidence_invalid",
+            Self::Unsupported => "unsupported",
+            Self::EvidenceUnknown => "evidence_unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for ResourceTermProblem {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ResourceTermProblem {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ResourceTermProblem {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ResourceTermProblem {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ResourceTermProblem", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "unknown")]
+            Unknown,
+            #[serde(rename = "evidence_invalid")]
+            EvidenceInvalid,
+            #[serde(rename = "unsupported")]
+            Unsupported,
+            #[serde(rename = "evidence_unknown")]
+            EvidenceUnknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Unknown => Self::Unknown,
+            Raw::EvidenceInvalid => Self::EvidenceInvalid,
+            Raw::Unsupported => Self::Unsupported,
+            Raw::EvidenceUnknown => Self::EvidenceUnknown,
+        })
+    }
+}
 impl RunAdmissionCode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -10848,6 +19251,1504 @@ impl<'de> ::serde::Deserialize<'de> for RunAdmissionCode {
             Raw::RunNotInstalled => Self::RunNotInstalled,
             Raw::RunFabricAddressMissing => Self::RunFabricAddressMissing,
             Raw::RunFabricAddressDuplicate => Self::RunFabricAddressDuplicate,
+        })
+    }
+}
+impl RunDegradedReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ExternalMember => "external-member",
+            Self::MappingIncomplete => "mapping-incomplete",
+            Self::MissingRanks => "missing-ranks",
+            Self::UnexpectedRanks => "unexpected-ranks",
+            Self::RankMembershipMismatch => "rank-membership-mismatch",
+            Self::RunNotRunning => "run-not-running",
+            Self::RankNotRunning => "rank-not-running",
+            Self::RankStale => "rank-stale",
+            Self::RouteNotPublished => "route-not-published",
+        }
+    }
+}
+impl ::std::ops::Deref for RunDegradedReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RunDegradedReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RunDegradedReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RunDegradedReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RunDegradedReason", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "external-member")]
+            ExternalMember,
+            #[serde(rename = "mapping-incomplete")]
+            MappingIncomplete,
+            #[serde(rename = "missing-ranks")]
+            MissingRanks,
+            #[serde(rename = "unexpected-ranks")]
+            UnexpectedRanks,
+            #[serde(rename = "rank-membership-mismatch")]
+            RankMembershipMismatch,
+            #[serde(rename = "run-not-running")]
+            RunNotRunning,
+            #[serde(rename = "rank-not-running")]
+            RankNotRunning,
+            #[serde(rename = "rank-stale")]
+            RankStale,
+            #[serde(rename = "route-not-published")]
+            RouteNotPublished,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ExternalMember => Self::ExternalMember,
+            Raw::MappingIncomplete => Self::MappingIncomplete,
+            Raw::MissingRanks => Self::MissingRanks,
+            Raw::UnexpectedRanks => Self::UnexpectedRanks,
+            Raw::RankMembershipMismatch => Self::RankMembershipMismatch,
+            Raw::RunNotRunning => Self::RunNotRunning,
+            Raw::RankNotRunning => Self::RankNotRunning,
+            Raw::RankStale => Self::RankStale,
+            Raw::RouteNotPublished => Self::RouteNotPublished,
+        })
+    }
+}
+impl RunSwitchCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RunSwitchActiveRunConflict => "run-switch.active-run-conflict",
+            Self::RunSwitchAdvanceFailed => "run-switch.advance-failed",
+            Self::RunSwitchAgentUpgradeRequired => "run-switch.agent-upgrade-required",
+            Self::RunSwitchArtifactIdentityUnknown => "run-switch.artifact-identity-unknown",
+            Self::RunSwitchArtifactInspectionUnavailable => {
+                "run-switch.artifact-inspection-unavailable"
+            }
+            Self::RunSwitchArtifactManifestUnknown => "run-switch.artifact-manifest-unknown",
+            Self::RunSwitchArtifactPhaseExecutorUnavailable => {
+                "run-switch.artifact-phase-executor-unavailable"
+            }
+            Self::RunSwitchArtifactVerificationResultInvalid => {
+                "run-switch.artifact-verification-result-invalid"
+            }
+            Self::RunSwitchCleanupReclaimEvidenceInvalid => {
+                "run-switch.cleanup-reclaim-evidence-invalid"
+            }
+            Self::RunSwitchCleanupReclaimedBytesExceedPlan => {
+                "run-switch.cleanup-reclaimed-bytes-exceed-plan"
+            }
+            Self::RunSwitchCleanupReferenceProtectionEvidenceInvalid => {
+                "run-switch.cleanup-reference-protection-evidence-invalid"
+            }
+            Self::RunSwitchCleanupReferenceProtectionOverlap => {
+                "run-switch.cleanup-reference-protection-overlap"
+            }
+            Self::RunSwitchCleanupScopeInvalid => "run-switch.cleanup-scope-invalid",
+            Self::RunSwitchContainerBuildEvidenceInvalid => {
+                "run-switch.container-build-evidence-invalid"
+            }
+            Self::RunSwitchContainerBuildExecutorUnavailable => {
+                "run-switch.container-build-executor-unavailable"
+            }
+            Self::RunSwitchContainerBuildIdentityUnavailable => {
+                "run-switch.container-build-identity-unavailable"
+            }
+            Self::RunSwitchContainerBuildParentChanged => {
+                "run-switch.container-build-parent-changed"
+            }
+            Self::RunSwitchContainerBuildParentInvalid => {
+                "run-switch.container-build-parent-invalid"
+            }
+            Self::RunSwitchContainerBuildPlanInvalid => "run-switch.container-build-plan-invalid",
+            Self::RunSwitchContainerBuildReceiptUnavailable => {
+                "run-switch.container-build-receipt-unavailable"
+            }
+            Self::RunSwitchContainerBuildRequired => "run-switch.container-build-required",
+            Self::RunSwitchContainerBuildStateInvalid => "run-switch.container-build-state-invalid",
+            Self::RunSwitchContainerBuildUnavailable => "run-switch.container-build-unavailable",
+            Self::RunSwitchCrossGroupConflict => "run-switch.cross-group_conflict",
+            Self::RunSwitchDiskEnvelopeInvalid => "run-switch.disk-envelope-invalid",
+            Self::RunSwitchDiskEvictionPlanned => "run-switch.disk-eviction-planned",
+            Self::RunSwitchEffectUncertain => "run-switch.effect-uncertain",
+            Self::RunSwitchFinalVerification => "run-switch.final-verification",
+            Self::RunSwitchFinalVerificationClockInvalid => {
+                "run-switch.final-verification-clock-invalid"
+            }
+            Self::RunSwitchFinalVerificationFailed => "run-switch.final-verification-failed",
+            Self::RunSwitchFinalVerificationTimeout => "run-switch.final-verification-timeout",
+            Self::RunSwitchFinalVerificationUnavailable => {
+                "run-switch.final-verification-unavailable"
+            }
+            Self::RunSwitchInstallExecutorUnavailable => "run-switch.install-executor-unavailable",
+            Self::RunSwitchInstallPreparationUnavailable => {
+                "run-switch.install-preparation-unavailable"
+            }
+            Self::RunSwitchInstallationHandoffUnavailable => {
+                "run-switch.installation-handoff-unavailable"
+            }
+            Self::RunSwitchInstallationIdentityChanged => {
+                "run-switch.installation-identity-changed"
+            }
+            Self::RunSwitchInstallationIdentityUnavailable => {
+                "run-switch.installation-identity-unavailable"
+            }
+            Self::RunSwitchInstallationMembershipChanged => {
+                "run-switch.installation-membership-changed"
+            }
+            Self::RunSwitchInstallationPreparationUnavailable => {
+                "run-switch.installation-preparation-unavailable"
+            }
+            Self::RunSwitchInstallationVerificationFailed => {
+                "run-switch.installation-verification-failed"
+            }
+            Self::RunSwitchInstallationVerificationUnavailable => {
+                "run-switch.installation-verification-unavailable"
+            }
+            Self::RunSwitchInsufficientDisk => "run-switch.insufficient-disk",
+            Self::RunSwitchInsufficientMemory => "run-switch.insufficient-memory",
+            Self::RunSwitchInterfaceInvalid => "run-switch.interface-invalid",
+            Self::RunSwitchInventoryStale => "run-switch.inventory-stale",
+            Self::RunSwitchInventoryUnknown => "run-switch.inventory-unknown",
+            Self::RunSwitchMappingGroupMismatch => "run-switch.mapping_group_mismatch",
+            Self::RunSwitchMappingInvalid => "run-switch.mapping_invalid",
+            Self::RunSwitchMappingMaterializationUnavailable => {
+                "run-switch.mapping_materialization_unavailable"
+            }
+            Self::RunSwitchMemoryEnvelopeInvalid => "run-switch.memory-envelope-invalid",
+            Self::RunSwitchModelDownloadArtifactSetMismatch => {
+                "run-switch.model-download-artifact-set-mismatch"
+            }
+            Self::RunSwitchModelDownloadByteEvidenceMismatch => {
+                "run-switch.model-download-byte-evidence-mismatch"
+            }
+            Self::RunSwitchModelDownloadCoverageIncomplete => {
+                "run-switch.model-download-coverage-incomplete"
+            }
+            Self::RunSwitchModelRecipeMismatch => "run-switch.model_recipe_mismatch",
+            Self::RunSwitchModelRevisionUnavailable => "run-switch.model_revision_unavailable",
+            Self::RunSwitchNasCoverageUnknown => "run-switch.nas-coverage-unknown",
+            Self::RunSwitchNasDownloadBlocked => "run-switch.nas-download-blocked",
+            Self::RunSwitchNasDownloadRequired => "run-switch.nas-download-required",
+            Self::RunSwitchOptionInvalid => "run-switch.option_invalid",
+            Self::RunSwitchPhaseRetry => "run-switch.phase-retry",
+            Self::RunSwitchPlanRefreshUnavailable => "run-switch.plan-refresh-unavailable",
+            Self::RunSwitchPlanTargetsChanged => "run-switch.plan-targets-changed",
+            Self::RunSwitchPostStopInventoryPending => "run-switch.post-stop-inventory-pending",
+            Self::RunSwitchPostStopMemoryPoolChanged => "run-switch.post-stop-memory-pool-changed",
+            Self::RunSwitchPreflightRecipeChanged => "run-switch.preflight-recipe-changed",
+            Self::RunSwitchPrepareSubphaseUnsupported => "run-switch.prepare-subphase-unsupported",
+            Self::RunSwitchProfileIncompleteMultiSparkModel => {
+                "run-switch.profile.incomplete_multi_spark_model"
+            }
+            Self::RunSwitchProfileStopScopeChanged => "run-switch.profile_stop_scope_changed",
+            Self::RunSwitchReceiptInvalid => "run-switch.receipt_invalid",
+            Self::RunSwitchRecipeBuildCompatibilityUnknown => {
+                "run-switch.recipe-build-compatibility-unknown"
+            }
+            Self::RunSwitchRecipeBuildIncompatible => "run-switch.recipe-build-incompatible",
+            Self::RunSwitchRecipeBuildUnavailable => "run-switch.recipe-build-unavailable",
+            Self::RunSwitchRecipeDependenciesUnavailable => {
+                "run-switch.recipe_dependencies_unavailable"
+            }
+            Self::RunSwitchRecipeDigestChanged => "run-switch.recipe_digest_changed",
+            Self::RunSwitchRecipeUnresolved => "run-switch.recipe_unresolved",
+            Self::RunSwitchReconciliationAssessmentUnavailable => {
+                "run-switch.reconciliation-assessment-unavailable"
+            }
+            Self::RunSwitchReconciliationAuthorityUnavailable => {
+                "run-switch.reconciliation-authority-unavailable"
+            }
+            Self::RunSwitchReconciliationPrerequisite => "run-switch.reconciliation-prerequisite",
+            Self::RunSwitchReconciliationReceiptsRetained => {
+                "run-switch.reconciliation-receipts-retained"
+            }
+            Self::RunSwitchReconciliationStateVerificationFailed => {
+                "run-switch.reconciliation-state-verification-failed"
+            }
+            Self::RunSwitchReconciliationVerificationFailed => {
+                "run-switch.reconciliation-verification-failed"
+            }
+            Self::RunSwitchRequestKeyReusedDifferently => {
+                "run-switch.request_key_reused_differently"
+            }
+            Self::RunSwitchResourceContractInvalid => "run-switch.resource-contract-invalid",
+            Self::RunSwitchResourceInsufficient => "run-switch.resource.insufficient",
+            Self::RunSwitchResourceInsufficientCapacity => {
+                "run-switch.resource.insufficient_capacity"
+            }
+            Self::RunSwitchResourceInsufficientCapacityAfterStop => {
+                "run-switch.resource.insufficient_capacity_after_stop"
+            }
+            Self::RunSwitchResourceInsufficientReservationBudget => {
+                "run-switch.resource.insufficient_reservation_budget"
+            }
+            Self::RunSwitchResourceResidentUsageUnknown => {
+                "run-switch.resource.resident_usage_unknown"
+            }
+            Self::RunSwitchRunNotActive => "run-switch.run-not-active",
+            Self::RunSwitchRunAdmissionBlocked => "run-switch.run_admission_blocked",
+            Self::RunSwitchRunAdmissionUnavailable => "run-switch.run_admission_unavailable",
+            Self::RunSwitchRuntimeBuildVerificationMismatch => {
+                "run-switch.runtime-build-verification-mismatch"
+            }
+            Self::RunSwitchRuntimeImageAuthorizationMismatch => {
+                "run-switch.runtime-image-authorization-mismatch"
+            }
+            Self::RunSwitchRuntimeImageExecutorUnavailable => {
+                "run-switch.runtime-image-executor-unavailable"
+            }
+            Self::RunSwitchRuntimeImageOwnerChanged => "run-switch.runtime-image-owner-changed",
+            Self::RunSwitchRuntimeImagePreparationLayoutMismatch => {
+                "run-switch.runtime-image-preparation-layout-mismatch"
+            }
+            Self::RunSwitchRuntimeImagePreparationReceiptInvalid => {
+                "run-switch.runtime-image-preparation-receipt-invalid"
+            }
+            Self::RunSwitchRuntimeImagePreparing => "run-switch.runtime-image-preparing",
+            Self::RunSwitchRuntimeImageReferenceIdentityMismatch => {
+                "run-switch.runtime-image-reference-identity-mismatch"
+            }
+            Self::RunSwitchRuntimeImageWaitingWithoutChild => {
+                "run-switch.runtime-image-waiting-without-child"
+            }
+            Self::RunSwitchSparkUnavailable => "run-switch.spark-unavailable",
+            Self::RunSwitchStartObservation => "run-switch.start-observation",
+            Self::RunSwitchStartObservationExpired => "run-switch.start-observation-expired",
+            Self::RunSwitchStartInstallationUnavailable => {
+                "run-switch.start_installation_unavailable"
+            }
+            Self::RunSwitchStopPlanUnavailable => "run-switch.stop-plan-unavailable",
+            Self::RunSwitchStopStillUnresolvedAfterCancellation => {
+                "run-switch.stop-still-unresolved-after-cancellation"
+            }
+            Self::RunSwitchStopTargetDisappeared => "run-switch.stop-target-disappeared",
+            Self::RunSwitchStoppedRunIdentityChanged => "run-switch.stopped-run-identity-changed",
+            Self::RunSwitchStoppedRunMembershipChanged => {
+                "run-switch.stopped-run-membership-changed"
+            }
+            Self::RunSwitchTargetNotActive => "run-switch.target-not-active",
+            Self::RunSwitchTransferByteEvidenceInvalid => {
+                "run-switch.transfer-byte-evidence-invalid"
+            }
+            Self::RunSwitchUninstallAssessmentUnavailable => {
+                "run-switch.uninstall-assessment-unavailable"
+            }
+            Self::RunSwitchUninstallBlocked => "run-switch.uninstall-blocked",
+            Self::RunSwitchUninstallIssuedPrerequisite => {
+                "run-switch.uninstall-issued-prerequisite"
+            }
+            Self::RunSwitchUninstallTargetUnavailable => "run-switch.uninstall_target_unavailable",
+            Self::RunSwitchWaiting => "run-switch.waiting",
+            Self::RunSwitchReasonUnclassified => "run-switch.reason-unclassified",
+            Self::RunSwitchCancelEffectUnknown => "run-switch.cancel-effect-unknown",
+            Self::RunSwitchContainerBuildStartUnavailable => {
+                "run-switch.container-build-start-unavailable"
+            }
+            Self::RunSwitchDistributedRecoveryActive => "run-switch.distributed-recovery-active",
+            Self::RunSwitchFinalOwnerStateUnknown => "run-switch.final-owner-state-unknown",
+            Self::RunSwitchFinalVerificationExpired => "run-switch.final-verification-expired",
+            Self::RunSwitchInstallPlanUnavailable => "run-switch.install-plan-unavailable",
+            Self::RunSwitchInstallPreflightExpired => "run-switch.install-preflight-expired",
+            Self::RunSwitchInstallPreparationFailed => "run-switch.install-preparation-failed",
+            Self::RunSwitchInstallStartFailed => "run-switch.install-start-failed",
+            Self::RunSwitchInstallationHandoffInconsistent => {
+                "run-switch.installation-handoff-inconsistent"
+            }
+            Self::RunSwitchPlanBlocked => "run-switch.plan_blocked",
+            Self::RunSwitchReconciliationStartFailed => "run-switch.reconciliation-start-failed",
+            Self::RunSwitchRouteHealthRecoveryActive => "run-switch.route-health-recovery-active",
+            Self::RunSwitchRouteOwnerFailed => "run-switch.route-owner-failed",
+            Self::RunSwitchRoutePublicationPending => "run-switch.route-publication-pending",
+            Self::RunSwitchRouteWithdrawnOwnerUnknown => "run-switch.route-withdrawn-owner-unknown",
+            Self::RunSwitchRunOwnerActive => "run-switch.run-owner-active",
+            Self::RunSwitchRunOwnerTerminal => "run-switch.run-owner-terminal",
+            Self::RunSwitchStalePlan => "run-switch.stale_plan",
+            Self::RunSwitchStopVerificationPending => "run-switch.stop-verification-pending",
+            Self::RunSwitchSuperseded => "run-switch.superseded",
+            Self::RunSwitchUninstallAbandonFailed => "run-switch.uninstall-abandon-failed",
+            Self::RunSwitchUninstallStartFailed => "run-switch.uninstall-start-failed",
+            Self::RunSwitchRecipeStopIssuedPending => "run-switch.recipe.stop-issued-pending",
+            Self::RunSwitchRecipeInstallIssuedPending => "run-switch.recipe.install-issued-pending",
+            Self::RunSwitchRecipeUninstallIssuedPending => {
+                "run-switch.recipe.uninstall-issued-pending"
+            }
+            Self::RunSwitchRecipeReconcileIssuedPending => {
+                "run-switch.recipe.reconcile-issued-pending"
+            }
+            Self::RunSwitchArtifactJobCancellationIssuedPending => {
+                "run-switch.artifact-job-cancellation-issued-pending"
+            }
+            Self::RunSwitchTransferExecutorUnavailable => {
+                "run-switch.transfer-executor-unavailable"
+            }
+            Self::RunSwitchTransferWaitingWithoutChild => {
+                "run-switch.transfer-waiting-without-child"
+            }
+            Self::RunSwitchTransferReturnedNoEvidence => "run-switch.transfer-returned-no-evidence",
+            Self::RunSwitchVerifyExecutorUnavailable => "run-switch.verify-executor-unavailable",
+            Self::RunSwitchVerifyWaitingWithoutChild => "run-switch.verify-waiting-without-child",
+            Self::RunSwitchVerifyReturnedNoEvidence => "run-switch.verify-returned-no-evidence",
+            Self::RunSwitchCleanupExecutorUnavailable => "run-switch.cleanup-executor-unavailable",
+            Self::RunSwitchCleanupWaitingWithoutChild => "run-switch.cleanup-waiting-without-child",
+            Self::RunSwitchCleanupReturnedNoEvidence => "run-switch.cleanup-returned-no-evidence",
+            Self::RunSwitchResourceCapacityUnknown => "run-switch.resource.capacity_unknown",
+            Self::RunSwitchResourceEstimateUncertain => "run-switch.resource.estimate_uncertain",
+            Self::RunSwitchResourceEvidenceInvalid => "run-switch.resource.evidence_invalid",
+            Self::RunSwitchResourceEvidenceUnknown => "run-switch.resource.evidence_unknown",
+            Self::RunSwitchResourceKnobsInvalid => "run-switch.resource.knobs_invalid",
+            Self::RunSwitchResourceParallelismDuplicate => {
+                "run-switch.resource.parallelism_duplicate"
+            }
+            Self::RunSwitchResourceParallelismInconsistent => {
+                "run-switch.resource.parallelism_inconsistent"
+            }
+            Self::RunSwitchResourceParallelismType => "run-switch.resource.parallelism_type",
+            Self::RunSwitchResourceParallelismUnknown => "run-switch.resource.parallelism_unknown",
+            Self::RunSwitchResourceSettingsKindUnknown => {
+                "run-switch.resource.settings_kind_unknown"
+            }
+            Self::RunSwitchResourceSettingsType => "run-switch.resource.settings_type",
+            Self::RunSwitchResourceSettingsUnknown => "run-switch.resource.settings_unknown",
+            Self::RunSwitchResourceStopReleaseUnknown => "run-switch.resource.stop_release_unknown",
+            Self::RunSwitchReconcileActiveEffectUnknown => {
+                "run-switch.reconcile.active_effect_unknown"
+            }
+            Self::RunSwitchReconcileAgentUnavailable => "run-switch.reconcile.agent_unavailable",
+            Self::RunSwitchReconcileCapacityBusy => "run-switch.reconcile.capacity_busy",
+            Self::RunSwitchReconcileInstallProvenanceMismatch => {
+                "run-switch.reconcile.install_provenance_mismatch"
+            }
+            Self::RunSwitchReconcileInstallProvenanceUnavailable => {
+                "run-switch.reconcile.install_provenance_unavailable"
+            }
+            Self::RunSwitchReconcileInstallationEffectUnknown => {
+                "run-switch.reconcile.installation_effect_unknown"
+            }
+            Self::RunSwitchReconcileInstallationIdentityMismatch => {
+                "run-switch.reconcile.installation_identity_mismatch"
+            }
+            Self::RunSwitchReconcileInstallationIdentityUnavailable => {
+                "run-switch.reconcile.installation_identity_unavailable"
+            }
+            Self::RunSwitchReconcileMembershipChanged => "run-switch.reconcile.membership_changed",
+            Self::RunSwitchReconcileOperationActive => "run-switch.reconcile.operation_active",
+            Self::RunSwitchReconcileRankMembershipChanged => {
+                "run-switch.reconcile.rank_membership_changed"
+            }
+            Self::RunSwitchReconcileRecipeRevisionUnavailable => {
+                "run-switch.reconcile.recipe_revision_unavailable"
+            }
+            Self::RunSwitchReconcileSpecIdentityMismatch => {
+                "run-switch.reconcile.spec_identity_mismatch"
+            }
+            Self::RunSwitchStopCapacityReleaseDeferred => {
+                "run-switch.stop.capacity_release_deferred"
+            }
+            Self::RunSwitchStopRankMembershipChanged => "run-switch.stop.rank_membership_changed",
+            Self::RunSwitchStopReservationMembershipChanged => {
+                "run-switch.stop.reservation_membership_changed"
+            }
+            Self::RunSwitchStopRunNotStoppable => "run-switch.stop.run_not_stoppable",
+            Self::RunSwitchStopTargetScopeChanged => "run-switch.stop.target_scope_changed",
+            Self::RunSwitchUninstallAbandonNeverInstalled => {
+                "run-switch.uninstall.abandon-never-installed"
+            }
+            Self::RunSwitchUninstallActiveRun => "run-switch.uninstall.active_run",
+            Self::RunSwitchUninstallActiveRunsTruncated => {
+                "run-switch.uninstall.active_runs_truncated"
+            }
+            Self::RunSwitchUninstallBytesUnknown => "run-switch.uninstall.bytes_unknown",
+            Self::RunSwitchUninstallInstallationNotUninstallable => {
+                "run-switch.uninstall.installation_not_uninstallable"
+            }
+            Self::RunSwitchUninstallOperationActive => "run-switch.uninstall.operation_active",
+            Self::RunSwitchUninstallRankMembershipChanged => {
+                "run-switch.uninstall.rank_membership_changed"
+            }
+        }
+    }
+}
+impl ::std::ops::Deref for RunSwitchCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RunSwitchCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RunSwitchCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RunSwitchCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RunSwitchCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "run-switch.active-run-conflict")]
+            RunSwitchActiveRunConflict,
+            #[serde(rename = "run-switch.advance-failed")]
+            RunSwitchAdvanceFailed,
+            #[serde(rename = "run-switch.agent-upgrade-required")]
+            RunSwitchAgentUpgradeRequired,
+            #[serde(rename = "run-switch.artifact-identity-unknown")]
+            RunSwitchArtifactIdentityUnknown,
+            #[serde(rename = "run-switch.artifact-inspection-unavailable")]
+            RunSwitchArtifactInspectionUnavailable,
+            #[serde(rename = "run-switch.artifact-manifest-unknown")]
+            RunSwitchArtifactManifestUnknown,
+            #[serde(rename = "run-switch.artifact-phase-executor-unavailable")]
+            RunSwitchArtifactPhaseExecutorUnavailable,
+            #[serde(rename = "run-switch.artifact-verification-result-invalid")]
+            RunSwitchArtifactVerificationResultInvalid,
+            #[serde(rename = "run-switch.cleanup-reclaim-evidence-invalid")]
+            RunSwitchCleanupReclaimEvidenceInvalid,
+            #[serde(rename = "run-switch.cleanup-reclaimed-bytes-exceed-plan")]
+            RunSwitchCleanupReclaimedBytesExceedPlan,
+            #[serde(rename = "run-switch.cleanup-reference-protection-evidence-invalid")]
+            RunSwitchCleanupReferenceProtectionEvidenceInvalid,
+            #[serde(rename = "run-switch.cleanup-reference-protection-overlap")]
+            RunSwitchCleanupReferenceProtectionOverlap,
+            #[serde(rename = "run-switch.cleanup-scope-invalid")]
+            RunSwitchCleanupScopeInvalid,
+            #[serde(rename = "run-switch.container-build-evidence-invalid")]
+            RunSwitchContainerBuildEvidenceInvalid,
+            #[serde(rename = "run-switch.container-build-executor-unavailable")]
+            RunSwitchContainerBuildExecutorUnavailable,
+            #[serde(rename = "run-switch.container-build-identity-unavailable")]
+            RunSwitchContainerBuildIdentityUnavailable,
+            #[serde(rename = "run-switch.container-build-parent-changed")]
+            RunSwitchContainerBuildParentChanged,
+            #[serde(rename = "run-switch.container-build-parent-invalid")]
+            RunSwitchContainerBuildParentInvalid,
+            #[serde(rename = "run-switch.container-build-plan-invalid")]
+            RunSwitchContainerBuildPlanInvalid,
+            #[serde(rename = "run-switch.container-build-receipt-unavailable")]
+            RunSwitchContainerBuildReceiptUnavailable,
+            #[serde(rename = "run-switch.container-build-required")]
+            RunSwitchContainerBuildRequired,
+            #[serde(rename = "run-switch.container-build-state-invalid")]
+            RunSwitchContainerBuildStateInvalid,
+            #[serde(rename = "run-switch.container-build-unavailable")]
+            RunSwitchContainerBuildUnavailable,
+            #[serde(rename = "run-switch.cross-group_conflict")]
+            RunSwitchCrossGroupConflict,
+            #[serde(rename = "run-switch.disk-envelope-invalid")]
+            RunSwitchDiskEnvelopeInvalid,
+            #[serde(rename = "run-switch.disk-eviction-planned")]
+            RunSwitchDiskEvictionPlanned,
+            #[serde(rename = "run-switch.effect-uncertain")]
+            RunSwitchEffectUncertain,
+            #[serde(rename = "run-switch.final-verification")]
+            RunSwitchFinalVerification,
+            #[serde(rename = "run-switch.final-verification-clock-invalid")]
+            RunSwitchFinalVerificationClockInvalid,
+            #[serde(rename = "run-switch.final-verification-failed")]
+            RunSwitchFinalVerificationFailed,
+            #[serde(rename = "run-switch.final-verification-timeout")]
+            RunSwitchFinalVerificationTimeout,
+            #[serde(rename = "run-switch.final-verification-unavailable")]
+            RunSwitchFinalVerificationUnavailable,
+            #[serde(rename = "run-switch.install-executor-unavailable")]
+            RunSwitchInstallExecutorUnavailable,
+            #[serde(rename = "run-switch.install-preparation-unavailable")]
+            RunSwitchInstallPreparationUnavailable,
+            #[serde(rename = "run-switch.installation-handoff-unavailable")]
+            RunSwitchInstallationHandoffUnavailable,
+            #[serde(rename = "run-switch.installation-identity-changed")]
+            RunSwitchInstallationIdentityChanged,
+            #[serde(rename = "run-switch.installation-identity-unavailable")]
+            RunSwitchInstallationIdentityUnavailable,
+            #[serde(rename = "run-switch.installation-membership-changed")]
+            RunSwitchInstallationMembershipChanged,
+            #[serde(rename = "run-switch.installation-preparation-unavailable")]
+            RunSwitchInstallationPreparationUnavailable,
+            #[serde(rename = "run-switch.installation-verification-failed")]
+            RunSwitchInstallationVerificationFailed,
+            #[serde(rename = "run-switch.installation-verification-unavailable")]
+            RunSwitchInstallationVerificationUnavailable,
+            #[serde(rename = "run-switch.insufficient-disk")]
+            RunSwitchInsufficientDisk,
+            #[serde(rename = "run-switch.insufficient-memory")]
+            RunSwitchInsufficientMemory,
+            #[serde(rename = "run-switch.interface-invalid")]
+            RunSwitchInterfaceInvalid,
+            #[serde(rename = "run-switch.inventory-stale")]
+            RunSwitchInventoryStale,
+            #[serde(rename = "run-switch.inventory-unknown")]
+            RunSwitchInventoryUnknown,
+            #[serde(rename = "run-switch.mapping_group_mismatch")]
+            RunSwitchMappingGroupMismatch,
+            #[serde(rename = "run-switch.mapping_invalid")]
+            RunSwitchMappingInvalid,
+            #[serde(rename = "run-switch.mapping_materialization_unavailable")]
+            RunSwitchMappingMaterializationUnavailable,
+            #[serde(rename = "run-switch.memory-envelope-invalid")]
+            RunSwitchMemoryEnvelopeInvalid,
+            #[serde(rename = "run-switch.model-download-artifact-set-mismatch")]
+            RunSwitchModelDownloadArtifactSetMismatch,
+            #[serde(rename = "run-switch.model-download-byte-evidence-mismatch")]
+            RunSwitchModelDownloadByteEvidenceMismatch,
+            #[serde(rename = "run-switch.model-download-coverage-incomplete")]
+            RunSwitchModelDownloadCoverageIncomplete,
+            #[serde(rename = "run-switch.model_recipe_mismatch")]
+            RunSwitchModelRecipeMismatch,
+            #[serde(rename = "run-switch.model_revision_unavailable")]
+            RunSwitchModelRevisionUnavailable,
+            #[serde(rename = "run-switch.nas-coverage-unknown")]
+            RunSwitchNasCoverageUnknown,
+            #[serde(rename = "run-switch.nas-download-blocked")]
+            RunSwitchNasDownloadBlocked,
+            #[serde(rename = "run-switch.nas-download-required")]
+            RunSwitchNasDownloadRequired,
+            #[serde(rename = "run-switch.option_invalid")]
+            RunSwitchOptionInvalid,
+            #[serde(rename = "run-switch.phase-retry")]
+            RunSwitchPhaseRetry,
+            #[serde(rename = "run-switch.plan-refresh-unavailable")]
+            RunSwitchPlanRefreshUnavailable,
+            #[serde(rename = "run-switch.plan-targets-changed")]
+            RunSwitchPlanTargetsChanged,
+            #[serde(rename = "run-switch.post-stop-inventory-pending")]
+            RunSwitchPostStopInventoryPending,
+            #[serde(rename = "run-switch.post-stop-memory-pool-changed")]
+            RunSwitchPostStopMemoryPoolChanged,
+            #[serde(rename = "run-switch.preflight-recipe-changed")]
+            RunSwitchPreflightRecipeChanged,
+            #[serde(rename = "run-switch.prepare-subphase-unsupported")]
+            RunSwitchPrepareSubphaseUnsupported,
+            #[serde(rename = "run-switch.profile.incomplete_multi_spark_model")]
+            RunSwitchProfileIncompleteMultiSparkModel,
+            #[serde(rename = "run-switch.profile_stop_scope_changed")]
+            RunSwitchProfileStopScopeChanged,
+            #[serde(rename = "run-switch.receipt_invalid")]
+            RunSwitchReceiptInvalid,
+            #[serde(rename = "run-switch.recipe-build-compatibility-unknown")]
+            RunSwitchRecipeBuildCompatibilityUnknown,
+            #[serde(rename = "run-switch.recipe-build-incompatible")]
+            RunSwitchRecipeBuildIncompatible,
+            #[serde(rename = "run-switch.recipe-build-unavailable")]
+            RunSwitchRecipeBuildUnavailable,
+            #[serde(rename = "run-switch.recipe_dependencies_unavailable")]
+            RunSwitchRecipeDependenciesUnavailable,
+            #[serde(rename = "run-switch.recipe_digest_changed")]
+            RunSwitchRecipeDigestChanged,
+            #[serde(rename = "run-switch.recipe_unresolved")]
+            RunSwitchRecipeUnresolved,
+            #[serde(rename = "run-switch.reconciliation-assessment-unavailable")]
+            RunSwitchReconciliationAssessmentUnavailable,
+            #[serde(rename = "run-switch.reconciliation-authority-unavailable")]
+            RunSwitchReconciliationAuthorityUnavailable,
+            #[serde(rename = "run-switch.reconciliation-prerequisite")]
+            RunSwitchReconciliationPrerequisite,
+            #[serde(rename = "run-switch.reconciliation-receipts-retained")]
+            RunSwitchReconciliationReceiptsRetained,
+            #[serde(rename = "run-switch.reconciliation-state-verification-failed")]
+            RunSwitchReconciliationStateVerificationFailed,
+            #[serde(rename = "run-switch.reconciliation-verification-failed")]
+            RunSwitchReconciliationVerificationFailed,
+            #[serde(rename = "run-switch.request_key_reused_differently")]
+            RunSwitchRequestKeyReusedDifferently,
+            #[serde(rename = "run-switch.resource-contract-invalid")]
+            RunSwitchResourceContractInvalid,
+            #[serde(rename = "run-switch.resource.insufficient")]
+            RunSwitchResourceInsufficient,
+            #[serde(rename = "run-switch.resource.insufficient_capacity")]
+            RunSwitchResourceInsufficientCapacity,
+            #[serde(rename = "run-switch.resource.insufficient_capacity_after_stop")]
+            RunSwitchResourceInsufficientCapacityAfterStop,
+            #[serde(rename = "run-switch.resource.insufficient_reservation_budget")]
+            RunSwitchResourceInsufficientReservationBudget,
+            #[serde(rename = "run-switch.resource.resident_usage_unknown")]
+            RunSwitchResourceResidentUsageUnknown,
+            #[serde(rename = "run-switch.run-not-active")]
+            RunSwitchRunNotActive,
+            #[serde(rename = "run-switch.run_admission_blocked")]
+            RunSwitchRunAdmissionBlocked,
+            #[serde(rename = "run-switch.run_admission_unavailable")]
+            RunSwitchRunAdmissionUnavailable,
+            #[serde(rename = "run-switch.runtime-build-verification-mismatch")]
+            RunSwitchRuntimeBuildVerificationMismatch,
+            #[serde(rename = "run-switch.runtime-image-authorization-mismatch")]
+            RunSwitchRuntimeImageAuthorizationMismatch,
+            #[serde(rename = "run-switch.runtime-image-executor-unavailable")]
+            RunSwitchRuntimeImageExecutorUnavailable,
+            #[serde(rename = "run-switch.runtime-image-owner-changed")]
+            RunSwitchRuntimeImageOwnerChanged,
+            #[serde(rename = "run-switch.runtime-image-preparation-layout-mismatch")]
+            RunSwitchRuntimeImagePreparationLayoutMismatch,
+            #[serde(rename = "run-switch.runtime-image-preparation-receipt-invalid")]
+            RunSwitchRuntimeImagePreparationReceiptInvalid,
+            #[serde(rename = "run-switch.runtime-image-preparing")]
+            RunSwitchRuntimeImagePreparing,
+            #[serde(rename = "run-switch.runtime-image-reference-identity-mismatch")]
+            RunSwitchRuntimeImageReferenceIdentityMismatch,
+            #[serde(rename = "run-switch.runtime-image-waiting-without-child")]
+            RunSwitchRuntimeImageWaitingWithoutChild,
+            #[serde(rename = "run-switch.spark-unavailable")]
+            RunSwitchSparkUnavailable,
+            #[serde(rename = "run-switch.start-observation")]
+            RunSwitchStartObservation,
+            #[serde(rename = "run-switch.start-observation-expired")]
+            RunSwitchStartObservationExpired,
+            #[serde(rename = "run-switch.start_installation_unavailable")]
+            RunSwitchStartInstallationUnavailable,
+            #[serde(rename = "run-switch.stop-plan-unavailable")]
+            RunSwitchStopPlanUnavailable,
+            #[serde(rename = "run-switch.stop-still-unresolved-after-cancellation")]
+            RunSwitchStopStillUnresolvedAfterCancellation,
+            #[serde(rename = "run-switch.stop-target-disappeared")]
+            RunSwitchStopTargetDisappeared,
+            #[serde(rename = "run-switch.stopped-run-identity-changed")]
+            RunSwitchStoppedRunIdentityChanged,
+            #[serde(rename = "run-switch.stopped-run-membership-changed")]
+            RunSwitchStoppedRunMembershipChanged,
+            #[serde(rename = "run-switch.target-not-active")]
+            RunSwitchTargetNotActive,
+            #[serde(rename = "run-switch.transfer-byte-evidence-invalid")]
+            RunSwitchTransferByteEvidenceInvalid,
+            #[serde(rename = "run-switch.uninstall-assessment-unavailable")]
+            RunSwitchUninstallAssessmentUnavailable,
+            #[serde(rename = "run-switch.uninstall-blocked")]
+            RunSwitchUninstallBlocked,
+            #[serde(rename = "run-switch.uninstall-issued-prerequisite")]
+            RunSwitchUninstallIssuedPrerequisite,
+            #[serde(rename = "run-switch.uninstall_target_unavailable")]
+            RunSwitchUninstallTargetUnavailable,
+            #[serde(rename = "run-switch.waiting")]
+            RunSwitchWaiting,
+            #[serde(rename = "run-switch.reason-unclassified")]
+            RunSwitchReasonUnclassified,
+            #[serde(rename = "run-switch.cancel-effect-unknown")]
+            RunSwitchCancelEffectUnknown,
+            #[serde(rename = "run-switch.container-build-start-unavailable")]
+            RunSwitchContainerBuildStartUnavailable,
+            #[serde(rename = "run-switch.distributed-recovery-active")]
+            RunSwitchDistributedRecoveryActive,
+            #[serde(rename = "run-switch.final-owner-state-unknown")]
+            RunSwitchFinalOwnerStateUnknown,
+            #[serde(rename = "run-switch.final-verification-expired")]
+            RunSwitchFinalVerificationExpired,
+            #[serde(rename = "run-switch.install-plan-unavailable")]
+            RunSwitchInstallPlanUnavailable,
+            #[serde(rename = "run-switch.install-preflight-expired")]
+            RunSwitchInstallPreflightExpired,
+            #[serde(rename = "run-switch.install-preparation-failed")]
+            RunSwitchInstallPreparationFailed,
+            #[serde(rename = "run-switch.install-start-failed")]
+            RunSwitchInstallStartFailed,
+            #[serde(rename = "run-switch.installation-handoff-inconsistent")]
+            RunSwitchInstallationHandoffInconsistent,
+            #[serde(rename = "run-switch.plan_blocked")]
+            RunSwitchPlanBlocked,
+            #[serde(rename = "run-switch.reconciliation-start-failed")]
+            RunSwitchReconciliationStartFailed,
+            #[serde(rename = "run-switch.route-health-recovery-active")]
+            RunSwitchRouteHealthRecoveryActive,
+            #[serde(rename = "run-switch.route-owner-failed")]
+            RunSwitchRouteOwnerFailed,
+            #[serde(rename = "run-switch.route-publication-pending")]
+            RunSwitchRoutePublicationPending,
+            #[serde(rename = "run-switch.route-withdrawn-owner-unknown")]
+            RunSwitchRouteWithdrawnOwnerUnknown,
+            #[serde(rename = "run-switch.run-owner-active")]
+            RunSwitchRunOwnerActive,
+            #[serde(rename = "run-switch.run-owner-terminal")]
+            RunSwitchRunOwnerTerminal,
+            #[serde(rename = "run-switch.stale_plan")]
+            RunSwitchStalePlan,
+            #[serde(rename = "run-switch.stop-verification-pending")]
+            RunSwitchStopVerificationPending,
+            #[serde(rename = "run-switch.superseded")]
+            RunSwitchSuperseded,
+            #[serde(rename = "run-switch.uninstall-abandon-failed")]
+            RunSwitchUninstallAbandonFailed,
+            #[serde(rename = "run-switch.uninstall-start-failed")]
+            RunSwitchUninstallStartFailed,
+            #[serde(rename = "run-switch.recipe.stop-issued-pending")]
+            RunSwitchRecipeStopIssuedPending,
+            #[serde(rename = "run-switch.recipe.install-issued-pending")]
+            RunSwitchRecipeInstallIssuedPending,
+            #[serde(rename = "run-switch.recipe.uninstall-issued-pending")]
+            RunSwitchRecipeUninstallIssuedPending,
+            #[serde(rename = "run-switch.recipe.reconcile-issued-pending")]
+            RunSwitchRecipeReconcileIssuedPending,
+            #[serde(rename = "run-switch.artifact-job-cancellation-issued-pending")]
+            RunSwitchArtifactJobCancellationIssuedPending,
+            #[serde(rename = "run-switch.transfer-executor-unavailable")]
+            RunSwitchTransferExecutorUnavailable,
+            #[serde(rename = "run-switch.transfer-waiting-without-child")]
+            RunSwitchTransferWaitingWithoutChild,
+            #[serde(rename = "run-switch.transfer-returned-no-evidence")]
+            RunSwitchTransferReturnedNoEvidence,
+            #[serde(rename = "run-switch.verify-executor-unavailable")]
+            RunSwitchVerifyExecutorUnavailable,
+            #[serde(rename = "run-switch.verify-waiting-without-child")]
+            RunSwitchVerifyWaitingWithoutChild,
+            #[serde(rename = "run-switch.verify-returned-no-evidence")]
+            RunSwitchVerifyReturnedNoEvidence,
+            #[serde(rename = "run-switch.cleanup-executor-unavailable")]
+            RunSwitchCleanupExecutorUnavailable,
+            #[serde(rename = "run-switch.cleanup-waiting-without-child")]
+            RunSwitchCleanupWaitingWithoutChild,
+            #[serde(rename = "run-switch.cleanup-returned-no-evidence")]
+            RunSwitchCleanupReturnedNoEvidence,
+            #[serde(rename = "run-switch.resource.capacity_unknown")]
+            RunSwitchResourceCapacityUnknown,
+            #[serde(rename = "run-switch.resource.estimate_uncertain")]
+            RunSwitchResourceEstimateUncertain,
+            #[serde(rename = "run-switch.resource.evidence_invalid")]
+            RunSwitchResourceEvidenceInvalid,
+            #[serde(rename = "run-switch.resource.evidence_unknown")]
+            RunSwitchResourceEvidenceUnknown,
+            #[serde(rename = "run-switch.resource.knobs_invalid")]
+            RunSwitchResourceKnobsInvalid,
+            #[serde(rename = "run-switch.resource.parallelism_duplicate")]
+            RunSwitchResourceParallelismDuplicate,
+            #[serde(rename = "run-switch.resource.parallelism_inconsistent")]
+            RunSwitchResourceParallelismInconsistent,
+            #[serde(rename = "run-switch.resource.parallelism_type")]
+            RunSwitchResourceParallelismType,
+            #[serde(rename = "run-switch.resource.parallelism_unknown")]
+            RunSwitchResourceParallelismUnknown,
+            #[serde(rename = "run-switch.resource.settings_kind_unknown")]
+            RunSwitchResourceSettingsKindUnknown,
+            #[serde(rename = "run-switch.resource.settings_type")]
+            RunSwitchResourceSettingsType,
+            #[serde(rename = "run-switch.resource.settings_unknown")]
+            RunSwitchResourceSettingsUnknown,
+            #[serde(rename = "run-switch.resource.stop_release_unknown")]
+            RunSwitchResourceStopReleaseUnknown,
+            #[serde(rename = "run-switch.reconcile.active_effect_unknown")]
+            RunSwitchReconcileActiveEffectUnknown,
+            #[serde(rename = "run-switch.reconcile.agent_unavailable")]
+            RunSwitchReconcileAgentUnavailable,
+            #[serde(rename = "run-switch.reconcile.capacity_busy")]
+            RunSwitchReconcileCapacityBusy,
+            #[serde(rename = "run-switch.reconcile.install_provenance_mismatch")]
+            RunSwitchReconcileInstallProvenanceMismatch,
+            #[serde(rename = "run-switch.reconcile.install_provenance_unavailable")]
+            RunSwitchReconcileInstallProvenanceUnavailable,
+            #[serde(rename = "run-switch.reconcile.installation_effect_unknown")]
+            RunSwitchReconcileInstallationEffectUnknown,
+            #[serde(rename = "run-switch.reconcile.installation_identity_mismatch")]
+            RunSwitchReconcileInstallationIdentityMismatch,
+            #[serde(rename = "run-switch.reconcile.installation_identity_unavailable")]
+            RunSwitchReconcileInstallationIdentityUnavailable,
+            #[serde(rename = "run-switch.reconcile.membership_changed")]
+            RunSwitchReconcileMembershipChanged,
+            #[serde(rename = "run-switch.reconcile.operation_active")]
+            RunSwitchReconcileOperationActive,
+            #[serde(rename = "run-switch.reconcile.rank_membership_changed")]
+            RunSwitchReconcileRankMembershipChanged,
+            #[serde(rename = "run-switch.reconcile.recipe_revision_unavailable")]
+            RunSwitchReconcileRecipeRevisionUnavailable,
+            #[serde(rename = "run-switch.reconcile.spec_identity_mismatch")]
+            RunSwitchReconcileSpecIdentityMismatch,
+            #[serde(rename = "run-switch.stop.capacity_release_deferred")]
+            RunSwitchStopCapacityReleaseDeferred,
+            #[serde(rename = "run-switch.stop.rank_membership_changed")]
+            RunSwitchStopRankMembershipChanged,
+            #[serde(rename = "run-switch.stop.reservation_membership_changed")]
+            RunSwitchStopReservationMembershipChanged,
+            #[serde(rename = "run-switch.stop.run_not_stoppable")]
+            RunSwitchStopRunNotStoppable,
+            #[serde(rename = "run-switch.stop.target_scope_changed")]
+            RunSwitchStopTargetScopeChanged,
+            #[serde(rename = "run-switch.uninstall.abandon-never-installed")]
+            RunSwitchUninstallAbandonNeverInstalled,
+            #[serde(rename = "run-switch.uninstall.active_run")]
+            RunSwitchUninstallActiveRun,
+            #[serde(rename = "run-switch.uninstall.active_runs_truncated")]
+            RunSwitchUninstallActiveRunsTruncated,
+            #[serde(rename = "run-switch.uninstall.bytes_unknown")]
+            RunSwitchUninstallBytesUnknown,
+            #[serde(rename = "run-switch.uninstall.installation_not_uninstallable")]
+            RunSwitchUninstallInstallationNotUninstallable,
+            #[serde(rename = "run-switch.uninstall.operation_active")]
+            RunSwitchUninstallOperationActive,
+            #[serde(rename = "run-switch.uninstall.rank_membership_changed")]
+            RunSwitchUninstallRankMembershipChanged,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RunSwitchActiveRunConflict => Self::RunSwitchActiveRunConflict,
+            Raw::RunSwitchAdvanceFailed => Self::RunSwitchAdvanceFailed,
+            Raw::RunSwitchAgentUpgradeRequired => Self::RunSwitchAgentUpgradeRequired,
+            Raw::RunSwitchArtifactIdentityUnknown => Self::RunSwitchArtifactIdentityUnknown,
+            Raw::RunSwitchArtifactInspectionUnavailable => {
+                Self::RunSwitchArtifactInspectionUnavailable
+            }
+            Raw::RunSwitchArtifactManifestUnknown => Self::RunSwitchArtifactManifestUnknown,
+            Raw::RunSwitchArtifactPhaseExecutorUnavailable => {
+                Self::RunSwitchArtifactPhaseExecutorUnavailable
+            }
+            Raw::RunSwitchArtifactVerificationResultInvalid => {
+                Self::RunSwitchArtifactVerificationResultInvalid
+            }
+            Raw::RunSwitchCleanupReclaimEvidenceInvalid => {
+                Self::RunSwitchCleanupReclaimEvidenceInvalid
+            }
+            Raw::RunSwitchCleanupReclaimedBytesExceedPlan => {
+                Self::RunSwitchCleanupReclaimedBytesExceedPlan
+            }
+            Raw::RunSwitchCleanupReferenceProtectionEvidenceInvalid => {
+                Self::RunSwitchCleanupReferenceProtectionEvidenceInvalid
+            }
+            Raw::RunSwitchCleanupReferenceProtectionOverlap => {
+                Self::RunSwitchCleanupReferenceProtectionOverlap
+            }
+            Raw::RunSwitchCleanupScopeInvalid => Self::RunSwitchCleanupScopeInvalid,
+            Raw::RunSwitchContainerBuildEvidenceInvalid => {
+                Self::RunSwitchContainerBuildEvidenceInvalid
+            }
+            Raw::RunSwitchContainerBuildExecutorUnavailable => {
+                Self::RunSwitchContainerBuildExecutorUnavailable
+            }
+            Raw::RunSwitchContainerBuildIdentityUnavailable => {
+                Self::RunSwitchContainerBuildIdentityUnavailable
+            }
+            Raw::RunSwitchContainerBuildParentChanged => Self::RunSwitchContainerBuildParentChanged,
+            Raw::RunSwitchContainerBuildParentInvalid => Self::RunSwitchContainerBuildParentInvalid,
+            Raw::RunSwitchContainerBuildPlanInvalid => Self::RunSwitchContainerBuildPlanInvalid,
+            Raw::RunSwitchContainerBuildReceiptUnavailable => {
+                Self::RunSwitchContainerBuildReceiptUnavailable
+            }
+            Raw::RunSwitchContainerBuildRequired => Self::RunSwitchContainerBuildRequired,
+            Raw::RunSwitchContainerBuildStateInvalid => Self::RunSwitchContainerBuildStateInvalid,
+            Raw::RunSwitchContainerBuildUnavailable => Self::RunSwitchContainerBuildUnavailable,
+            Raw::RunSwitchCrossGroupConflict => Self::RunSwitchCrossGroupConflict,
+            Raw::RunSwitchDiskEnvelopeInvalid => Self::RunSwitchDiskEnvelopeInvalid,
+            Raw::RunSwitchDiskEvictionPlanned => Self::RunSwitchDiskEvictionPlanned,
+            Raw::RunSwitchEffectUncertain => Self::RunSwitchEffectUncertain,
+            Raw::RunSwitchFinalVerification => Self::RunSwitchFinalVerification,
+            Raw::RunSwitchFinalVerificationClockInvalid => {
+                Self::RunSwitchFinalVerificationClockInvalid
+            }
+            Raw::RunSwitchFinalVerificationFailed => Self::RunSwitchFinalVerificationFailed,
+            Raw::RunSwitchFinalVerificationTimeout => Self::RunSwitchFinalVerificationTimeout,
+            Raw::RunSwitchFinalVerificationUnavailable => {
+                Self::RunSwitchFinalVerificationUnavailable
+            }
+            Raw::RunSwitchInstallExecutorUnavailable => Self::RunSwitchInstallExecutorUnavailable,
+            Raw::RunSwitchInstallPreparationUnavailable => {
+                Self::RunSwitchInstallPreparationUnavailable
+            }
+            Raw::RunSwitchInstallationHandoffUnavailable => {
+                Self::RunSwitchInstallationHandoffUnavailable
+            }
+            Raw::RunSwitchInstallationIdentityChanged => Self::RunSwitchInstallationIdentityChanged,
+            Raw::RunSwitchInstallationIdentityUnavailable => {
+                Self::RunSwitchInstallationIdentityUnavailable
+            }
+            Raw::RunSwitchInstallationMembershipChanged => {
+                Self::RunSwitchInstallationMembershipChanged
+            }
+            Raw::RunSwitchInstallationPreparationUnavailable => {
+                Self::RunSwitchInstallationPreparationUnavailable
+            }
+            Raw::RunSwitchInstallationVerificationFailed => {
+                Self::RunSwitchInstallationVerificationFailed
+            }
+            Raw::RunSwitchInstallationVerificationUnavailable => {
+                Self::RunSwitchInstallationVerificationUnavailable
+            }
+            Raw::RunSwitchInsufficientDisk => Self::RunSwitchInsufficientDisk,
+            Raw::RunSwitchInsufficientMemory => Self::RunSwitchInsufficientMemory,
+            Raw::RunSwitchInterfaceInvalid => Self::RunSwitchInterfaceInvalid,
+            Raw::RunSwitchInventoryStale => Self::RunSwitchInventoryStale,
+            Raw::RunSwitchInventoryUnknown => Self::RunSwitchInventoryUnknown,
+            Raw::RunSwitchMappingGroupMismatch => Self::RunSwitchMappingGroupMismatch,
+            Raw::RunSwitchMappingInvalid => Self::RunSwitchMappingInvalid,
+            Raw::RunSwitchMappingMaterializationUnavailable => {
+                Self::RunSwitchMappingMaterializationUnavailable
+            }
+            Raw::RunSwitchMemoryEnvelopeInvalid => Self::RunSwitchMemoryEnvelopeInvalid,
+            Raw::RunSwitchModelDownloadArtifactSetMismatch => {
+                Self::RunSwitchModelDownloadArtifactSetMismatch
+            }
+            Raw::RunSwitchModelDownloadByteEvidenceMismatch => {
+                Self::RunSwitchModelDownloadByteEvidenceMismatch
+            }
+            Raw::RunSwitchModelDownloadCoverageIncomplete => {
+                Self::RunSwitchModelDownloadCoverageIncomplete
+            }
+            Raw::RunSwitchModelRecipeMismatch => Self::RunSwitchModelRecipeMismatch,
+            Raw::RunSwitchModelRevisionUnavailable => Self::RunSwitchModelRevisionUnavailable,
+            Raw::RunSwitchNasCoverageUnknown => Self::RunSwitchNasCoverageUnknown,
+            Raw::RunSwitchNasDownloadBlocked => Self::RunSwitchNasDownloadBlocked,
+            Raw::RunSwitchNasDownloadRequired => Self::RunSwitchNasDownloadRequired,
+            Raw::RunSwitchOptionInvalid => Self::RunSwitchOptionInvalid,
+            Raw::RunSwitchPhaseRetry => Self::RunSwitchPhaseRetry,
+            Raw::RunSwitchPlanRefreshUnavailable => Self::RunSwitchPlanRefreshUnavailable,
+            Raw::RunSwitchPlanTargetsChanged => Self::RunSwitchPlanTargetsChanged,
+            Raw::RunSwitchPostStopInventoryPending => Self::RunSwitchPostStopInventoryPending,
+            Raw::RunSwitchPostStopMemoryPoolChanged => Self::RunSwitchPostStopMemoryPoolChanged,
+            Raw::RunSwitchPreflightRecipeChanged => Self::RunSwitchPreflightRecipeChanged,
+            Raw::RunSwitchPrepareSubphaseUnsupported => Self::RunSwitchPrepareSubphaseUnsupported,
+            Raw::RunSwitchProfileIncompleteMultiSparkModel => {
+                Self::RunSwitchProfileIncompleteMultiSparkModel
+            }
+            Raw::RunSwitchProfileStopScopeChanged => Self::RunSwitchProfileStopScopeChanged,
+            Raw::RunSwitchReceiptInvalid => Self::RunSwitchReceiptInvalid,
+            Raw::RunSwitchRecipeBuildCompatibilityUnknown => {
+                Self::RunSwitchRecipeBuildCompatibilityUnknown
+            }
+            Raw::RunSwitchRecipeBuildIncompatible => Self::RunSwitchRecipeBuildIncompatible,
+            Raw::RunSwitchRecipeBuildUnavailable => Self::RunSwitchRecipeBuildUnavailable,
+            Raw::RunSwitchRecipeDependenciesUnavailable => {
+                Self::RunSwitchRecipeDependenciesUnavailable
+            }
+            Raw::RunSwitchRecipeDigestChanged => Self::RunSwitchRecipeDigestChanged,
+            Raw::RunSwitchRecipeUnresolved => Self::RunSwitchRecipeUnresolved,
+            Raw::RunSwitchReconciliationAssessmentUnavailable => {
+                Self::RunSwitchReconciliationAssessmentUnavailable
+            }
+            Raw::RunSwitchReconciliationAuthorityUnavailable => {
+                Self::RunSwitchReconciliationAuthorityUnavailable
+            }
+            Raw::RunSwitchReconciliationPrerequisite => Self::RunSwitchReconciliationPrerequisite,
+            Raw::RunSwitchReconciliationReceiptsRetained => {
+                Self::RunSwitchReconciliationReceiptsRetained
+            }
+            Raw::RunSwitchReconciliationStateVerificationFailed => {
+                Self::RunSwitchReconciliationStateVerificationFailed
+            }
+            Raw::RunSwitchReconciliationVerificationFailed => {
+                Self::RunSwitchReconciliationVerificationFailed
+            }
+            Raw::RunSwitchRequestKeyReusedDifferently => Self::RunSwitchRequestKeyReusedDifferently,
+            Raw::RunSwitchResourceContractInvalid => Self::RunSwitchResourceContractInvalid,
+            Raw::RunSwitchResourceInsufficient => Self::RunSwitchResourceInsufficient,
+            Raw::RunSwitchResourceInsufficientCapacity => {
+                Self::RunSwitchResourceInsufficientCapacity
+            }
+            Raw::RunSwitchResourceInsufficientCapacityAfterStop => {
+                Self::RunSwitchResourceInsufficientCapacityAfterStop
+            }
+            Raw::RunSwitchResourceInsufficientReservationBudget => {
+                Self::RunSwitchResourceInsufficientReservationBudget
+            }
+            Raw::RunSwitchResourceResidentUsageUnknown => {
+                Self::RunSwitchResourceResidentUsageUnknown
+            }
+            Raw::RunSwitchRunNotActive => Self::RunSwitchRunNotActive,
+            Raw::RunSwitchRunAdmissionBlocked => Self::RunSwitchRunAdmissionBlocked,
+            Raw::RunSwitchRunAdmissionUnavailable => Self::RunSwitchRunAdmissionUnavailable,
+            Raw::RunSwitchRuntimeBuildVerificationMismatch => {
+                Self::RunSwitchRuntimeBuildVerificationMismatch
+            }
+            Raw::RunSwitchRuntimeImageAuthorizationMismatch => {
+                Self::RunSwitchRuntimeImageAuthorizationMismatch
+            }
+            Raw::RunSwitchRuntimeImageExecutorUnavailable => {
+                Self::RunSwitchRuntimeImageExecutorUnavailable
+            }
+            Raw::RunSwitchRuntimeImageOwnerChanged => Self::RunSwitchRuntimeImageOwnerChanged,
+            Raw::RunSwitchRuntimeImagePreparationLayoutMismatch => {
+                Self::RunSwitchRuntimeImagePreparationLayoutMismatch
+            }
+            Raw::RunSwitchRuntimeImagePreparationReceiptInvalid => {
+                Self::RunSwitchRuntimeImagePreparationReceiptInvalid
+            }
+            Raw::RunSwitchRuntimeImagePreparing => Self::RunSwitchRuntimeImagePreparing,
+            Raw::RunSwitchRuntimeImageReferenceIdentityMismatch => {
+                Self::RunSwitchRuntimeImageReferenceIdentityMismatch
+            }
+            Raw::RunSwitchRuntimeImageWaitingWithoutChild => {
+                Self::RunSwitchRuntimeImageWaitingWithoutChild
+            }
+            Raw::RunSwitchSparkUnavailable => Self::RunSwitchSparkUnavailable,
+            Raw::RunSwitchStartObservation => Self::RunSwitchStartObservation,
+            Raw::RunSwitchStartObservationExpired => Self::RunSwitchStartObservationExpired,
+            Raw::RunSwitchStartInstallationUnavailable => {
+                Self::RunSwitchStartInstallationUnavailable
+            }
+            Raw::RunSwitchStopPlanUnavailable => Self::RunSwitchStopPlanUnavailable,
+            Raw::RunSwitchStopStillUnresolvedAfterCancellation => {
+                Self::RunSwitchStopStillUnresolvedAfterCancellation
+            }
+            Raw::RunSwitchStopTargetDisappeared => Self::RunSwitchStopTargetDisappeared,
+            Raw::RunSwitchStoppedRunIdentityChanged => Self::RunSwitchStoppedRunIdentityChanged,
+            Raw::RunSwitchStoppedRunMembershipChanged => Self::RunSwitchStoppedRunMembershipChanged,
+            Raw::RunSwitchTargetNotActive => Self::RunSwitchTargetNotActive,
+            Raw::RunSwitchTransferByteEvidenceInvalid => Self::RunSwitchTransferByteEvidenceInvalid,
+            Raw::RunSwitchUninstallAssessmentUnavailable => {
+                Self::RunSwitchUninstallAssessmentUnavailable
+            }
+            Raw::RunSwitchUninstallBlocked => Self::RunSwitchUninstallBlocked,
+            Raw::RunSwitchUninstallIssuedPrerequisite => Self::RunSwitchUninstallIssuedPrerequisite,
+            Raw::RunSwitchUninstallTargetUnavailable => Self::RunSwitchUninstallTargetUnavailable,
+            Raw::RunSwitchWaiting => Self::RunSwitchWaiting,
+            Raw::RunSwitchReasonUnclassified => Self::RunSwitchReasonUnclassified,
+            Raw::RunSwitchCancelEffectUnknown => Self::RunSwitchCancelEffectUnknown,
+            Raw::RunSwitchContainerBuildStartUnavailable => {
+                Self::RunSwitchContainerBuildStartUnavailable
+            }
+            Raw::RunSwitchDistributedRecoveryActive => Self::RunSwitchDistributedRecoveryActive,
+            Raw::RunSwitchFinalOwnerStateUnknown => Self::RunSwitchFinalOwnerStateUnknown,
+            Raw::RunSwitchFinalVerificationExpired => Self::RunSwitchFinalVerificationExpired,
+            Raw::RunSwitchInstallPlanUnavailable => Self::RunSwitchInstallPlanUnavailable,
+            Raw::RunSwitchInstallPreflightExpired => Self::RunSwitchInstallPreflightExpired,
+            Raw::RunSwitchInstallPreparationFailed => Self::RunSwitchInstallPreparationFailed,
+            Raw::RunSwitchInstallStartFailed => Self::RunSwitchInstallStartFailed,
+            Raw::RunSwitchInstallationHandoffInconsistent => {
+                Self::RunSwitchInstallationHandoffInconsistent
+            }
+            Raw::RunSwitchPlanBlocked => Self::RunSwitchPlanBlocked,
+            Raw::RunSwitchReconciliationStartFailed => Self::RunSwitchReconciliationStartFailed,
+            Raw::RunSwitchRouteHealthRecoveryActive => Self::RunSwitchRouteHealthRecoveryActive,
+            Raw::RunSwitchRouteOwnerFailed => Self::RunSwitchRouteOwnerFailed,
+            Raw::RunSwitchRoutePublicationPending => Self::RunSwitchRoutePublicationPending,
+            Raw::RunSwitchRouteWithdrawnOwnerUnknown => Self::RunSwitchRouteWithdrawnOwnerUnknown,
+            Raw::RunSwitchRunOwnerActive => Self::RunSwitchRunOwnerActive,
+            Raw::RunSwitchRunOwnerTerminal => Self::RunSwitchRunOwnerTerminal,
+            Raw::RunSwitchStalePlan => Self::RunSwitchStalePlan,
+            Raw::RunSwitchStopVerificationPending => Self::RunSwitchStopVerificationPending,
+            Raw::RunSwitchSuperseded => Self::RunSwitchSuperseded,
+            Raw::RunSwitchUninstallAbandonFailed => Self::RunSwitchUninstallAbandonFailed,
+            Raw::RunSwitchUninstallStartFailed => Self::RunSwitchUninstallStartFailed,
+            Raw::RunSwitchRecipeStopIssuedPending => Self::RunSwitchRecipeStopIssuedPending,
+            Raw::RunSwitchRecipeInstallIssuedPending => Self::RunSwitchRecipeInstallIssuedPending,
+            Raw::RunSwitchRecipeUninstallIssuedPending => {
+                Self::RunSwitchRecipeUninstallIssuedPending
+            }
+            Raw::RunSwitchRecipeReconcileIssuedPending => {
+                Self::RunSwitchRecipeReconcileIssuedPending
+            }
+            Raw::RunSwitchArtifactJobCancellationIssuedPending => {
+                Self::RunSwitchArtifactJobCancellationIssuedPending
+            }
+            Raw::RunSwitchTransferExecutorUnavailable => Self::RunSwitchTransferExecutorUnavailable,
+            Raw::RunSwitchTransferWaitingWithoutChild => Self::RunSwitchTransferWaitingWithoutChild,
+            Raw::RunSwitchTransferReturnedNoEvidence => Self::RunSwitchTransferReturnedNoEvidence,
+            Raw::RunSwitchVerifyExecutorUnavailable => Self::RunSwitchVerifyExecutorUnavailable,
+            Raw::RunSwitchVerifyWaitingWithoutChild => Self::RunSwitchVerifyWaitingWithoutChild,
+            Raw::RunSwitchVerifyReturnedNoEvidence => Self::RunSwitchVerifyReturnedNoEvidence,
+            Raw::RunSwitchCleanupExecutorUnavailable => Self::RunSwitchCleanupExecutorUnavailable,
+            Raw::RunSwitchCleanupWaitingWithoutChild => Self::RunSwitchCleanupWaitingWithoutChild,
+            Raw::RunSwitchCleanupReturnedNoEvidence => Self::RunSwitchCleanupReturnedNoEvidence,
+            Raw::RunSwitchResourceCapacityUnknown => Self::RunSwitchResourceCapacityUnknown,
+            Raw::RunSwitchResourceEstimateUncertain => Self::RunSwitchResourceEstimateUncertain,
+            Raw::RunSwitchResourceEvidenceInvalid => Self::RunSwitchResourceEvidenceInvalid,
+            Raw::RunSwitchResourceEvidenceUnknown => Self::RunSwitchResourceEvidenceUnknown,
+            Raw::RunSwitchResourceKnobsInvalid => Self::RunSwitchResourceKnobsInvalid,
+            Raw::RunSwitchResourceParallelismDuplicate => {
+                Self::RunSwitchResourceParallelismDuplicate
+            }
+            Raw::RunSwitchResourceParallelismInconsistent => {
+                Self::RunSwitchResourceParallelismInconsistent
+            }
+            Raw::RunSwitchResourceParallelismType => Self::RunSwitchResourceParallelismType,
+            Raw::RunSwitchResourceParallelismUnknown => Self::RunSwitchResourceParallelismUnknown,
+            Raw::RunSwitchResourceSettingsKindUnknown => Self::RunSwitchResourceSettingsKindUnknown,
+            Raw::RunSwitchResourceSettingsType => Self::RunSwitchResourceSettingsType,
+            Raw::RunSwitchResourceSettingsUnknown => Self::RunSwitchResourceSettingsUnknown,
+            Raw::RunSwitchResourceStopReleaseUnknown => Self::RunSwitchResourceStopReleaseUnknown,
+            Raw::RunSwitchReconcileActiveEffectUnknown => {
+                Self::RunSwitchReconcileActiveEffectUnknown
+            }
+            Raw::RunSwitchReconcileAgentUnavailable => Self::RunSwitchReconcileAgentUnavailable,
+            Raw::RunSwitchReconcileCapacityBusy => Self::RunSwitchReconcileCapacityBusy,
+            Raw::RunSwitchReconcileInstallProvenanceMismatch => {
+                Self::RunSwitchReconcileInstallProvenanceMismatch
+            }
+            Raw::RunSwitchReconcileInstallProvenanceUnavailable => {
+                Self::RunSwitchReconcileInstallProvenanceUnavailable
+            }
+            Raw::RunSwitchReconcileInstallationEffectUnknown => {
+                Self::RunSwitchReconcileInstallationEffectUnknown
+            }
+            Raw::RunSwitchReconcileInstallationIdentityMismatch => {
+                Self::RunSwitchReconcileInstallationIdentityMismatch
+            }
+            Raw::RunSwitchReconcileInstallationIdentityUnavailable => {
+                Self::RunSwitchReconcileInstallationIdentityUnavailable
+            }
+            Raw::RunSwitchReconcileMembershipChanged => Self::RunSwitchReconcileMembershipChanged,
+            Raw::RunSwitchReconcileOperationActive => Self::RunSwitchReconcileOperationActive,
+            Raw::RunSwitchReconcileRankMembershipChanged => {
+                Self::RunSwitchReconcileRankMembershipChanged
+            }
+            Raw::RunSwitchReconcileRecipeRevisionUnavailable => {
+                Self::RunSwitchReconcileRecipeRevisionUnavailable
+            }
+            Raw::RunSwitchReconcileSpecIdentityMismatch => {
+                Self::RunSwitchReconcileSpecIdentityMismatch
+            }
+            Raw::RunSwitchStopCapacityReleaseDeferred => Self::RunSwitchStopCapacityReleaseDeferred,
+            Raw::RunSwitchStopRankMembershipChanged => Self::RunSwitchStopRankMembershipChanged,
+            Raw::RunSwitchStopReservationMembershipChanged => {
+                Self::RunSwitchStopReservationMembershipChanged
+            }
+            Raw::RunSwitchStopRunNotStoppable => Self::RunSwitchStopRunNotStoppable,
+            Raw::RunSwitchStopTargetScopeChanged => Self::RunSwitchStopTargetScopeChanged,
+            Raw::RunSwitchUninstallAbandonNeverInstalled => {
+                Self::RunSwitchUninstallAbandonNeverInstalled
+            }
+            Raw::RunSwitchUninstallActiveRun => Self::RunSwitchUninstallActiveRun,
+            Raw::RunSwitchUninstallActiveRunsTruncated => {
+                Self::RunSwitchUninstallActiveRunsTruncated
+            }
+            Raw::RunSwitchUninstallBytesUnknown => Self::RunSwitchUninstallBytesUnknown,
+            Raw::RunSwitchUninstallInstallationNotUninstallable => {
+                Self::RunSwitchUninstallInstallationNotUninstallable
+            }
+            Raw::RunSwitchUninstallOperationActive => Self::RunSwitchUninstallOperationActive,
+            Raw::RunSwitchUninstallRankMembershipChanged => {
+                Self::RunSwitchUninstallRankMembershipChanged
+            }
+        })
+    }
+}
+impl RuntimeImageCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RegistryDestinationForbidden => "registry.destination_forbidden",
+            Self::RegistryDigestMismatch => "registry.digest_mismatch",
+            Self::RegistryRedirectForbidden => "registry.redirect_forbidden",
+            Self::RuntimeImageArchitectureMismatch => "runtime_image.architecture_mismatch",
+            Self::RuntimeImageArchitectureMissing => "runtime_image.architecture_missing",
+            Self::RuntimeImageArchiveConflict => "runtime_image.archive_conflict",
+            Self::RuntimeImageArchiveInvalid => "runtime_image.archive_invalid",
+            Self::RuntimeImageArchiveMismatch => "runtime_image.archive_mismatch",
+            Self::RuntimeImageArchiveSizeMismatch => "runtime_image.archive_size_mismatch",
+            Self::RuntimeImageArchiveUnavailable => "runtime_image.archive_unavailable",
+            Self::RuntimeImageBuildArchiveDigest => "runtime_image.build_archive_digest",
+            Self::RuntimeImageBuildDigest => "runtime_image.build_digest",
+            Self::RuntimeImageBuildId => "runtime_image.build_id",
+            Self::RuntimeImageBuildIncomplete => "runtime_image.build_incomplete",
+            Self::RuntimeImageCacheMissing => "runtime_image.cache_missing",
+            Self::RuntimeImageConfigMissing => "runtime_image.config_missing",
+            Self::RuntimeImageDigestInvalid => "runtime_image.digest_invalid",
+            Self::RuntimeImageDigestMismatch => "runtime_image.digest_mismatch",
+            Self::RuntimeImageEvidenceInvalid => "runtime_image.evidence_invalid",
+            Self::RuntimeImageIdentityInvalid => "runtime_image.identity_invalid",
+            Self::RuntimeImageImageUnpinned => "runtime_image.image_unpinned",
+            Self::RuntimeImageInspectInvalid => "runtime_image.inspect_invalid",
+            Self::RuntimeImageInsufficientDisk => "runtime_image.insufficient_disk",
+            Self::RuntimeImageInterfaceMismatch => "runtime_image.interface_mismatch",
+            Self::RuntimeImageInterfaceMissing => "runtime_image.interface_missing",
+            Self::RuntimeImageLockUnavailable => "runtime_image.lock_unavailable",
+            Self::RuntimeImagePublicationContended => "runtime_image.publication_contended",
+            Self::RuntimeImageReceiptContractNewer => "runtime_image.receipt_contract_newer",
+            Self::RuntimeImageReceiptIdentityConflict => "runtime_image.receipt_identity_conflict",
+            Self::RuntimeImageReceiptIdentityInvalid => "runtime_image.receipt_identity_invalid",
+            Self::RuntimeImageReceiptInvalid => "runtime_image.receipt_invalid",
+            Self::RuntimeImageReceiptPersistenceFailed => {
+                "runtime_image.receipt_persistence_failed"
+            }
+            Self::RuntimeImageReceiptUnavailable => "runtime_image.receipt_unavailable",
+            Self::RuntimeImageReceiptWriteFailed => "runtime_image.receipt_write_failed",
+            Self::RuntimeImageRecipeInvalid => "runtime_image.recipe_invalid",
+            Self::RuntimeImageReferenceIntentInvalid => "runtime_image.reference_intent_invalid",
+            Self::RuntimeImageRemovalStorageFailed => "runtime_image.removal_storage_failed",
+            Self::RuntimeImageRuntimeInvalid => "runtime_image.runtime_invalid",
+            Self::RuntimeImageSourceMismatch => "runtime_image.source_mismatch",
+            Self::RuntimeImageTransferContended => "runtime_image.transfer_contended",
+        }
+    }
+}
+impl ::std::ops::Deref for RuntimeImageCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RuntimeImageCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RuntimeImageCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RuntimeImageCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RuntimeImageCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "registry.destination_forbidden")]
+            RegistryDestinationForbidden,
+            #[serde(rename = "registry.digest_mismatch")]
+            RegistryDigestMismatch,
+            #[serde(rename = "registry.redirect_forbidden")]
+            RegistryRedirectForbidden,
+            #[serde(rename = "runtime_image.architecture_mismatch")]
+            RuntimeImageArchitectureMismatch,
+            #[serde(rename = "runtime_image.architecture_missing")]
+            RuntimeImageArchitectureMissing,
+            #[serde(rename = "runtime_image.archive_conflict")]
+            RuntimeImageArchiveConflict,
+            #[serde(rename = "runtime_image.archive_invalid")]
+            RuntimeImageArchiveInvalid,
+            #[serde(rename = "runtime_image.archive_mismatch")]
+            RuntimeImageArchiveMismatch,
+            #[serde(rename = "runtime_image.archive_size_mismatch")]
+            RuntimeImageArchiveSizeMismatch,
+            #[serde(rename = "runtime_image.archive_unavailable")]
+            RuntimeImageArchiveUnavailable,
+            #[serde(rename = "runtime_image.build_archive_digest")]
+            RuntimeImageBuildArchiveDigest,
+            #[serde(rename = "runtime_image.build_digest")]
+            RuntimeImageBuildDigest,
+            #[serde(rename = "runtime_image.build_id")]
+            RuntimeImageBuildId,
+            #[serde(rename = "runtime_image.build_incomplete")]
+            RuntimeImageBuildIncomplete,
+            #[serde(rename = "runtime_image.cache_missing")]
+            RuntimeImageCacheMissing,
+            #[serde(rename = "runtime_image.config_missing")]
+            RuntimeImageConfigMissing,
+            #[serde(rename = "runtime_image.digest_invalid")]
+            RuntimeImageDigestInvalid,
+            #[serde(rename = "runtime_image.digest_mismatch")]
+            RuntimeImageDigestMismatch,
+            #[serde(rename = "runtime_image.evidence_invalid")]
+            RuntimeImageEvidenceInvalid,
+            #[serde(rename = "runtime_image.identity_invalid")]
+            RuntimeImageIdentityInvalid,
+            #[serde(rename = "runtime_image.image_unpinned")]
+            RuntimeImageImageUnpinned,
+            #[serde(rename = "runtime_image.inspect_invalid")]
+            RuntimeImageInspectInvalid,
+            #[serde(rename = "runtime_image.insufficient_disk")]
+            RuntimeImageInsufficientDisk,
+            #[serde(rename = "runtime_image.interface_mismatch")]
+            RuntimeImageInterfaceMismatch,
+            #[serde(rename = "runtime_image.interface_missing")]
+            RuntimeImageInterfaceMissing,
+            #[serde(rename = "runtime_image.lock_unavailable")]
+            RuntimeImageLockUnavailable,
+            #[serde(rename = "runtime_image.publication_contended")]
+            RuntimeImagePublicationContended,
+            #[serde(rename = "runtime_image.receipt_contract_newer")]
+            RuntimeImageReceiptContractNewer,
+            #[serde(rename = "runtime_image.receipt_identity_conflict")]
+            RuntimeImageReceiptIdentityConflict,
+            #[serde(rename = "runtime_image.receipt_identity_invalid")]
+            RuntimeImageReceiptIdentityInvalid,
+            #[serde(rename = "runtime_image.receipt_invalid")]
+            RuntimeImageReceiptInvalid,
+            #[serde(rename = "runtime_image.receipt_persistence_failed")]
+            RuntimeImageReceiptPersistenceFailed,
+            #[serde(rename = "runtime_image.receipt_unavailable")]
+            RuntimeImageReceiptUnavailable,
+            #[serde(rename = "runtime_image.receipt_write_failed")]
+            RuntimeImageReceiptWriteFailed,
+            #[serde(rename = "runtime_image.recipe_invalid")]
+            RuntimeImageRecipeInvalid,
+            #[serde(rename = "runtime_image.reference_intent_invalid")]
+            RuntimeImageReferenceIntentInvalid,
+            #[serde(rename = "runtime_image.removal_storage_failed")]
+            RuntimeImageRemovalStorageFailed,
+            #[serde(rename = "runtime_image.runtime_invalid")]
+            RuntimeImageRuntimeInvalid,
+            #[serde(rename = "runtime_image.source_mismatch")]
+            RuntimeImageSourceMismatch,
+            #[serde(rename = "runtime_image.transfer_contended")]
+            RuntimeImageTransferContended,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RegistryDestinationForbidden => Self::RegistryDestinationForbidden,
+            Raw::RegistryDigestMismatch => Self::RegistryDigestMismatch,
+            Raw::RegistryRedirectForbidden => Self::RegistryRedirectForbidden,
+            Raw::RuntimeImageArchitectureMismatch => Self::RuntimeImageArchitectureMismatch,
+            Raw::RuntimeImageArchitectureMissing => Self::RuntimeImageArchitectureMissing,
+            Raw::RuntimeImageArchiveConflict => Self::RuntimeImageArchiveConflict,
+            Raw::RuntimeImageArchiveInvalid => Self::RuntimeImageArchiveInvalid,
+            Raw::RuntimeImageArchiveMismatch => Self::RuntimeImageArchiveMismatch,
+            Raw::RuntimeImageArchiveSizeMismatch => Self::RuntimeImageArchiveSizeMismatch,
+            Raw::RuntimeImageArchiveUnavailable => Self::RuntimeImageArchiveUnavailable,
+            Raw::RuntimeImageBuildArchiveDigest => Self::RuntimeImageBuildArchiveDigest,
+            Raw::RuntimeImageBuildDigest => Self::RuntimeImageBuildDigest,
+            Raw::RuntimeImageBuildId => Self::RuntimeImageBuildId,
+            Raw::RuntimeImageBuildIncomplete => Self::RuntimeImageBuildIncomplete,
+            Raw::RuntimeImageCacheMissing => Self::RuntimeImageCacheMissing,
+            Raw::RuntimeImageConfigMissing => Self::RuntimeImageConfigMissing,
+            Raw::RuntimeImageDigestInvalid => Self::RuntimeImageDigestInvalid,
+            Raw::RuntimeImageDigestMismatch => Self::RuntimeImageDigestMismatch,
+            Raw::RuntimeImageEvidenceInvalid => Self::RuntimeImageEvidenceInvalid,
+            Raw::RuntimeImageIdentityInvalid => Self::RuntimeImageIdentityInvalid,
+            Raw::RuntimeImageImageUnpinned => Self::RuntimeImageImageUnpinned,
+            Raw::RuntimeImageInspectInvalid => Self::RuntimeImageInspectInvalid,
+            Raw::RuntimeImageInsufficientDisk => Self::RuntimeImageInsufficientDisk,
+            Raw::RuntimeImageInterfaceMismatch => Self::RuntimeImageInterfaceMismatch,
+            Raw::RuntimeImageInterfaceMissing => Self::RuntimeImageInterfaceMissing,
+            Raw::RuntimeImageLockUnavailable => Self::RuntimeImageLockUnavailable,
+            Raw::RuntimeImagePublicationContended => Self::RuntimeImagePublicationContended,
+            Raw::RuntimeImageReceiptContractNewer => Self::RuntimeImageReceiptContractNewer,
+            Raw::RuntimeImageReceiptIdentityConflict => Self::RuntimeImageReceiptIdentityConflict,
+            Raw::RuntimeImageReceiptIdentityInvalid => Self::RuntimeImageReceiptIdentityInvalid,
+            Raw::RuntimeImageReceiptInvalid => Self::RuntimeImageReceiptInvalid,
+            Raw::RuntimeImageReceiptPersistenceFailed => Self::RuntimeImageReceiptPersistenceFailed,
+            Raw::RuntimeImageReceiptUnavailable => Self::RuntimeImageReceiptUnavailable,
+            Raw::RuntimeImageReceiptWriteFailed => Self::RuntimeImageReceiptWriteFailed,
+            Raw::RuntimeImageRecipeInvalid => Self::RuntimeImageRecipeInvalid,
+            Raw::RuntimeImageReferenceIntentInvalid => Self::RuntimeImageReferenceIntentInvalid,
+            Raw::RuntimeImageRemovalStorageFailed => Self::RuntimeImageRemovalStorageFailed,
+            Raw::RuntimeImageRuntimeInvalid => Self::RuntimeImageRuntimeInvalid,
+            Raw::RuntimeImageSourceMismatch => Self::RuntimeImageSourceMismatch,
+            Raw::RuntimeImageTransferContended => Self::RuntimeImageTransferContended,
+        })
+    }
+}
+impl RuntimePreflightCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RuntimePreflightChildMissing => "runtime_preflight.child_missing",
+            Self::RuntimePreflightExecutionFailed => "runtime_preflight.execution_failed",
+            Self::RuntimePreflightHostChanged => "runtime_preflight.host_changed",
+            Self::RuntimePreflightNodeRevoked => "runtime_preflight.node_revoked",
+            Self::RuntimePreflightOperationMissing => "runtime_preflight.operation_missing",
+            Self::RuntimePreflightReceiptInvalid => "runtime_preflight.receipt_invalid",
+            Self::RuntimePreflightReceiptMissing => "runtime_preflight.receipt_missing",
+            Self::RuntimePreflightRequired => "runtime_preflight.required",
+            Self::RuntimePreflightRequirementUnknown => "runtime_preflight.requirement_unknown",
+            Self::RuntimePreflightRequirementsChanged => "runtime_preflight.requirements_changed",
+            Self::RuntimePreflightStale => "runtime_preflight.stale",
+            Self::RuntimePreflightNodeMissing => "runtime_preflight.node_missing",
+            Self::RuntimePreflightCapabilityFailed => "runtime_preflight.capability_failed",
+        }
+    }
+}
+impl ::std::ops::Deref for RuntimePreflightCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RuntimePreflightCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RuntimePreflightCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RuntimePreflightCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RuntimePreflightCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "runtime_preflight.child_missing")]
+            RuntimePreflightChildMissing,
+            #[serde(rename = "runtime_preflight.execution_failed")]
+            RuntimePreflightExecutionFailed,
+            #[serde(rename = "runtime_preflight.host_changed")]
+            RuntimePreflightHostChanged,
+            #[serde(rename = "runtime_preflight.node_revoked")]
+            RuntimePreflightNodeRevoked,
+            #[serde(rename = "runtime_preflight.operation_missing")]
+            RuntimePreflightOperationMissing,
+            #[serde(rename = "runtime_preflight.receipt_invalid")]
+            RuntimePreflightReceiptInvalid,
+            #[serde(rename = "runtime_preflight.receipt_missing")]
+            RuntimePreflightReceiptMissing,
+            #[serde(rename = "runtime_preflight.required")]
+            RuntimePreflightRequired,
+            #[serde(rename = "runtime_preflight.requirement_unknown")]
+            RuntimePreflightRequirementUnknown,
+            #[serde(rename = "runtime_preflight.requirements_changed")]
+            RuntimePreflightRequirementsChanged,
+            #[serde(rename = "runtime_preflight.stale")]
+            RuntimePreflightStale,
+            #[serde(rename = "runtime_preflight.node_missing")]
+            RuntimePreflightNodeMissing,
+            #[serde(rename = "runtime_preflight.capability_failed")]
+            RuntimePreflightCapabilityFailed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RuntimePreflightChildMissing => Self::RuntimePreflightChildMissing,
+            Raw::RuntimePreflightExecutionFailed => Self::RuntimePreflightExecutionFailed,
+            Raw::RuntimePreflightHostChanged => Self::RuntimePreflightHostChanged,
+            Raw::RuntimePreflightNodeRevoked => Self::RuntimePreflightNodeRevoked,
+            Raw::RuntimePreflightOperationMissing => Self::RuntimePreflightOperationMissing,
+            Raw::RuntimePreflightReceiptInvalid => Self::RuntimePreflightReceiptInvalid,
+            Raw::RuntimePreflightReceiptMissing => Self::RuntimePreflightReceiptMissing,
+            Raw::RuntimePreflightRequired => Self::RuntimePreflightRequired,
+            Raw::RuntimePreflightRequirementUnknown => Self::RuntimePreflightRequirementUnknown,
+            Raw::RuntimePreflightRequirementsChanged => Self::RuntimePreflightRequirementsChanged,
+            Raw::RuntimePreflightStale => Self::RuntimePreflightStale,
+            Raw::RuntimePreflightNodeMissing => Self::RuntimePreflightNodeMissing,
+            Raw::RuntimePreflightCapabilityFailed => Self::RuntimePreflightCapabilityFailed,
         })
     }
 }
@@ -11282,6 +21183,141 @@ impl<'de> ::serde::Deserialize<'de> for SignedHostHelperGrant {
         })
     }
 }
+impl SourceBundleCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::BundleArchiveTooLarge => "bundle.archive_too_large",
+            Self::BundleDigestInvalid => "bundle.digest_invalid",
+            Self::BundleDigestMismatch => "bundle.digest_mismatch",
+            Self::BundleDuplicatePath => "bundle.duplicate_path",
+            Self::BundleEmpty => "bundle.empty",
+            Self::BundleEntryForbidden => "bundle.entry_forbidden",
+            Self::BundleExpandedTooLarge => "bundle.expanded_too_large",
+            Self::BundleFileInvalid => "bundle.file_invalid",
+            Self::BundleFileTooLarge => "bundle.file_too_large",
+            Self::BundleInvalidArchive => "bundle.invalid_archive",
+            Self::BundleManifestInvalid => "bundle.manifest_invalid",
+            Self::BundleMetadataMismatch => "bundle.metadata_mismatch",
+            Self::BundleNotFound => "bundle.not_found",
+            Self::BundlePathForbidden => "bundle.path_forbidden",
+            Self::BundlePathTooLong => "bundle.path_too_long",
+            Self::BundleReadFailed => "bundle.read_failed",
+            Self::BundleSizeMismatch => "bundle.size_mismatch",
+            Self::BundleStorageCollision => "bundle.storage_collision",
+            Self::BundleStorageConflict => "bundle.storage_conflict",
+            Self::BundleStorageUnavailable => "bundle.storage_unavailable",
+            Self::BundleTooManyFiles => "bundle.too_many_files",
+            Self::SourceDigestMismatch => "source.digest_mismatch",
+        }
+    }
+}
+impl ::std::ops::Deref for SourceBundleCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for SourceBundleCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for SourceBundleCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SourceBundleCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SourceBundleCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "bundle.archive_too_large")]
+            BundleArchiveTooLarge,
+            #[serde(rename = "bundle.digest_invalid")]
+            BundleDigestInvalid,
+            #[serde(rename = "bundle.digest_mismatch")]
+            BundleDigestMismatch,
+            #[serde(rename = "bundle.duplicate_path")]
+            BundleDuplicatePath,
+            #[serde(rename = "bundle.empty")]
+            BundleEmpty,
+            #[serde(rename = "bundle.entry_forbidden")]
+            BundleEntryForbidden,
+            #[serde(rename = "bundle.expanded_too_large")]
+            BundleExpandedTooLarge,
+            #[serde(rename = "bundle.file_invalid")]
+            BundleFileInvalid,
+            #[serde(rename = "bundle.file_too_large")]
+            BundleFileTooLarge,
+            #[serde(rename = "bundle.invalid_archive")]
+            BundleInvalidArchive,
+            #[serde(rename = "bundle.manifest_invalid")]
+            BundleManifestInvalid,
+            #[serde(rename = "bundle.metadata_mismatch")]
+            BundleMetadataMismatch,
+            #[serde(rename = "bundle.not_found")]
+            BundleNotFound,
+            #[serde(rename = "bundle.path_forbidden")]
+            BundlePathForbidden,
+            #[serde(rename = "bundle.path_too_long")]
+            BundlePathTooLong,
+            #[serde(rename = "bundle.read_failed")]
+            BundleReadFailed,
+            #[serde(rename = "bundle.size_mismatch")]
+            BundleSizeMismatch,
+            #[serde(rename = "bundle.storage_collision")]
+            BundleStorageCollision,
+            #[serde(rename = "bundle.storage_conflict")]
+            BundleStorageConflict,
+            #[serde(rename = "bundle.storage_unavailable")]
+            BundleStorageUnavailable,
+            #[serde(rename = "bundle.too_many_files")]
+            BundleTooManyFiles,
+            #[serde(rename = "source.digest_mismatch")]
+            SourceDigestMismatch,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::BundleArchiveTooLarge => Self::BundleArchiveTooLarge,
+            Raw::BundleDigestInvalid => Self::BundleDigestInvalid,
+            Raw::BundleDigestMismatch => Self::BundleDigestMismatch,
+            Raw::BundleDuplicatePath => Self::BundleDuplicatePath,
+            Raw::BundleEmpty => Self::BundleEmpty,
+            Raw::BundleEntryForbidden => Self::BundleEntryForbidden,
+            Raw::BundleExpandedTooLarge => Self::BundleExpandedTooLarge,
+            Raw::BundleFileInvalid => Self::BundleFileInvalid,
+            Raw::BundleFileTooLarge => Self::BundleFileTooLarge,
+            Raw::BundleInvalidArchive => Self::BundleInvalidArchive,
+            Raw::BundleManifestInvalid => Self::BundleManifestInvalid,
+            Raw::BundleMetadataMismatch => Self::BundleMetadataMismatch,
+            Raw::BundleNotFound => Self::BundleNotFound,
+            Raw::BundlePathForbidden => Self::BundlePathForbidden,
+            Raw::BundlePathTooLong => Self::BundlePathTooLong,
+            Raw::BundleReadFailed => Self::BundleReadFailed,
+            Raw::BundleSizeMismatch => Self::BundleSizeMismatch,
+            Raw::BundleStorageCollision => Self::BundleStorageCollision,
+            Raw::BundleStorageConflict => Self::BundleStorageConflict,
+            Raw::BundleStorageUnavailable => Self::BundleStorageUnavailable,
+            Raw::BundleTooManyFiles => Self::BundleTooManyFiles,
+            Raw::SourceDigestMismatch => Self::SourceDigestMismatch,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for SourceBundleDigestManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -11349,6 +21385,157 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleManifest {
             schema_version: raw.schema_version,
             sha256: raw.sha256,
             total_bytes: raw.total_bytes,
+        })
+    }
+}
+impl SourcePolicyCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ComposeCapabilities => "compose.capabilities",
+            Self::ComposeDevices => "compose.devices",
+            Self::ComposeHostBind => "compose.host_bind",
+            Self::ComposeHostNamespace => "compose.host_namespace",
+            Self::ComposeInvalid => "compose.invalid",
+            Self::ComposePrivileged => "compose.privileged",
+            Self::ComposeServiceInvalid => "compose.service_invalid",
+            Self::ComposeTooLarge => "compose.too_large",
+            Self::ComposeUnconfined => "compose.unconfined",
+            Self::ComposeVolumesInvalid => "compose.volumes_invalid",
+            Self::DockerfileAddForbidden => "dockerfile.add_forbidden",
+            Self::DockerfileBasePlaceholder => "dockerfile.base_placeholder",
+            Self::DockerfileBaseUnpinned => "dockerfile.base_unpinned",
+            Self::DockerfileBuildPrivilege => "dockerfile.build_privilege",
+            Self::DockerfileCopyBasePlaceholder => "dockerfile.copy_base_placeholder",
+            Self::DockerfileCopyBaseUnpinned => "dockerfile.copy_base_unpinned",
+            Self::DockerfileCopyInvalid => "dockerfile.copy_invalid",
+            Self::DockerfileCopyPath => "dockerfile.copy_path",
+            Self::DockerfileFromMissing => "dockerfile.from_missing",
+            Self::DockerfileHeredocForbidden => "dockerfile.heredoc_forbidden",
+            Self::DockerfileInvalidUtf8 => "dockerfile.invalid_utf8",
+            Self::DockerfileMissing => "dockerfile.missing",
+            Self::DockerfileNetworkHost => "dockerfile.network_host",
+            Self::DockerfileOnbuildForbidden => "dockerfile.onbuild_forbidden",
+            Self::DockerfileRootUser => "dockerfile.root_user",
+            Self::DockerfileSecretMount => "dockerfile.secret_mount",
+        }
+    }
+}
+impl ::std::ops::Deref for SourcePolicyCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for SourcePolicyCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for SourcePolicyCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SourcePolicyCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SourcePolicyCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "compose.capabilities")]
+            ComposeCapabilities,
+            #[serde(rename = "compose.devices")]
+            ComposeDevices,
+            #[serde(rename = "compose.host_bind")]
+            ComposeHostBind,
+            #[serde(rename = "compose.host_namespace")]
+            ComposeHostNamespace,
+            #[serde(rename = "compose.invalid")]
+            ComposeInvalid,
+            #[serde(rename = "compose.privileged")]
+            ComposePrivileged,
+            #[serde(rename = "compose.service_invalid")]
+            ComposeServiceInvalid,
+            #[serde(rename = "compose.too_large")]
+            ComposeTooLarge,
+            #[serde(rename = "compose.unconfined")]
+            ComposeUnconfined,
+            #[serde(rename = "compose.volumes_invalid")]
+            ComposeVolumesInvalid,
+            #[serde(rename = "dockerfile.add_forbidden")]
+            DockerfileAddForbidden,
+            #[serde(rename = "dockerfile.base_placeholder")]
+            DockerfileBasePlaceholder,
+            #[serde(rename = "dockerfile.base_unpinned")]
+            DockerfileBaseUnpinned,
+            #[serde(rename = "dockerfile.build_privilege")]
+            DockerfileBuildPrivilege,
+            #[serde(rename = "dockerfile.copy_base_placeholder")]
+            DockerfileCopyBasePlaceholder,
+            #[serde(rename = "dockerfile.copy_base_unpinned")]
+            DockerfileCopyBaseUnpinned,
+            #[serde(rename = "dockerfile.copy_invalid")]
+            DockerfileCopyInvalid,
+            #[serde(rename = "dockerfile.copy_path")]
+            DockerfileCopyPath,
+            #[serde(rename = "dockerfile.from_missing")]
+            DockerfileFromMissing,
+            #[serde(rename = "dockerfile.heredoc_forbidden")]
+            DockerfileHeredocForbidden,
+            #[serde(rename = "dockerfile.invalid_utf8")]
+            DockerfileInvalidUtf8,
+            #[serde(rename = "dockerfile.missing")]
+            DockerfileMissing,
+            #[serde(rename = "dockerfile.network_host")]
+            DockerfileNetworkHost,
+            #[serde(rename = "dockerfile.onbuild_forbidden")]
+            DockerfileOnbuildForbidden,
+            #[serde(rename = "dockerfile.root_user")]
+            DockerfileRootUser,
+            #[serde(rename = "dockerfile.secret_mount")]
+            DockerfileSecretMount,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ComposeCapabilities => Self::ComposeCapabilities,
+            Raw::ComposeDevices => Self::ComposeDevices,
+            Raw::ComposeHostBind => Self::ComposeHostBind,
+            Raw::ComposeHostNamespace => Self::ComposeHostNamespace,
+            Raw::ComposeInvalid => Self::ComposeInvalid,
+            Raw::ComposePrivileged => Self::ComposePrivileged,
+            Raw::ComposeServiceInvalid => Self::ComposeServiceInvalid,
+            Raw::ComposeTooLarge => Self::ComposeTooLarge,
+            Raw::ComposeUnconfined => Self::ComposeUnconfined,
+            Raw::ComposeVolumesInvalid => Self::ComposeVolumesInvalid,
+            Raw::DockerfileAddForbidden => Self::DockerfileAddForbidden,
+            Raw::DockerfileBasePlaceholder => Self::DockerfileBasePlaceholder,
+            Raw::DockerfileBaseUnpinned => Self::DockerfileBaseUnpinned,
+            Raw::DockerfileBuildPrivilege => Self::DockerfileBuildPrivilege,
+            Raw::DockerfileCopyBasePlaceholder => Self::DockerfileCopyBasePlaceholder,
+            Raw::DockerfileCopyBaseUnpinned => Self::DockerfileCopyBaseUnpinned,
+            Raw::DockerfileCopyInvalid => Self::DockerfileCopyInvalid,
+            Raw::DockerfileCopyPath => Self::DockerfileCopyPath,
+            Raw::DockerfileFromMissing => Self::DockerfileFromMissing,
+            Raw::DockerfileHeredocForbidden => Self::DockerfileHeredocForbidden,
+            Raw::DockerfileInvalidUtf8 => Self::DockerfileInvalidUtf8,
+            Raw::DockerfileMissing => Self::DockerfileMissing,
+            Raw::DockerfileNetworkHost => Self::DockerfileNetworkHost,
+            Raw::DockerfileOnbuildForbidden => Self::DockerfileOnbuildForbidden,
+            Raw::DockerfileRootUser => Self::DockerfileRootUser,
+            Raw::DockerfileSecretMount => Self::DockerfileSecretMount,
         })
     }
 }
@@ -11541,6 +21728,188 @@ impl<'de> ::serde::Deserialize<'de> for StopOutcome {
         })
     }
 }
+impl StopPlanCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::StopCapacityReleaseDeferred => "stop.capacity_release_deferred",
+            Self::StopRankMembershipChanged => "stop.rank_membership_changed",
+            Self::StopReservationMembershipChanged => "stop.reservation_membership_changed",
+            Self::StopRunNotStoppable => "stop.run_not_stoppable",
+            Self::StopTargetScopeChanged => "stop.target_scope_changed",
+        }
+    }
+}
+impl ::std::ops::Deref for StopPlanCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for StopPlanCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for StopPlanCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for StopPlanCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("StopPlanCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "stop.capacity_release_deferred")]
+            StopCapacityReleaseDeferred,
+            #[serde(rename = "stop.rank_membership_changed")]
+            StopRankMembershipChanged,
+            #[serde(rename = "stop.reservation_membership_changed")]
+            StopReservationMembershipChanged,
+            #[serde(rename = "stop.run_not_stoppable")]
+            StopRunNotStoppable,
+            #[serde(rename = "stop.target_scope_changed")]
+            StopTargetScopeChanged,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::StopCapacityReleaseDeferred => Self::StopCapacityReleaseDeferred,
+            Raw::StopRankMembershipChanged => Self::StopRankMembershipChanged,
+            Raw::StopReservationMembershipChanged => Self::StopReservationMembershipChanged,
+            Raw::StopRunNotStoppable => Self::StopRunNotStoppable,
+            Raw::StopTargetScopeChanged => Self::StopTargetScopeChanged,
+        })
+    }
+}
+impl StorageDemandCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::StorageEvicting => "storage.evicting",
+            Self::StorageInsufficientAfterEviction => "storage.insufficient_after_eviction",
+        }
+    }
+}
+impl ::std::ops::Deref for StorageDemandCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for StorageDemandCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for StorageDemandCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for StorageDemandCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("StorageDemandCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "storage.evicting")]
+            StorageEvicting,
+            #[serde(rename = "storage.insufficient_after_eviction")]
+            StorageInsufficientAfterEviction,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::StorageEvicting => Self::StorageEvicting,
+            Raw::StorageInsufficientAfterEviction => Self::StorageInsufficientAfterEviction,
+        })
+    }
+}
+impl SupersedeCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SupersededByIntent => "superseded-by-intent",
+            Self::SupersededByRetry => "superseded-by-retry",
+            Self::EffectsChangedDuringAdmission => "effects-changed-during-admission",
+        }
+    }
+}
+impl ::std::ops::Deref for SupersedeCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for SupersedeCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for SupersedeCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SupersedeCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("SupersedeCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "superseded-by-intent")]
+            SupersededByIntent,
+            #[serde(rename = "superseded-by-retry")]
+            SupersededByRetry,
+            #[serde(rename = "effects-changed-during-admission")]
+            EffectsChangedDuringAdmission,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::SupersededByIntent => Self::SupersededByIntent,
+            Raw::SupersededByRetry => Self::SupersededByRetry,
+            Raw::EffectsChangedDuringAdmission => Self::EffectsChangedDuringAdmission,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -11665,6 +22034,154 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             memory_available_bytes: raw.memory_available_bytes,
             memory_total_bytes: raw.memory_total_bytes,
             observed_at: raw.observed_at,
+        })
+    }
+}
+impl TopologyCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::TopologyFabricInsufficient => "topology.fabric_insufficient",
+            Self::TopologyInvalid => "topology.invalid",
+            Self::TopologyPlacementInvalid => "topology.placement_invalid",
+            Self::TopologyRoleMismatch => "topology.role_mismatch",
+            Self::TopologyRuntimeCapabilityMissing => "topology.runtime_capability_missing",
+        }
+    }
+}
+impl ::std::ops::Deref for TopologyCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for TopologyCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for TopologyCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for TopologyCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("TopologyCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "topology.fabric_insufficient")]
+            TopologyFabricInsufficient,
+            #[serde(rename = "topology.invalid")]
+            TopologyInvalid,
+            #[serde(rename = "topology.placement_invalid")]
+            TopologyPlacementInvalid,
+            #[serde(rename = "topology.role_mismatch")]
+            TopologyRoleMismatch,
+            #[serde(rename = "topology.runtime_capability_missing")]
+            TopologyRuntimeCapabilityMissing,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::TopologyFabricInsufficient => Self::TopologyFabricInsufficient,
+            Raw::TopologyInvalid => Self::TopologyInvalid,
+            Raw::TopologyPlacementInvalid => Self::TopologyPlacementInvalid,
+            Raw::TopologyRoleMismatch => Self::TopologyRoleMismatch,
+            Raw::TopologyRuntimeCapabilityMissing => Self::TopologyRuntimeCapabilityMissing,
+        })
+    }
+}
+impl UninstallPlanCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::UninstallAbandonNeverInstalled => "uninstall.abandon-never-installed",
+            Self::UninstallActiveRun => "uninstall.active_run",
+            Self::UninstallActiveRunsTruncated => "uninstall.active_runs_truncated",
+            Self::UninstallBytesUnknown => "uninstall.bytes_unknown",
+            Self::UninstallInstallationNotUninstallable => {
+                "uninstall.installation_not_uninstallable"
+            }
+            Self::UninstallOperationActive => "uninstall.operation_active",
+            Self::UninstallRankMembershipChanged => "uninstall.rank_membership_changed",
+        }
+    }
+}
+impl ::std::ops::Deref for UninstallPlanCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for UninstallPlanCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for UninstallPlanCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for UninstallPlanCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("UninstallPlanCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "uninstall.abandon-never-installed")]
+            UninstallAbandonNeverInstalled,
+            #[serde(rename = "uninstall.active_run")]
+            UninstallActiveRun,
+            #[serde(rename = "uninstall.active_runs_truncated")]
+            UninstallActiveRunsTruncated,
+            #[serde(rename = "uninstall.bytes_unknown")]
+            UninstallBytesUnknown,
+            #[serde(rename = "uninstall.installation_not_uninstallable")]
+            UninstallInstallationNotUninstallable,
+            #[serde(rename = "uninstall.operation_active")]
+            UninstallOperationActive,
+            #[serde(rename = "uninstall.rank_membership_changed")]
+            UninstallRankMembershipChanged,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::UninstallAbandonNeverInstalled => Self::UninstallAbandonNeverInstalled,
+            Raw::UninstallActiveRun => Self::UninstallActiveRun,
+            Raw::UninstallActiveRunsTruncated => Self::UninstallActiveRunsTruncated,
+            Raw::UninstallBytesUnknown => Self::UninstallBytesUnknown,
+            Raw::UninstallInstallationNotUninstallable => {
+                Self::UninstallInstallationNotUninstallable
+            }
+            Raw::UninstallOperationActive => Self::UninstallOperationActive,
+            Raw::UninstallRankMembershipChanged => Self::UninstallRankMembershipChanged,
         })
     }
 }

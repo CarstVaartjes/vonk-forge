@@ -21,6 +21,8 @@ from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
     OperationProgress,
+    RecipeUpdateCode,
+    RuntimeImageCode,
     SecurityRefusalReason,
     WaitReason,
 )
@@ -115,13 +117,13 @@ class RecipeUpdateBatches:
             document = read_update_document(job.payload)
         except (ValueError, TypeError) as error:
             raise RecipeImageAvailabilityInvalid(
-                "recipe_update.operation_invalid",
+                RecipeUpdateCode.OPERATION_INVALID,
                 "stored update document is invalid",
                 retryable=False,
             ) from error
         if job.kind != UPDATE_KIND or _binding_digest(document) != job.payload_digest:
             raise RecipeImageAvailabilityInvalid(
-                "recipe_update.operation_invalid",
+                RecipeUpdateCode.OPERATION_INVALID,
                 "stored update scope does not match its accepted identity",
                 retryable=False,
             )
@@ -130,7 +132,7 @@ class RecipeUpdateBatches:
             for child in document.children
         ):
             raise RecipeImageAvailabilityInvalid(
-                "recipe_update.operation_invalid",
+                RecipeUpdateCode.OPERATION_INVALID,
                 "update dependency graph contains a cycle",
                 retryable=False,
             )
@@ -156,7 +158,7 @@ class RecipeUpdateBatches:
     ) -> RecipeUpdateResponse:
         if job.kind != UPDATE_KIND or job.actor != actor:
             raise RecipeImageAvailabilityInvalid(
-                "recipe_update.request_key_reused",
+                RecipeUpdateCode.REQUEST_KEY_REUSED,
                 "request key was already used for another operation",
                 reason=InvalidRequestReason.CONFLICT,
                 retryable=False,
@@ -164,7 +166,7 @@ class RecipeUpdateBatches:
         document = self._document(job)
         if document.request != scope:
             raise RecipeImageAvailabilityInvalid(
-                "recipe_update.request_key_reused",
+                RecipeUpdateCode.REQUEST_KEY_REUSED,
                 "request key was already used for another scope",
                 reason=InvalidRequestReason.CONFLICT,
                 retryable=False,
@@ -203,7 +205,7 @@ class RecipeUpdateBatches:
                         receipt.oci_archive_sha256, receipt.image_bytes
                     )
                 except RuntimeImagePreparationError as error:
-                    if error.code == "runtime_image.cache_missing" or isinstance(
+                    if error.code == RuntimeImageCode.CACHE_MISSING or isinstance(
                         error.__cause__, FileNotFoundError
                     ):
                         continue
@@ -242,7 +244,7 @@ class RecipeUpdateBatches:
                     or revision.execution_key is None
                 ):
                     raise RecipeImageAvailabilityInvalid(
-                        "recipe_update.scope_invalid",
+                        RecipeUpdateCode.SCOPE_INVALID,
                         "selected recipe revision is no longer available",
                         retryable=False,
                     )
@@ -326,7 +328,7 @@ class RecipeUpdateBatches:
         size = max(len(_encoded(worst)), len(_encoded(response)))
         if size > MAX_CONTROL_DOCUMENT_BYTES:
             raise RecipeImageAvailabilityInvalid(
-                "recipe_update.scope_invalid",
+                RecipeUpdateCode.SCOPE_INVALID,
                 f"complete update scope requires up to {size} bytes; document limit is {MAX_CONTROL_DOCUMENT_BYTES} bytes",
                 retryable=False,
             )
@@ -788,7 +790,7 @@ class RecipeUpdateBatches:
         )
         if job is None:
             raise RecipeImageAvailabilityUnknown(
-                "recipe_update.claim_lost",
+                RecipeUpdateCode.CLAIM_LOST,
                 "recipe update no longer owns its claim",
                 reason=WaitReason.LEASE_LAPSED,
                 retryable=False,
@@ -801,7 +803,7 @@ class RecipeUpdateBatches:
             or document.claim_until <= _now(self.owner._clock())
         ):
             raise RecipeImageAvailabilityUnknown(
-                "recipe_update.claim_lost",
+                RecipeUpdateCode.CLAIM_LOST,
                 "recipe update no longer owns its claim",
                 reason=WaitReason.LEASE_LAPSED,
                 retryable=False,
@@ -825,7 +827,7 @@ class RecipeUpdateBatches:
         )
         if job.actor != actor or child is None or intent != self._intent(child):
             raise RecipeImageAvailabilityInvalid(
-                "recipe_update.operation_invalid",
+                RecipeUpdateCode.OPERATION_INVALID,
                 "child admission does not match the accepted update scope",
                 retryable=False,
             )
@@ -836,7 +838,7 @@ class RecipeUpdateBatches:
             or revision.execution_key != child.effective_execution_key
         ):
             raise RecipeImageAvailabilityInvalid(
-                "recipe_update.operation_invalid",
+                RecipeUpdateCode.OPERATION_INVALID,
                 "child recipe no longer matches the accepted update identity",
                 retryable=False,
             )
@@ -893,7 +895,7 @@ class RecipeUpdateBatches:
                     )
                 ):
                     raise RecipeImageAvailabilityInvalid(
-                        "recipe_update.operation_invalid",
+                        RecipeUpdateCode.OPERATION_INVALID,
                         "child receipt does not match its frozen recipe identity",
                         retryable=False,
                     )
@@ -910,7 +912,7 @@ class RecipeUpdateBatches:
                 )
                 child.retry_at = None
             except RecipeImageAvailabilityError as error:
-                if error.code == "recipe_update.claim_lost":
+                if error.code == RecipeUpdateCode.CLAIM_LOST:
                     return
                 retryable = _retryable(error)
                 child.failure = RecipeUpdateFailure(
@@ -927,7 +929,7 @@ class RecipeUpdateBatches:
             except (ValueError, TypeError):
                 child.state = LifecycleState.FAILED
                 child.failure = RecipeUpdateFailure(
-                    code="recipe_update.observation_invalid",
+                    code=RecipeUpdateCode.OBSERVATION_INVALID,
                     detail="child operation returned invalid persisted evidence",
                     retryable=False,
                 )

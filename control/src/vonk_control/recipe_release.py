@@ -21,6 +21,7 @@ from importlib.resources import files
 from sigstore.errors import Error as SigstoreError
 from sigstore.models import Bundle, TrustedRoot
 from sigstore.verify import Verifier, policy
+from vonk_agent_protocol import CatalogCode
 
 from .recipe_library_types import RecipeLibraryError
 
@@ -63,7 +64,7 @@ def _verifier() -> Verifier:
 
 
 def _invalid(detail: str) -> RecipeReleaseError:
-    return RecipeReleaseError("recipe_release.signature_invalid", detail)
+    return RecipeReleaseError(CatalogCode.SIGNATURE_INVALID, detail)
 
 
 def _source_commit(statement: Mapping[str, object]) -> str:

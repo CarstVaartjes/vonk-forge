@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    DistributionCode,
     DistributionObject,
     SecurityRefusalReason,
     canonical_message,
@@ -125,11 +126,11 @@ class FilesystemObjectSource:
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise DistributionError(
-                "distribution.object_invalid", "object digest is invalid"
+                DistributionCode.OBJECT_INVALID, "object digest is invalid"
             )
         if not 1 <= expected_bytes <= self.maximum_bytes:
             raise DistributionError(
-                "distribution.object_invalid", "object length is invalid"
+                DistributionCode.OBJECT_INVALID, "object length is invalid"
             )
         try:
             root = self.root
@@ -163,7 +164,7 @@ class FilesystemObjectSource:
             ):
                 os.close(fd)
                 raise DistributionError(
-                    "distribution.object_unavailable", "stored object length changed"
+                    DistributionCode.OBJECT_UNAVAILABLE, "stored object length changed"
                 )
             # The name is the digest and the object entered the store through an
             # ingress that verified it; serving checks identity and size only.
@@ -173,7 +174,7 @@ class FilesystemObjectSource:
             raise
         except OSError as error:
             raise DistributionError(
-                "distribution.object_unavailable", "stored object is unavailable"
+                DistributionCode.OBJECT_UNAVAILABLE, "stored object is unavailable"
             ) from error
 
 
@@ -220,7 +221,7 @@ class RecipeBuildObjectSource(FilesystemObjectSource):
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         raise DistributionError(
-            "distribution.object_unavailable",
+            DistributionCode.OBJECT_UNAVAILABLE,
             "runtime images are pulled from the layered store, not downloaded",
         )
 
@@ -319,7 +320,7 @@ class ModelCacheObjectSource:
             )
         except Exception as error:
             raise DistributionError(
-                "distribution.model_set_mismatch", "NAS cache manifest is unavailable"
+                DistributionCode.MODEL_SET_MISMATCH, "NAS cache manifest is unavailable"
             ) from error
         objects = []
         receipts = []
@@ -335,7 +336,8 @@ class ModelCacheObjectSource:
                 path = descriptor["file"]
             except (KeyError, TypeError, ValueError) as error:
                 raise DistributionError(
-                    "distribution.model_set_mismatch", "NAS cache manifest is malformed"
+                    DistributionCode.MODEL_SET_MISMATCH,
+                    "NAS cache manifest is malformed",
                 ) from error
             objects.append(item)
             paths[item.sha256] = (digest, item.name, path)
@@ -361,7 +363,8 @@ class ModelCacheObjectSource:
             entry = self._paths.get(digest)
         if entry is None:
             raise DistributionError(
-                "distribution.object_unavailable", "NAS cache object was not authorized"
+                DistributionCode.OBJECT_UNAVAILABLE,
+                "NAS cache object was not authorized",
             )
         set_digest, path, _ = entry
         try:
@@ -373,7 +376,7 @@ class ModelCacheObjectSource:
             )
             if size != expected_bytes or verified_digest != digest:
                 raise DistributionError(
-                    "distribution.object_unavailable",
+                    DistributionCode.OBJECT_UNAVAILABLE,
                     "NAS cache object identity changed",
                 )
             return OpenedObject(verified_path.open("rb"), size, digest, verified_path)
@@ -381,7 +384,7 @@ class ModelCacheObjectSource:
             raise
         except Exception as error:
             raise DistributionError(
-                "distribution.object_unavailable", "NAS cache object is unavailable"
+                DistributionCode.OBJECT_UNAVAILABLE, "NAS cache object is unavailable"
             ) from error
 
     def verify_artifact_set(
@@ -414,7 +417,7 @@ class ModelCacheObjectSource:
             objects, receipts, paths = self._describe(digest, manifest)
             if len(receipts) != len(objects):
                 raise DistributionError(
-                    "distribution.model_set_identity_unavailable",
+                    DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                     "NAS cache manifest lacks canonical model-file identity",
                 )
             with self._metadata_guard:
@@ -428,19 +431,19 @@ class ModelCacheObjectSource:
                     self._load_manifest(digest)
                 except Exception as error:
                     raise DistributionError(
-                        "distribution.model_set_identity_unavailable",
+                        DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                         "NAS cache manifest lacks canonical model-file identity",
                     ) from error
             else:
                 raise DistributionError(
-                    "distribution.model_set_identity_unavailable",
+                    DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                     "NAS cache manifest lacks canonical model-file identity",
                 )
         with self._metadata_guard:
             receipts = self._receipts.get(digest)
         if receipts is None:
             raise DistributionError(
-                "distribution.model_set_identity_unavailable",
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "NAS cache manifest lacks canonical model-file identity",
             )
         return receipts
@@ -471,7 +474,7 @@ class CompositeObjectSource:
         resolver = getattr(self.model_source, "verified_model_objects_for_set", None)
         if resolver is None:
             raise DistributionError(
-                "distribution.model_set_identity_unavailable",
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "NAS cache source lacks canonical model-file identity",
             )
         if manifest is None:
@@ -539,7 +542,7 @@ class MemoryObjectSource:
             or hashlib.sha256(payload).hexdigest() != digest
         ):
             raise DistributionError(
-                "distribution.object_unavailable", "verified object digest mismatch"
+                DistributionCode.OBJECT_UNAVAILABLE, "verified object digest mismatch"
             )
         return OpenedObject(BytesIO(payload), len(payload), digest, self.root / digest)
 
@@ -643,7 +646,7 @@ class DistributionService:
             assignment.model_artifact_set_sha256, assignment.objects
         ):
             raise DistributionError(
-                "distribution.model_set_mismatch",
+                DistributionCode.MODEL_SET_MISMATCH,
                 "assignment model objects do not match a verified cache manifest",
             )
         image_verifier = getattr(self.source, "verify_runtime_image", None)
@@ -652,7 +655,7 @@ class DistributionService:
         )
         if not image_verified:
             raise DistributionError(
-                "distribution.runtime_image_mismatch",
+                DistributionCode.RUNTIME_IMAGE_MISMATCH,
                 "assignment runtime image does not match the verified image identity",
             )
         key = (assignment.plan_digest, assignment.node_id)
@@ -665,7 +668,7 @@ class DistributionService:
                     existing, assignment, active=True, now=self.clock()
                 ):
                     raise DistributionError(
-                        "distribution.assignment_conflict",
+                        DistributionCode.ASSIGNMENT_CONFLICT,
                         "node assignment is already bound",
                     )
                 self._assignments[key] = assignment
@@ -699,7 +702,7 @@ class DistributionService:
                     existing, assignment, active=row.state == "active", now=now
                 ):
                     raise DistributionError(
-                        "distribution.assignment_conflict",
+                        DistributionCode.ASSIGNMENT_CONFLICT,
                         "node assignment is already bound",
                     )
             try:
@@ -860,14 +863,14 @@ class DistributionService:
         if assignment is None:
             if plan_assignment is not None:
                 raise DistributionError(
-                    "distribution.wrong_node", "assignment is bound to another node"
+                    DistributionCode.WRONG_NODE, "assignment is bound to another node"
                 )
             raise DistributionError(
-                "distribution.unassigned", "assignment is not available"
+                DistributionCode.UNASSIGNED, "assignment is not available"
             )
         if assignment.node_id != node_id:
             raise DistributionError(
-                "distribution.wrong_node", "assignment is bound to another node"
+                DistributionCode.WRONG_NODE, "assignment is bound to another node"
             )
         now = self.clock()
         if (
@@ -888,7 +891,7 @@ class DistributionService:
                     if row is not None:
                         row.state = "expired"
                         row.updated_at = now
-            raise DistributionError("distribution.expired", "assignment has expired")
+            raise DistributionError(DistributionCode.EXPIRED, "assignment has expired")
         return assignment
 
     def locate_object(
@@ -936,7 +939,7 @@ class DistributionService:
         )
         if object_spec is None:
             raise DistributionError(
-                "distribution.unassigned", "object is not assigned to this node"
+                DistributionCode.UNASSIGNED, "object is not assigned to this node"
             )
         # The worker registers assignments, while another API process serves
         # their bytes. Rehydrate that process's model lookup from the durable
@@ -945,7 +948,7 @@ class DistributionService:
             assignment.model_artifact_set_sha256, assignment.objects
         ):
             raise DistributionError(
-                "distribution.model_set_mismatch",
+                DistributionCode.MODEL_SET_MISMATCH,
                 "assignment model objects do not match the cache manifest",
             )
         try:
@@ -954,12 +957,12 @@ class DistributionService:
             raise
         except Exception as error:
             raise DistributionError(
-                "distribution.object_unavailable", "stored object is unavailable"
+                DistributionCode.OBJECT_UNAVAILABLE, "stored object is unavailable"
             ) from error
         if opened.size != object_spec.bytes or opened.sha256 != digest:
             opened.stream.close()
             raise DistributionError(
-                "distribution.object_unavailable", "source returned an invalid object"
+                DistributionCode.OBJECT_UNAVAILABLE, "source returned an invalid object"
             )
         return assignment, object_spec, opened
 

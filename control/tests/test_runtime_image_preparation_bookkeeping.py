@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import vonk_control.runtime_image_preparation as module
+from vonk_agent_protocol import RuntimeImageCode
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
@@ -82,6 +83,20 @@ def test_a_storage_fault_is_a_retryable_failure_not_a_terminal_one(
     assert unwritten.value.retryable is True
 
 
+def _code_word(node: ast.expr) -> str | None:
+    """The word of a literal or of a ``RuntimeImageCode.MEMBER`` argument."""
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "RuntimeImageCode"
+    ):
+        return RuntimeImageCode[node.attr].value
+    return None
+
+
 def test_every_raise_of_a_storage_fault_names_its_retry() -> None:
     """A storage-fault code never goes back to a terminal, non-retryable raise."""
 
@@ -97,10 +112,10 @@ def test_every_raise_of_a_storage_fault_names_its_retry() -> None:
             isinstance(node, ast.Raise)
             and isinstance(node.exc, ast.Call)
             and node.exc.args
-            and isinstance(node.exc.args[0], ast.Constant)
-            and node.exc.args[0].value in retryable_codes
+            and (word := _code_word(node.exc.args[0])) in retryable_codes
         ):
-            seen.add(node.exc.args[0].value)
+            assert word is not None
+            seen.add(word)
             assert any(
                 keyword.arg == "retryable"
                 and isinstance(keyword.value, ast.Constant)

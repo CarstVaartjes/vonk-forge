@@ -20,7 +20,11 @@ from pydantic import ConfigDict, Field, model_serializer
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import ObservationCause, SecurityRefusalReason
+from vonk_agent_protocol import (
+    ControllerErrorCode,
+    ObservationCause,
+    SecurityRefusalReason,
+)
 
 from . import agent_operation_states
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
@@ -710,7 +714,7 @@ def _operator_error(error: Exception) -> HTTPException:
         return HTTPException(
             status_code=409,
             detail=_domain_refusal_detail(error),
-            headers={"x-vonk-error-code": "controller.fleet.upgrade_conflict"},
+            headers={"x-vonk-error-code": ControllerErrorCode.FLEET_UPGRADE_CONFLICT},
         )
     if isinstance(error, RemoteRevocationUncertain):
         # Local revocation is durable; only the CA confirmation is pending. Stay
@@ -718,7 +722,9 @@ def _operator_error(error: Exception) -> HTTPException:
         return HTTPException(
             status_code=503,
             detail=_domain_refusal_detail(error),
-            headers={"x-vonk-error-code": "controller.fleet.revocation_uncertain"},
+            headers={
+                "x-vonk-error-code": ControllerErrorCode.FLEET_REVOCATION_UNCERTAIN
+            },
         )
     if isinstance(error, EnrollmentDenied):
         return HTTPException(

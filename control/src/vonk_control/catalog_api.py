@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import ConfigDict, Field
 from starlette.responses import JSONResponse
+from vonk_agent_protocol import CatalogSyncCode
 
 from .auth import Actor
 from .catalog_service import (
@@ -175,7 +176,7 @@ def install_catalog_routes(
             return _catalog_problem(
                 request,
                 status_code=404,
-                code="catalog.sync_not_found",
+                code=CatalogSyncCode.NOT_FOUND,
                 detail="no managed recipe catalog sync has run yet",
             )
         return _managed_sync(value)

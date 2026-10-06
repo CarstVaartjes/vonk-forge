@@ -13,6 +13,7 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import CatalogCode
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -256,7 +257,7 @@ class CatalogEntityService:
                 return revision
         except IntegrityError as error:
             raise CatalogConflict(
-                "catalog.document_exists", "catalog document identity already exists"
+                CatalogCode.DOCUMENT_EXISTS, "catalog document identity already exists"
             ) from error
 
     def revise(
@@ -279,7 +280,7 @@ class CatalogEntityService:
                 raise KeyError(document_id)
             if (root.kind, root.publisher, root.slug) != (kind, publisher, slug):
                 raise CatalogValidationError(
-                    "catalog.identity_changed", "document identity cannot change"
+                    CatalogCode.IDENTITY_CHANGED, "document identity cannot change"
                 )
             head = _head(session, root)
             latest = session.scalar(
@@ -290,18 +291,18 @@ class CatalogEntityService:
             )
             if latest is None:
                 raise CatalogValidationError(
-                    "catalog.revision_missing", "document has no revision"
+                    CatalogCode.REVISION_MISSING, "document has no revision"
                 )
             if (
                 expected_revision is not None
                 and latest.revision_number != expected_revision
             ):
                 raise CatalogConflict(
-                    "catalog.stale_revision", "document revision changed"
+                    CatalogCode.STALE_REVISION, "document revision changed"
                 )
             if head.candidate_revision_id is not None:
                 raise CatalogConflict(
-                    "catalog.candidate_exists",
+                    CatalogCode.CANDIDATE_EXISTS,
                     "document already has a pending candidate",
                 )
             revision = _revision(
@@ -349,7 +350,7 @@ class CatalogEntityService:
                 return revision
             if revision.id != head.candidate_revision_id:
                 raise CatalogConflict(
-                    "catalog.not_candidate",
+                    CatalogCode.NOT_CANDIDATE,
                     "only the current candidate can be activated",
                 )
             if (
@@ -357,7 +358,7 @@ class CatalogEntityService:
                 and revision.revision_number != expected_revision
             ):
                 raise CatalogConflict(
-                    "catalog.stale_revision", "document revision changed"
+                    CatalogCode.STALE_REVISION, "document revision changed"
                 )
             if revision.kind == "recipe":
                 self._bind_recipe_models(session, revision)
@@ -420,7 +421,8 @@ class CatalogEntityService:
             isinstance(value, str) for value in (publisher, slug, digest)
         ):
             raise CatalogValidationError(
-                "catalog.reference", "only exact model/recipe references are supported"
+                CatalogCode.REFERENCE,
+                "only exact model/recipe references are supported",
             )
         with self._read() as session:
             revision = session.scalar(
@@ -436,7 +438,7 @@ class CatalogEntityService:
             )
             if revision is None:
                 raise CatalogValidationError(
-                    "catalog.reference_missing",
+                    CatalogCode.REFERENCE_MISSING,
                     "exact referenced document is not active",
                 )
             return revision
@@ -447,7 +449,7 @@ class CatalogEntityService:
         recipe = read_catalog_document(revision)
         if not isinstance(recipe, RecipeDefinition):
             raise CatalogValidationError(
-                "catalog.recipe_invalid", "recipe revision is not a recipe document"
+                CatalogCode.RECIPE_INVALID, "recipe revision is not a recipe document"
             )
         models: dict[str, ModelDefinition] = {}
         bindings = []
@@ -467,19 +469,19 @@ class CatalogEntityService:
             )
             if model_revision is None:
                 raise CatalogValidationError(
-                    "catalog.model_reference_missing",
+                    CatalogCode.MODEL_REFERENCE_MISSING,
                     f"model reference is missing: {ref.publisher}/{ref.slug}",
                 )
             model = read_catalog_document(model_revision)
             if not isinstance(model, ModelDefinition):
                 raise CatalogValidationError(
-                    "catalog.model_reference_invalid",
+                    CatalogCode.MODEL_REFERENCE_INVALID,
                     "referenced revision is not a model document",
                 )
             models[model_revision.content_digest] = model
             if model_revision.artifact_key is None:
                 raise CatalogValidationError(
-                    "catalog.model_artifact_missing",
+                    CatalogCode.MODEL_ARTIFACT_MISSING,
                     f"model artifact projection is missing: {ref.publisher}/{ref.slug}",
                 )
             artifact_inputs.append(
@@ -504,7 +506,7 @@ class CatalogEntityService:
             validate_recipe_models(recipe, models)
         except ValueError as error:
             raise CatalogValidationError(
-                "catalog.model_reference_invalid", str(error)
+                CatalogCode.MODEL_REFERENCE_INVALID, str(error)
             ) from error
         revision.artifact_key = _digest({"models": artifact_inputs})
         revision.execution_key = _digest(
@@ -533,7 +535,7 @@ def _parse(
         )
     except Exception as error:
         raise CatalogValidationError(
-            "catalog.document_invalid",
+            CatalogCode.DOCUMENT_INVALID,
             "document does not satisfy the public recipe contract",
         ) from error
     title = (
@@ -782,7 +784,7 @@ def _head(session: Session, root: CatalogDocument) -> CatalogDocumentHead:
     )
     if head is None:
         raise CatalogValidationError(
-            "catalog.head_missing", "catalog document head is missing"
+            CatalogCode.HEAD_MISSING, "catalog document head is missing"
         )
     return head
 
