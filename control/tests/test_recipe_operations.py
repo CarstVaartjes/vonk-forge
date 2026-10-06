@@ -89,6 +89,7 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
+    RecipeRequestInvalid,
     _recipe_model_identities,
     prepare_exact_recipe_run_observation_nodes,
 )
@@ -6194,12 +6195,16 @@ def test_postgres_start_bounds_uncommitted_job_request_unique_wait(
         )
 
 
-def test_install_ignores_old_digest_but_request_keys_remain_scoped(
+def test_install_requires_reviewed_digest_and_request_keys_remain_scoped(
     tmp_path: Path,
 ) -> None:
     _sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(tmp_path)
     plan = service.preview_install(mapping_id, build_id)
-    service.install(plan, plan_digest="0" * 64, actor="admin", request_id="9" * 36)
+    with pytest.raises(RecipeRequestInvalid, match="reviewed plan digest"):
+        service.install(plan, plan_digest="0" * 64, actor="admin", request_id="9" * 36)
+    service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="9" * 36
+    )
     with pytest.raises(RecipeOperationConflict, match="request key"):
         service.stop(
             "f" * 36,
