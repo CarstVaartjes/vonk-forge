@@ -4151,3 +4151,60 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
     finally:
         service.close()
         client.close()
+
+
+def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
+    cache, tmp_path, monkeypatch
+):
+    from concurrent.futures import wait
+
+    _existing, sessions = cache
+    handler, payload, served = _gone_handler([404] * 5)
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
+    try:
+        artifact = _http_artifact(payload)
+        preview = service.download_preview(
+            model_content_sha256="b" * 64, artifacts=[artifact]
+        )
+        operation = service.start_download(
+            actor="test",
+            request_key="00000000-0000-4000-8000-000000000951",
+            plan_digest=str(preview["plan_digest"]),
+            model_content_sha256="b" * 64,
+            artifacts=[artifact],
+        )
+        real_finish = service._finish_failed
+        lost_ack = [True]
+
+        def finish(*args, **kwargs):
+            real_finish(*args, **kwargs)
+            if lost_ack[0]:
+                lost_ack[0] = False
+                raise ConnectionError("commit succeeded but its reply was lost")
+
+        monkeypatch.setattr(service, "_finish_failed", finish)
+        service.tick(limit=1)
+        futures = service._background_operations[operation.id]["futures"]
+        assert not wait(futures, timeout=1).not_done
+        with pytest.raises(ConnectionError, match="reply was lost"):
+            service.tick(limit=1)
+        waiting = service.get_operation(operation.id)
+        next_attempt = waiting.next_attempt_at
+        assert waiting.state == "queued"
+        service.tick(limit=1)  # same Future report, not another HTTP observation
+        assert served["count"] == 1
+        assert service.get_operation(operation.id).next_attempt_at == next_attempt
+        for _ in range(3):
+            service.run_pending()
+            assert service.get_operation(operation.id).state == "queued"
+        service.run_pending()
+        assert served["count"] == 5
+        assert (
+            service.get_operation(operation.id).failure["code"]
+            == "model_cache.source_gone"
+        )
+    finally:
+        service.close()
+        client.close()
