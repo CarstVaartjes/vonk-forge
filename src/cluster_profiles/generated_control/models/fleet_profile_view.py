@@ -15,10 +15,10 @@ from typing import cast
 import datetime
 
 if TYPE_CHECKING:
+  from ..models.fleet_cache_summary import FleetCacheSummary
+  from ..models.fleet_node_view import FleetNodeView
   from ..models.fleet_profile_assignment_view import FleetProfileAssignmentView
   from ..models.fleet_profile_definition import FleetProfileDefinition
-  from ..models.fleet_profile_view_cache_summary import FleetProfileViewCacheSummary
-  from ..models.fleet_profile_view_fleet_item import FleetProfileViewFleetItem
   from ..models.fleet_profile_view_labels import FleetProfileViewLabels
 
 
@@ -47,8 +47,8 @@ class FleetProfileView:
             profile_digest (str):
             revision (int):
             updated_at (datetime.datetime):
-            cache_summary (FleetProfileViewCacheSummary | Unset):
-            fleet (list[FleetProfileViewFleetItem] | Unset):
+            cache_summary (FleetCacheSummary | Unset): How many assignments of a profile are cached, missing or unknown.
+            fleet (list[FleetNodeView] | Unset):
             loaded_revision (int | None | Unset):
             next_actions (list[str] | Unset):
             status (str | Unset):  Default: 'draft'.
@@ -69,8 +69,8 @@ class FleetProfileView:
     profile_digest: str
     revision: int
     updated_at: datetime.datetime
-    cache_summary: FleetProfileViewCacheSummary | Unset = UNSET
-    fleet: list[FleetProfileViewFleetItem] | Unset = UNSET
+    cache_summary: FleetCacheSummary | Unset = UNSET
+    fleet: list[FleetNodeView] | Unset = UNSET
     loaded_revision: int | None | Unset = UNSET
     next_actions: list[str] | Unset = UNSET
     status: str | Unset = 'draft'
@@ -81,10 +81,10 @@ class FleetProfileView:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_cache_summary import FleetCacheSummary # noqa: PLC0415
+        from ..models.fleet_node_view import FleetNodeView # noqa: PLC0415
         from ..models.fleet_profile_assignment_view import FleetProfileAssignmentView # noqa: PLC0415
         from ..models.fleet_profile_definition import FleetProfileDefinition # noqa: PLC0415
-        from ..models.fleet_profile_view_cache_summary import FleetProfileViewCacheSummary # noqa: PLC0415
-        from ..models.fleet_profile_view_fleet_item import FleetProfileViewFleetItem # noqa: PLC0415
         from ..models.fleet_profile_view_labels import FleetProfileViewLabels # noqa: PLC0415
         assignments = []
         for assignments_item_data in self.assignments:
@@ -190,10 +190,10 @@ class FleetProfileView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_cache_summary import FleetCacheSummary # noqa: PLC0415
+        from ..models.fleet_node_view import FleetNodeView # noqa: PLC0415
         from ..models.fleet_profile_assignment_view import FleetProfileAssignmentView # noqa: PLC0415
         from ..models.fleet_profile_definition import FleetProfileDefinition # noqa: PLC0415
-        from ..models.fleet_profile_view_cache_summary import FleetProfileViewCacheSummary # noqa: PLC0415
-        from ..models.fleet_profile_view_fleet_item import FleetProfileViewFleetItem # noqa: PLC0415
         from ..models.fleet_profile_view_labels import FleetProfileViewLabels # noqa: PLC0415
         d = dict(src_dict)
         assignments = []
@@ -248,21 +248,21 @@ class FleetProfileView:
 
 
         _cache_summary = d.pop("cache_summary", UNSET)
-        cache_summary: FleetProfileViewCacheSummary | Unset
+        cache_summary: FleetCacheSummary | Unset
         if isinstance(_cache_summary,  Unset):
             cache_summary = UNSET
         else:
-            cache_summary = FleetProfileViewCacheSummary.from_dict(_cache_summary)
+            cache_summary = FleetCacheSummary.from_dict(_cache_summary)
 
 
 
 
         _fleet = d.pop("fleet", UNSET)
-        fleet: list[FleetProfileViewFleetItem] | Unset = UNSET
+        fleet: list[FleetNodeView] | Unset = UNSET
         if _fleet is not UNSET:
             fleet = []
             for fleet_item_data in _fleet:
-                fleet_item = FleetProfileViewFleetItem.from_dict(fleet_item_data)
+                fleet_item = FleetNodeView.from_dict(fleet_item_data)
 
 
 

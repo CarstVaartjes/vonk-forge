@@ -266,20 +266,12 @@
       "count": 3
     },
     {
-      "path": "control/src/vonk_control/fleet_profile_contract.py",
-      "count": 5
-    },
-    {
       "path": "control/src/vonk_control/fleet_profiles.py",
-      "count": 36
+      "count": 30
     },
     {
       "path": "control/src/vonk_control/fleet_stream.py",
       "count": 4
-    },
-    {
-      "path": "control/src/vonk_control/gateway_keys.py",
-      "count": 7
     },
     {
       "path": "control/src/vonk_control/harnesses/canonical.py",
@@ -343,7 +335,7 @@
     },
     {
       "path": "control/src/vonk_control/model_cache.py",
-      "count": 89
+      "count": 86
     },
     {
       "path": "control/src/vonk_control/model_cache_api.py",

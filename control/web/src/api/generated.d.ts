@@ -1763,6 +1763,20 @@ export interface components {
             /** With Model */
             with_model: boolean | null;
         };
+        /**
+         * CachedResourceEstimate
+         * @description What loading the resolved revision needs; ``None`` is unknown.
+         */
+        CachedResourceEstimate: {
+            /** Additional Disk Bytes */
+            additional_disk_bytes?: number | null;
+            /** Image Bytes */
+            image_bytes?: number | null;
+            /** Model Bytes */
+            model_bytes?: number | null;
+            /** Per Spark Memory Bytes */
+            per_spark_memory_bytes?: number | null;
+        };
         /** CancelRequest */
         CancelRequest: {
             /** Reason */
@@ -2301,6 +2315,57 @@ export interface components {
             /** Targets */
             targets?: string[];
         };
+        /**
+         * FleetAssignmentModelView
+         * @description The model an assignment runs, as the operator reads it.
+         */
+        FleetAssignmentModelView: {
+            /** Content Sha256 */
+            content_sha256?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Selector */
+            selector?: string | null;
+            /** State */
+            state: string;
+            /** Variant */
+            variant?: string | null;
+        };
+        /**
+         * FleetAssignmentRecipeView
+         * @description The recipe revision an assignment runs, as the operator reads it.
+         */
+        FleetAssignmentRecipeView: {
+            /** Name */
+            name?: string | null;
+            /** Revision Id */
+            revision_id?: string | null;
+            /** Selector */
+            selector: string;
+            /** State */
+            state: string;
+        };
+        /**
+         * FleetCacheSummary
+         * @description How many assignments of a profile are cached, missing or unknown.
+         */
+        FleetCacheSummary: {
+            /**
+             * Cached
+             * @default 0
+             */
+            cached: number;
+            /**
+             * Missing
+             * @default 0
+             */
+            missing: number;
+            /**
+             * Unknown
+             * @default 0
+             */
+            unknown: number;
+        };
         FleetChange: components["schemas"]["NodeProfileChange"] | components["schemas"]["RecipeInstallationChange"] | components["schemas"]["InstallationNodeChange"] | components["schemas"]["RecipeRunChange"] | components["schemas"]["RunNodeChange"] | components["schemas"]["JobChange"] | components["schemas"]["AgentOperationChange"];
         /** FleetChangeEvent */
         FleetChangeEvent: {
@@ -2415,6 +2480,18 @@ export interface components {
             id: string;
             /** Ip Address */
             ip_address?: string | null;
+        };
+        /**
+         * FleetNodeView
+         * @description One Spark of the fleet and whether the profile assigns it.
+         */
+        FleetNodeView: {
+            /** Display Name */
+            display_name: string;
+            /** Selector */
+            selector: string;
+            /** State */
+            state: string;
         };
         /** FleetOpenTransaction */
         FleetOpenTransaction: {
@@ -2778,10 +2855,7 @@ export interface components {
             assigned_sparks: number;
             /** Display Name */
             display_name: string;
-            /** Model */
-            model?: {
-                [key: string]: unknown;
-            };
+            model: components["schemas"]["FleetAssignmentModelView"];
             /**
              * Observed State
              * @default Not loaded
@@ -2791,10 +2865,7 @@ export interface components {
             option_choices?: {
                 [key: string]: string;
             };
-            /** Recipe */
-            recipe?: {
-                [key: string]: unknown;
-            };
+            recipe: components["schemas"]["FleetAssignmentRecipeView"];
             /** Recipe Id */
             recipe_id?: string | null;
             /** Recipe Selector */
@@ -2802,10 +2873,7 @@ export interface components {
             recipe_update?: components["schemas"]["RecipeUpdateNotice"] | null;
             /** Required Sparks */
             required_sparks?: number | null;
-            /** Resources */
-            resources?: {
-                [key: string]: unknown;
-            };
+            resources?: components["schemas"]["CachedResourceEstimate"];
             /** Selector */
             selector: string;
             /** Spark Ids */
@@ -3386,10 +3454,7 @@ export interface components {
         FleetProfileView: {
             /** Assignments */
             assignments: components["schemas"]["FleetProfileAssignmentView"][];
-            /** Cache Summary */
-            cache_summary?: {
-                [key: string]: unknown;
-            };
+            cache_summary?: components["schemas"]["FleetCacheSummary"];
             /**
              * Created At
              * Format: date-time
@@ -3403,9 +3468,7 @@ export interface components {
             /** Favorite */
             favorite: boolean;
             /** Fleet */
-            fleet?: {
-                [key: string]: unknown;
-            }[];
+            fleet?: components["schemas"]["FleetNodeView"][];
             /** Id */
             id: string;
             /**

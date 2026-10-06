@@ -2972,7 +2972,7 @@ def test_profile_create_is_server_owned_validated_and_digest_stable() -> None:
     assert created == loaded
     assert listed.profiles == [created]
     assert created.name == "Studio ready"
-    assert created.assignments[0].recipe["name"] == "Synthetic Tiny build"
+    assert created.assignments[0].recipe.name == "Synthetic Tiny build"
     assert created.assignments[0].spark_ids == [_node_id(1)]
     assert len(created.profile_digest) == 64
     assert created.profile_digest == loaded.profile_digest

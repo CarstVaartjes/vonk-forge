@@ -219,8 +219,8 @@ def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edi
         assert view.revision == 2
         assert view.status == "loaded"
         assert view.loaded_revision == 1
-        joined = next(item for item in view.fleet if item["selector"] == joined_node)
-        assert joined["state"] == "Idle"
+        joined = next(item for item in view.fleet if item.selector == joined_node)
+        assert joined.state == "Idle"
         assert view.assignments[0].spark_ids == [joined_node]
     finally:
         restarted_engine.dispose()

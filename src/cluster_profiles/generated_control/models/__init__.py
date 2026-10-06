@@ -61,6 +61,7 @@ from .cache_removal_finding_asset_kind import CacheRemovalFindingAssetKind
 from .cache_removal_finding_classification import CacheRemovalFindingClassification
 from .cache_removal_review import CacheRemovalReview
 from .cache_removal_review_resource_kind import CacheRemovalReviewResourceKind
+from .cached_resource_estimate import CachedResourceEstimate
 from .cancel_request import CancelRequest
 from .capacity_reservations import CapacityReservations
 from .catalog_code import CatalogCode
@@ -115,6 +116,9 @@ from .failure_log_tail import FailureLogTail
 from .failure_property import FailureProperty
 from .fleet_action_response import FleetActionResponse
 from .fleet_action_response_action import FleetActionResponseAction
+from .fleet_assignment_model_view import FleetAssignmentModelView
+from .fleet_assignment_recipe_view import FleetAssignmentRecipeView
+from .fleet_cache_summary import FleetCacheSummary
 from .fleet_change_event import FleetChangeEvent
 from .fleet_enroll_request import FleetEnrollRequest
 from .fleet_lock_holder import FleetLockHolder
@@ -126,6 +130,7 @@ from .fleet_log_response import FleetLogResponse
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
+from .fleet_node_view import FleetNodeView
 from .fleet_open_transaction import FleetOpenTransaction
 from .fleet_profile_admission_decision import FleetProfileAdmissionDecision
 from .fleet_profile_application_cancel_request import FleetProfileApplicationCancelRequest
@@ -154,10 +159,7 @@ from .fleet_profile_assignment_preview import FleetProfileAssignmentPreview
 from .fleet_profile_assignment_preview_actions_item import FleetProfileAssignmentPreviewActionsItem
 from .fleet_profile_assignment_preview_option_choices import FleetProfileAssignmentPreviewOptionChoices
 from .fleet_profile_assignment_view import FleetProfileAssignmentView
-from .fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel
 from .fleet_profile_assignment_view_option_choices import FleetProfileAssignmentViewOptionChoices
-from .fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe
-from .fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources
 from .fleet_profile_child_progress import FleetProfileChildProgress
 from .fleet_profile_child_progress_phase import FleetProfileChildProgressPhase
 from .fleet_profile_compatibility_decision import FleetProfileCompatibilityDecision
@@ -211,8 +213,6 @@ from .fleet_profile_switch_queue_item import FleetProfileSwitchQueueItem
 from .fleet_profile_switch_queue_item_kind import FleetProfileSwitchQueueItemKind
 from .fleet_profile_verification_result import FleetProfileVerificationResult
 from .fleet_profile_view import FleetProfileView
-from .fleet_profile_view_cache_summary import FleetProfileViewCacheSummary
-from .fleet_profile_view_fleet_item import FleetProfileViewFleetItem
 from .fleet_profile_view_installation_policy import FleetProfileViewInstallationPolicy
 from .fleet_profile_view_labels import FleetProfileViewLabels
 from .fleet_reenroll_request import FleetReenrollRequest
@@ -669,6 +669,7 @@ __all__ = (
     "BuildPatch",
     "BuildSourceEvidence",
     "BuildSourceEvidenceState",
+    "CachedResourceEstimate",
     "CacheReferenceReason",
     "CacheRemovalAsset",
     "CacheRemovalAssetDisposition",
@@ -733,6 +734,9 @@ __all__ = (
     "FailureProperty",
     "FleetActionResponse",
     "FleetActionResponseAction",
+    "FleetAssignmentModelView",
+    "FleetAssignmentRecipeView",
+    "FleetCacheSummary",
     "FleetChangeEvent",
     "FleetEnrollRequest",
     "FleetLockHolder",
@@ -744,6 +748,7 @@ __all__ = (
     "FleetNode",
     "FleetNodeIdentity",
     "FleetNodeLabels",
+    "FleetNodeView",
     "FleetOpenTransaction",
     "FleetProfileAdmissionDecision",
     "FleetProfileApplicationCancellationIntent",
@@ -772,10 +777,7 @@ __all__ = (
     "FleetProfileAssignmentPreviewActionsItem",
     "FleetProfileAssignmentPreviewOptionChoices",
     "FleetProfileAssignmentView",
-    "FleetProfileAssignmentViewModel",
     "FleetProfileAssignmentViewOptionChoices",
-    "FleetProfileAssignmentViewRecipe",
-    "FleetProfileAssignmentViewResources",
     "FleetProfileChildProgress",
     "FleetProfileChildProgressPhase",
     "FleetProfileCompatibilityDecision",
@@ -829,8 +831,6 @@ __all__ = (
     "FleetProfileSwitchQueueItemKind",
     "FleetProfileVerificationResult",
     "FleetProfileView",
-    "FleetProfileViewCacheSummary",
-    "FleetProfileViewFleetItem",
     "FleetProfileViewInstallationPolicy",
     "FleetProfileViewLabels",
     "FleetReenrollRequest",

@@ -15,11 +15,6 @@ from vonk_control.jobs import JobService
 # document. Their surrounding request, response, and receipt remain typed.
 EXTENSION_OBJECTS = {
     "EffectiveSettingsSelection.properties.knobs": "Canonical recipe engine tuning values",
-    "FleetProfileAssignmentView.properties.model": "Current model projection",
-    "FleetProfileAssignmentView.properties.recipe": "Current recipe projection",
-    "FleetProfileAssignmentView.properties.resources": "Current resource projection",
-    "FleetProfileView.properties.cache_summary": "Current cache projection",
-    "FleetProfileView.properties.fleet.items": "Current fleet projection",
     "MappingSelection.properties.parameters": "Mapping-specific placement parameters",
 }
 

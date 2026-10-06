@@ -23,7 +23,7 @@ from typing import Annotated, Any
 import httpx2
 from fastapi import FastAPI, HTTPException, status
 from fastapi import Path as PathParameter
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from .auth import MUTATION_ROLES, Actor
 from .operation_api import bounded_error_responses
@@ -99,6 +99,115 @@ class GatewayKeyRevoked(StrictJSONModel):
     name: str = Field(min_length=1, max_length=63)
 
 
+class _LiteLlmRequest(BaseModel):
+    """What the Controller sends to LiteLLM's key admin API (fields we choose)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class _KeyMetadata(_LiteLlmRequest):
+    managed_by: str = "vonk-forge"
+
+
+class _KeyGenerateRequest(_LiteLlmRequest):
+    key_alias: str
+    models: list[str]
+    allowed_routes: list[str]
+    metadata: _KeyMetadata
+    duration: str | None = None
+    key: str | None = None
+
+
+class _KeyDeleteRequest(_LiteLlmRequest):
+    key_aliases: list[str]
+
+
+class _KeyUpdateRequest(_LiteLlmRequest):
+    key: str
+    key_alias: str
+
+
+class _KeyListParams(_LiteLlmRequest):
+    return_full_object: str = "true"
+    page: int
+    size: int
+
+
+class _KeyInfoParams(_LiteLlmRequest):
+    key: str
+
+
+class _LiteLlmReply(BaseModel):
+    """A LiteLLM answer: only the fields the Controller reads, the rest ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+
+def _loose_text(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _loose_strings(value: object) -> list[str]:
+    return (
+        [item for item in value if isinstance(item, str)]
+        if isinstance(value, list)
+        else []
+    )
+
+
+def _loose_keys(value: object) -> list[object]:
+    return (
+        [item for item in value if isinstance(item, dict)]
+        if isinstance(value, list)
+        else []
+    )
+
+
+def _loose_count(value: object) -> int | None:
+    return value if type(value) is int else None
+
+
+# LiteLLM is a foreign service: a field of the wrong type reads as absent, never
+# as a reason to refuse the whole answer.
+_LooseText = Annotated[str | None, BeforeValidator(_loose_text)]
+_LooseStrings = Annotated[list[str], BeforeValidator(_loose_strings)]
+_LooseCount = Annotated[int | None, BeforeValidator(_loose_count)]
+
+
+class _LiteLlmKey(_LiteLlmReply):
+    """One virtual key as LiteLLM describes it; any field may be absent or null."""
+
+    key_alias: _LooseText = None
+    key_name: _LooseText = None
+    models: _LooseStrings = Field(default_factory=list)
+    created_at: _LooseText = None
+    expires: _LooseText = None
+    last_active: _LooseText = None
+
+
+class _KeyListReply(_LiteLlmReply):
+    keys: list[_LiteLlmKey] | None = Field(default=None)
+    total_pages: _LooseCount = None
+
+    @field_validator("keys", mode="before")
+    @classmethod
+    def _only_objects(cls, value: object) -> object:
+        return _loose_keys(value) if isinstance(value, list) else None
+
+
+class _KeyGenerateReply(_LiteLlmKey):
+    key: _LooseText = None
+
+
+class _KeyInfoReply(_LiteLlmReply):
+    info: _LiteLlmKey | None = None
+
+    @field_validator("info", mode="before")
+    @classmethod
+    def _only_an_object(cls, value: object) -> object:
+        return value if isinstance(value, dict) else None
+
+
 def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -123,19 +232,16 @@ def _rolling_alias(name: str) -> str:
     return f"{name}.rolling"
 
 
-def _view(item: dict[str, Any]) -> GatewayKeyView | None:
-    name = _text(item.get("key_alias")) or _text(item.get("key_name"))
+def _view(item: _LiteLlmKey) -> GatewayKeyView | None:
+    name = item.key_alias or item.key_name
     if name is None:
         return None
-    models = item.get("models")
     return GatewayKeyView(
         name=name[:256],
-        models=[model for model in models if isinstance(model, str)]
-        if isinstance(models, list)
-        else [],
-        created_at=_text(item.get("created_at")),
-        expires_at=_text(item.get("expires")),
-        last_used_at=_text(item.get("last_active")),
+        models=item.models,
+        created_at=item.created_at,
+        expires_at=item.expires,
+        last_used_at=item.last_active,
     )
 
 
@@ -161,9 +267,9 @@ class GatewayKeyService:
         method: str,
         path: str,
         *,
-        json: dict[str, Any] | None = None,
-        params: dict[str, Any] | None = None,
-    ) -> tuple[int, dict[str, Any]]:
+        json: _LiteLlmRequest | None = None,
+        params: _LiteLlmRequest | None = None,
+    ) -> tuple[int, object]:
         try:
             master_key = self._master_key()
         except OSError as error:
@@ -172,34 +278,35 @@ class GatewayKeyService:
             response = self._client.request(
                 method,
                 path,
-                json=json,
-                params=params,
+                json=json.model_dump(exclude_none=True) if json is not None else None,
+                params=(
+                    params.model_dump(exclude_none=True) if params is not None else None
+                ),
                 headers={"Authorization": f"Bearer {master_key}"},
             )
         except httpx2.HTTPError as error:
             raise GatewayKeyError("LiteLLM gateway is unavailable") from error
         try:
-            payload = response.json() if response.content else {}
+            payload: object = response.json() if response.content else {}
         except ValueError:
             payload = {}
         return response.status_code, payload if isinstance(payload, dict) else {}
 
-    def _raw_keys(self) -> list[dict[str, Any]]:
-        keys: list[dict[str, Any]] = []
+    def _raw_keys(self) -> list[_LiteLlmKey]:
+        keys: list[_LiteLlmKey] = []
         for page in range(1, _MAX_PAGES + 1):
             code, payload = self._request(
                 "GET",
                 "/key/list",
-                params={"return_full_object": "true", "page": page, "size": _PAGE_SIZE},
+                params=_KeyListParams(page=page, size=_PAGE_SIZE),
             )
             if code != 200:
                 raise GatewayKeyError(f"LiteLLM refused to list keys (HTTP {code})")
-            items = payload.get("keys")
-            if not isinstance(items, list):
+            reply = _KeyListReply.model_validate(payload)
+            if reply.keys is None:
                 raise GatewayKeyError("LiteLLM returned a malformed key list")
-            keys.extend(item for item in items if isinstance(item, dict))
-            total_pages = payload.get("total_pages")
-            if not isinstance(total_pages, int) or page >= total_pages:
+            keys.extend(reply.keys)
+            if reply.total_pages is None or page >= reply.total_pages:
                 break
         return keys
 
@@ -212,7 +319,7 @@ class GatewayKeyService:
         )
 
     def _exists(self, name: str) -> bool:
-        return any(item.get("key_alias") == name for item in self._raw_keys())
+        return any(item.key_alias == name for item in self._raw_keys())
 
     def create(
         self,
@@ -236,25 +343,35 @@ class GatewayKeyService:
         expires: str | None = None,
         key: str | None = None,
     ) -> GatewayKeyCreated:
-        body: dict[str, Any] = {
-            "key_alias": name,
-            "models": list(models or []),
-            "allowed_routes": _KEY_ROUTES,
-            "metadata": {"managed_by": "vonk-forge"},
-        }
-        if expires is not None:
-            body["duration"] = expires
-        if key is not None:
-            body["key"] = key
+        body = _KeyGenerateRequest(
+            key_alias=name,
+            models=list(models or []),
+            allowed_routes=list(_KEY_ROUTES),
+            metadata=_KeyMetadata(),
+            duration=expires,
+            key=key,
+        )
         code, payload = self._request("POST", "/key/generate", json=body)
-        secret = _text(payload.get("key"))
+        reply = _KeyGenerateReply.model_validate(payload)
+        secret = reply.key
         if code not in (200, 201) or secret is None:
             raise GatewayKeyError(f"LiteLLM refused to create the key (HTTP {code})")
-        view = _view({**body, **payload}) or GatewayKeyView(name=name, models=[])
+        # The request's own facts fill what LiteLLM's answer leaves out.
+        described = _LiteLlmKey(
+            key_alias=reply.key_alias or body.key_alias,
+            key_name=reply.key_name,
+            models=reply.models if "models" in reply.model_fields_set else body.models,
+            created_at=reply.created_at,
+            expires=reply.expires,
+            last_active=reply.last_active,
+        )
+        view = _view(described) or GatewayKeyView(name=name, models=[])
         return GatewayKeyCreated(**view.model_dump(), key=secret)
 
     def _delete_alias(self, name: str) -> None:
-        code, _ = self._request("POST", "/key/delete", json={"key_aliases": [name]})
+        code, _ = self._request(
+            "POST", "/key/delete", json=_KeyDeleteRequest(key_aliases=[name])
+        )
         if code != 200:
             raise GatewayKeyError(f"LiteLLM refused to revoke the key (HTTP {code})")
 
@@ -274,7 +391,7 @@ class GatewayKeyService:
         lifetime.
         """
         current = next(
-            (item for item in self._raw_keys() if item.get("key_alias") == name), None
+            (item for item in self._raw_keys() if item.key_alias == name), None
         )
         if current is None:
             raise KeyError(name)
@@ -288,13 +405,13 @@ class GatewayKeyService:
         created = self._create_under(
             temporary,
             models=models,
-            expires=_remaining(current.get("expires")),
+            expires=_remaining(current.expires),
         )
         self._delete_alias(name)
         code, _ = self._request(
             "POST",
             "/key/update",
-            json={"key": created.key, "key_alias": name},
+            json=_KeyUpdateRequest(key=created.key, key_alias=name),
         )
         if code != 200:
             # The new key works; it keeps the temporary alias until the next
@@ -320,13 +437,11 @@ class GatewayKeyService:
         if key is None:
             key = "sk-" + secrets.token_urlsafe(32)
             _write_private(path, key + "\n")
-        code, payload = self._request("GET", "/key/info", params={"key": key})
-        info = payload.get("info")
-        if (
-            code == 200
-            and isinstance(info, dict)
-            and info.get("key_alias") == DEFAULT_KEY_NAME
-        ):
+        code, payload = self._request(
+            "GET", "/key/info", params=_KeyInfoParams(key=key)
+        )
+        info = _KeyInfoReply.model_validate(payload).info
+        if code == 200 and info is not None and info.key_alias == DEFAULT_KEY_NAME:
             return False
         if self._exists(DEFAULT_KEY_NAME):
             self.revoke(DEFAULT_KEY_NAME)

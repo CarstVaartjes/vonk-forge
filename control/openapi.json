@@ -2310,6 +2310,62 @@
         "title": "CacheRemovalReview",
         "type": "object"
       },
+      "CachedResourceEstimate": {
+        "additionalProperties": false,
+        "description": "What loading the resolved revision needs; ``None`` is unknown.",
+        "properties": {
+          "additional_disk_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additional Disk Bytes"
+          },
+          "image_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Bytes"
+          },
+          "model_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Bytes"
+          },
+          "per_spark_memory_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Spark Memory Bytes"
+          }
+        },
+        "title": "CachedResourceEstimate",
+        "type": "object"
+      },
       "CancelRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3918,6 +3974,133 @@
         "title": "FleetActionResponse",
         "type": "object"
       },
+      "FleetAssignmentModelView": {
+        "additionalProperties": false,
+        "description": "The model an assignment runs, as the operator reads it.",
+        "properties": {
+          "content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selector"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "FleetAssignmentModelView",
+        "type": "object"
+      },
+      "FleetAssignmentRecipeView": {
+        "additionalProperties": false,
+        "description": "The recipe revision an assignment runs, as the operator reads it.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
+          "selector": {
+            "title": "Selector",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "state"
+        ],
+        "title": "FleetAssignmentRecipeView",
+        "type": "object"
+      },
+      "FleetCacheSummary": {
+        "additionalProperties": false,
+        "description": "How many assignments of a profile are cached, missing or unknown.",
+        "properties": {
+          "cached": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cached",
+            "type": "integer"
+          },
+          "missing": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Missing",
+            "type": "integer"
+          },
+          "unknown": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Unknown",
+            "type": "integer"
+          }
+        },
+        "title": "FleetCacheSummary",
+        "type": "object"
+      },
       "FleetChange": {
         "discriminator": {
           "mapping": {
@@ -4347,6 +4530,31 @@
           "hostname"
         ],
         "title": "FleetNodeIdentity",
+        "type": "object"
+      },
+      "FleetNodeView": {
+        "additionalProperties": false,
+        "description": "One Spark of the fleet and whether the profile assigns it.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "selector": {
+            "title": "Selector",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "display_name",
+          "state"
+        ],
+        "title": "FleetNodeView",
         "type": "object"
       },
       "FleetOpenTransaction": {
@@ -5575,9 +5783,7 @@
             "type": "string"
           },
           "model": {
-            "additionalProperties": true,
-            "title": "Model",
-            "type": "object"
+            "$ref": "#/components/schemas/FleetAssignmentModelView"
           },
           "observed_state": {
             "default": "Not loaded",
@@ -5602,9 +5808,7 @@
             "type": "object"
           },
           "recipe": {
-            "additionalProperties": true,
-            "title": "Recipe",
-            "type": "object"
+            "$ref": "#/components/schemas/FleetAssignmentRecipeView"
           },
           "recipe_id": {
             "anyOf": [
@@ -5649,9 +5853,7 @@
             "title": "Required Sparks"
           },
           "resources": {
-            "additionalProperties": true,
-            "title": "Resources",
-            "type": "object"
+            "$ref": "#/components/schemas/CachedResourceEstimate"
           },
           "selector": {
             "maxLength": 128,
@@ -5676,7 +5878,9 @@
           "display_name",
           "recipe_selector",
           "spark_ids",
-          "assigned_sparks"
+          "assigned_sparks",
+          "model",
+          "recipe"
         ],
         "title": "FleetProfileAssignmentView",
         "type": "object"
@@ -7444,9 +7648,7 @@
             "type": "array"
           },
           "cache_summary": {
-            "additionalProperties": true,
-            "title": "Cache Summary",
-            "type": "object"
+            "$ref": "#/components/schemas/FleetCacheSummary"
           },
           "created_at": {
             "format": "date-time",
@@ -7473,8 +7675,7 @@
           },
           "fleet": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/FleetNodeView"
             },
             "title": "Fleet",
             "type": "array"
