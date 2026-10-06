@@ -2266,7 +2266,7 @@ class RecipeOperationService:
         request_id: str,
         workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
-        refused: InstallAdmissionBusy | RunAdmissionBusy | None = None
+        refused: UnknownOutcomeError | None = None
         for _attempt in admission_attempts():
             try:
                 return self._install_once(
@@ -2276,10 +2276,7 @@ class RecipeOperationService:
                     request_id=request_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
-            except (
-                InstallAdmissionBusy,
-                RunAdmissionBusy,
-            ) as error:
+            except UnknownOutcomeError as error:
                 refused = error
         assert refused is not None
         raise refused
@@ -2526,7 +2523,7 @@ class RecipeOperationService:
         workload_intent_ordinal: int | None = None,
         profile_application_id: str | None = None,
     ) -> RecipeOperationView:
-        refused: InstallAdmissionBusy | RunAdmissionBusy | None = None
+        refused: UnknownOutcomeError | None = None
         for _attempt in admission_attempts():
             try:
                 return self._start_once(
@@ -2537,10 +2534,7 @@ class RecipeOperationService:
                     workload_intent_ordinal=workload_intent_ordinal,
                     profile_application_id=profile_application_id,
                 )
-            except (
-                InstallAdmissionBusy,
-                RunAdmissionBusy,
-            ) as error:
+            except UnknownOutcomeError as error:
                 refused = error
         assert refused is not None
         raise refused
@@ -2742,7 +2736,7 @@ class RecipeOperationService:
         request_id: str,
     ) -> RecipeOperationView:
         """Reserve an installed artifact recipe without starting a service container."""
-        refused: RunAdmissionBusy | None = None
+        refused: UnknownOutcomeError | None = None
         for _attempt in admission_attempts():
             try:
                 return self._activate_job_run_once(
@@ -2751,7 +2745,7 @@ class RecipeOperationService:
                     actor=actor,
                     request_id=request_id,
                 )
-            except RunAdmissionBusy as error:
+            except UnknownOutcomeError as error:
                 refused = error
         assert refused is not None
         raise refused
@@ -4507,6 +4501,25 @@ class RecipeOperationService:
         )
 
     def record_node_result(
+        self,
+        operation_id: str,
+        node_id: str,
+        *,
+        succeeded: bool,
+        evidence: Mapping[str, object],
+    ) -> RecipeOperationView:
+        refused: UnknownOutcomeError | None = None
+        for _attempt in admission_attempts():
+            try:
+                return self._record_node_result_once(
+                    operation_id, node_id, succeeded=succeeded, evidence=evidence
+                )
+            except UnknownOutcomeError as error:
+                refused = error
+        assert refused is not None
+        raise refused
+
+    def _record_node_result_once(
         self,
         operation_id: str,
         node_id: str,
@@ -8135,37 +8148,6 @@ class RecipeOperationService:
                     reason=InvalidRequestReason.CONFLICT,
                 )
         return existing
-
-    def _queue(
-        self,
-        *,
-        kind: str,
-        owner_kind: str,
-        owner_id: str,
-        plan_digest: str,
-        actor: str,
-        request_id: str,
-        node_payloads: Sequence[tuple[str, Mapping[str, object]]],
-        authority_digest: str,
-        workload_intent_ordinal: int | None = None,
-    ) -> RecipeOperationView:
-        now = self._clock()
-        with self._sessions.begin() as session:
-            job = self._queue_in_session(
-                session,
-                kind=kind,
-                owner_kind=owner_kind,
-                owner_id=owner_id,
-                plan_digest=plan_digest,
-                actor=actor,
-                request_id=request_id,
-                node_payloads=node_payloads,
-                authority_digest=authority_digest,
-                now=now,
-                workload_intent_ordinal=workload_intent_ordinal,
-            )
-        self._agent_jobs.notify_available()
-        return self.get(job.id)
 
     @staticmethod
     def _admit_workload_intent(

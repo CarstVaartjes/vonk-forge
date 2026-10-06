@@ -65,6 +65,7 @@ from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     acquire_admission_keys,
+    admission_attempts,
     label_transaction,
     lock_admission_rows,
     node_admission_key,
@@ -4121,17 +4122,29 @@ class AgentJobService:
             )
 
     def succeed(self, fence: AgentFence, result: AgentResultPayload) -> None:
-        self._finish(fence, "succeeded", result=result, reason=None)
+        refused: UnknownOutcomeError | None = None
+        for _attempt in admission_attempts():
+            try:
+                self._finish(fence, "succeeded", result=result, reason=None)
+                return
+            except UnknownOutcomeError as error:
+                refused = error
+        assert refused is not None
+        raise refused
 
     def fail(self, fence: AgentFence, reason: str) -> None:
-        self._finish(
-            fence,
-            "failed",
-            result=_failure_result(
-                FailureCode.OPERATION_FAILED.value, reason, uncertain=False
-            ),
-            reason=None,
+        result = _failure_result(
+            FailureCode.OPERATION_FAILED.value, reason, uncertain=False
         )
+        refused: UnknownOutcomeError | None = None
+        for _attempt in admission_attempts():
+            try:
+                self._finish(fence, "failed", result=result, reason=None)
+                return
+            except UnknownOutcomeError as error:
+                refused = error
+        assert refused is not None
+        raise refused
 
     def record_result(
         self, message: AgentResult, *, source: AgentSource | None = None

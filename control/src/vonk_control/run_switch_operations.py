@@ -57,7 +57,12 @@ from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.recipe import Scalar
 
 from . import job_states
-from .admission_locking import AdmissionLockBusy, busy_detail, patient_admission
+from .admission_locking import (
+    AdmissionLockBusy,
+    admission_attempts,
+    busy_detail,
+    patient_admission,
+)
 from .agent_jobs import AgentJobService
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -201,7 +206,6 @@ from .recipe_operations import (
     RecipeInstallPreflightExpired,
     RecipeOperationConflict,
     RecipeOperationService,
-    RecipeReconciliationBlocked,
 )
 from .recipe_runtime_specs import (
     OPTION_CHOICES_KEY,
@@ -2967,6 +2971,22 @@ class RunSwitchOperationService:
         *,
         actor: str,
     ) -> RunSwitchPlan:
+        """Re-observe uncertain cleanup authority from a fresh read transaction."""
+        refused: UnknownOutcomeError | None = None
+        for _attempt in admission_attempts():
+            try:
+                return self._preview_cleanup_once(request, actor=actor)
+            except UnknownOutcomeError as error:
+                refused = error
+        assert refused is not None
+        raise refused
+
+    def _preview_cleanup_once(
+        self,
+        request: RunSwitchCleanupPreviewRequest | str,
+        *,
+        actor: str,
+    ) -> RunSwitchPlan:
         """Plan one scoped removal without consulting launch readiness.
 
         The installation's own uninstall assessment is the only authority for
@@ -3108,15 +3128,8 @@ class RunSwitchOperationService:
                             authority.document()
                         )
                     )
-                except RecipeReconciliationBlocked as error:
-                    blockers.append(
-                        _as_reason(
-                            run_switch_code(error.code),
-                            error.detail,
-                            scope="operation",
-                            node_ids=node_ids,
-                        )
-                    )
+                except (UnknownOutcomeError, SecurityRefusalError):
+                    raise
                 except (
                     KeyError,
                     RecipeOperationConflict,
@@ -3169,6 +3182,8 @@ class RunSwitchOperationService:
             else:
                 try:
                     assessment = self._lifecycle.preview_uninstall(installation_id)
+                except (UnknownOutcomeError, SecurityRefusalError):
+                    raise
                 except (
                     KeyError,
                     RecipeOperationConflict,
@@ -4822,6 +4837,24 @@ class RunSwitchOperationService:
             saw_builder = True
             try:
                 proposed = preview_build(revision.id, node.node_id)
+            except SecurityRefusalError:
+                raise
+            except UnknownOutcomeError as error:
+                # End this preview without selecting a different effect on
+                # unknown evidence. An accepted blocked plan is refreshed by
+                # the worker with bounded backoff, using this same revision.
+                return _BuildSelection(
+                    build=None,
+                    candidate=None,
+                    blockers=(
+                        _as_reason(
+                            RunSwitchCode.CONTAINER_BUILD_UNAVAILABLE,
+                            f"Waiting for exact builder evidence: {error}",
+                            scope="operation",
+                            node_ids=[node.node_id for node in group.nodes],
+                        ),
+                    ),
+                )
             except (
                 KeyError,
                 RecipeOperationConflict,
@@ -7014,6 +7047,9 @@ class RunSwitchOperationService:
                 # An intent this plan cannot be refreshed from is read as no
                 # refreshed plan; the waiting operation backs off below.
                 refreshed = None
+        except UnknownOutcomeError as error:
+            self._hold_after_advance_failure(operation_id, error)
+            return True
         except (KeyError, TypeError, ValueError, RuntimeError) as error:
             if is_security_failure(error_code(error)):
                 with self._sessions.begin() as session:
