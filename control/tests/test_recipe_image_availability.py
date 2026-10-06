@@ -2287,7 +2287,9 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
     with sessions() as session:
         still_waiting = session.get(Job, queued.id)
         assert still_waiting is not None
-        assert still_waiting.payload["retry_after_at"] == retry_at.isoformat()
+        retry_after = still_waiting.payload["retry_after_at"]
+        assert isinstance(retry_after, str)
+        assert datetime.fromisoformat(retry_after) == retry_at
 
     # Let the original bounded retry deadline elapse. The retry must select the
     # existing completed model operation under the same parent request.
