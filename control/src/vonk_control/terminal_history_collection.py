@@ -13,11 +13,12 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import datetime
 
-from sqlalchemy import delete, exists, select
+from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import DistributionAssignmentState, RunState
 
+from .attempt_residues import Residue
 from .catalog_revision_collection import GRACE, INTERVAL, live_tokens, tokens
 from .logging import log_event
 from .models import (
@@ -32,6 +33,8 @@ from .models import (
     JobAttempt,
     ModelCacheOperation,
     NodeArtifact,
+    RecipeBuild,
+    RecipeInstallation,
     RecipeLibrarySyncRun,
     RecipeRouteAuthority,
     RecipeRun,
@@ -40,6 +43,7 @@ from .models import (
     RoutePublicationOwner,
     RunNode,
 )
+from .stored_json import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
 _TERMINAL = ("succeeded", "failed", "cancelled", "superseded")
@@ -232,8 +236,22 @@ class TerminalHistoryCollector:
         return +removed
 
     @staticmethod
-    def _unused(session: Session, row: object, now: datetime) -> bool:
-        protected = live_tokens(session, now)
+    def _unused(
+        session: Session,
+        row: Job
+        | AgentOperation
+        | ModelCacheOperation
+        | FleetProfileApplication
+        | RecipeLibrarySyncRun
+        | ArtifactDistributionAssignment
+        | ResourceReservation
+        | NodeArtifact
+        | RecipeRun,
+        now: datetime,
+    ) -> bool:
+        protected = _protected_tokens(session, now)
+        if protected is None:
+            return False
         identity = row.id
         if identity in protected:
             return False
@@ -333,7 +351,9 @@ class TerminalHistoryCollector:
         )
         with self._sessions.begin() as session:
             ids = tuple(session.scalars(statement))
-            protected = live_tokens(session, self._clock())
+            protected = _protected_tokens(session, self._clock())
+            if protected is None:
+                return 0
             removed = 0
             for identity in ids:
                 if identity in protected:
@@ -345,3 +365,86 @@ class TerminalHistoryCollector:
                 )
                 removed += 1
             return removed
+
+
+def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
+    """Unknown accepted references defer retention instead of implying unused."""
+    cutoff = now - GRACE
+    selected = session.scalar(select(FleetProfileSelection.application_id))
+    specs = (
+        (Job, "payload", or_(Job.state.not_in(_TERMINAL), Job.updated_at >= cutoff)),
+        (
+            AgentOperation,
+            "payload",
+            or_(
+                AgentOperation.state.not_in(_TERMINAL),
+                AgentOperation.updated_at >= cutoff,
+            ),
+        ),
+        (
+            ModelCacheOperation,
+            "payload",
+            or_(
+                ModelCacheOperation.state.not_in(_TERMINAL),
+                ModelCacheOperation.updated_at >= cutoff,
+            ),
+        ),
+        (
+            FleetProfileApplication,
+            "plan",
+            or_(
+                FleetProfileApplication.state.not_in(_TERMINAL),
+                FleetProfileApplication.updated_at >= cutoff,
+                FleetProfileApplication.id == selected,
+            ),
+        ),
+        (
+            ArtifactJob,
+            "compiled_contract",
+            or_(
+                ArtifactJob.state.is_(None),
+                ArtifactJob.state.not_in((*_TERMINAL, "expired")),
+                ArtifactJob.updated_at >= cutoff,
+            ),
+        ),
+        (RecipeInstallation, "plan", RecipeInstallation.state != "uninstalled"),
+        (
+            RecipeRun,
+            "plan",
+            RecipeRun.state.not_in((RunState.STOPPED.value, RunState.FAILED.value)),
+        ),
+        (RecipeBuild, "plan", RecipeBuild.state.in_(("planned", "building"))),
+        (
+            ArtifactDistributionAssignment,
+            "objects",
+            ArtifactDistributionAssignment.state
+            == DistributionAssignmentState.ACTIVE.value,
+        ),
+    )
+    extra: set[str] = set()
+    for model, column, condition in specs:
+        for owner in session.scalars(
+            select(model).where(condition).execution_options(yield_per=20)
+        ):
+            decoded = read_row_column(owner, column)
+            if isinstance(decoded, Residue):
+                log_event(
+                    _LOGGER,
+                    "history.references_unavailable",
+                    service="control-worker",
+                    table=model.__tablename__,
+                    row_id=owner.id,
+                    code=decoded.reason.value,
+                )
+                return None
+            if isinstance(owner, ArtifactDistributionAssignment):
+                extra.update(
+                    tokens(
+                        (
+                            owner.objects,
+                            owner.model_artifact_set_sha256,
+                            owner.oci_archive_sha256,
+                        )
+                    )
+                )
+    return live_tokens(session, now) | frozenset(extra)

@@ -22,7 +22,7 @@ def _job(
     return Job(
         id=str(uuid.uuid4()),
         request_id=str(uuid.uuid4()),
-        kind="recipe.start.v1",
+        kind="history-test",
         state=state,
         actor="operator",
         authority_revision="revision",
@@ -35,7 +35,6 @@ def _job(
     )
 
 
-@pytest.mark.usefixtures("damaged_json_rows")
 def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_references(
     history_sessions: sessionmaker[Session],
 ) -> None:
@@ -90,3 +89,25 @@ def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
     with history_sessions() as session:
         assert session.get(Job, job.id) is None
         assert session.get(JobAttempt, attempt_id) is None
+
+
+def test_unreadable_live_authority_defers_pruning_until_repaired(
+    history_sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    removable = _job(old)
+    unreadable = _job(now, state="running")
+    # Empty documents are allowed fixture placeholders; the canonical reader
+    # correctly reports this as a missing required recipe-operation document.
+    unreadable.kind = "recipe.start.v1"
+    with history_sessions.begin() as session:
+        session.add_all((removable, unreadable))
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    assert not collector.collect()
+    with history_sessions.begin() as session:
+        assert session.get(Job, removable.id) is not None
+        owner = session.get(Job, unreadable.id)
+        assert owner is not None
+        owner.kind = "history-test"
+    assert collector.collect()["jobs"] == 1
