@@ -127,6 +127,14 @@ readiness regressions. Real NVIDIA hardware, NCCL/fabric behavior, model
 quality, and physical Spark acceptance still require the designated Linux/ARM64
 or Spark lane.
 
+Run the lane in the VM from a worktree with `scripts/test-vm-lane <ref>
+[-- PYTEST_ARGS...]` (default: the installed-CLI tests). A worktree's gitdir
+lives under `/opt`, which the VM cannot see, so the script clones `<ref>` (a
+committed ref in this repository) into a unique `/private/tmp/vonk-vm-lane.*`
+directory, builds the VM-side environments under unique names in the VM's
+`$HOME`, runs pytest there and removes only those directories afterwards. Never
+point the VM at the host checkout, and never delete other agents' directories.
+
 Every Python suite, lint and type check runs in one locked environment: the
 `control` project with its `dev` dependency group (`control/uv.lock`). It
 contains the root `vonk-cluster-profiles` package (editable), the Controller,
@@ -140,6 +148,18 @@ that installs a wheel into a scratch venv installs it `--no-deps` and links the
 CLI's own locked dependencies, which `scripts/sync-cli-dependencies` prepares
 (`scripts/test` runs it first); Docker-backed tests use the pinned images
 `scripts/pull-test-images` pulls beforehand (CI does the same, with retries).
+
+The CLI dependency environment holds compiled packages (rpds, ...), so it is
+keyed by OS and architecture: `.cli-dependencies/<os>-<arch>` (for example
+`darwin-arm64` and `linux-arm64`), stamped with the platform and interpreter
+that built it. The macOS host and the `vonk-ci` VM see the same files, so they
+must never share one environment; `scripts/sync-cli-dependencies` rebuilds any
+environment whose stamp does not match, and the tests and the
+`needs_cli_dependencies` prerequisite refuse one (`tools/cli_dependencies.py`,
+guarded by `tests/test_cli_dependencies_platform.py`). A `No module named
+'rpds.rpds'` failure in an installed-CLI test means a foreign environment was
+linked; it is no longer possible without `VONK_CLI_DEPENDENCY_ENV` pointing at
+one.
 
 Use a writable, task-specific uv cache. Replace `vonk-example-change` in these
 cache paths with the task name. Run from the active task worktree:

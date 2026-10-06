@@ -4,8 +4,30 @@
 # environment. The installed-CLI tests install each wheel they build into a
 # scratch venv with --no-deps and link this environment in, so no test
 # resolves or downloads a dependency.
+#
+# The environment holds compiled packages, so it is keyed by OS and
+# architecture (.cli-dependencies/<os>-<arch>) and stamped with the platform
+# and interpreter that built it. A checkout shared between the macOS host and
+# the Linux VM therefore keeps one environment per platform, and an
+# environment whose stamp does not match is removed and rebuilt, never reused.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-export UV_PROJECT_ENVIRONMENT=${VONK_CLI_DEPENDENCY_ENV:-"$root/.cli-dependencies"}
-exec "$root/scripts/retry-dependency-fetch" \
+export UV_PROJECT_ENVIRONMENT=${VONK_CLI_DEPENDENCY_ENV:-"$root/.cli-dependencies/$(python3 "$root/tools/cli_dependencies.py" key)"}
+
+env=$UV_PROJECT_ENVIRONMENT
+helper="$root/tools/cli_dependencies.py"
+
+# Never reuse an environment built for another platform or interpreter.
+if [[ -e "$env" || -L "$env" ]]; then
+    key=$(python3 "$helper" key)
+    found=$(cat "$env/.vonk-platform" 2>/dev/null || true)
+    built_by=$("$env/bin/python" "$helper" stamp 2>/dev/null || true)
+    if [[ "$found" != "$built_by" || "$built_by" != "$key "* ]]; then
+        echo "sync-cli-dependencies: rebuilding $env (built for: ${found:-unknown})" >&2
+        rm -rf "$env"
+    fi
+fi
+
+"$root/scripts/retry-dependency-fetch" \
     uv sync --project "$root" --frozen --no-dev --no-install-project --quiet
+"$env/bin/python" "$helper" stamp >"$env/.vonk-platform"

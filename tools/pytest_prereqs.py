@@ -17,6 +17,7 @@ The repository, Controller and Compose conftests register this plugin from
 from __future__ import annotations
 
 import functools
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -25,6 +26,15 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+
+# Loaded by path: the Controller suite cannot put the repository root (and its
+# own ``tests`` package) on the import path.
+_spec = importlib.util.spec_from_file_location(
+    "vonk_cli_dependencies", Path(__file__).with_name("cli_dependencies.py")
+)
+assert _spec is not None and _spec.loader is not None
+cli_dependencies = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cli_dependencies)
 
 _PLUGIN_NAME = "vonk-test-prerequisites"
 _ROOT = Path(__file__).resolve().parents[1]
@@ -161,12 +171,8 @@ def _backup_container() -> str | None:
 
 
 def _cli_dependencies() -> str | None:
-    environment = Path(
-        os.environ.get("VONK_CLI_DEPENDENCY_ENV", _ROOT / ".cli-dependencies")
-    )
-    if any(environment.glob("lib/python3.*/site-packages")):
-        return None
-    return "the CLI dependency environment (run scripts/sync-cli-dependencies)"
+    _, reason = cli_dependencies.site_packages(_ROOT)
+    return None if reason is None else f"the CLI dependency environment ({reason})"
 
 
 def _postgres() -> str | None:

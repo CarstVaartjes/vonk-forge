@@ -480,16 +480,15 @@ def _install_cli_wheel(uv: str, venv: Path, wheel: Path) -> Path:
     """
 
     root = Path(__file__).resolve().parents[2]
-    dependencies = sorted(
-        Path(
-            os.environ.get("VONK_CLI_DEPENDENCY_ENV", root / ".cli-dependencies")
-        ).glob("lib/python3.*/site-packages")
-    )
-    if not dependencies:
-        message = "the CLI dependency environment is missing; run scripts/sync-cli-dependencies"
+    from tools import cli_dependencies
+
+    found, reason = cli_dependencies.site_packages(root)
+    if found is None:
+        message = f"the CLI dependency environment is unusable: {reason}"
         if os.environ.get("CI", "").lower() == "true":
             pytest.fail(message, pytrace=False)
         pytest.skip(message)
+    dependencies = [found]
     subprocess.run(
         [uv, "venv", "--python", sys.executable, str(venv)],
         check=True,
