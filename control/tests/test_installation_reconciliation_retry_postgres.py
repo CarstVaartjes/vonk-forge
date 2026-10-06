@@ -37,7 +37,7 @@ def _payload() -> RecipeReconcilePayload:
 
 def _result_envelope(
     claim: AgentClaim,
-    state: Literal["succeeded", "failed", "waiting-for-operator"],
+    state: Literal["succeeded", "failed", "observing"],
     result: Mapping[str, object],
 ) -> AgentResult:
     claim_document = claim.model_dump(mode="json")
@@ -102,7 +102,7 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
             "reason": "the exact installation is temporarily busy",
         }
     elif interruption == "agent-restart":
-        failure_state = "waiting-for-operator"
+        failure_state = "observing"
         failure = {
             "error_code": "agent_restart_interrupted",
             "failure_kind": "uncertain-effect",

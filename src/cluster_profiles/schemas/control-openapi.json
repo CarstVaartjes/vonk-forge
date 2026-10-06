@@ -473,12 +473,12 @@
         "type": "object"
       },
       "AgentResultState": {
-        "description": "The state words of an agent result on the wire.\n\nThe wire keeps four words, shared with agents already deployed.  A typed\noutcome decides which one is truthful (``done`` is ``succeeded``, a\nconfirmed cancellation is ``cancelled``, any other definite failure is\n``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the\nController maps them onto its stored state values unchanged.",
+        "description": "The state words of an agent result on the wire.\n\nUnknown effects are observed by the Controller with bounded retries. The\nretired operator-wait spelling is adopted only when reading old receipts.",
         "enum": [
           "succeeded",
           "failed",
           "cancelled",
-          "waiting-for-operator"
+          "observing"
         ],
         "title": "AgentResultState",
         "type": "string"
@@ -2362,6 +2362,22 @@
             "minLength": 1,
             "title": "Recipe Revision Id",
             "type": "string"
+          },
+          "removal_archives": {
+            "anyOf": [
+              {
+                "items": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Removal Archives"
           },
           "removal_fence": {
             "anyOf": [
@@ -7357,6 +7373,56 @@
         "title": "FleetProfileAdmissionDecision",
         "type": "object"
       },
+      "FleetProfileAdoptedApplicationEffect": {
+        "additionalProperties": false,
+        "description": "An exact continuing executor authorized by the newer reviewed snapshot.",
+        "properties": {
+          "application_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Application Id",
+            "type": "string"
+          },
+          "assignment_ids": {
+            "items": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Assignment Ids",
+            "type": "array"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "workload_intent_ordinal": {
+            "minimum": 1.0,
+            "title": "Workload Intent Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "application_id",
+          "plan_digest",
+          "workload_intent_ordinal",
+          "node_ids",
+          "assignment_ids"
+        ],
+        "title": "FleetProfileAdoptedApplicationEffect",
+        "type": "object"
+      },
       "FleetProfileApplicationCancelRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8344,7 +8410,8 @@
             "items": {
               "enum": [
                 "switch",
-                "keep"
+                "keep",
+                "adopt"
               ],
               "type": "string"
             },
@@ -8819,6 +8886,14 @@
         "additionalProperties": false,
         "description": "Identified live effects, including complete distributed membership.",
         "properties": {
+          "adopted": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAdoptedApplicationEffect"
+            },
+            "maxItems": 64,
+            "title": "Adopted",
+            "type": "array"
+          },
           "installations": {
             "items": {
               "$ref": "#/components/schemas/FleetProfileInstallationEffect"
@@ -21350,6 +21425,7 @@
           "recipe_image.removal_evidence_unavailable",
           "recipe_image.operation_missing",
           "recipe_image.preparation_failed",
+          "recipe_image.preparation_exhausted",
           "recipe_image.preparing",
           "recipe_image.recipe_invalid",
           "recipe_image.recipe_unavailable",

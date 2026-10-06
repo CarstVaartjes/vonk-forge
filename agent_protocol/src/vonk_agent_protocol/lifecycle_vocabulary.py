@@ -11,8 +11,8 @@ retired spellings (``waiting-for-operator``, ``cancelling``, ``waiting``,
 ``partial``, ``expired``) live in :data:`STATE_ALIASES` and nowhere else: a
 reader of an old row adopts it through :func:`adopt_state`, a caller that still
 sends one is understood through :func:`input_state`, for one release.  The agent
-wire keeps its own four result words (:class:`AgentResultState`) for agents
-already deployed; :data:`LEGACY_WAIT_STATE` is the wire spelling of "unknown".
+wire uses :class:`AgentResultState`; unknown effects are ``observing``.
+:data:`LEGACY_WAIT_STATE` names only the retired spelling adopted on read.
 """
 
 from __future__ import annotations
@@ -69,17 +69,22 @@ class LifecycleState(WireEnum):
 class AgentResultState(WireEnum):
     """The state words of an agent result on the wire.
 
-    The wire keeps four words, shared with agents already deployed.  A typed
-    outcome decides which one is truthful (``done`` is ``succeeded``, a
-    confirmed cancellation is ``cancelled``, any other definite failure is
-    ``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the
-    Controller maps them onto its stored state values unchanged.
+    Unknown effects are observed by the Controller with bounded retries. The
+    retired operator-wait spelling is adopted only when reading old receipts.
     """
 
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
-    WAITING_FOR_OPERATOR = "waiting-for-operator"
+    OBSERVING = "observing"
+
+    @classmethod
+    def _missing_(cls, value: object) -> AgentResultState | None:
+        return (
+            RETIRED_RESULT_STATE_SPELLINGS.get(value)
+            if isinstance(value, str)
+            else None
+        )
 
 
 class LifecycleEffect(WireEnum):
@@ -149,9 +154,8 @@ class OperatorSurface(WireEnum):
     AUTOMATIC = "automatic"
 
 
-#: The stored spelling of "an operator must act" that the legacy kinds still
-#: write.  Only the legacy adapter and the allowlisted legacy writers may spell it.
-LEGACY_WAIT_STATE = AgentResultState.WAITING_FOR_OPERATOR.value
+#: The retired operator-wait spelling, accepted only by read adoption.
+LEGACY_WAIT_STATE = "waiting-for-operator"
 
 
 class BlockerCategory(WireEnum):
@@ -198,6 +202,12 @@ class StateAlias(WireEnum):
     WAITING = "waiting"
     PARTIAL = "partial"
     EXPIRED = "expired"
+
+
+#: Retired result spellings are adopted on reads, never emitted or published as enum members.
+RETIRED_RESULT_STATE_SPELLINGS: Mapping[str, AgentResultState] = {
+    StateAlias.WAITING_FOR_OPERATOR.value: AgentResultState.OBSERVING,
+}
 
 
 class ObservationCause(WireEnum):

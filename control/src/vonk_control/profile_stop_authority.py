@@ -301,9 +301,6 @@ def validate_profile_stop_owner(
             require_current
             and (
                 selection is None
-                or selection.generation != application.selection_generation
-                or selection.application_id != application.id
-                or selection.profile_id != application.profile_id
                 or not FleetProfileService._application_is_current_selection(
                     session, application, progress
                 )
@@ -381,6 +378,15 @@ def validate_profile_stop_owner(
     expected_missing_ids = (
         tuple(profile_scope.missing_node_ids) if profile_scope is not None else ()
     )
+    adopted_scope = FleetProfileService._adopted_application_scope(session, application)
+    if (
+        require_current
+        and adopted_scope is not None
+        and not set(node_ids) <= set(adopted_scope)
+    ):
+        raise ProfileStopAuthorityError(
+            "profile Stop exceeds its adopted assignment scope"
+        )
     stop = stops[0] if len(stops) == 1 else None
     if require_current and (
         any(

@@ -53,6 +53,11 @@ def export_schema() -> dict[str, object]:
         [(model, "validation") for model in ordered],
         title="Vonk Agent Wire",
     )
+    from vonk_agent_protocol.lifecycle_vocabulary import RETIRED_RESULT_STATE_SPELLINGS
+
+    schema["$defs"]["AgentResultState"]["x-vonk-read-aliases"] = {
+        old: current.value for old, current in RETIRED_RESULT_STATE_SPELLINGS.items()
+    }
     # A validation format on a string does not authorize normalizing its bytes
     # into a timestamp type: these values may be inside digest-bound payloads.
     for model in ordered:
@@ -100,6 +105,7 @@ def main() -> None:
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(rendered())
+
 
 if __name__ == "__main__":
     main()

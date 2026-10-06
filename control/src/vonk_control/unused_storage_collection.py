@@ -61,6 +61,7 @@ that cannot be removed is kept for the next pass and never stops the rest.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -104,7 +105,7 @@ from .catalog_revision_collection import (
     operation_tokens,
     tokens,
 )
-from .fleet_profile_contract import FleetProfileAssignmentInput
+from .fleet_profile_contract import FleetProfileAssignmentInput, FleetProfilePreview
 from .logging import log_event
 from .models import (
     AgentNode,
@@ -483,6 +484,7 @@ class _Evidence:
     active_scopes: tuple[str, ...]
     recent_sets: frozenset[str]
     recent_archives: frozenset[str]
+    application_references_readable: bool
 
     @classmethod
     def read(cls, session: Session, now: datetime) -> _Evidence:
@@ -512,6 +514,14 @@ class _Evidence:
             else _profile_pointers(session, only_profile_id=selected)
         )
         head_ids = {item[0] for item in newest.values()}
+        # A load that is queued, admission-waiting or running needs the exact
+        # revisions its plan resolved, whatever the saved profiles say now (a
+        # sweep rewrites its profile between steps).  Unlike the Spark scopes
+        # below, a load waiting for storage still needs its assets.
+        applied_ids = _applied_revision_ids(session)
+        application_references_readable = applied_ids is not None
+        applied_ids = applied_ids or frozenset()
+        head_ids.update(applied_ids)
         for column in (
             CatalogDocumentHead.active_revision_id,
             CatalogDocumentHead.candidate_revision_id,
@@ -538,6 +548,7 @@ class _Evidence:
                 ).where(CatalogDocumentRevision.id.in_(head_ids))
             )
             if pointers is None
+            or row.id in applied_ids
             or (row.publisher.casefold(), row.slug.casefold()) in pointers
         ]
         pointed_ids = frozenset(row.id for row in pointed)
@@ -565,13 +576,14 @@ class _Evidence:
             canonical_message(application.plan).decode()
             for application in session.scalars(
                 select(FleetProfileApplication).where(
-                    FleetProfileApplication.state.in_(("queued", "running"))
+                    FleetProfileApplication.state.in_(_UNFINISHED_LOADS)
                 )
             )
             if not _waits_for_storage(application)
         )
         return cls(
             now=now,
+            application_references_readable=application_references_readable,
             cutoff=cutoff,
             live=live_tokens(session, now),
             operations=operation_tokens(session, now, recent=False),
@@ -1581,6 +1593,8 @@ def _installation_kept(
         )
     ):
         return "live operation"
+    if not evidence.application_references_readable:
+        return "profile application unreadable"
     return None
 
 
@@ -1650,6 +1664,35 @@ def _installation_last_used(session: Session, installation_id: str) -> datetime:
     return max(stamps)
 
 
+#: Profile applications that still hold what their plans resolved.
+_UNFINISHED_LOADS = ("queued", "running")
+
+
+def _applied_revision_ids(session: Session) -> frozenset[str] | None:
+    """Read exact pending references; damage cannot prove any artifact unused."""
+
+    found: set[str] = set()
+    for application in session.scalars(
+        select(FleetProfileApplication).where(
+            FleetProfileApplication.state.in_(_UNFINISHED_LOADS)
+        )
+    ):
+        try:
+            plan = FleetProfilePreview.model_validate_json(
+                json.dumps(application.plan), strict=True
+            )
+        except (TypeError, ValueError):
+            return None
+        if (
+            plan.profile_id != application.profile_id
+            or plan.profile_digest != application.profile_digest
+            or plan.plan_digest != application.plan_digest
+        ):
+            return None
+        found.update(item.recipe_revision_id for item in plan.resolved_assignments)
+    return frozenset(found)
+
+
 def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | None:
     """Why a model's cached files stay, or ``None`` when no profile needs them."""
 
@@ -1673,6 +1716,8 @@ def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | Non
     )
     if not evidence.live.isdisjoint(names):
         return "live operation"
+    if not evidence.application_references_readable:
+        return "profile application unreadable"
     return None
 
 
@@ -1687,6 +1732,8 @@ def _image_kept(
         return "receipt unreadable"
     if archive in evidence.live:
         return "live operation"
+    if not evidence.application_references_readable:
+        return "profile application unreadable"
     return None
 
 

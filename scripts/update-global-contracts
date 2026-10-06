@@ -21,6 +21,7 @@ def git(repo: Path, *arguments: str) -> bytes:
         ["git", "-C", str(repo), *arguments],
         check=True,
         capture_output=True,
+        timeout=30,
     ).stdout
 
 

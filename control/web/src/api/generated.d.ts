@@ -1208,14 +1208,11 @@ export interface components {
          * AgentResultState
          * @description The state words of an agent result on the wire.
          *
-         *     The wire keeps four words, shared with agents already deployed.  A typed
-         *     outcome decides which one is truthful (``done`` is ``succeeded``, a
-         *     confirmed cancellation is ``cancelled``, any other definite failure is
-         *     ``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the
-         *     Controller maps them onto its stored state values unchanged.
+         *     Unknown effects are observed by the Controller with bounded retries. The
+         *     retired operator-wait spelling is adopted only when reading old receipts.
          * @enum {string}
          */
-        AgentResultState: "succeeded" | "failed" | "cancelled" | "waiting-for-operator";
+        AgentResultState: "succeeded" | "failed" | "cancelled" | "observing";
         /** AgentUpgradeDiagnosticsResponse */
         AgentUpgradeDiagnosticsResponse: {
             expected_identity: components["schemas"]["AgentUpgradeIdentityResponse"];
@@ -1852,6 +1849,11 @@ export interface components {
             recipe_content_sha256: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+            /**
+             * Removal Archives
+             * @default null
+             */
+            removal_archives: string[] | null;
             /**
              * Removal Fence
              * @default null
@@ -3488,6 +3490,22 @@ export interface components {
             /** Stops */
             stops: components["schemas"]["StopImpact"][];
         };
+        /**
+         * FleetProfileAdoptedApplicationEffect
+         * @description An exact continuing executor authorized by the newer reviewed snapshot.
+         */
+        FleetProfileAdoptedApplicationEffect: {
+            /** Application Id */
+            application_id: string;
+            /** Assignment Ids */
+            assignment_ids: string[];
+            /** Node Ids */
+            node_ids: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal: number;
+        };
         /** FleetProfileApplicationCancelRequest */
         FleetProfileApplicationCancelRequest: {
             /** Profile Number */
@@ -3791,7 +3809,7 @@ export interface components {
         /** FleetProfileAssignmentPreview */
         FleetProfileAssignmentPreview: {
             /** Actions */
-            actions: ("switch" | "keep")[];
+            actions: ("switch" | "keep" | "adopt")[];
             /** Assignment Id */
             assignment_id: string;
             current_state: components["schemas"]["ObservedAssignmentState"];
@@ -3933,6 +3951,8 @@ export interface components {
          * @description Identified live effects, including complete distributed membership.
          */
         FleetProfileEffects: {
+            /** Adopted */
+            adopted?: components["schemas"]["FleetProfileAdoptedApplicationEffect"][];
             /** Installations */
             installations: components["schemas"]["FleetProfileInstallationEffect"][];
             /** Runs */
@@ -7964,7 +7984,7 @@ export interface components {
          * @description Runtime image availability, preparation and cache-removal problems.
          * @enum {string}
          */
-        RecipeImageCode: "recipe_image.action_invalid" | "recipe_image.build_cancelled" | "recipe_image.build_capacity_wait" | "recipe_image.build_failed" | "recipe_image.build_input_missing" | "recipe_image.build_invalid" | "recipe_image.build_unavailable" | "recipe_image.build_wait" | "recipe_image.builder_busy" | "recipe_image.builder_occupied" | "recipe_image.cancel_busy" | "recipe_image.cancel_request_key_reused" | "recipe_image.cancellation_invalid" | "recipe_image.claim_lost" | "recipe_image.database_busy" | "recipe_image.identity_conflict" | "recipe_image.identity_invalid" | "recipe_image.insufficient_disk" | "recipe_image.insufficient_memory" | "recipe_image.metadata_refresh_failed" | "recipe_image.metadata_refresh_unavailable" | "recipe_image.model_cache_failed" | "recipe_image.model_cache_invalid" | "recipe_image.model_cache_unavailable" | "recipe_image.model_child_cancelled" | "recipe_image.model_child_missing" | "recipe_image.no_builder" | "recipe_image.not_cancellable" | "recipe_image.not_retryable" | "recipe_image.operation_invalid" | "recipe_image.removal_evidence_unavailable" | "recipe_image.operation_missing" | "recipe_image.preparation_failed" | "recipe_image.preparing" | "recipe_image.recipe_invalid" | "recipe_image.recipe_unavailable" | "recipe_image.removal_choice_invalid" | "recipe_image.removal_failed" | "recipe_image.removal_referenced" | "recipe_image.removal_scope_limited" | "recipe_image.request_key_reused" | "recipe_image.runtime_invalid" | "recipe_image.selector_ambiguous" | "recipe_image.selector_invalid" | "recipe_image.selector_missing" | "recipe_image.source_policy_refused" | "recipe_image.superseded_by_newer_revision" | "recipe_image.waiting_for_model" | "recipe_image.waiting_for_worker";
+        RecipeImageCode: "recipe_image.action_invalid" | "recipe_image.build_cancelled" | "recipe_image.build_capacity_wait" | "recipe_image.build_failed" | "recipe_image.build_input_missing" | "recipe_image.build_invalid" | "recipe_image.build_unavailable" | "recipe_image.build_wait" | "recipe_image.builder_busy" | "recipe_image.builder_occupied" | "recipe_image.cancel_busy" | "recipe_image.cancel_request_key_reused" | "recipe_image.cancellation_invalid" | "recipe_image.claim_lost" | "recipe_image.database_busy" | "recipe_image.identity_conflict" | "recipe_image.identity_invalid" | "recipe_image.insufficient_disk" | "recipe_image.insufficient_memory" | "recipe_image.metadata_refresh_failed" | "recipe_image.metadata_refresh_unavailable" | "recipe_image.model_cache_failed" | "recipe_image.model_cache_invalid" | "recipe_image.model_cache_unavailable" | "recipe_image.model_child_cancelled" | "recipe_image.model_child_missing" | "recipe_image.no_builder" | "recipe_image.not_cancellable" | "recipe_image.not_retryable" | "recipe_image.operation_invalid" | "recipe_image.removal_evidence_unavailable" | "recipe_image.operation_missing" | "recipe_image.preparation_failed" | "recipe_image.preparation_exhausted" | "recipe_image.preparing" | "recipe_image.recipe_invalid" | "recipe_image.recipe_unavailable" | "recipe_image.removal_choice_invalid" | "recipe_image.removal_failed" | "recipe_image.removal_referenced" | "recipe_image.removal_scope_limited" | "recipe_image.request_key_reused" | "recipe_image.runtime_invalid" | "recipe_image.selector_ambiguous" | "recipe_image.selector_invalid" | "recipe_image.selector_missing" | "recipe_image.source_policy_refused" | "recipe_image.superseded_by_newer_revision" | "recipe_image.waiting_for_model" | "recipe_image.waiting_for_worker";
         /** RecipeInputSlot */
         RecipeInputSlot: {
             /** Description */

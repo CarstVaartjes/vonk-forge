@@ -19,7 +19,7 @@ export const AgentResultState = {
   SUCCEEDED: "succeeded",
   FAILED: "failed",
   CANCELLED: "cancelled",
-  WAITING_FOR_OPERATOR: "waiting-for-operator",
+  OBSERVING: "observing",
 } as const;
 export type AgentResultState = (typeof AgentResultState)[keyof typeof AgentResultState];
 
@@ -1068,6 +1068,7 @@ export const RecipeImageCode = {
   REMOVAL_EVIDENCE_UNAVAILABLE: "recipe_image.removal_evidence_unavailable",
   OPERATION_MISSING: "recipe_image.operation_missing",
   PREPARATION_FAILED: "recipe_image.preparation_failed",
+  PREPARATION_EXHAUSTED: "recipe_image.preparation_exhausted",
   PREPARING: "recipe_image.preparing",
   RECIPE_INVALID: "recipe_image.recipe_invalid",
   RECIPE_UNAVAILABLE: "recipe_image.recipe_unavailable",
@@ -1654,5 +1655,5 @@ export const STATE_INPUT_ALIASES = {
   "expired": LifecycleState.FAILED,
 } as const;
 
-/** The stored spelling of an agent result that waits for an operator. */
-export const LEGACY_WAIT_STATE = AgentResultState.WAITING_FOR_OPERATOR;
+/** Retired wait spelling, adopted only when reading old rows. */
+export const LEGACY_WAIT_STATE = "waiting-for-operator";

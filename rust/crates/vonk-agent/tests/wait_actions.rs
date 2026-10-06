@@ -1,7 +1,7 @@
 //! Guard: the agent never reports a wait nobody can act on.
 //!
 //! An operation the agent cannot confirm ends as the typed `unknown` outcome
-//! (`ExecutionResult::unknown`), the only way a `waiting-for-operator` state is
+//! (`ExecutionResult::unknown`), the only way an `observing` result state is
 //! produced. Three rules keep such a wait honest:
 //!
 //! * it carries evidence: `ExecutionResult::unknown` cannot be built without an
@@ -156,7 +156,9 @@ fn hand_built_waiting_states(sources: &[(String, String)]) -> Vec<String> {
     sources
         .iter()
         .filter(|(name, _)| name != "outcome.rs")
-        .filter(|(_, code)| code.contains("WaitingForOperator"))
+        .filter(|(_, code)| {
+            code.contains("AgentResultState::Observing") || code.contains("WaitingForOperator")
+        })
         .map(|(name, _)| name.clone())
         .collect()
 }
@@ -218,7 +220,7 @@ fn a_wait_reports_its_evidence_on_the_wire() {
     )
     .finish_for(&AgentOperation::RecipeStop);
 
-    assert_eq!(finished.state, AgentResultState::WaitingForOperator);
+    assert_eq!(finished.state, AgentResultState::Observing);
     let AgentResultResult::OutcomeUnknown(unknown) = finished.result else {
         panic!("a wait is the unknown arm");
     };
@@ -241,7 +243,7 @@ fn the_guard_finds_what_it_forbids() {
                 r#"
 fn wait() -> ExecutionResult {
     // WaitReason::LeaseLapsed in a comment is prose
-    let state = AgentResultState::WaitingForOperator;
+    let state = AgentResultState::Observing;
     unconfirmed(WaitReason::ScopeChanged, "x", evidence)
 }
 #[cfg(test)]
@@ -253,7 +255,7 @@ mod tests {
         ),
         (
             "outcome.rs".to_owned(),
-            "Self::Unknown(_) => AgentResultState::WaitingForOperator".to_owned(),
+            "Self::Unknown(_) => AgentResultState::Observing".to_owned(),
         ),
     ];
 

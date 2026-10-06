@@ -112,12 +112,14 @@ jobs:
         uses: ./.github/actions/python-env
       - name: Run Ruff
         shell: bash
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            mapfile -t changed_python < <(
-              git diff --name-only --diff-filter=ACMR "$GITHUB_BASE_SHA" "$GITHUB_SHA" -- '*.py'
-            )
+            changed_python_file="$RUNNER_TEMP/ruff-changed-python"
+            git diff --name-only --diff-filter=ACMR "${GITHUB_BASE_SHA:?missing pull request base SHA}" "$GITHUB_SHA" -- '*.py' > "$changed_python_file"
+            mapfile -t changed_python < "$changed_python_file"
             if ((${#changed_python[@]} == 0)); then
               echo "No changed Python files; skipping Ruff"
             else
@@ -795,6 +797,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Principle debt compares against the reviewed origin/main inventory.
+          fetch-depth: 0
       - name: Provide the canonical recipe library
         uses: ./.github/actions/recipe-library
       - name: Prepare the locked Python environment

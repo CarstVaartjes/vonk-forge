@@ -623,6 +623,7 @@ class RecipeImageCode(WireEnum):
     REMOVAL_EVIDENCE_UNAVAILABLE = "recipe_image.removal_evidence_unavailable"
     OPERATION_MISSING = "recipe_image.operation_missing"
     PREPARATION_FAILED = "recipe_image.preparation_failed"
+    PREPARATION_EXHAUSTED = "recipe_image.preparation_exhausted"
     PREPARING = "recipe_image.preparing"
     RECIPE_INVALID = "recipe_image.recipe_invalid"
     RECIPE_UNAVAILABLE = "recipe_image.recipe_unavailable"

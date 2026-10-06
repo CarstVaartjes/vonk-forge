@@ -195,6 +195,7 @@ from .fleet_node_labels_type_0 import FleetNodeLabelsType0
 from .fleet_node_view import FleetNodeView
 from .fleet_open_transaction import FleetOpenTransaction
 from .fleet_profile_admission_decision import FleetProfileAdmissionDecision
+from .fleet_profile_adopted_application_effect import FleetProfileAdoptedApplicationEffect
 from .fleet_profile_application_cancel_request import FleetProfileApplicationCancelRequest
 from .fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
 from .fleet_profile_application_cancellation_intent_cause import FleetProfileApplicationCancellationIntentCause
@@ -1027,6 +1028,7 @@ __all__ = (
     "FleetNodeView",
     "FleetOpenTransaction",
     "FleetProfileAdmissionDecision",
+    "FleetProfileAdoptedApplicationEffect",
     "FleetProfileApplicationCancellationIntent",
     "FleetProfileApplicationCancellationIntentCause",
     "FleetProfileApplicationCancellationIntentState",

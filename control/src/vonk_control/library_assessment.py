@@ -182,7 +182,7 @@ class LibraryAssessment:
                 reasons=[
                     _reason(
                         LibraryAssessmentCode.CACHE_MISSING,
-                        f"{reason} for {recipe.selector}; prepare the exact assets with vonkctl recipe download {recipe.selector}.",
+                        f"{reason} for {recipe.selector}; the Controller prepares the exact assets when a load needs them.",
                     )
                     for reason in blockers
                 ],

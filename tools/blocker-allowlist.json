@@ -55,7 +55,7 @@
       "control/src/vonk_control/runtime_image_preparation.py"
     ]
   },
-  "max_debt": 9,
+  "max_debt": 0,
   "debt_ceiling": {
     "total": 59,
     "unaudited": 289,
@@ -67,6 +67,14 @@
     "grandfathered": {}
   },
   "retry_loops": [
+    {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.reconcile_requested_removals",
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "reason": "The recurring worker tick and run_pending pass re-inventory accepted waiting requests after disposable cursor wrap; a busy exact storage lock retains the accepted receipt and the old removal fence, and the next pass retries the same canonical intent."
+    },
     {
       "path": "control/src/vonk_control/distributed_recovery.py",
       "function": "DistributedRecoveryCoordinator.tick",
@@ -486,6 +494,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "Direct completion retries the same fence and evidence after rollback on the bounded admission schedule; spent attempts return the unknown outcome for exact resend, never acknowledge an uncommitted result."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "function": "ManagedRecipeCatalogSyncService._apply",
+      "catches": [
+        "SourceBundleUnknown"
+      ],
+      "reason": "A transient source ingress fault records an item problem and retains the previous catalog revision; the automatic sync repeats ingress on its normal bounded interval after storage recovers."
     }
   ],
   "call_edges": [
@@ -535,182 +551,17 @@
   ],
   "operator_waits": [
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.run_status",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.start",
-        "recipe.stop"
-      ],
-      "trigger": "recovery owner projection of a Job already in waiting-for-operator",
-      "advertised_action": "inherits the job: resume/retire when eligible",
-      "irreversible_effect": "inherits",
-      "verdict": "DERIVED",
-      "reason": "Read-side projection of an existing Job state onto a typed owner view; it creates no wait.",
-      "sites": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "ControlExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "agent.upgrade.v1"
-      ],
-      "trigger": "package installed, awaiting identity confirmation",
-      "advertised_action": "automatic: schedule_agent_upgrade_retry; agent_upgrade_next_action",
-      "irreversible_effect": "binary replaced",
-      "verdict": "SELF-HEAL",
-      "reason": "Success path reported as waiting; give it its own non-operator state.",
-      "sites": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::stop_run_exact",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "recipe.start",
-        "recipe.stop"
-      ],
-      "trigger": "workload stop or local cleanup unconfirmed",
-      "advertised_action": "automatic: the typed unknown outcome (wait reason stop-unconfirmed or cleanup-unconfirmed) is retried by the Controller after the exact-resume inspection",
-      "irreversible_effect": "workload may still hold GPU memory; Stop is idempotent",
-      "verdict": "SELF-HEAL",
-      "reason": "Stop is idempotent and restart-safe: the unknown outcome carries a typed wait reason, and the Controller retries it instead of parking it.",
-      "sites": 4
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "recipe.stop",
-        "recipe.uninstall"
-      ],
-      "trigger": "container runtime stop or stop metadata unconfirmed",
-      "advertised_action": "automatic: typed unknown outcome with evidence (wait reason stop-unconfirmed or stop-metadata-unconfirmed), retried by the Controller after observing",
-      "irreversible_effect": "container may still run; re-stop is idempotent",
-      "verdict": "SELF-HEAL",
-      "reason": "Stop and uninstall are idempotent: the Controller treats any waiting result as an uncertain effect and retries after observing.",
-      "sites": 7
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "recipe.job.run.v1"
-      ],
-      "trigger": "controller cancellation could not stop the active job / runtime state uncertain",
-      "advertised_action": "stop route (see artifact_jobs entry)",
-      "irreversible_effect": "job process may still run",
-      "verdict": "KEEP",
-      "reason": "Real uncertain irreversible effect.",
-      "sites": 7
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "recipe.start"
-      ],
-      "trigger": "cancelled workload model custody (installation ACL transition) unconfirmed",
-      "advertised_action": "automatic: typed unknown outcome with evidence (wait reason model-custody-unconfirmed), retried by the Controller after observing",
-      "irreversible_effect": "ACL on shared model files may stay granted",
-      "verdict": "SELF-HEAL",
-      "reason": "finish_installation_acl_transition is an idempotent local step: the agent repeats it (bounded, three retries on transient storage errors) and only a persistent failure reports unknown with evidence (stage model-custody, error category) for the Controller to observe.",
-      "sites": 7
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/state.rs",
-      "function": "StateStore::recover_interrupted",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "every operation running at agent restart"
-      ],
-      "trigger": "agent restarted with an operation in progress",
-      "advertised_action": "automatic for restart-safe kinds: typed unknown outcome (wait reason agent-restart-interrupted)",
-      "irreversible_effect": "unknown",
-      "verdict": "SELF-HEAL",
-      "reason": "Already typed as an unknown outcome with a closed wait reason; recipe.job.run.v1 and recipe.build.v1 remain parked (see their entries).",
-      "sites": 1
-    },
-    {
       "path": "control/src/vonk_control/lifecycle/agent_operation.py",
       "function": "AgentOperationAdapter._stored",
       "kind": "control-state-projection",
       "operation_kinds": [
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.reconcile",
-        "artifact.distribution.v1",
-        "runtime.preflight",
-        "agent.upgrade.v1",
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1",
         "recipe.job.run.v1"
       ],
-      "trigger": "the core decided backoff (an automatic retry) or a queued retry; projected onto the stored vocabulary",
-      "advertised_action": "automatic: next_action_at schedules the claim (the Spark polls; the label waiting-for-operator is legacy)",
-      "irreversible_effect": "none: only a restart-safe or fenced order is ever scheduled (core rule 1)",
-      "verdict": "DERIVED",
-      "reason": "Projection of a core decision. The stored label is kept for compatibility; no operator is involved and the order is claimable when next_action_at is due.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
-      "function": "AgentOperationAdapter._stored",
-      "kind": "control-state-projection",
-      "operation_kinds": [
-        "recipe.job.run.v1",
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1"
-      ],
-      "trigger": "the core decided observing or needs-operator for an irreversible order (a user job or a build) whose effect cannot be observed from the Controller",
+      "trigger": "the core requires explicit authority before repeating an uncertain user job",
       "advertised_action": "resume/retire (operator_resume_candidates_in_session) while the order is eligible; otherwise the reconciler re-evaluates the wait on every pass and ends it when its job ends or is cancelled",
-      "irreversible_effect": "a user job may have run or still be running; a build may have produced output",
+      "irreversible_effect": "a user job may have modified user data",
       "verdict": "KEEP",
-      "reason": "Core rule 3: needs-operator only for an irreversible order with an advertised action. Without one the order keeps being re-evaluated and a cancel ends it with its effect recorded as unknown.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
-      "function": "AgentOperationAdapter.reopen",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "agent.upgrade.v1"
-      ],
-      "trigger": "an agent-upgrade helper acknowledgement (or failure) the owner finds is not proof of the target build",
-      "advertised_action": "automatic: the core schedules the fenced retry in the same call (schedule_agent_upgrade_retry)",
-      "irreversible_effect": "none: the claim refuses to install over any binary but the exact rollback source",
-      "verdict": "SELF-HEAL",
-      "reason": "The order is reopened and immediately decided by the core, which retries it behind the dpkg safety fence; it never stays waiting.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
-      "function": "aggregate_parent_state",
-      "kind": "control-state-projection",
-      "operation_kinds": [
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.reconcile",
-        "artifact.distribution.v1",
-        "runtime.preflight",
-        "agent.upgrade.v1",
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1",
-        "recipe.job.run.v1"
-      ],
-      "trigger": "every order of a parent job has finished and at least one waits",
-      "advertised_action": "inherits the waiting child: automatic retry, or resume/retire when eligible",
-      "irreversible_effect": "inherits",
-      "verdict": "DERIVED",
-      "reason": "Pure projection of the children onto the parent job; allowed exactly while a child wait is allowed.",
+      "reason": "Security edge: an uncertain user job may have destructive effects on user data; rerunning it requires explicit authority. Stop is advertised and accepted.",
       "sites": 1
     },
     {
@@ -724,7 +575,21 @@
       "advertised_action": "stop: ArtifactJobAdapter.actions; the cancel endpoint takes it (a waiting parent accepts it) and the job's supported_actions advertises it",
       "irreversible_effect": "the job process may still be running and holding GPU/memory",
       "verdict": "KEEP",
-      "reason": "Irreversible and uncertain (audit C8, now FIX-ACTION done: Stop is advertised and accepted). The row is a projection of the order's core decision (rule 3). The job never waits on its own: a requested cancel is shown as cancelling and ends cancelled with the effect unknown and a residue record (rule 4), and the API contract refuses waiting-for-operator without supported_actions=[stop].",
+      "reason": "Security edge: an uncertain user job may have destructive effects on user data; rerunning it requires explicit authority. Stop is advertised and accepted.",
+      "sites": 1
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "function": "aggregate_parent_state",
+      "kind": "control-state-projection",
+      "operation_kinds": [
+        "recipe.job.run.v1"
+      ],
+      "trigger": "an irreversible user-job child needs explicit authority",
+      "advertised_action": "stop via the artifact job",
+      "irreversible_effect": "inherits the user job",
+      "verdict": "KEEP",
+      "reason": "Security edge: a parent mirrors only a child whose uncertain user-data effects require authority before repeat. Automatic observations and retries are live, never operator waits.",
       "sites": 1
     }
   ],
@@ -1365,14 +1230,6 @@
       ]
     },
     {
-      "family": "distribution.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
-      "sites": [
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.revoked", 1]
-      ]
-    },
-    {
       "family": "distribution_executor.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ExecutionPlanCompilationError validates a contract or request.",
@@ -1492,6 +1349,15 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CursorError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/fleet_events.py", "CursorError", "FleetEventRepository.replay_after", "fleet-event-cursor-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "fleet_profiles.adoption-authority",
+      "category": "security-edge",
+      "reason": "Preserves the current selected whole-fleet authority: stale executor cancellation cannot revoke newer adopted intent, and a reviewed stop child cannot broaden beyond its complete currently authorized assignment scope. These are authorization boundaries before effects, not recoverable observation failures.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "this-application-s-continuing-effects-now-belong-to-selected", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-stop-exceeds-its-current-authorized-scope", 1]
       ]
     },
     {
@@ -2030,6 +1896,7 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-exceeds-its-adopted-assignment-scope", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "profile-stop-target-is-not-authorized", 1]
       ]
     },
@@ -2504,37 +2371,37 @@
     {
       "family": "source_bundles.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: operation bookkeeping by default.",
+      "reason": "Missing or unreadable source evidence stays unknown. Normal image preparation durably retries storage faults and catalog sync repeats source ingress, but alternate read/check paths are not all statically proven; these sites retain their debt classification.",
       "sites": [
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.not_found", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.not_found", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_generated_bundle", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.empty", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "generate_source_bundle", "bundle.empty", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.put", "bundle.storage_unavailable", 1]
       ]
     },
     {
       "family": "source_bundles.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
+      "reason": "Reject malformed source input before effects: empty file maps, empty uploaded archives, and invalid declared paths. These are caller-owned inputs, not transient managed storage evidence.",
       "sites": [
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_too_long", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_too_long", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "_read_archive", "bundle.empty", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "generate_source_bundle", "bundle.empty", 1]
       ]
     },
     {
       "family": "source_bundles.security-edge",
       "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class SourceBundleError verifies content at its ingress.",
+      "reason": "Digest and archive ingress integrity remain enforced; explicit managed storage permission denial stays a typed refusal and cannot trigger bundle healing or replacement.",
       "sites": [
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.manifest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.storage_collision", 2],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.put", "bundle.digest_mismatch", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.digest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.storage_collision", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.put", "bundle.digest_invalid", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.put", "bundle.digest_mismatch", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.duplicate_path", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.entry_forbidden", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.expanded_too_large", 1],
@@ -2546,7 +2413,11 @@
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_forbidden", 2],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_validate_digest", "source-bundle-digest-is-invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "generate_source_bundle", "bundle.file_invalid", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "parse_source_bundle_manifest", "bundle.manifest_invalid", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "parse_source_bundle_manifest", "bundle.manifest_invalid", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore._put", "bundle.digest_invalid", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore._put", "bundle.digest_mismatch", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleRefused", "SourceBundleStore.get", "source-bundle-storage-access-was-denied", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleRefused", "SourceBundleStore.put", "source-bundle-storage-access-was-denied", 1]
       ]
     },
     {
@@ -2773,7 +2644,6 @@
       "reason": "Destructive-effect guard: a recipe cache removal and the references that compete with it are decided on one exact, reviewed scope. A review that cannot be sealed on consistent evidence, a reference scan that is unavailable (an unavailable scan does not prove an object unused), a changed scope at acceptance (reject changed effects instead of broadening consent) and an artifact reserved for removal all refuse here; the refusal names its retry or inspect action.",
       "sites": [
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService._model_removal_assets", "model_cache.review_invalid", 4],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService._start_request", "message", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService.remove_selector", "message", 4],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService.remove_selector", "model_cache.removal_scope_changed", 2],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService.review_removal", "message", 1],
@@ -3783,6 +3653,28 @@
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.preflight", "run-switch.preflight-recipe-changed", 1]
+      ]
+    },
+    {
+      "family": "recipe_builds.security-edge",
+      "category": "security-edge",
+      "reason": "Explicit source storage permission denial is propagated as a typed build refusal, never a source miss, regeneration request, or automatic repair.",
+      "sites": [
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._heal_source_bundle", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._verified_bundle.read", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "rederive_source_bundle_from_closure", "permission-denied", 1]
+      ]
+    },
+    {
+      "family": "distribution.security-edge",
+      "category": "security-edge",
+      "reason": "Revoked exact assignments, unsafe managed roots, and explicit source access denial remain typed security refusals through composite source lookup and the agent wire; neither fallback nor availability retry may soften them.",
+      "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "DistributionService._authorize_uncached", "distribution.revoked", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "forbidden", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "permission-denied", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "nas-cache-object-access-was-refused", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "permission-denied", 1]
       ]
     }
   ]

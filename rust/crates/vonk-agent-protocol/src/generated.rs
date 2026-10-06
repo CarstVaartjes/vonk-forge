@@ -687,8 +687,9 @@ pub enum AgentResultState {
     Failed,
     #[serde(rename = "cancelled")]
     Cancelled,
-    #[serde(rename = "waiting-for-operator")]
-    WaitingForOperator,
+    #[serde(rename = "observing")]
+    #[serde(alias = "waiting-for-operator")]
+    Observing,
 }
 impl ::std::fmt::Display for AgentResultState {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -696,7 +697,7 @@ impl ::std::fmt::Display for AgentResultState {
             Self::Succeeded => f.write_str("succeeded"),
             Self::Failed => f.write_str("failed"),
             Self::Cancelled => f.write_str("cancelled"),
-            Self::WaitingForOperator => f.write_str("waiting-for-operator"),
+            Self::Observing => f.write_str("observing"),
         }
     }
 }
@@ -707,7 +708,7 @@ impl ::std::str::FromStr for AgentResultState {
             "succeeded" => Ok(Self::Succeeded),
             "failed" => Ok(Self::Failed),
             "cancelled" => Ok(Self::Cancelled),
-            "waiting-for-operator" => Ok(Self::WaitingForOperator),
+            "observing" => Ok(Self::Observing),
             _ => Err("invalid value".into()),
         }
     }
@@ -8127,6 +8128,8 @@ pub enum RecipeImageCode {
     RecipeImageOperationMissing,
     #[serde(rename = "recipe_image.preparation_failed")]
     RecipeImagePreparationFailed,
+    #[serde(rename = "recipe_image.preparation_exhausted")]
+    RecipeImagePreparationExhausted,
     #[serde(rename = "recipe_image.preparing")]
     RecipeImagePreparing,
     #[serde(rename = "recipe_image.recipe_invalid")]
@@ -8210,6 +8213,9 @@ impl ::std::fmt::Display for RecipeImageCode {
             }
             Self::RecipeImageOperationMissing => f.write_str("recipe_image.operation_missing"),
             Self::RecipeImagePreparationFailed => f.write_str("recipe_image.preparation_failed"),
+            Self::RecipeImagePreparationExhausted => {
+                f.write_str("recipe_image.preparation_exhausted")
+            }
             Self::RecipeImagePreparing => f.write_str("recipe_image.preparing"),
             Self::RecipeImageRecipeInvalid => f.write_str("recipe_image.recipe_invalid"),
             Self::RecipeImageRecipeUnavailable => f.write_str("recipe_image.recipe_unavailable"),
@@ -8278,6 +8284,7 @@ impl ::std::str::FromStr for RecipeImageCode {
             }
             "recipe_image.operation_missing" => Ok(Self::RecipeImageOperationMissing),
             "recipe_image.preparation_failed" => Ok(Self::RecipeImagePreparationFailed),
+            "recipe_image.preparation_exhausted" => Ok(Self::RecipeImagePreparationExhausted),
             "recipe_image.preparing" => Ok(Self::RecipeImagePreparing),
             "recipe_image.recipe_invalid" => Ok(Self::RecipeImageRecipeInvalid),
             "recipe_image.recipe_unavailable" => Ok(Self::RecipeImageRecipeUnavailable),
@@ -14567,7 +14574,7 @@ impl AgentResultState {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
-            Self::WaitingForOperator => "waiting-for-operator",
+            Self::Observing => "observing",
         }
     }
 }
@@ -14611,8 +14618,9 @@ impl<'de> ::serde::Deserialize<'de> for AgentResultState {
             Failed,
             #[serde(rename = "cancelled")]
             Cancelled,
-            #[serde(rename = "waiting-for-operator")]
-            WaitingForOperator,
+            #[serde(rename = "observing")]
+            #[serde(alias = "waiting-for-operator")]
+            Observing,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -14620,7 +14628,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentResultState {
             Raw::Succeeded => Self::Succeeded,
             Raw::Failed => Self::Failed,
             Raw::Cancelled => Self::Cancelled,
-            Raw::WaitingForOperator => Self::WaitingForOperator,
+            Raw::Observing => Self::Observing,
         })
     }
 }
@@ -23646,6 +23654,7 @@ impl RecipeImageCode {
             }
             Self::RecipeImageOperationMissing => "recipe_image.operation_missing",
             Self::RecipeImagePreparationFailed => "recipe_image.preparation_failed",
+            Self::RecipeImagePreparationExhausted => "recipe_image.preparation_exhausted",
             Self::RecipeImagePreparing => "recipe_image.preparing",
             Self::RecipeImageRecipeInvalid => "recipe_image.recipe_invalid",
             Self::RecipeImageRecipeUnavailable => "recipe_image.recipe_unavailable",
@@ -23768,6 +23777,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeImageCode {
             RecipeImageOperationMissing,
             #[serde(rename = "recipe_image.preparation_failed")]
             RecipeImagePreparationFailed,
+            #[serde(rename = "recipe_image.preparation_exhausted")]
+            RecipeImagePreparationExhausted,
             #[serde(rename = "recipe_image.preparing")]
             RecipeImagePreparing,
             #[serde(rename = "recipe_image.recipe_invalid")]
@@ -23841,6 +23852,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeImageCode {
             }
             Raw::RecipeImageOperationMissing => Self::RecipeImageOperationMissing,
             Raw::RecipeImagePreparationFailed => Self::RecipeImagePreparationFailed,
+            Raw::RecipeImagePreparationExhausted => Self::RecipeImagePreparationExhausted,
             Raw::RecipeImagePreparing => Self::RecipeImagePreparing,
             Raw::RecipeImageRecipeInvalid => Self::RecipeImageRecipeInvalid,
             Raw::RecipeImageRecipeUnavailable => Self::RecipeImageRecipeUnavailable,

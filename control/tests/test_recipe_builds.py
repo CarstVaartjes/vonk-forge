@@ -1551,7 +1551,7 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
             assert remaining is None
         else:
             assert remaining is not None
-            assert original_job.state == "needs-operator"
+            assert original_job.state == "observing"
 
 
 @pytest.mark.parametrize(
@@ -2277,3 +2277,108 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
         service.plan(changed.id, node_id, now=now).build_input_sha256
         != first.build_input_sha256
     )
+
+
+def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
+    tmp_path, monkeypatch
+):
+    import errno
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    rederived = []
+    builds = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        source_rederiver=lambda *args: rederived.append(args),
+    )
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
+    )
+
+    def production():
+        return build_recipe_image_availability(
+            sessions,
+            artifact_root=tmp_path / "artifacts",
+            managed_catalog_sync=None,
+            recipe_builds=builds,
+            recipe_operations=operations,
+            clock=lambda: now,
+        )
+
+    first = production()
+    reviewed = builds.prepare_plan(revision.id, node_id, now=now)
+    queued = first.service.start(
+        revision.id,
+        actor="operator",
+        request_id="source-read-recovery",
+        force_rebuild=True,
+        build_input_sha256=reviewed.build_input_sha256,
+    )
+    source_path = next((tmp_path / "bundles").rglob("*.tar"))
+    verified_bytes = source_path.read_bytes()
+    read_bytes = Path.read_bytes
+    fault: list[bool | str] = [True]
+
+    def read(path):
+        if path == source_path and fault[0]:
+            if fault[0] == "permission":
+                raise PermissionError(errno.EACCES, "NAS access denied")
+            raise OSError(errno.EIO, "temporary NAS read fault")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    with pytest.raises(UnknownOutcomeError):
+        builds.reusable_build_id(revision.id)
+    assert first.service.run_pending() == 1
+    waiting = first.service.get(queued.id)
+    assert waiting.state == "queued"
+    assert waiting.failure is not None
+    assert waiting.failure["code"] == "bundle.storage_unavailable"
+    assert waiting.failure["retryable"] is True
+    assert waiting.failure["retry_time"] is not None
+    assert rederived == []
+    with sessions() as session:
+        assert (
+            tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
+            == ()
+        )
+        parent = session.get(Job, queued.id)
+        assert parent is not None and parent.request_id == "source-read-recovery"
+        bound_digest = parent.payload["build_input_sha256"]
+    first.close()
+    fault[0] = False
+    assert source_path.read_bytes() == verified_bytes
+    now += timedelta(minutes=1)
+    restarted = production()
+    assert restarted.service.run_pending() == 1
+    waiting = restarted.service.get(queued.id)
+    assert waiting.state == "queued"
+    assert waiting.failure is not None
+    assert waiting.failure["code"] == "recipe_image.build_wait"
+    now += timedelta(minutes=1)
+    assert restarted.service.run_pending() == 1
+    with sessions() as session:
+        children = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+        )
+        assert len(children) == 1
+        assert children[0].payload["plan_digest"] == bound_digest
+        parent = session.get(Job, queued.id)
+        assert parent is not None and parent.request_id == "source-read-recovery"
+    assert rederived == []
+    fault[0] = "permission"
+    from vonk_agent_protocol import SecurityRefusalError
+    from vonk_control.recipe_image_availability import _retryable
+
+    with pytest.raises(SecurityRefusalError) as denied:
+        builds.reusable_build_id(revision.id)
+    assert not _retryable(denied.value)
+    fault[0] = False
+    restarted.close()

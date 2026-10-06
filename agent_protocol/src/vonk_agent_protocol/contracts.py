@@ -20,6 +20,7 @@ from pydantic import (
     RootModel,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -1156,6 +1157,13 @@ class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
     fence: CanonicalUUID
     state: AgentResultState
     result: AgentResultPayload
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def adopt_result_state(cls, value: object) -> object:
+        if isinstance(value, str):
+            return AgentResultState(value)
+        return value
 
     @model_validator(mode="after")
     def validate_wire(self) -> AgentResult:

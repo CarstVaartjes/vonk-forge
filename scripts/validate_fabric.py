@@ -374,9 +374,24 @@ class Runner:
     def local(
         self, command: list[str], *, check: bool = True, input_text: str | None = None
     ) -> subprocess.CompletedProcess[str]:
-        completed = subprocess.run(
-            command, input=input_text, capture_output=True, text=True, check=False
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                input=input_text,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=600,
+            )
+        except subprocess.TimeoutExpired as error:
+            completed = subprocess.CompletedProcess(
+                command,
+                124,
+                (error.stdout or b"").decode(errors="replace")
+                if isinstance(error.stdout, bytes)
+                else (error.stdout or ""),
+                "fabric diagnostic exceeded its 600s command budget; outcome unconfirmed",
+            )
         self.evidence.append(command_record(command, completed))
         if check and completed.returncode:
             raise GateError(
