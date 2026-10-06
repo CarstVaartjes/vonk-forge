@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
+from time import sleep
 
 # Every command here only acquires locked or digest-pinned inputs. A command
 # is matched on its executable name, so a path such as
@@ -113,7 +113,7 @@ def main(command: list[str] | None = None) -> int:
             f"Transient dependency fetch failure; retry {attempt + 1}/3 in {delay}s.",
             file=sys.stderr,
         )
-        time.sleep(delay)
+        sleep(delay)
     raise AssertionError("retry loop must return")
 
 

@@ -85,7 +85,7 @@ def test_transient_fetch_retries_without_publishing_partial_stdout(
     module = _module()
     state = _fetcher(tmp_path, monkeypatch, [error, error, ""], command[0])
     delays = []
-    monkeypatch.setattr(module.time, "sleep", delays.append)
+    monkeypatch.setattr(module, "sleep", delays.append)
     assert module.main(command) == 0
     assert json.loads(state.read_text()) == []
     assert delays == [2, 4]
@@ -128,7 +128,7 @@ def test_permanent_fetch_failure_is_not_retried(tmp_path, monkeypatch, error, co
 def test_transient_failure_stops_at_attempt_limit(tmp_path, monkeypatch):
     module = _module()
     state = _fetcher(tmp_path, monkeypatch, ["connection reset by peer"] * 4)
-    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(module, "sleep", lambda _: None)
     assert module.main(["uv", "sync"]) == 17
     assert len(json.loads(state.read_text())) == 1
 
@@ -169,7 +169,7 @@ def test_expired_fetch_reaps_child_and_resumes_without_partial_stdout(
     )
     executable.chmod(0o755)
     monkeypatch.setattr(module, "FETCH_TIMEOUT_SECONDS", 1)
-    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(module, "sleep", lambda _: None)
     assert module.main([str(executable), "sync"]) == 0
     captured = capsys.readouterr()
     assert captured.out == "verified output\n"
