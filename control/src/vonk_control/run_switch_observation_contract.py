@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import (
     BaseModel,
@@ -16,7 +16,11 @@ from pydantic import (
 from vonk_agent_protocol import OperationProgress, canonical_message
 
 from .recipe_lifecycle_contract import LifecycleNodeResult
-from .run_switch_contract import RunSwitchCancellation, RunSwitchMemberReceipt
+from .run_switch_contract import (
+    RunSwitchAction,
+    RunSwitchCancellation,
+    RunSwitchMemberReceipt,
+)
 from .runtime_image_preparation import RuntimeImageReceipt
 
 
@@ -81,10 +85,8 @@ class RunSwitchStoredIdentity(BaseModel):
 
     model_config = ConfigDict(extra="ignore", strict=True)
     action: Annotated[
-        Literal["install", "run", "stop", "switch", "cleanup"] | None,
-        readable_or_none(
-            TypeAdapter(Literal["install", "run", "stop", "switch", "cleanup"])
-        ),
+        RunSwitchAction | None,
+        readable_or_none(TypeAdapter(RunSwitchAction)),
     ] = None
     plan_digest: Annotated[
         str | None,
