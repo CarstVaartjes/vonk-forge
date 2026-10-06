@@ -150,10 +150,6 @@ class HostRuntimeRequest(WireModel):
                 or self.run_generation != plan.run_generation
             ):
                 raise ValueError("runtime stop plan binding is invalid")
-            if len(canonical_message(plan.compiled_execution_plan)) > (
-                MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
-            ):
-                raise ValueError("runtime stop compiled plan exceeds its byte ceiling")
             if len(canonical_message(plan)) > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES:
                 raise ValueError("runtime stop plan exceeds its canonical byte ceiling")
         elif any(

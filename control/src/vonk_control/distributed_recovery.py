@@ -248,7 +248,11 @@ class DistributedRecoveryCoordinator:
                     )
                     worked = True
                     continue
-                run_plan = run_plan_document(run.plan)
+                try:
+                    run_plan = run_plan_document(run.plan)
+                except RecipeExecutionContractError:
+                    _advance_recovery_check(run, now)
+                    continue
                 if run_plan.get("execution_mode") == "one-shot-jobs":
                     _settle_unrecoverable(
                         run,
@@ -474,7 +478,6 @@ class DistributedRecoveryCoordinator:
 
         with self._routes.publication_transaction() as session:
             candidates = {
-                *_unreadable_run_ids(session),
                 *session.scalars(
                     select(RecipeRun.id)
                     .where(
@@ -506,31 +509,24 @@ class DistributedRecoveryCoordinator:
         return True
 
     def _settle_unreadable_runs(self, session: Session, now: datetime) -> bool:
-        """A run whose stored plan this Controller cannot read is settled.
+        """Retain exact live ownership when its historical plan is unreadable.
 
-        Such a run was written under an older contract: it can be neither
-        recovered nor stopped from its plan, so it must not keep holding
-        capacity or wait for a stop that can never be planned. Its claims are
-        released by the ownership rule below.
+        Plan projection failure does not prove that a workload exited. Durable
+        run/node identity still permits exact observation and authorized Stop;
+        claims remain until that effect is confirmed.
         """
 
-        settled = False
+        changed = False
         for run_id in _unreadable_run_ids(session):
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or run.state not in STOPPABLE_RUN_STATES:
                 continue
-            if not self._routes.withdrawal_complete_in_session(
-                session, frozenset({run.id})
-            ):
-                continue  # withdrawn first on the next tick
-            _settle_unrecoverable(
-                run,
-                "the stored run plan is unreadable (older contract); the run is "
-                "settled and its capacity released",
-                now,
-            )
-            settled = True
-        return settled
+            note = "stored run plan is unreadable; retaining workload until exact observation or Stop"
+            if run.route_error != note:
+                run.route_error = note
+                run.updated_at = now
+                changed = True
+        return changed
 
     @staticmethod
     def _active_recovery(session: Session, run_id: str) -> bool:

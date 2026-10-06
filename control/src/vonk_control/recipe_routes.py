@@ -18,11 +18,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from urllib.parse import urlsplit
 
+from pydantic import TypeAdapter
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import GatewayRouteState, RoutePublicationState, RunState
 from vonk_agent_protocol import RouteState as RunRouteState
+from vonk_agent_protocol.enrollment import NodeId
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_forge_contracts import read_recipe
 
@@ -38,7 +40,7 @@ from .litellm import (
 )
 from .logging import log_event
 from .models import (
-    AgentPresence,
+    AgentNode,
     CatalogDocumentRevision,
     ClusterMapping,
     Job,
@@ -60,15 +62,17 @@ from .route_runtime import (
     ActivationMarker,
     AtomicRouteBundlePublisher,
     RouteRuntimeError,
+    recipe_route_run_id,
+    verify_active_route_bundle,
 )
 
+_NODE_ID = TypeAdapter(NodeId)
 _ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 # A serving route is kept while its Sparks keep talking to the Controller,
 # even when their rank reports are missing; a Spark silent this long is gone.
-SPARK_SILENT_WITHDRAWAL_SECONDS = 300
 _LOGGER = logging.getLogger(__name__)
 _WITHDRAWAL_ATTEMPTS = 5
 _WITHDRAWAL_BACKOFF_SECONDS = 0.05
@@ -110,6 +114,14 @@ class RecipeRouteError(RuntimeError):
     def __init__(self, message: str, *, run_id: str | None = None) -> None:
         super().__init__(message)
         self.run_id = run_id
+
+
+class RecipeRankStopped(RecipeRouteError):
+    """A durable rank reports a stopped or failed workload, requiring recovery."""
+
+
+class RecipeEndpointAuthorityRefused(RecipeRouteError):
+    """A route violates the enforced network or node-revocation boundary."""
 
 
 class RecipeRouteNotReady(RecipeRouteError):
@@ -329,6 +341,107 @@ class AtomicRecipeRoutePublisher:
         except RouteRuntimeError:
             return None
         return None if marker is None else marker.digest
+
+    def accepted_run(
+        self, run_id: str, policy: ManagementAddressPolicy
+    ) -> _RecipeCandidate | None:
+        """Reuse only a checksum-verified immutable route already owned by this run.
+
+        The active bundle owns endpoint and runtime-model facts; SQL/history
+        cannot manufacture them when a current projection becomes unreadable.
+        """
+        if not (self._publisher._root / "activation.json").exists():
+            return None
+        bundle = verify_active_route_bundle(self._publisher._root)
+        if (
+            bundle.marker.authority_id != self._AUTHORITY_ID
+            or bundle.marker.state != GatewayRouteState.PUBLISHED
+        ):
+            return None
+        if (
+            bundle.routes.get("schema_version") != 2
+            or bundle.routes.get("state") != GatewayRouteState.PUBLISHED
+            or bundle.routes.get("generation") != bundle.marker.generation
+            or bundle.marker.evidence_set_digest != bundle.marker.plan_digest
+        ):
+            raise RouteRuntimeError("accepted recipe route identity is invalid")
+        routes = bundle.routes.get("routes")
+        models = bundle.litellm.get("model_list")
+        if not isinstance(routes, Mapping) or not isinstance(models, list):
+            raise RouteRuntimeError("accepted recipe route bundle is invalid")
+        found = [
+            (alias, raw)
+            for alias, raw in routes.items()
+            if isinstance(raw, Mapping)
+            and recipe_route_run_id(raw.get("operation_id")) == run_id
+        ]
+        if not found:
+            return None
+        if len(found) != 1:
+            raise RouteRuntimeError("accepted recipe run has ambiguous route ownership")
+        alias, raw = found[0]
+        address, port, node_id = raw.get("address"), raw.get("port"), raw.get("node_id")
+        observed_at, operation_id = raw.get("observed_at"), raw.get("operation_id")
+        if (
+            not isinstance(alias, str)
+            or _ALIAS.fullmatch(alias) is None
+            or not isinstance(address, str)
+            or not isinstance(port, int)
+            or isinstance(port, bool)
+            or not 1 <= port <= 65535
+            or not isinstance(node_id, str)
+            or not isinstance(observed_at, str)
+            or not isinstance(operation_id, str)
+            or raw.get("scheme") != "http"
+            or raw.get("path") != "/v1"
+        ):
+            raise RouteRuntimeError("accepted recipe endpoint is invalid")
+        try:
+            policy.validate(address)
+        except PresenceError as error:
+            raise RecipeEndpointAuthorityRefused(
+                "accepted endpoint is outside management policy", run_id=run_id
+            ) from error
+        endpoint = _RecipeEndpoint(
+            _NODE_ID.validate_python(node_id),
+            str(ipaddress.ip_address(address)),
+            port,
+            _aware(datetime.fromisoformat(observed_at)),
+            operation_id,
+        )
+        entries = [
+            item
+            for item in models
+            if isinstance(item, Mapping) and item.get("model_name") == alias
+        ]
+        if len(entries) != 1 or not isinstance(
+            params := entries[0].get("litellm_params"), Mapping
+        ):
+            raise RouteRuntimeError("accepted recipe runtime policy is invalid")
+        model, rpm, tpm = params.get("model"), params.get("rpm"), params.get("tpm")
+        if (
+            not isinstance(model, str)
+            or not model.startswith("openai/")
+            or _UPSTREAM_MODEL.fullmatch(model[7:]) is None
+            or type(rpm) is not int
+            or type(tpm) is not int
+            or params.get("api_base") != endpoint.api_base.rstrip("/")
+            or params.get("api_key") != "os.environ/LITELLM_UPSTREAM_KEY"
+        ):
+            raise RouteRuntimeError("accepted recipe runtime policy is invalid")
+        quota = LiteLlmPolicy(
+            {
+                alias: {
+                    "upstream_model": model[7:],
+                    "requests_per_minute": rpm,
+                    "tokens_per_minute": tpm,
+                }
+            }
+        )
+        # The renderer owns policy validation, including resource bounds.
+        state = RouteState({alias: endpoint.api_base}, bundle.marker.plan_digest)
+        render_config(state, quota)
+        return _RecipeCandidate(state, frozenset({run_id}), quota, {alias: endpoint})
 
     def _next_generation(self) -> int:
         """Allocate above every staged generation, even past an unreadable marker."""
@@ -958,7 +1071,13 @@ class RecipeRouteService:
                 )
                 break
             except RecipeRouteError as error:
-                if error.run_id is None or error.run_id in excluded:
+                if (
+                    error.run_id is None
+                    or error.run_id in excluded
+                    or not isinstance(
+                        error, RecipeRankStopped | RecipeEndpointAuthorityRefused
+                    )
+                ):
                     raise
                 excluded.add(error.run_id)
         return _RecipeWithdrawal(
@@ -1167,6 +1286,14 @@ class RecipeRouteService:
         except RecipeRouteError as error:
             if error.run_id is None:
                 raise
+            if not isinstance(
+                error, RecipeRankStopped | RecipeEndpointAuthorityRefused
+            ):
+                # Failure to reconstruct a candidate is not evidence that an
+                # already accepted endpoint stopped serving. Initial route
+                # publication still validates every candidate field.
+                self._note_retained(error.run_id, [str(error)])
+                return False
             published_ids = frozenset(run.id for run in published)
             recovery_error = f"{_HEALTH_RECOVERY_ERROR}: {error}"[:512]
             log_event(
@@ -1358,6 +1485,7 @@ class RecipeRouteService:
             raise RecipeRouteError("recipe route clock must be timezone-aware")
         aliases: dict[str, str] = {}
         upstream_models: dict[str, str] = {}
+        model_policies: dict[str, Mapping[str, int | str]] = {}
         endpoints: dict[str, _RecipeEndpoint] = {}
         included: set[str] = set()
         run_identities: list[dict[str, object]] = []
@@ -1398,167 +1526,216 @@ class RecipeRouteService:
             serving = (
                 run.route_state == RunRouteState.PUBLISHED and run.id != include_run_id
             )
-            retained: list[str] = []
-            if _ALIAS.fullmatch(run.alias) is None or run.alias in aliases:
-                raise RecipeRouteError(
-                    "recipe run alias is invalid or duplicated", run_id=run.id
+            if any(node.state in {RunState.STOPPED, RunState.FAILED} for node in nodes):
+                raise RecipeRankStopped(
+                    "recipe rank reports a stopped or failed workload",
+                    run_id=run.id,
                 )
-            upstream_model = _primary_model_alias(session, run)
-            if not nodes or any(node.state != RunState.RUNNING for node in nodes):
-                raise RecipeRouteError(
-                    "every recipe rank must be running", run_id=run.id
-                )
-            if tuple(node.rank for node in nodes) != tuple(range(len(nodes))):
-                raise RecipeRouteError("recipe rank set is not exact", run_id=run.id)
+            for node in nodes:
+                agent = session.get(AgentNode, node.node_id)
+                if agent is not None and agent.revoked_at is not None:
+                    raise RecipeEndpointAuthorityRefused(
+                        "recipe rank node is revoked", run_id=run.id
+                    )
             try:
-                stored_run_plan = run_plan_document(run.plan)
-            except RecipeExecutionContractError as error:
-                raise RecipeRouteError(
-                    "stored recipe run plan is invalid", run_id=run.id
-                ) from error
-            expected = stored_run_plan.get("nodes")
-            if isinstance(expected, list):
-                expected_identity = (
-                    {
-                        (item.get("node_id"), item.get("rank"), item.get("role"))
-                        for item in expected
-                    }
-                    if all(isinstance(item, Mapping) for item in expected)
-                    else set()
-                )
-                actual_identity = {
-                    (node.node_id, node.rank, node.role) for node in nodes
-                }
-                if len(expected) != len(nodes) or expected_identity != actual_identity:
+                retained: list[str] = []
+                if _ALIAS.fullmatch(run.alias) is None or run.alias in aliases:
                     raise RecipeRouteError(
-                        "recipe rank set does not match accepted plan",
+                        "recipe run alias is invalid or duplicated", run_id=run.id
+                    )
+                upstream_model = _primary_model_alias(session, run)
+                if not nodes or any(node.state != RunState.RUNNING for node in nodes):
+                    raise RecipeRouteNotReady(
+                        "every recipe rank must be running", run_id=run.id
+                    )
+                if tuple(node.rank for node in nodes) != tuple(range(len(nodes))):
+                    raise RecipeRouteError(
+                        "recipe rank set is not exact", run_id=run.id
+                    )
+                try:
+                    stored_run_plan = run_plan_document(run.plan)
+                except RecipeExecutionContractError as error:
+                    raise RecipeRouteError(
+                        "stored recipe run plan is invalid", run_id=run.id
+                    ) from error
+                expected = stored_run_plan.get("nodes")
+                if isinstance(expected, list):
+                    expected_identity = (
+                        {
+                            (item.get("node_id"), item.get("rank"), item.get("role"))
+                            for item in expected
+                        }
+                        if all(isinstance(item, Mapping) for item in expected)
+                        else set()
+                    )
+                    actual_identity = {
+                        (node.node_id, node.rank, node.role) for node in nodes
+                    }
+                    if (
+                        len(expected) != len(nodes)
+                        or expected_identity != actual_identity
+                    ):
+                        raise RecipeRouteError(
+                            "recipe rank set does not match accepted plan",
+                            run_id=run.id,
+                        )
+                exact_observations = (
+                    stored_run_plan.get("observation_schema_version") == 2
+                )
+                if len(nodes) > 1 and not exact_observations:
+                    raise RecipeRouteError(
+                        "distributed recipe route requires exact rank observations",
                         run_id=run.id,
                     )
-            exact_observations = stored_run_plan.get("observation_schema_version") == 2
-            if len(nodes) > 1 and not exact_observations:
-                raise RecipeRouteError(
-                    "distributed recipe route requires exact rank observations",
-                    run_id=run.id,
+                mapping = session.get(ClusterMapping, run.mapping_id)
+                entrypoints = [node for node in nodes if node.role == "entrypoint"]
+                endpoint_owners = (
+                    [
+                        node
+                        for node in nodes
+                        if node.node_id == mapping.endpoint_owner_node_id
+                    ]
+                    if mapping is not None
+                    and mapping.generation == run.mapping_generation
+                    else []
                 )
-            mapping = session.get(ClusterMapping, run.mapping_id)
-            entrypoints = [node for node in nodes if node.role == "entrypoint"]
-            endpoint_owners = (
-                [
-                    node
-                    for node in nodes
-                    if node.node_id == mapping.endpoint_owner_node_id
-                ]
-                if mapping is not None and mapping.generation == run.mapping_generation
-                else []
-            )
-            if (
-                len(entrypoints) != 1
-                or len(endpoint_owners) != 1
-                or entrypoints[0] is not endpoint_owners[0]
-            ):
-                raise RecipeRouteError(
-                    "recipe run must have exactly one mapped endpoint-owner entrypoint",
-                    run_id=run.id,
-                )
-            endpoint_owner = endpoint_owners[0]
-            if exact_observations:
-                for node in nodes:
-                    if (
-                        node.observed_run_generation != run.run_generation
-                        or node.observation_observed_at is None
-                    ):
-                        if not serving:
-                            raise RecipeRouteNotReady(
-                                "recipe rank is awaiting current exact observation",
-                                run_id=run.id,
-                            )
-                        retained.append(
-                            f"rank {node.rank} has no current exact observation"
-                        )
-                    if node is endpoint_owner:
-                        if node.observation_endpoint_ready is not True:
+                if (
+                    len(entrypoints) != 1
+                    or len(endpoint_owners) != 1
+                    or entrypoints[0] is not endpoint_owners[0]
+                ):
+                    raise RecipeRouteError(
+                        "recipe run must have exactly one mapped endpoint-owner entrypoint",
+                        run_id=run.id,
+                    )
+                endpoint_owner = endpoint_owners[0]
+                if exact_observations:
+                    for node in nodes:
+                        if (
+                            node.observed_run_generation != run.run_generation
+                            or node.observation_observed_at is None
+                        ):
                             if not serving:
                                 raise RecipeRouteNotReady(
-                                    "recipe endpoint owner is awaiting exact readiness",
+                                    "recipe rank is awaiting current exact observation",
                                     run_id=run.id,
                                 )
                             retained.append(
-                                f"rank {node.rank} endpoint readiness is not proven"
+                                f"rank {node.rank} has no current exact observation"
                             )
-                    elif node.observation_endpoint_ready is not None:
+                        if node is endpoint_owner:
+                            if node.observation_endpoint_ready is not True:
+                                if not serving:
+                                    raise RecipeRouteNotReady(
+                                        "recipe endpoint owner is awaiting exact readiness",
+                                        run_id=run.id,
+                                    )
+                                retained.append(
+                                    f"rank {node.rank} endpoint readiness is not proven"
+                                )
+                        elif node.observation_endpoint_ready is not None:
+                            if not serving:
+                                raise RecipeRouteError(
+                                    "headless recipe rank exposed endpoint readiness",
+                                    run_id=run.id,
+                                )
+                            retained.append(
+                                f"headless rank {node.rank} reported endpoint readiness"
+                            )
+                for node in nodes:
+                    observed = _aware(node.updated_at)
+                    if (
+                        observed > now.astimezone(UTC)
+                        or now.astimezone(UTC) - observed >= self._maximum_age
+                    ):
                         if not serving:
                             raise RecipeRouteError(
-                                "headless recipe rank exposed endpoint readiness",
-                                run_id=run.id,
+                                "recipe rank readiness evidence is stale", run_id=run.id
                             )
-                        retained.append(
-                            f"headless rank {node.rank} reported endpoint readiness"
-                        )
-            for node in nodes:
-                observed = _aware(node.updated_at)
-                if (
-                    observed > now.astimezone(UTC)
-                    or now.astimezone(UTC) - observed >= self._maximum_age
-                ):
-                    if not serving:
-                        raise RecipeRouteError(
-                            "recipe rank readiness evidence is stale", run_id=run.id
-                        )
-                    age = int((now.astimezone(UTC) - observed).total_seconds())
-                    # A Spark that stopped talking to the Controller at all is
-                    # evidence, not bookkeeping: its endpoint is gone too.
-                    presence = session.get(AgentPresence, node.node_id)
-                    silent = (
-                        None
-                        if presence is None
-                        else int(
-                            (
-                                now.astimezone(UTC) - _aware(presence.observed_at)
-                            ).total_seconds()
-                        )
+                        age = int((now.astimezone(UTC) - observed).total_seconds())
+                        retained.append(f"rank {node.rank} evidence is {age}s old")
+                self._note_retained(run.id, retained)
+                try:
+                    endpoint = _endpoint(
+                        endpoint_owner,
+                        self._management_policy,
+                        operation_id=f"recipe:{run.id}:rank:{endpoint_owner.rank}",
                     )
-                    if silent is not None and silent >= SPARK_SILENT_WITHDRAWAL_SECONDS:
-                        raise RecipeRouteError(
-                            f"Spark {node.node_id} has not reached the Controller "
-                            f"for {silent}s",
-                            run_id=run.id,
-                        )
-                    retained.append(f"rank {node.rank} evidence is {age}s old")
-            self._note_retained(run.id, retained)
-            try:
-                endpoint = _endpoint(
-                    endpoint_owner,
-                    self._management_policy,
-                    operation_id=f"recipe:{run.id}:rank:{endpoint_owner.rank}",
+                except RecipeRouteError as error:
+                    # Bind the failure to its run so one bad endpoint withdraws
+                    # only that route instead of blocking every other one.
+                    error.run_id = run.id
+                    raise
+                model_policies[run.alias] = {
+                    "requests_per_minute": 60,
+                    "tokens_per_minute": 1_000_000,
+                    "upstream_model": upstream_model,
+                }
+                aliases[run.alias] = endpoint.api_base
+                upstream_models[run.alias] = upstream_model
+                included.add(run.id)
+                endpoints[run.alias] = endpoint
+                run_identities.append(
+                    {
+                        "run_id": run.id,
+                        "alias": run.alias,
+                        "plan_digest": run.plan_digest,
+                        "run_generation": run.run_generation,
+                        "upstream_model": upstream_model,
+                        # Observation time stays out of route identity so an
+                        # otherwise identical heartbeat never generates a new
+                        # bundle.
+                        "ranks": [
+                            {
+                                "node_id": node.node_id,
+                                "rank": node.rank,
+                                "role": node.role,
+                            }
+                            for node in nodes
+                        ],
+                    }
                 )
             except RecipeRouteError as error:
-                # Bind the failure to its run so one bad endpoint withdraws
-                # only that route instead of blocking every other one.
-                raise RecipeRouteError(str(error), run_id=run.id) from error
-            aliases[run.alias] = endpoint.api_base
-            upstream_models[run.alias] = upstream_model
-            included.add(run.id)
-            endpoints[run.alias] = endpoint
-            run_identities.append(
-                {
-                    "run_id": run.id,
-                    "alias": run.alias,
-                    "plan_digest": run.plan_digest,
-                    "run_generation": run.run_generation,
-                    "upstream_model": upstream_model,
-                    # Observation time stays out of route identity so an
-                    # otherwise identical heartbeat never generates a new
-                    # bundle.
-                    "ranks": [
+                if not serving or isinstance(
+                    error, RecipeRankStopped | RecipeEndpointAuthorityRefused
+                ):
+                    raise
+                read_accepted = getattr(self._publisher, "accepted_run", None)
+                if read_accepted is None:
+                    raise
+                accepted = read_accepted(run.id, self._management_policy)
+                if accepted is None:
+                    raise
+                for accepted_alias, endpoint in accepted.endpoints.items():
+                    agent = session.get(AgentNode, endpoint.node_id)
+                    if agent is not None and agent.revoked_at is not None:
+                        raise RecipeEndpointAuthorityRefused(
+                            "accepted endpoint node is revoked", run_id=run.id
+                        )
+                    if accepted_alias in aliases:
+                        raise RecipeRouteError(
+                            "accepted recipe aliases overlap", run_id=run.id
+                        )
+                    model_policies[accepted_alias] = accepted.policy.models[
+                        accepted_alias
+                    ]
+                    aliases[accepted_alias] = endpoint.api_base
+                    endpoints[accepted_alias] = endpoint
+                    upstream_models[accepted_alias] = str(
+                        accepted.policy.models[accepted_alias]["upstream_model"]
+                    )
+                    run_identities.append(
                         {
-                            "node_id": node.node_id,
-                            "rank": node.rank,
-                            "role": node.role,
+                            "run_id": run.id,
+                            "alias": accepted_alias,
+                            "accepted_endpoint": endpoint.route_document(),
+                            "accepted_policy": dict(
+                                accepted.policy.models[accepted_alias]
+                            ),
                         }
-                        for node in nodes
-                    ],
-                }
-            )
+                    )
+                included.add(run.id)
+                self._note_retained(run.id, [str(error)])
         identity = {
             "schema_version": 1,
             "runs": run_identities,
@@ -1568,16 +1745,7 @@ class RecipeRouteService:
             json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         state = RouteState(aliases=aliases, digest=digest)
-        policy = LiteLlmPolicy(
-            models={
-                alias: {
-                    "requests_per_minute": 60,
-                    "tokens_per_minute": 1_000_000,
-                    "upstream_model": upstream_models[alias],
-                }
-                for alias in aliases
-            }
-        )
+        policy = LiteLlmPolicy(models=model_policies)
         return _RecipeCandidate(state, frozenset(included), policy, endpoints)
 
 
@@ -1681,11 +1849,13 @@ def _endpoint(
         or parsed.fragment
         or parsed.path.rstrip("/") not in {"", "/v1"}
     ):
-        raise RecipeRouteError("entrypoint endpoint is outside management policy")
+        raise RecipeEndpointAuthorityRefused(
+            "entrypoint endpoint is outside management policy"
+        )
     try:
         management_policy.validate(str(address))
     except PresenceError as error:
-        raise RecipeRouteError(
+        raise RecipeEndpointAuthorityRefused(
             "entrypoint endpoint is outside management policy"
         ) from error
     assert port is not None

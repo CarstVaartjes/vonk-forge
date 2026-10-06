@@ -9121,26 +9121,39 @@ export interface components {
              */
             workload_intent_ordinal: number | null;
         };
-        /** RecipeStopPayload */
+        /**
+         * RecipeStopPayload
+         * @description Exact cleanup authority, independent of historical launch-plan readability.
+         *
+         *     The Controller binds these identities and timeout into the signed helper
+         *     grant; the helper reconciles only the matching runtime generation.
+         */
         RecipeStopPayload: {
             /**
              * Cancel Pending Start
              * @default false
              */
             cancel_pending_start: boolean;
-            compiled_execution_plan: components["schemas"]["CompiledExecutionPlan"];
             /** Installation Id */
             installation_id: string;
             /** Mapping Id */
             mapping_id: string;
             /** Plan Digest */
             plan_digest: string;
+            /** Rank */
+            rank: number;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+            /** Role */
+            role: string;
             /** Run Generation */
             run_generation: number;
             /** Run Id */
             run_id: string;
+            /** Stop Timeout Seconds */
+            stop_timeout_seconds: number;
             /** Target Runtime Id */
             target_runtime_id: string;
         };

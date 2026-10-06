@@ -17,7 +17,7 @@ class TerritorialAdmissionDecision:
 
 
 def territorial_admission(
-    model_version: Mapping[str, object],
+    model_version: Mapping[str, object] | None,
     *,
     operation: str,
 ) -> TerritorialAdmissionDecision:
@@ -25,7 +25,9 @@ def territorial_admission(
 
     if operation not in {"install", "run"}:
         raise ValueError("territorial admission operation is invalid")
-    license_document = model_version.get("license")
+    license_document = (
+        model_version.get("license") if isinstance(model_version, Mapping) else None
+    )
     restrictions = (
         license_document.get("territorial_restrictions")
         if isinstance(license_document, Mapping)
@@ -34,7 +36,7 @@ def territorial_admission(
     if restrictions is None:
         return TerritorialAdmissionDecision(None)
     if not isinstance(restrictions, Mapping):
-        raise TypeError("model territorial restrictions are invalid")
+        return TerritorialAdmissionDecision(None)
     denied = restrictions.get("denied_jurisdictions")
     notice = restrictions.get("notice")
     if (
@@ -44,7 +46,7 @@ def territorial_admission(
         or not isinstance(notice, str)
         or not notice
     ):
-        raise TypeError("model territorial restrictions are invalid")
+        return TerritorialAdmissionDecision(None)
     prefix = f"{operation}.license"
     return TerritorialAdmissionDecision(
         (

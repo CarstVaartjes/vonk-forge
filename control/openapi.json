@@ -24944,14 +24944,12 @@
       },
       "RecipeStopPayload": {
         "additionalProperties": false,
+        "description": "Exact cleanup authority, independent of historical launch-plan readability.\n\nThe Controller binds these identities and timeout into the signed helper\ngrant; the helper reconciles only the matching runtime generation.",
         "properties": {
           "cancel_pending_start": {
             "default": false,
             "title": "Cancel Pending Start",
             "type": "boolean"
-          },
-          "compiled_execution_plan": {
-            "$ref": "#/components/schemas/CompiledExecutionPlan"
           },
           "installation_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -24968,9 +24966,24 @@
             "title": "Plan Digest",
             "type": "string"
           },
+          "rank": {
+            "minimum": 0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
           "recipe_revision_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "role": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Role",
             "type": "string"
           },
           "run_generation": {
@@ -24983,6 +24996,12 @@
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Run Id",
             "type": "string"
+          },
+          "stop_timeout_seconds": {
+            "maximum": 600,
+            "minimum": 1,
+            "title": "Stop Timeout Seconds",
+            "type": "integer"
           },
           "target_runtime_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -24998,7 +25017,10 @@
           "recipe_revision_id",
           "mapping_id",
           "plan_digest",
-          "compiled_execution_plan"
+          "rank",
+          "role",
+          "recipe_content_sha256",
+          "stop_timeout_seconds"
         ],
         "title": "RecipeStopPayload",
         "type": "object"

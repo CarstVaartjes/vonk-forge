@@ -26,7 +26,13 @@ fn claim(attempt: u128, deadline: &str) -> AgentClaim {
     let run_id = Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap();
     let payload = RecipeStopPayload {
         cancel_pending_start: false,
-        compiled_execution_plan: compiled_execution_plan.clone(),
+        rank: compiled_execution_plan.runtime.placement.rank,
+        role: compiled_execution_plan.runtime.placement.role.clone(),
+        recipe_content_sha256: compiled_execution_plan
+            .identity
+            .recipe_revision_sha256
+            .clone(),
+        stop_timeout_seconds: compiled_execution_plan.lifecycle.stop_timeout_seconds,
         installation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap(),
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
         plan_digest: "e".repeat(64),
