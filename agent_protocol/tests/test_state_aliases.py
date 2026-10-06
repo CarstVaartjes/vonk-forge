@@ -88,8 +88,13 @@ def test_a_word_the_subject_keeps_outside_the_vocabulary_is_left_to_its_owner() 
     # A subject that never used a retired word does not adopt it silently.
     assert adopt_state(LifecycleSubject.JOB_ATTEMPT, "partial") is None
     # Its CHECK constraint never admitted these.
-    for word in ("waiting", "cancelling", "expired"):
+    for word in ("waiting", "expired"):
         assert adopt_state(LifecycleSubject.FLEET_PROFILE_APPLICATION, word) is None
+    # ``cancelling`` is the state of an application's cancellation intent (its
+    # progress document): a cancel being driven is observed.
+    assert adopt_state(
+        LifecycleSubject.FLEET_PROFILE_APPLICATION, "cancelling"
+    ) == AdoptedState(LifecycleState.OBSERVING, cancel_requested=True)
 
 
 def test_callers_may_still_send_a_retired_word_as_input() -> None:
