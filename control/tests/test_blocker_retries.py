@@ -6,7 +6,6 @@ import ast
 import copy
 import textwrap
 from collections.abc import Mapping
-from typing import cast
 
 import pytest
 
@@ -21,7 +20,6 @@ from .blocker_retries import (
     evaluate_retry_gate,
     loop_problems,
     promote_proven,
-    proof_of,
     proven,
     unknown_classes,
     unproven_sites,
@@ -816,28 +814,30 @@ def test_the_allowlist_credits_exactly_what_the_proof_proves(
     assert promote_proven(document) == 0
 
 
-def test_admission_proof_requires_the_result_retry_on_every_path(
-    retry_proof_graph: object,
-) -> None:
-    document = copy.deepcopy(load_allowlist())
-    path = "control/src/vonk_control/recipe_operations.py"
-    for cls, function in (
-        ("InstallAdmissionBusy", "RecipeOperationService._queue_in_session"),
-        ("InstallAdmissionBusy", "RecipeOperationService._admit_workload_intent"),
-    ):
-        assert proven(document, path, cls, function) is not None
-    document["retry_loops"] = [
-        loop
-        for loop in cast(list[dict[str, object]], document["retry_loops"])
-        if loop["function"] not in {"AgentJobService.succeed", "AgentJobService.fail"}
-    ]
-    for function in (
-        "RecipeOperationService._queue_in_session",
-        "RecipeOperationService._admit_workload_intent",
-    ):
-        proof = proof_of(document, path, "InstallAdmissionBusy", function)
+def test_admission_proof_requires_the_result_retry_on_every_path() -> None:
+    """Reject credit when worker admission retries but result admission does not."""
+
+    source = """
+        def _queue_in_session():
+            raise Busy("admission writer busy")
+        def _admit_workload_intent():
+            _queue_in_session()
+        def worker_tick():
+            try:
+                _admit_workload_intent()
+            except Busy:
+                pass
+        def record_result():
+            try:
+                _admit_workload_intent()
+            except Busy:
+                pass
+        """
+    loops = {"worker_tick": ("Busy",), "record_result": ("Busy",)}
+    for function in ("_queue_in_session", "_admit_workload_intent"):
+        assert _prove(source, function, loops=loops).proven
+        proof = _prove(source, function, loops={"worker_tick": ("Busy",)})
         assert proof.reached_by_a_loop and not proof.proven
-        assert proven(document, path, "InstallAdmissionBusy", function) is None
 
 
 def test_a_callback_through_an_injected_service_has_its_caller(
