@@ -93,7 +93,9 @@ def test_accepted_image_request_waits_for_exact_lock_and_recovers_after_restart(
     recipe = _recipe("recipe-source-build.json")
     revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
-        revision = _add_revision(session, revision_id, recipe)
+        revision = _add_revision(
+            session, revision_id, recipe, document_id=str(uuid.uuid4())
+        )
         _add_head(session, revision)
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
     place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))

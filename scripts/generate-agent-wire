@@ -29,11 +29,13 @@ def main() -> None:
         ],
         cwd=ROOT,
         check=True,
+        timeout=1200,
     )
     subprocess.run(
         [sys.executable, str(ROOT / "scripts/export-installer-release-schema")],
         cwd=ROOT,
         check=True,
+        timeout=1200,
     )
     subprocess.run(
         [
@@ -49,6 +51,7 @@ def main() -> None:
         ],
         cwd=ROOT,
         check=True,
+        timeout=1200,
     )
 
 

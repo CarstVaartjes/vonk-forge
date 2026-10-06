@@ -245,7 +245,12 @@ def stream(command: list[str]) -> tuple[int, str]:
 
 def capture(command: list[str]) -> tuple[int, str]:
     completed = subprocess.run(
-        command, check=False, capture_output=True, text=True, encoding="utf-8"
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
     )
     return completed.returncode, (completed.stdout + completed.stderr).strip()
 
