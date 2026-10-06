@@ -598,7 +598,10 @@ class FleetProjection:
             presences = self._node_presences(session, node_ids)
             certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
-            telemetry = self._telemetry.latest_in_session(session, node_ids)
+            unreadable_telemetry: set[str] = set()
+            telemetry = self._telemetry.latest_in_session(
+                session, node_ids, unreadable_node_ids=unreadable_telemetry
+            )
             recent_telemetry = self._telemetry.recent_in_session(
                 session,
                 node_ids,
@@ -641,6 +644,7 @@ class FleetProjection:
                     certificate=certificates.get(node_id),
                     inventory=inventories.get(node_id),
                     telemetry=telemetry.get(node_id),
+                    telemetry_unreadable=node_id in unreadable_telemetry,
                     recent_telemetry=recent_telemetry.get(node_id, ()),
                     installed=installed.get(node_id, ()),
                     loaded=loaded.get(node_id, ()),
@@ -1163,11 +1167,21 @@ class FleetProjection:
         loaded: Sequence[RunPresence],
         reservations: Mapping[str, tuple[int, int]],
         stalls: Sequence[str] = (),
+        telemetry_unreadable: bool = False,
     ) -> FleetNode:
         warnings: list[ProjectionReason] = []
         connection = self._connection(agent, certificate, current)
-        inventory_state = self._inventory(inventory, current)
-        telemetry_state = self._telemetry_state(telemetry, current)
+        inventory_unreadable = False
+        try:
+            inventory_state = self._inventory(inventory, current)
+        except (AttributeError, TypeError, ValueError):
+            inventory_state = None
+            inventory_unreadable = True
+        try:
+            telemetry_state = self._telemetry_state(telemetry, current)
+        except (AttributeError, TypeError, ValueError):
+            telemetry_state = None
+            telemetry_unreadable = True
         if connection.online_state != "online":
             warnings.append(
                 ProjectionReason(
@@ -1180,7 +1194,11 @@ class FleetProjection:
             warnings.append(
                 ProjectionReason(
                     code=ProjectionCode.INVENTORY_MISSING,
-                    detail="No admission inventory snapshot is available.",
+                    detail=(
+                        "Stored admission inventory is unreadable; capacity is unknown."
+                        if inventory_unreadable
+                        else "No admission inventory snapshot is available."
+                    ),
                     severity="warning",
                 )
             )
@@ -1212,7 +1230,11 @@ class FleetProjection:
             warnings.append(
                 ProjectionReason(
                     code=ProjectionCode.TELEMETRY_MISSING,
-                    detail="No telemetry sample is available.",
+                    detail=(
+                        "Stored telemetry is unreadable; measurements are unknown."
+                        if telemetry_unreadable
+                        else "No telemetry sample is available."
+                    ),
                     severity="warning",
                 )
             )

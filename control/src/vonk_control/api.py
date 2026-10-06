@@ -109,13 +109,11 @@ from .operation_api import (
     ErrorContextResponse,
     HealthzResponse,
     JobDetailResponse,
-    JobProgress,
     JobResumeRequest,
     JobResumeResponse,
     OperationApiServices,
     OperationDetailResponse,
     OperationOwnerReference,
-    OperationPage,
     OperationsResponse,
     ReadyzResponse,
     RequestValidationIssue,
@@ -1159,9 +1157,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="job not found") from None
         try:
             projected = (
-                OperationPage(
-                    (), None, JobProgress(completed=0, failed=0, running=0, total=0)
-                )
+                None
                 if operations is None
                 else operations.job_operations(job_id, operation_cursor, limit)
             )
@@ -1184,9 +1180,16 @@ def create_app(
                 status_code=422, detail="job cursor is invalid"
             ) from None
         except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(
-                status_code=503, detail="operation projection unavailable"
-            ) from None
+            warn_unreadable_once("job operations", job_id)
+            return job_response(
+                job,
+                None,
+                target_cursor=decode_offset(
+                    target_cursor, job_id=str(job.id), cursors=cursor_codec
+                ),
+                limit=limit,
+                cursors=cursor_codec,
+            )
 
     @app.post(
         "/api/jobs/{job_id}/resume",

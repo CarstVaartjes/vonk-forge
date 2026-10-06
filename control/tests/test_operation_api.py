@@ -756,9 +756,10 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
         "current_attempt": 1,
         "id": "11111111-1111-4111-8111-111111111111",
         "kind": "reconcile",
-        "operations": [],
-        "operation_total": 0,
-        "progress": {"completed": 0, "failed": 0, "running": 0, "total": 0},
+        "operations": None,
+        "operation_total": None,
+        "progress": None,
+        "projection_issue": "Operation observations are unavailable; progress and step membership are unknown.",
         "recovery": {"actions": ["inspect"], "uncertain": False},
         "state": "queued",
         "targets": [NODE_ID],
@@ -1583,9 +1584,18 @@ def test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault() -> N
     def unavailable(*_args: object) -> NoReturn:
         raise BoundedJSONError("stored operation progress is invalid")
 
+    repaired = False
+
+    def read_job(*_args: object) -> OperationPage:
+        if not repaired:
+            unavailable()
+        return OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        )
+
     services = OperationApiServices(
         agents=lambda: (),
-        job_operations=unavailable,
+        job_operations=read_job,
         resume_job=lambda _job_id: None,
         list_operations=unavailable,
         get_operation=lambda _operation_id: {},
@@ -1593,12 +1603,23 @@ def test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault() -> N
     client, operator, *_ = _client(operations=services)
 
     detail = client.get(f"/api/jobs/{EnqueuedJob.id}", headers=operator)
-    assert detail.status_code == 503
-    assert detail.json()["detail"] == "operation projection unavailable"
+    assert detail.status_code == 200
+    assert detail.json()["id"] == EnqueuedJob.id
+    assert detail.json()["operations"] is None
+    assert detail.json()["operation_total"] is None
+    assert detail.json()["progress"] is None
+    assert "unknown" in detail.json()["projection_issue"]
 
     listed = client.get("/api/operations", headers=operator)
     assert listed.status_code == 503
     assert listed.json()["detail"] == "operation projection unavailable"
+
+    repaired = True
+    recovered = client.get(f"/api/jobs/{EnqueuedJob.id}", headers=operator)
+    assert recovered.status_code == 200
+    assert recovered.json()["progress"]["total"] == 0
+    assert recovered.json()["operations"] == []
+    assert recovered.json().get("projection_issue") is None
 
 
 def test_parallel_job_byte_aggregate_is_independent_of_operation_page(tmp_path) -> None:

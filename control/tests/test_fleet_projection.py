@@ -2286,3 +2286,76 @@ def test_wired_unknown_or_unreported_nas_route_raises_no_warning() -> None:
     # An older agent never reports network evidence: unknown, not a warning.
     assert _route_warnings(None, None) == []
     assert _route_warnings([wired, _WIFI], None) == []
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("damaged", ["inventory", "telemetry"])
+def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) -> None:
+    from .test_operation_api import _client
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'observations.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    sample_id = "00000000-0000-4000-8000-000000000011"
+    inventory = _inventory(NODE_A, NOW, free_bytes=800)
+    sample = _telemetry(NODE_A, sample_id, NOW, sequence=1, cpu=50)
+    with sessions.begin() as session:
+        session.add_all(
+            [
+                AgentNode(node_id=NODE_A, state="active", last_seen_at=NOW),
+                AgentNode(node_id=NODE_B, state="active", last_seen_at=NOW),
+                inventory,
+                sample,
+                NodeTelemetryLatest(node_id=NODE_A, sample_id=sample_id),
+                _inventory(NODE_B, NOW, free_bytes=750),
+            ]
+        )
+    with sessions.begin() as session:
+        if damaged == "inventory":
+            session.execute(
+                update(NodeInventorySnapshot)
+                .where(NodeInventorySnapshot.id == inventory.id)
+                .values(network_interfaces=[{"unexpected": True}])
+            )
+        else:
+            # Simulate a damaged historical row despite today's writer constraint.
+            session.execute(text("PRAGMA ignore_check_constraints = ON"))
+            session.execute(
+                update(NodeTelemetrySample)
+                .where(NodeTelemetrySample.id == sample_id)
+                .values(boot_id="invalid")
+            )
+            session.execute(text("PRAGMA ignore_check_constraints = OFF"))
+    client, operator, *_ = _client(
+        fleet_projection=FleetProjection(sessions, clock=lambda: NOW)
+    )
+    response = client.get("/api/fleet", headers=operator)
+    assert response.status_code == 200
+    nodes = {node["id"]: node for node in response.json()["nodes"]}
+    assert set(nodes) == {NODE_A, NODE_B}
+    assert nodes[NODE_B]["inventory"]["disk_free_bytes"] == 750
+    assert nodes[NODE_A][damaged] is None
+    assert any(
+        "unreadable" in warning["detail"] and "unknown" in warning["detail"]
+        for warning in nodes[NODE_A]["warnings"]
+    )
+    with sessions.begin() as session:
+        if damaged == "inventory":
+            session.execute(
+                update(NodeInventorySnapshot)
+                .where(NodeInventorySnapshot.id == inventory.id)
+                .values(network_interfaces=None)
+            )
+        else:
+            session.execute(
+                update(NodeTelemetrySample)
+                .where(NodeTelemetrySample.id == sample_id)
+                .values(boot_id="00000000-0000-4000-8000-000000000001")
+            )
+    recovered = client.get("/api/fleet", headers=operator)
+    assert recovered.status_code == 200
+    restored = next(node for node in recovered.json()["nodes"] if node["id"] == NODE_A)
+    assert restored[damaged] is not None
+    assert not any(
+        "unreadable" in warning["detail"] for warning in restored["warnings"]
+    )

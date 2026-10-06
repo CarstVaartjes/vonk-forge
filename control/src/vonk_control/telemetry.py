@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
+from .strict_json import warn_unreadable_once
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _MAX_BYTES = 16 * 1024**4
@@ -202,6 +203,21 @@ def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
     )
 
 
+def _read_view(row: NodeTelemetrySample) -> TelemetrySampleView | None:
+    """Validate stored values without reapplying the ingestion time window."""
+    try:
+        view = _view(row)
+        TelemetrySampleInput(
+            boot_id=view.boot_id,
+            observed_at=view.observed_at,
+            **{name: getattr(view, name) for name in _SAMPLE_FIELDS},
+        )
+        return view
+    except (AttributeError, TypeError, ValueError):
+        warn_unreadable_once("telemetry sample", row.id)
+        return None
+
+
 class TelemetryRepository:
     def __init__(
         self,
@@ -313,7 +329,11 @@ class TelemetryRepository:
             return self.latest_in_session(session, identities)
 
     def latest_in_session(
-        self, session: Session, node_ids: Sequence[str]
+        self,
+        session: Session,
+        node_ids: Sequence[str],
+        *,
+        unreadable_node_ids: set[str] | None = None,
     ) -> dict[str, TelemetrySampleView]:
         """Read latest pointers in a caller-owned bounded read transaction."""
 
@@ -328,7 +348,15 @@ class TelemetryRepository:
             )
             .where(NodeTelemetryLatest.node_id.in_(identities))
         ).all()
-        return {row.node_id: _view(row) for row in rows}
+        readable: dict[str, TelemetrySampleView] = {}
+        for row in rows:
+            view = _read_view(row)
+            if view is None:
+                if unreadable_node_ids is not None:
+                    unreadable_node_ids.add(row.node_id)
+            else:
+                readable[row.node_id] = view
+        return readable
 
     def recent_in_session(
         self,
@@ -351,7 +379,9 @@ class TelemetryRepository:
         ).all()
         recent: dict[str, list[TelemetrySampleView]] = {}
         for row in rows:
-            recent.setdefault(row.node_id, []).append(_view(row))
+            view = _read_view(row)
+            if view is not None:
+                recent.setdefault(row.node_id, []).append(view)
         return recent
 
     def by_ids(self, sample_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:
@@ -368,7 +398,7 @@ class TelemetryRepository:
                     NodeTelemetrySample.id.in_(identities)
                 )
             ).all()
-        return {row.id: _view(row) for row in rows}
+        return {row.id: view for row in rows if (view := _read_view(row)) is not None}
 
 
 # Fixed rule for a CPU that runs well below its maximum clock while it is hot or

@@ -4947,10 +4947,12 @@ export interface components {
             /** Operation Next Cursor */
             operation_next_cursor?: string | null;
             /** Operation Total */
-            operation_total: number;
+            operation_total: number | null;
             /** Operations */
-            operations: components["schemas"]["JobOperationResponse"][];
-            progress: components["schemas"]["JobProgress"];
+            operations: components["schemas"]["JobOperationResponse"][] | null;
+            progress: components["schemas"]["JobProgress"] | null;
+            /** Projection Issue */
+            projection_issue?: string | null;
             recovery?: components["schemas"]["OperationRecovery"] | null;
             /** State */
             state: string;

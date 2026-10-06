@@ -580,3 +580,20 @@ test("server-side filters are sent to the operations API and kept in the URL", a
   await user.click(screen.getByRole("button", {name: "Clear filters"}));
   await waitFor(() => expect(location.search).toBe(""));
 });
+
+it("shows unknown job observations without invented progress counts and refreshes", async () => {
+  const user = userEvent.setup();
+  const loadJob = vi.fn().mockResolvedValueOnce({
+    id: "operation-1", kind: "recipe-install", state: "running", authority_revision: "a".repeat(64), targets: [TARGET_ID], target_total: 1, current_attempt: 1,
+    operations: null, operation_total: null, progress: null, projection_issue: "Operation observations are unavailable; progress and step membership are unknown.",
+  }).mockResolvedValue({
+    id: "operation-1", kind: "recipe-install", state: "running", authority_revision: "a".repeat(64), targets: [TARGET_ID], target_total: 1, current_attempt: 1,
+    operations: [], operation_total: 1, progress: {completed: 0, failed: 0, running: 1, total: 1}, projection_issue: null,
+  });
+  render(<ActivityPage api={api(loadJob)} now={NOW}/>);
+  await user.click(await screen.findByText("View operation progress"));
+  expect(await screen.findByText(/progress and step membership are unknown/)).toBeVisible();
+  expect(screen.queryByRole("region", {name: "Operation progress"})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Refresh details"}));
+  expect(await screen.findByRole("region", {name: "Operation progress"})).toHaveTextContent("Running1");
+});

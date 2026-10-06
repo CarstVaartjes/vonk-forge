@@ -11911,20 +11911,53 @@
             "title": "Operation Next Cursor"
           },
           "operation_total": {
-            "minimum": 0.0,
-            "title": "Operation Total",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Total"
           },
           "operations": {
-            "items": {
-              "$ref": "#/components/schemas/JobOperationResponse"
-            },
-            "maxItems": 100,
-            "title": "Operations",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JobOperationResponse"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operations"
           },
           "progress": {
-            "$ref": "#/components/schemas/JobProgress"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "projection_issue": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Issue"
           },
           "recovery": {
             "anyOf": [
