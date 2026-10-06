@@ -369,6 +369,34 @@ class RecipeImageAvailabilityUnknown(UnknownOutcomeError, RecipeImageAvailabilit
         self.typed_reason = reason
 
 
+@dataclass(frozen=True, slots=True)
+class BuildUnsettled:
+    """A build observation that cannot settle yet: an unknown outcome, returned.
+
+    The builder hands it back instead of raising: the build is still queued or
+    running, its evidence is missing or changed, or its outcome is unconfirmed.
+    The claim runner records it through the lifecycle core (``_fail``), which
+    schedules the next attempt on its bounded backoff; ``retryable=False`` is
+    the one explicit owner decision that ends the operation.  The fields are the
+    ones ``_fail`` reads from any failure.
+    """
+
+    code: str
+    detail: str
+    reason: WaitReason
+    retryable: bool | None = None
+    retry_after_seconds: int | None = None
+    retry_time: str | None = None
+    recovery_actions: tuple[str, ...] = ()
+    log_excerpt: str | None = None
+    step: str | None = None
+    settled_build_operation_id: str | None = None
+    blockers: tuple[OperationBlocker, ...] = ()
+
+    def __str__(self) -> str:
+        return self.detail
+
+
 class _ModelQueueFailed(RecipeImageAvailabilityUnknown):
     """A Model cache call raised: the availability error carries its cause."""
 
@@ -411,7 +439,7 @@ class RecipeImageBuilder(Protocol):
         build_input_sha256: str,
         force: bool,
         progress: Callable[[Mapping[str, object]], None],
-    ) -> Mapping[str, object]: ...
+    ) -> Mapping[str, object] | BuildUnsettled: ...
 
 
 class RuntimeImageCacheStorage(RuntimeImageStorage, Protocol):
@@ -683,12 +711,14 @@ def _progress(
     return normalize_operation_progress(value)
 
 
-def _retryable(error: BaseException) -> bool:
+def _retryable(error: BaseException | BuildUnsettled) -> bool:
     """Classify by typed code; unknown failures retry with capped backoff."""
 
     code = getattr(error, "code", None)
     if isinstance(code, str) and is_security_failure(code):
         return False
+    if isinstance(error, BuildUnsettled):
+        return error.retryable is not False
     if (
         isinstance(error, UnknownOutcomeError)
         and not isinstance(error, ModelCacheError)
@@ -721,7 +751,7 @@ def _is_database_busy(error: BaseException | None) -> bool:
     return False
 
 
-def _failure_code(error: BaseException) -> str:
+def _failure_code(error: BaseException | BuildUnsettled) -> str:
     """Return the stable operation failure code for an exception.
 
     Only the repository's own operation failures may contribute ``code``.
@@ -740,7 +770,7 @@ def _failure_code(error: BaseException) -> str:
     return code
 
 
-def _failure_detail(error: BaseException) -> str:
+def _failure_detail(error: BaseException | BuildUnsettled) -> str:
     """Return operator-facing failure text, never a non-string attribute.
 
     ``sqlalchemy.exc.StatementError`` initialises ``detail`` to an empty list,
@@ -767,14 +797,14 @@ def _failure_detail(error: BaseException) -> str:
     return f"{type(error).__name__}: {message}"
 
 
-def _retry_after(error: BaseException) -> int | None:
+def _retry_after(error: BaseException | BuildUnsettled) -> int | None:
     value = getattr(error, "retry_after_seconds", None)
     if type(value) is int and 0 <= value <= 86_400:
         return value
     return None
 
 
-def _log_excerpt(error: BaseException) -> str | None:
+def _log_excerpt(error: BaseException | BuildUnsettled) -> str | None:
     value = getattr(error, "log_excerpt", None)
     if not isinstance(value, str) or not value.strip():
         value = getattr(error, "detail", None)
@@ -4831,9 +4861,15 @@ class RecipeImageAvailabilityService:
                 if receipt is None or not self._storage.build_archive_available(
                     receipt.oci_archive_sha256, receipt.image_bytes
                 ):
-                    receipt = self._prepare_claimed_image(
+                    prepared = self._prepare_claimed_image(
                         claim, payload, recipe, runtime
                     )
+                    if isinstance(prepared, BuildUnsettled):
+                        # Unknown, not failed: the outcome is recorded and the
+                        # core schedules the next attempt on its bounded backoff.
+                        self._fail(claim, prepared)
+                        return
+                    receipt = prepared
                     # Removal holds the same lock and commits a durable fence
                     # before deleting Controller image bytes. Late verified
                     # bytes may remain reusable, but stale work cannot accept
@@ -5181,7 +5217,7 @@ class RecipeImageAvailabilityService:
         payload: Mapping[str, object],
         recipe: RecipeDefinition,
         runtime: Mapping[str, object],
-    ) -> RuntimeImageReceipt:
+    ) -> RuntimeImageReceipt | BuildUnsettled:
         force_rebuild = payload.get("force_rebuild") is True
 
         def persist_provisional_reference(
@@ -5221,6 +5257,8 @@ class RecipeImageAvailabilityService:
             force=force_rebuild,
             progress=report,
         )
+        if isinstance(build_receipt, BuildUnsettled):
+            return build_receipt
         if not isinstance(build_receipt, Mapping):
             raise RecipeImageAvailabilityUnknown(
                 RecipeImageCode.BUILD_INVALID,
@@ -5555,7 +5593,7 @@ class RecipeImageAvailabilityService:
     def _fail(
         self,
         claim: RecipeImageAvailabilityClaim,
-        error: BaseException,
+        error: BaseException | BuildUnsettled,
     ) -> None:
         retryable = _retryable(error)
         code = _failure_code(error)

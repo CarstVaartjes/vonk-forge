@@ -10,7 +10,10 @@ from vonk_control import availability_production
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
 from vonk_control.models import Job, NodeInventorySnapshot, RecipeBuild
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
+from vonk_control.recipe_image_availability import (
+    BuildUnsettled,
+    RecipeImageAvailabilityError,
+)
 
 from .recipe_removal_review_support import remove_after_review
 from .test_build_cancellation_recovery import _active_claims, _evidence, _services
@@ -65,9 +68,9 @@ def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
         SimpleNamespace(sleep=forbidden_poll),
         raising=False,
     )
-    with pytest.raises(RecipeImageAvailabilityError) as waiting:
-        observe(production())
-    assert waiting.value.code == "recipe_image.build_wait"
+    waiting = observe(production())
+    assert isinstance(waiting, BuildUnsettled)
+    assert waiting.code == "recipe_image.build_wait"
     with sessions.begin() as session:
         jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
         assert len(jobs) == 1
@@ -91,13 +94,14 @@ def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
 
     monkeypatch.setattr(builds, "resolve", forbidden_replan)
     monkeypatch.setattr(builds, "prepare_plan", forbidden_replan)
-    with pytest.raises(RecipeImageAvailabilityError) as resumed:
-        observe(production())
-    assert resumed.value.code == "recipe_image.build_wait"
+    resumed = observe(production())
+    assert isinstance(resumed, BuildUnsettled)
+    assert resumed.code == "recipe_image.build_wait"
     operations.record_node_result(
         child_id, node, succeeded=True, evidence=_evidence(plan)
     )
     result = observe(production())
+    assert not isinstance(result, BuildUnsettled)
     assert result["build_id"] == plan.build_id
     assert result["build_input_sha256"] == plan.build_input_sha256
     with sessions() as session:
@@ -474,9 +478,9 @@ def test_expired_observers_failure_cannot_erase_the_new_claims_build_dependency(
     inherited = []
 
     def fail_after_claim_replacement(*args, **kwargs):
-        with pytest.raises(RecipeImageAvailabilityError) as waiting:
-            build(*args, **kwargs)
-        assert waiting.value.code == "recipe_image.build_wait"
+        waiting = build(*args, **kwargs)
+        assert isinstance(waiting, BuildUnsettled)
+        assert waiting.code == "recipe_image.build_wait"
         with sessions.begin() as session:
             row = session.get(Job, parent.id)
             assert row is not None

@@ -8,6 +8,7 @@
       "rust/crates/vonk-agent/src"
     ],
     "audited_paths": [
+      "control/src/vonk_control/admission_locking.py",
       "control/src/vonk_control/agent_jobs.py",
       "control/src/vonk_control/agent_upgrades.py",
       "control/src/vonk_control/artifact_blob_store.py",
@@ -57,7 +58,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 203,
-    "unaudited": 341,
+    "unaudited": 307,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -198,6 +199,14 @@
         "RecipeImageAvailabilityError"
       ],
       "reason": "A removal step that meets unconfirmed evidence (a changed reference, a published length that differs) records the failure on the removal checkpoint with a five second retry floor and leaves the image in place; the next pass retries the same step when it is due."
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "build_recipe_image_availability.builder",
+      "catches": [
+        "AdmissionLockBusy"
+      ],
+      "reason": "A Spark whose admission lock is held by another change is recorded as busy and the next candidate Spark is tried in the same selection loop; when every candidate is busy or occupied the wait is raised to the claim runner, which asks again on its bounded backoff, so a busy lock never fails the build."
     }
   ],
   "operator_waits": [
@@ -806,7 +815,8 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class AdmissionLockBusy is a busy/pending/superseded handoff.",
       "sites": [
-        ["control/src/vonk_control/admission_locking.py", "AdmissionLockBusy", "_raise_if_busy", "admission-lock-is-busy", 1]
+        ["control/src/vonk_control/admission_locking.py", "AdmissionLockBusy", "_raise_if_busy", "admission-lock-is-busy", 1],
+        ["control/src/vonk_control/admission_locking.py", "AdmissionLockBusy", "acquire_admission_keys", "admission-lock", 1]
       ]
     },
     {
@@ -3218,14 +3228,6 @@
       ]
     },
     {
-      "family": "admission_locking.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/admission_locking.py", "AdmissionLockBusy", "acquire_admission_keys", "admission-lock", 1]
-      ]
-    },
-    {
       "family": "agent_jobs.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
@@ -3319,28 +3321,9 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_build_dependency", "recipe_image.build_invalid", 1],
         ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_cached_build_receipt", "recipe_image.build_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "recipe_image.build_cancelled", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "recipe_image.build_invalid", 5],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "recipe_image.build_wait", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "report-uncertain", 1],
         ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.authority", "observation-unavailable", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "observation-unavailable", 2],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_capacity_wait", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_input_missing", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_invalid", 2],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_unavailable", 2],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.identity_conflict", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.operation_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "scope-changed", 2],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder.admission_guard", "recipe_image.build_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.recover_build", "recipe_image.build_invalid", 5],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.recover_build", "recipe_image.identity_conflict", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.recover_build", "recipe_image.operation_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "_BuildDependencyFailure", "build_recipe_image_availability.recover_build", "message", 1],
-        ["control/src/vonk_control/availability_production.py", "_BuildPlanningFailure", "build_recipe_image_availability.builder", "message", 2],
-        ["control/src/vonk_control/availability_production.py", "_CapacityWait", "build_recipe_image_availability.builder", "message", 2]
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder.admission_guard", "recipe_image.build_invalid", 1]
       ]
     },
     {
