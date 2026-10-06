@@ -76,8 +76,7 @@ from .catalog_api import CatalogProblem, install_catalog_routes
 from .catalog_service import CatalogService
 from .catalog_sync import (
     ManagedRecipeCatalogSyncService,
-    catalog_sync_failure_reason,
-    catalog_sync_retry_delay,
+    run_automatic_sync,
 )
 from .cluster_mappings import ClusterMappingService
 from .distribution_executor import CompositeDistributionPhaseExecutor
@@ -90,7 +89,11 @@ from .fleet_projection import (
 )
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
-from .gateway_keys import GatewayKeyError, GatewayKeyService, install_gateway_key_routes
+from .gateway_keys import (
+    GatewayKeyService,
+    install_gateway_key_routes,
+    keep_default_key,
+)
 from .installation_reconciliation_api import (
     install_installation_reconciliation_routes,
 )
@@ -1542,68 +1545,21 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()
 
-    async def run_automatic_catalog_sync() -> None:
-        # Let migrations, health checks, and the local relay settle before the
-        # first network-bound refresh. The durable ledger remains authoritative.
-        try:
-            await asyncio.wait_for(automatic_sync_stop.wait(), timeout=10)
-            return
-        except TimeoutError:
-            pass
-        failures = 0
-        while not automatic_sync_stop.is_set():
-            try:
-                await asyncio.to_thread(managed_catalog_sync.automatic)
-                failures = 0
-            except Exception as error:  # noqa: BLE001 - the loop must never die
-                # The previously imported catalog stays active; retry sooner
-                # than the steady-state interval, backing off per failure.
-                failures += 1
-                _LOGGER.warning(
-                    "automatic managed recipe catalog sync failed: %s; "
-                    "retrying in %s seconds",
-                    catalog_sync_failure_reason(error),
-                    catalog_sync_retry_delay(
-                        failures, RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-                    ),
-                )
-            try:
-                await asyncio.wait_for(
-                    automatic_sync_stop.wait(),
-                    timeout=catalog_sync_retry_delay(
-                        failures, RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-                    ),
-                )
-            except TimeoutError:
-                continue
-
     gateway_keys = GatewayKeyService()
-
-    async def ensure_default_gateway_key() -> None:
-        # LiteLLM starts after the API; retry until the default client key
-        # exists and matches its secrets file, then stop.
-        delay = 5.0
-        while not automatic_sync_stop.is_set():
-            try:
-                if await asyncio.to_thread(gateway_keys.ensure_default):
-                    _LOGGER.info("default gateway client key is ready")
-                return
-            except (GatewayKeyError, OSError) as error:
-                _LOGGER.warning(
-                    "default gateway client key not ready: %s; retrying in %s seconds",
-                    error,
-                    delay,
-                )
-            try:
-                await asyncio.wait_for(automatic_sync_stop.wait(), timeout=delay)
-            except TimeoutError:
-                delay = min(delay * 2, 300.0)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         nonlocal automatic_sync_task
-        automatic_sync_task = asyncio.create_task(run_automatic_catalog_sync())
-        default_key_task = asyncio.create_task(ensure_default_gateway_key())
+        automatic_sync_task = asyncio.create_task(
+            run_automatic_sync(
+                managed_catalog_sync,
+                automatic_sync_stop,
+                interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
+            )
+        )
+        default_key_task = asyncio.create_task(
+            keep_default_key(gateway_keys, automatic_sync_stop)
+        )
         try:
             yield
         finally:

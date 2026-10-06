@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -16,7 +17,12 @@ from typing import Protocol
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import CatalogSyncCode, canonical_message
+from vonk_agent_protocol import (
+    CatalogSyncCode,
+    UnknownOutcomeError,
+    WaitReason,
+    canonical_message,
+)
 
 from .bounded_json import require_integer, require_sequence
 from .catalog_service import CatalogService
@@ -57,6 +63,18 @@ class CatalogSyncError(RuntimeError):
         self.code = code
         self.detail = detail[:256]
         super().__init__(self.detail)
+
+
+class CatalogSyncUnsettled(UnknownOutcomeError, CatalogSyncError):
+    """The sync could not settle: another sync owns the catalog, or the library
+    moved on since it was read.  Unknown, asked again.
+
+    ``run_automatic_sync`` retries on its bounded backoff; nothing was applied.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        CatalogSyncError.__init__(self, code, detail)
+        self.typed_reason = WaitReason.OBSERVATION_UNAVAILABLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,7 +193,7 @@ class ManagedRecipeCatalogSyncService:
                     session.flush()
                     active = None
                 if active is not None:
-                    raise CatalogSyncError(
+                    raise CatalogSyncUnsettled(
                         CatalogSyncCode.IN_PROGRESS,
                         f"managed catalog sync {active.id} is already running",
                     )
@@ -184,7 +202,7 @@ class ManagedRecipeCatalogSyncService:
             replay = self._by_request_key(request_key)
             if replay is not None:
                 return _view(replay)
-            raise CatalogSyncError(
+            raise CatalogSyncUnsettled(
                 CatalogSyncCode.IN_PROGRESS, "another managed catalog sync is running"
             ) from error
         try:
@@ -195,17 +213,19 @@ class ManagedRecipeCatalogSyncService:
                     "recipe library repository identity changed",
                 )
             if expected_commit is not None and snapshot.commit != expected_commit:
-                raise CatalogSyncError(
+                raise CatalogSyncUnsettled(
                     CatalogSyncCode.PREVIEW_CHANGED,
                     "recipe library changed since it was reviewed",
                 )
             prepare = getattr(self._reader, "prepare", None)
             if callable(prepare):
                 prepare(snapshot)
-            self._initialize(run.id, snapshot)
-            self._finish(
-                run.id, self._apply(run.id, snapshot, actor=actor, trigger=trigger)
-            )
+            if self._initialize(run.id, snapshot):
+                applied = self._apply(run.id, snapshot, actor=actor, trigger=trigger)
+                # A run that was replaced meanwhile (its lease lapsed) stops
+                # quietly: the run that replaced it owns the catalog now.
+                if applied is not None:
+                    self._finish(run.id, applied)
         except Exception as error:
             # Whatever went wrong, never leave the run "running": it would
             # block every later sync until its lease expired.
@@ -391,7 +411,9 @@ class ManagedRecipeCatalogSyncService:
         *,
         actor: str,
         trigger: str = "automatic",
-    ) -> dict[str, object]:
+    ) -> dict[str, object] | None:
+        """Apply the snapshot; ``None`` when this run was replaced meanwhile."""
+
         result = _empty_result()
         self._catalog.refresh_build_policy()
         # Index documents the reader could not validate were already skipped;
@@ -404,7 +426,8 @@ class ManagedRecipeCatalogSyncService:
                 code=str(problem.get("code", CatalogSyncCode.ITEM_FAILED)),
                 detail=str(problem.get("detail", "catalog document was skipped")),
             )
-            self._progress(run_id, result)
+            if not self._progress(run_id, result):
+                return None
         # Catalog index entries are independent immutable documents. Import each
         # in its own transaction so one malformed model cannot hold up recipes
         # and models that are otherwise ready to apply.
@@ -418,7 +441,8 @@ class ManagedRecipeCatalogSyncService:
                     code=str(getattr(error, "code", CatalogSyncCode.MODEL_FAILED)),
                     detail=str(getattr(error, "detail", str(error))),
                 )
-            self._progress(run_id, result)
+            if not self._progress(run_id, result):
+                return None
         local = self._catalog.recipe_catalog_local_revisions(
             [(item.publisher, item.slug) for item in snapshot.items]
         )
@@ -462,10 +486,18 @@ class ManagedRecipeCatalogSyncService:
                         hydrated.library_commit != snapshot.commit
                         or hydrated.content_sha256 != item.content_sha256
                     ):
-                        raise CatalogSyncError(
+                        # The library moved on while this snapshot was applied:
+                        # the recipe is left as it is, named as a problem, and
+                        # the next sync reads the newer library.
+                        self._record_problem(
+                            result,
+                            item,
                             CatalogSyncCode.REVISION_CHANGED,
                             "recipe changed while the exact library snapshot was applied",
                         )
+                        if not self._progress(run_id, result):
+                            return None
+                        continue
                     if previous is not None and previous.node_count is not None:
                         try:
                             incoming_count = recipe_topology(
@@ -489,7 +521,8 @@ class ManagedRecipeCatalogSyncService:
                                 "a different Spark count needs a new recipe id, "
                                 "so the revision was not imported",
                             )
-                            self._progress(run_id, result)
+                            if not self._progress(run_id, result):
+                                return None
                             continue
                     self._store_source_bundle(hydrated, actor)
                     self._catalog.import_recipe_library(
@@ -525,7 +558,8 @@ class ManagedRecipeCatalogSyncService:
                         str(getattr(error, "code", CatalogSyncCode.ITEM_FAILED)),
                         str(getattr(error, "detail", str(error))),
                     )
-            self._progress(run_id, result)
+            if not self._progress(run_id, result):
+                return None
         # Newest only: a recipe the published library no longer lists stops
         # being offered.  Installed and running revisions are untouched.  A
         # snapshot with skipped documents or no recipes may be incomplete, so
@@ -612,13 +646,13 @@ class ManagedRecipeCatalogSyncService:
             )
         result["problems"] = problems
 
-    def _initialize(self, run_id: str, snapshot: RecipeLibrarySnapshot) -> None:
+    def _initialize(self, run_id: str, snapshot: RecipeLibrarySnapshot) -> bool:
+        """Record the snapshot; ``False`` when this run was replaced meanwhile."""
+
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
-                raise CatalogSyncError(
-                    CatalogSyncCode.STATE_INVALID, "managed catalog sync state changed"
-                )
+                return False
             run.heartbeat_at = self._clock()
             run.observed_commit = snapshot.commit
             run.library_version = snapshot.version
@@ -628,14 +662,15 @@ class ManagedRecipeCatalogSyncService:
                 + len(snapshot.catalog_entities)
                 + len(snapshot.problems)
             )
+        return True
 
-    def _progress(self, run_id: str, result: Mapping[str, object]) -> None:
+    def _progress(self, run_id: str, result: Mapping[str, object]) -> bool:
+        """Record one step; ``False`` when this run was replaced meanwhile."""
+
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
-                raise CatalogSyncError(
-                    CatalogSyncCode.STATE_INVALID, "managed catalog sync state changed"
-                )
+                return False
             parsed = _result(result)
             run.heartbeat_at = self._clock()
             run.processed_count += 1
@@ -644,14 +679,15 @@ class ManagedRecipeCatalogSyncService:
             run.current_count = parsed.unchanged_count
             run.conflict_count = parsed.skipped_count
             run.result = json.loads(canonical_message(parsed))
+        return True
 
     def _finish(self, run_id: str, result: Mapping[str, object]) -> None:
+        """Settle the run as succeeded; a run replaced meanwhile stays as it is."""
+
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
-                raise CatalogSyncError(
-                    CatalogSyncCode.STATE_INVALID, "managed catalog sync state changed"
-                )
+                return
             run.state = "succeeded"
             run.active_slot = None
             run.result = json.loads(canonical_message(_result(result)))
@@ -753,6 +789,58 @@ def catalog_sync_failure_reason(error: Exception) -> str:
         else ""
     )
     return f"{type(error).__name__} ({str(code)[:128]})" + (f": {text}" if text else "")
+
+
+async def run_automatic_sync(
+    service: ManagedRecipeCatalogSyncService,
+    stop: asyncio.Event,
+    *,
+    interval_seconds: int,
+    settle_seconds: float = 10.0,
+) -> None:
+    """Run the automatic library sync until ``stop`` is set; it never dies.
+
+    A sync that cannot finish (the library unreachable, another sync running, a
+    document unreadable) is unknown, not failed for good: the previously imported
+    catalog stays active and the sync is asked again on a delay that doubles from
+    30 seconds up to ``interval_seconds``.
+    """
+
+    # Let migrations, health checks, and the local relay settle before the first
+    # network-bound refresh. The durable ledger remains authoritative.
+    try:
+        await asyncio.wait_for(stop.wait(), timeout=settle_seconds)
+        return
+    except TimeoutError:
+        pass
+    failures = 0
+    while not stop.is_set():
+        try:
+            await asyncio.to_thread(lambda: service.automatic())
+            failures = 0
+        except (CatalogSyncError, RecipeLibraryError, OSError) as error:
+            failures += 1
+            _log_automatic_failure(error, failures, interval_seconds)
+        except Exception as error:  # noqa: BLE001 - the loop must never die
+            failures += 1
+            _log_automatic_failure(error, failures, interval_seconds)
+        try:
+            await asyncio.wait_for(
+                stop.wait(),
+                timeout=catalog_sync_retry_delay(failures, interval_seconds),
+            )
+        except TimeoutError:
+            continue
+
+
+def _log_automatic_failure(
+    error: Exception, failures: int, interval_seconds: int
+) -> None:
+    _LOGGER.warning(
+        "automatic managed recipe catalog sync failed: %s; retrying in %s seconds",
+        catalog_sync_failure_reason(error),
+        catalog_sync_retry_delay(failures, interval_seconds),
+    )
 
 
 # An unreadable record is neither current nor failed: the next sync redoes it.

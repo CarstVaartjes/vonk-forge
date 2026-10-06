@@ -10,6 +10,7 @@ working as profiles change.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -24,6 +25,7 @@ import httpx2
 from fastapi import FastAPI, HTTPException, status
 from fastapi import Path as PathParameter
 from pydantic import ConfigDict, Field
+from vonk_agent_protocol import UnknownOutcomeError
 
 from .auth import MUTATION_ROLES, Actor
 from .operation_api import bounded_error_responses
@@ -51,8 +53,14 @@ _REVOKE_PATH = "/api/key/{name}/revoke"
 _ROLL_PATH = "/api/key/{name}/roll"
 
 
-class GatewayKeyError(RuntimeError):
-    """LiteLLM could not complete a key request; the detail is secret-free."""
+class GatewayKeyError(UnknownOutcomeError, RuntimeError):
+    """LiteLLM could not complete a key request; the detail is secret-free.
+
+    An unknown outcome, never a refusal of the caller: the gateway may simply not
+    be up yet.  ``keep_default_key`` retries the startup path on a doubling
+    delay, and an operator request that meets it is answered 503 to be asked
+    again.
+    """
 
 
 class GatewayKeyConflict(ValueError):
@@ -332,6 +340,40 @@ class GatewayKeyService:
             self.revoke(DEFAULT_KEY_NAME)
         self.create(DEFAULT_KEY_NAME, key=key)
         return True
+
+
+async def keep_default_key(
+    service: GatewayKeyService,
+    stop: asyncio.Event,
+    *,
+    path: Path = DEFAULT_KEY_FILE,
+    first_delay: float = 5.0,
+    maximum_delay: float = 300.0,
+) -> None:
+    """Retry until the default client key exists and matches its secrets file.
+
+    LiteLLM starts after the API, so the first attempts may find no gateway.  An
+    attempt that cannot reach it or settle with it is unknown, not failed: the
+    delay doubles up to ``maximum_delay`` and the key is asked for again until it
+    is ready or ``stop`` is set.
+    """
+
+    delay = first_delay
+    while not stop.is_set():
+        try:
+            if await asyncio.to_thread(lambda: service.ensure_default(path)):
+                _LOGGER.info("default gateway client key is ready")
+            return
+        except (GatewayKeyError, OSError) as error:
+            _LOGGER.warning(
+                "default gateway client key not ready: %s; retrying in %s seconds",
+                error,
+                delay,
+            )
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=delay)
+        except TimeoutError:
+            delay = min(delay * 2, maximum_delay)
 
 
 def _read_key(path: Path) -> str | None:

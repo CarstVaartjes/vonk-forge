@@ -15,6 +15,7 @@
       "control/src/vonk_control/artifact_lifecycle.py",
       "control/src/vonk_control/artifact_reference_scan.py",
       "control/src/vonk_control/fleet_profiles.py",
+      "control/src/vonk_control/gateway_keys.py",
       "control/src/vonk_control/image_store_collection.py",
       "control/src/vonk_control/library_projection.py",
       "control/src/vonk_control/model_cache.py",
@@ -56,7 +57,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 203,
-    "unaudited": 366,
+    "unaudited": 353,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -164,6 +165,22 @@
         "BuildConsumerError"
       ],
       "reason": "Unknown ownership of an issued build keeps the cancellation pending (the predicate answers True); reconcile_cancellations asks again on every pass until the ownership is known, and the build is never released on unknown ownership."
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "keep_default_key",
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "reason": "The default client key is asked for again on a delay that doubles from 5 to 300 seconds until LiteLLM answers and the key matches its secrets file; an unreachable or unsettled gateway is unknown, never a refusal, and the loop ends only when the key is ready or the Controller stops."
+    },
+    {
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "function": "run_automatic_sync",
+      "catches": [
+        "CatalogSyncError"
+      ],
+      "reason": "The automatic library sync is asked again after every failure on a delay that doubles from 30 seconds up to the steady-state interval; a sync that finds another sync running, or cannot finish, leaves the previously imported catalog active and is unknown, never a refusal. The loop only ends when the Controller stops."
     }
   ],
   "operator_waits": [
@@ -904,15 +921,9 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._apply", "catalog.sync_revision_changed", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._finish", "catalog.sync_state_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._initialize", "catalog.sync_state_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._progress", "catalog.sync_state_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_actor_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_commit_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_trigger_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_in_progress", 2],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_repository_changed", 1]
       ]
     },
@@ -1311,19 +1322,6 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CursorError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/fleet_projection.py", "CursorError", "FleetProjection.read_at", "fleet-event-cursor-is-invalid", 1]
-      ]
-    },
-    {
-      "family": "gateway_keys.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
-      "sites": [
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._create_under", "litellm-refused-to-create-the-key-http", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._delete_alias", "litellm-refused-to-revoke-the-key-http", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._raw_keys", "litellm-refused-to-list-keys-http", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._raw_keys", "litellm-returned-a-malformed-key-list", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._request", "litellm-gateway-is-unavailable", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._request", "litellm-master-key-is-unavailable", 1]
       ]
     },
     {
@@ -3559,6 +3557,28 @@
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "message", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "runtime_image.receipt_unavailable", 3]
+      ]
+    },
+    {
+      "family": "gateway_keys.already-retried",
+      "category": "already-retried",
+      "reason": "An unknown outcome raised on a path that a registered retry or observe loop (retry_loops, AST-proven by blocker_retries) catches and re-runs on its bounded backoff; the raise is the handoff to that loop, not a dead end.",
+      "sites": [
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._create_under", "litellm-refused-to-create-the-key-http", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._delete_alias", "litellm-refused-to-revoke-the-key-http", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._raw_keys", "litellm-refused-to-list-keys-http", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._raw_keys", "litellm-returned-a-malformed-key-list", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._request", "litellm-gateway-is-unavailable", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._request", "litellm-master-key-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "catalog_sync.already-retried",
+      "category": "already-retried",
+      "reason": "An unknown outcome raised on a path that a registered retry or observe loop (retry_loops, AST-proven by blocker_retries) catches and re-runs on its bounded backoff; the raise is the handoff to that loop, not a dead end.",
+      "sites": [
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_in_progress", 2],
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1]
       ]
     }
   ]
