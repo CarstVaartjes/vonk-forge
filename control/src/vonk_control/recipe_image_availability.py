@@ -97,7 +97,6 @@ from .categorized_errors import InvalidValue, MissingRecord
 from .categorized_faults import security_reason
 from .content_identity import ImageContent, same_image
 from .failure_classification import is_redownload, is_security_failure
-from .job_documents import AvailabilityJobPayload
 from .lifecycle.core import STOP_BUDGET
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .lifecycle.image_availability import ImageAvailabilityAdapter
@@ -2124,6 +2123,10 @@ class RecipeImageAvailabilityService:
 
     def reconcile_requested_removals(self, *, limit: int = 64) -> int:
         """Reconcile only the exact deletion dependencies bound at acceptance."""
+        # This stored contract also imports the API response types. Resolve it
+        # after the service module has loaded, keeping that import seam acyclic.
+        from .job_documents import AvailabilityJobPayload
+
         with self._sessions() as session:
             requests = []
             observed_request = False
@@ -4565,6 +4568,8 @@ class RecipeImageAvailabilityService:
         claims carry no network handle, so a process restart can safely find
         the same rows through :meth:`resume_operations`.
         """
+
+        from .job_documents import AvailabilityJobPayload
 
         if not 1 <= limit <= self._max_parallel:
             raise InvalidValue(
