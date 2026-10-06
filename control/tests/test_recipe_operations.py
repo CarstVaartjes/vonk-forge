@@ -95,7 +95,7 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
-    RecipeRouteError,
+    RecipeRankStopped,
     RecipeRouteNotReady,
     RecipeRouteService,
 )
@@ -2247,7 +2247,9 @@ def test_worker_death_while_owner_is_healthy_never_publishes_route(
 
     publisher = ConcurrentPublisher()
     _service, routes = bind_route_publications(sessions, service, publisher)
-    with pytest.raises(RecipeRouteError, match="every .*rank"):
+    with pytest.raises(
+        RecipeRankStopped, match="rank reports a stopped or failed workload"
+    ):
         routes.publish_run(start.owner_id)
 
     assert publisher.aliases == []
@@ -3012,7 +3014,7 @@ def test_stop_preview_blocks_nonexact_reservation_authority(tmp_path: Path) -> N
 
 @pytest.mark.parametrize("changed_identity", ("run_id", "plan_digest"))
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_stop_refuses_durable_start_with_changed_target_or_plan(
+def test_stop_uses_run_ownership_when_start_history_has_changed(
     tmp_path: Path, changed_identity: str
 ) -> None:
     withdrawn: list[str] = []
@@ -3061,27 +3063,28 @@ def test_stop_refuses_durable_start_with_changed_target_or_plan(
         ).hexdigest()
 
     plan = service.preview_stop(run.owner_id)
-    with pytest.raises(RecipeOperationConflict, match="exact durable Start authority"):
-        service.stop(
-            run.owner_id,
-            plan_digest=plan.plan_digest,
-            actor="admin",
-            request_id="2" * 35 + "a",
-        )
-
-    assert withdrawn == []
+    stopped = service.stop(
+        run.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="2" * 35 + "a",
+    )
+    assert stopped.owner_id == run.owner_id
+    assert withdrawn == [run.owner_id]
     with sessions() as session:
-        assert (
-            session.scalar(
-                select(Job.id).where(
-                    Job.kind == "recipe.stop",
-                    Job.payload["owner_id"].as_string() == run.owner_id,
-                )
-            )
-            is None
-        )
         stored = _required(session.get(RecipeRun, run.owner_id))
-        assert stored.state == "running"
+        assert stored.state == "stopping"
+        stops = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == stopped.id)
+            )
+        )
+        assert stops
+        assert all(
+            child.payload["run_id"] == run.owner_id
+            and child.payload["plan_digest"] == stored.plan_digest
+            for child in stops
+        )
 
 
 def test_stop_preview_is_stable_exact_and_defers_capacity_release(

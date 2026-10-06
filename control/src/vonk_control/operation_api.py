@@ -92,7 +92,7 @@ from .operation_item_contract import (
 )
 from .operation_progress import aggregate_progress, project_progress
 from .route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
-from .route_runtime import verify_active_route_bundle
+from .route_runtime import recipe_route_run_id, verify_active_route_bundle
 from .state_filters import state_filter
 from .strict_json import (
     StrictModel,
@@ -1390,13 +1390,7 @@ class _DurableOperationProjection:
 
     @staticmethod
     def _route_run_id(raw: RouteEndpointDocument) -> str | None:
-        operation_id = raw.operation_id
-        match = re.fullmatch(
-            r"recipe:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}):rank:(?:0|[1-9][0-9]*)",
-            operation_id,
-        )
-        return None if match is None else match.group(1)
+        return recipe_route_run_id(raw.operation_id)
 
     def profile_endpoint(
         self, number: int, alias: str | None, gateway_api_base: str

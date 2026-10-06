@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 from vonk_agent_protocol import (
     AgentOperation,
@@ -30,11 +27,10 @@ STOP = RecipeStopPayload.model_validate(
         "recipe_revision_id": "00000000-0000-4000-8000-000000000004",
         "mapping_id": "00000000-0000-4000-8000-000000000005",
         "plan_digest": PLAN_DIGEST,
-        "compiled_execution_plan": json.loads(
-            (
-                Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json"
-            ).read_text(encoding="utf-8")
-        ),
+        "rank": 0,
+        "role": "entrypoint",
+        "recipe_content_sha256": RECIPE_DIGEST,
+        "stop_timeout_seconds": 30,
         "cancel_pending_start": False,
     }
 ).model_dump(mode="json")
@@ -114,3 +110,33 @@ def test_recipe_success_results_are_operation_specific(
     assert isinstance(parse_recipe_operation_result(operation, body), result_type)
     with pytest.raises(AgentProtocolError):
         parse_recipe_operation_result(operation, body | {"unexpected": True})
+
+
+def test_exact_stop_does_not_require_a_launchable_plan() -> None:
+    """Broken launch history cannot prevent authorized cleanup of an exact runtime."""
+    request = RecipeOperationRequest.parse(AgentOperation.RECIPE_STOP, STOP)
+    assert isinstance(request.payload, RecipeStopPayload)
+    assert request.compiled_execution_plan is None
+    # A retired launch-shaped Stop must never reopen a parallel authority path.
+    with pytest.raises(AgentProtocolError):
+        RecipeOperationRequest.parse(
+            AgentOperation.RECIPE_STOP, STOP | {"compiled_execution_plan": {}}
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("rank", -1),
+        ("role", "../other"),
+        ("recipe_content_sha256", "not-a-digest"),
+        ("stop_timeout_seconds", 0),
+        ("stop_timeout_seconds", 601),
+        ("run_generation", 0),
+    ],
+)
+def test_exact_stop_rejects_unbounded_or_weak_identity(
+    field: str, value: object
+) -> None:
+    with pytest.raises(AgentProtocolError):
+        RecipeOperationRequest.parse(AgentOperation.RECIPE_STOP, STOP | {field: value})

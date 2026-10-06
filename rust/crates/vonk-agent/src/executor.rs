@@ -707,12 +707,7 @@ impl<R> RecipeExecutor<'_, R> {
                     .because("no exact stop plan could be derived from the claim"),
             )));
         };
-        if stop_plan
-            .compiled_execution_plan
-            .lifecycle
-            .stop_timeout_seconds
-            != stop_timeout_seconds
-        {
+        if stop_plan.stop_timeout_seconds != stop_timeout_seconds {
             return Err(StopStall::unproven(unconfirmed(
                 WaitReason::StopUnconfirmed,
                 "workload stop remains unconfirmed",
@@ -863,7 +858,13 @@ fn exact_stop_plan_from_claim(
     }
     Some(RecipeStopRequest {
         cancel_pending_start,
-        compiled_execution_plan,
+        rank: compiled_execution_plan.runtime.placement.rank,
+        role: compiled_execution_plan.runtime.placement.role.clone(),
+        recipe_content_sha256: compiled_execution_plan
+            .identity
+            .recipe_revision_sha256
+            .clone(),
+        stop_timeout_seconds: compiled_execution_plan.lifecycle.stop_timeout_seconds,
         installation_id,
         mapping_id,
         plan_digest,

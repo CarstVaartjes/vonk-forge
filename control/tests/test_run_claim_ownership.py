@@ -96,14 +96,14 @@ def _old_contract_run_does_not_block_a_new_load(
     sessions, profiles, profile, recovery, run_id = _load_over(
         tmp_path, state=state, plan_readable=False, engine=engine
     )
-    # An unreadable run plan no longer blocks the load (its Stop is planned from the
-    # saved mapping); recovery still settles the stale run and frees its claims.
+    # Missing launch history must not claim a running workload exited. A new
+    # load can stop it from durable identity; confirmed inactive rows release.
     recovery.tick()
 
-    assert _claims(sessions, run_id) == set()
+    assert bool(_claims(sessions, run_id)) is (state != "failed")
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "failed"
+        assert run is not None and run.state == state
     review = profiles.preview(profile.id)
     assert not _codes(review) & _CLAIM_BLOCKERS
     assert review.allowed, _codes(review)

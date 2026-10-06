@@ -325,7 +325,7 @@ def _service_stop_authority(
             reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
         )
     run = session.get(RecipeRun, stop.run_id)
-    authority = _load_run_authority(session, run)
+    authority = _load_run_authority(session, run, require_launch_plan=False)
     run = authority.run
     if (
         stop.target_runtime_id != run.id
@@ -341,7 +341,6 @@ def _service_stop_authority(
             reason=InvalidRequestReason.SUPERSEDED,
         )
     try:
-        stored = parse_stored_run_plan(run.plan)
         exact = durable_run_stop_payloads(
             session,
             run,
@@ -352,7 +351,7 @@ def _service_stop_authority(
         )
     except (RecipeExecutionContractError, RecipeStopAuthorityError) as error:
         raise RuntimePlanEvidenceUnavailable(
-            "durable prior Start authority is unavailable",
+            "durable exact run ownership is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
     recovery_marker = parent.payload.get("recovery")
@@ -377,11 +376,10 @@ def _service_stop_authority(
     if (
         expected is None
         or canonical_message(stop) != canonical_message(expected)
-        or stored.run_generation != run.run_generation
         or operation.kind != "recipe.stop"
     ):
         raise RuntimePlanAuthorityRefused(
-            "service Stop differs from exact prior Start",
+            "service Stop differs from exact accepted run ownership",
             reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
         )
 
@@ -590,7 +588,9 @@ def _placement_key(start: RecipeStartPayload) -> tuple[int, str, int]:
     return placement.rank, placement.role, placement.world_size
 
 
-def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthority:
+def _load_run_authority(
+    session: Session, run: RecipeRun | None, *, require_launch_plan: bool = True
+) -> _RunAuthority:
     if run is None:
         raise RuntimePlanEvidenceUnavailable(
             "recipe run is unavailable",
@@ -621,13 +621,15 @@ def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthorit
         if mapping is not None
         else ()
     )
-    try:
-        stored = parse_stored_run_plan(run.plan)
-    except RecipeExecutionContractError as error:
-        raise RuntimePlanEvidenceUnavailable(
-            "recipe run plan is invalid",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from error
+    stored = None
+    if require_launch_plan:
+        try:
+            stored = parse_stored_run_plan(run.plan)
+        except RecipeExecutionContractError as error:
+            raise RuntimePlanEvidenceUnavailable(
+                "recipe run plan is invalid",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
     if (
         installation is None
         or revision is None
@@ -635,21 +637,34 @@ def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthorit
         or not nodes
         or run.mapping_id != installation.mapping_id
         or run.mapping_generation != installation.mapping_generation
-        or mapping.generation != run.mapping_generation
-        or mapping.recipe_revision_id != installation.recipe_revision_id
+        or (
+            require_launch_plan
+            and (
+                mapping.generation != run.mapping_generation
+                or mapping.recipe_revision_id != installation.recipe_revision_id
+            )
+        )
         or revision.kind != "recipe"
         or revision.schema_version != 2
         or revision.content_digest is None
-        or stored.run_generation != run.run_generation
-        or stored.installation_id != run.installation_id
-        or stored.mapping_id != run.mapping_id
-        or stored.mapping_generation != run.mapping_generation
-        or stored.recipe_revision_id != installation.recipe_revision_id
-        or stored.plan_digest != run.plan_digest
-        or {(node.node_id, node.rank, node.role) for node in nodes}
-        != {(node.node_id, node.rank, node.role) for node in stored.nodes}
-        or {(node.node_id, node.rank, node.role) for node in nodes}
-        != {(node.node_id, node.rank, node.role) for node in mapping_nodes}
+        or (
+            stored is not None
+            and (
+                stored.run_generation != run.run_generation
+                or stored.installation_id != run.installation_id
+                or stored.mapping_id != run.mapping_id
+                or stored.mapping_generation != run.mapping_generation
+                or stored.recipe_revision_id != installation.recipe_revision_id
+                or stored.plan_digest != run.plan_digest
+                or {(node.node_id, node.rank, node.role) for node in nodes}
+                != {(node.node_id, node.rank, node.role) for node in stored.nodes}
+            )
+        )
+        or (
+            require_launch_plan
+            and {(node.node_id, node.rank, node.role) for node in nodes}
+            != {(node.node_id, node.rank, node.role) for node in mapping_nodes}
+        )
     ):
         raise RuntimePlanAuthorityStale(
             "recipe run authority is stale",

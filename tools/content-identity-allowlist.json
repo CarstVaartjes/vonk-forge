@@ -730,27 +730,6 @@
       "reason": "Recipe package index structure (publisher and slug name documents in a release); not image identity."
     },
     {
-      "path": "control/src/vonk_control/recipe_stop_payloads.py",
-      "function": "durable_run_stop_payloads",
-      "kind": "provenance_comparison",
-      "expression": "mapping.recipe_revision_id != installation.recipe_revision_id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_stop_payloads.py",
-      "function": "durable_run_stop_payloads",
-      "kind": "provenance_comparison",
-      "expression": "start.recipe_revision_id != installation.recipe_revision_id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_stop_payloads.py",
-      "function": "durable_run_stop_payloads",
-      "kind": "provenance_comparison",
-      "expression": "stored_run_plan.recipe_revision_id != installation.recipe_revision_id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
       "path": "control/src/vonk_control/revision_images.py",
       "function": "revision_images",
       "kind": "provenance_comparison",

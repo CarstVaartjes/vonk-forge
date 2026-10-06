@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -24,21 +22,12 @@ from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStop
 from .categorized_errors import BookkeepingUnknown
 from .categorized_faults import security_reason
 from .models import (
-    AgentOperation,
     CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    Job,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
 from .recipe_action_plans import StopNodeImpact
-from .recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_run_plan,
-)
-from .recipe_operation_phases import StoredPhases, decode_stored_phases
 from .strict_json import read_stored_model
 
 
@@ -109,7 +98,10 @@ def stop_payload_from_start(
             recipe_revision_id=start.recipe_revision_id,
             mapping_id=start.mapping_id,
             plan_digest=start.plan_digest,
-            compiled_execution_plan=start.compiled_execution_plan,
+            recipe_content_sha256=start.compiled_execution_plan.identity.recipe_revision_sha256,
+            rank=start.compiled_execution_plan.runtime.placement.rank,
+            role=start.compiled_execution_plan.runtime.placement.role,
+            stop_timeout_seconds=start.compiled_execution_plan.lifecycle.stop_timeout_seconds,
             cancel_pending_start=cancel_pending_start,
             run_generation=start.run_generation,
         )
@@ -142,7 +134,10 @@ def stop_payload_from_job_run(
             recipe_revision_id=job.recipe_revision_id,
             mapping_id=job.mapping_id,
             plan_digest=job.plan_digest,
-            compiled_execution_plan=job.compiled_execution_plan,
+            recipe_content_sha256=job.compiled_execution_plan.identity.recipe_revision_sha256,
+            rank=job.compiled_execution_plan.runtime.placement.rank,
+            role=job.compiled_execution_plan.runtime.placement.role,
+            stop_timeout_seconds=job.compiled_execution_plan.lifecycle.stop_timeout_seconds,
             cancel_pending_start=cancel_pending_start,
             run_generation=job.run_generation,
         )
@@ -165,26 +160,26 @@ def durable_run_stop_payloads(
     cancel_pending_start: bool,
     allow_missing_nodes: bool,
 ) -> dict[str, RecipeStopPayload]:
-    """Recover exact Stop plans from the durable Start operation for each node.
+    """Authorize exact Stop from current durable run and rank ownership.
 
-    The operation payload is accepted only when its digest and its parent Job
-    phase entry still agree. Two durable Starts at one generation are safe to
-    reuse only when their canonical Stop projection is identical.
+    Historical Job/AgentOperation rows are evidence of how a run started,
+    not the authority to stop that exact run. The caller binds current consent;
+    the helper checks run, installation, generation and plan labels before any
+    destructive effect.
     """
 
-    if type(run_generation) is not int or run_generation < 1:
+    if type(run_generation) is not int or not 1 <= run_generation <= run.run_generation:
         raise StopPayloadInvalid(
             "recipe Stop generation is invalid",
             reason=InvalidRequestReason.OUT_OF_RANGE,
         )
     requested = {node.node_id: node for node in nodes}
-    if not requested:
+    if not requested or len(requested) != len(nodes):
         raise StopPayloadInvalid(
-            "recipe Stop target set is empty", reason=InvalidRequestReason.INCOMPLETE
+            "recipe Stop target set is empty or duplicated",
+            reason=InvalidRequestReason.INCOMPLETE,
         )
-
     installation = session.get(RecipeInstallation, run.installation_id)
-    mapping = session.get(ClusterMapping, run.mapping_id)
     revision = (
         session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         if installation is not None
@@ -192,259 +187,48 @@ def durable_run_stop_payloads(
     )
     if (
         installation is None
-        or mapping is None
         or revision is None
-        or run.installation_id != installation.id
         or run.mapping_id != installation.mapping_id
         or run.mapping_generation != installation.mapping_generation
-        or mapping.generation != run.mapping_generation
-        or mapping.recipe_revision_id != installation.recipe_revision_id
         or revision.kind != "recipe"
-        or revision.schema_version != 2
         or revision.content_digest is None
     ):
         raise StopPayloadRefused("recipe Stop identity is stale")
-    mapping_nodes = tuple(
-        session.scalars(
-            select(ClusterMappingNode)
-            .where(ClusterMappingNode.mapping_id == mapping.id)
-            .order_by(ClusterMappingNode.rank, ClusterMappingNode.node_id)
-        )
+    durable_nodes = tuple(
+        session.scalars(select(RunNode).where(RunNode.run_id == run.id))
     )
-    if {(item.node_id, item.rank, item.role) for item in mapping_nodes} != {
+    if {(node.node_id, node.rank, node.role) for node in durable_nodes} != {
         (node.node_id, node.rank, node.role) for node in nodes
     }:
-        raise StopPayloadRefused("recipe Stop mapping membership differs")
-    try:
-        stored_run_plan = parse_stored_run_plan(run.plan)
-    except RecipeExecutionContractError as error:
-        raise StopPayloadUnknown(
-            "recipe Stop run plan is invalid", reason=WaitReason.OBSERVATION_UNAVAILABLE
-        ) from error
-    if (
-        stored_run_plan.installation_id != run.installation_id
-        or stored_run_plan.mapping_id != run.mapping_id
-        or stored_run_plan.mapping_generation != run.mapping_generation
-        or stored_run_plan.recipe_revision_id != installation.recipe_revision_id
-        or stored_run_plan.plan_digest != run.plan_digest
-        or {(item.node_id, item.rank, item.role) for item in stored_run_plan.nodes}
-        != {(node.node_id, node.rank, node.role) for node in nodes}
-    ):
-        raise StopPayloadRefused("recipe Stop run plan identity differs")
-
-    jobs = tuple(
-        session.scalars(
-            select(Job)
-            .where(
-                Job.kind == "recipe.start",
-                Job.payload["owner_kind"].as_string() == "run",
-                Job.payload["owner_id"].as_string() == run.id,
-            )
-            .order_by(Job.created_at, Job.id)
-        )
+        raise StopPayloadRefused("recipe Stop run membership differs")
+    # The timeout protects the Stop itself. An unreadable launch plan must not
+    # remove this operation: use the canonical recipe timeout when available,
+    # otherwise the bounded default. Neither choice changes the target.
+    timeout = 60
+    document = revision.document
+    runtime = document.get("runtime") if isinstance(document, Mapping) else None
+    lifecycle = runtime.get("lifecycle") if isinstance(runtime, Mapping) else None
+    value = (
+        lifecycle.get("stop_timeout_seconds")
+        if isinstance(lifecycle, Mapping)
+        else None
     )
-    if not jobs:
-        raise StopPayloadUnknown(
-            "recipe Stop lacks durable Start authority",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+    if type(value) is int and 1 <= value <= 600:
+        timeout = value
+    return {
+        node.node_id: RecipeStopPayload(
+            run_id=run.id,
+            target_runtime_id=run.id,
+            installation_id=run.installation_id,
+            recipe_revision_id=installation.recipe_revision_id,
+            mapping_id=run.mapping_id,
+            plan_digest=run.plan_digest,
+            run_generation=run_generation,
+            recipe_content_sha256=revision.content_digest,
+            rank=node.rank,
+            role=node.role,
+            stop_timeout_seconds=timeout,
+            cancel_pending_start=cancel_pending_start,
         )
-    candidates: dict[str, list[RecipeStopPayload]] = defaultdict(list)
-    expected_authority = revision.content_digest.removeprefix("sha256:")
-    expected_targets = sorted(requested)
-    for parent in jobs:
-        if (
-            parent.kind != "recipe.start"
-            or parent.payload.get("schema_version") != 1
-            or parent.payload.get("owner_kind") != "run"
-            or parent.payload.get("owner_id") != run.id
-            or parent.payload.get("plan_digest") != run.plan_digest
-            or parent.targets != expected_targets
-            or parent.authority_revision != expected_authority
-            or hashlib.sha256(canonical_message(parent.payload)).hexdigest()
-            != parent.payload_digest
-        ):
-            raise StopPayloadRefused("recipe Start parent is inconsistent")
-        decoded = decode_stored_phases(parent.payload)
-        if decoded is None:
-            raise StopPayloadUnknown(
-                "recipe Start phases are invalid",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-        phases: StoredPhases = decoded
-        if not phases:
-            raise StopPayloadUnknown(
-                "recipe Start phases are missing",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-
-        planned: dict[str, tuple[str, Mapping[str, object]]] = {}
-        current_starts: dict[str, RecipeStartPayload] = {}
-        for phase in phases:
-            for operation_id, node_id, raw_payload in phase:
-                if operation_id in planned:
-                    raise StopPayloadRefused("recipe Start phase identities overlap")
-                planned[operation_id] = (node_id, raw_payload)
-                raw_run_id = raw_payload.get("run_id")
-                raw_generation = raw_payload.get("run_generation")
-                if (
-                    raw_run_id == run.id
-                    and type(raw_generation) is int
-                    and raw_generation >= 1
-                    and raw_generation != run_generation
-                ):
-                    # A separately identifiable generation remains historical
-                    # data. Its child is still checked against this exact
-                    # digest-bound phase entry below.
-                    continue
-                try:
-                    start = read_stored_model(
-                        RecipeStartPayload,
-                        canonical_message(raw_payload),
-                        from_json=True,
-                    )
-                except (TypeError, ValueError) as error:
-                    raise StopPayloadUnknown(
-                        "recipe Start payload is invalid",
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    ) from error
-                if start.run_id != run.id:
-                    raise StopPayloadRefused("recipe Start run identity differs")
-                if start.run_generation != run_generation:
-                    continue
-                node = requested.get(node_id)
-                if (
-                    node is None
-                    or start.installation_id != run.installation_id
-                    or start.recipe_revision_id != installation.recipe_revision_id
-                    or start.compiled_execution_plan.identity.recipe_revision_sha256
-                    != revision.content_digest
-                    or start.mapping_id != run.mapping_id
-                    or start.plan_digest != run.plan_digest
-                    or start.compiled_execution_plan.runtime.placement.rank != node.rank
-                    or start.compiled_execution_plan.runtime.placement.role != node.role
-                    or start.compiled_execution_plan.runtime.placement.world_size
-                    != len(requested)
-                ):
-                    raise StopPayloadRefused("recipe Start target identity differs")
-                current_starts[operation_id] = start
-
-        phase_ids = set(planned)
-        children = tuple(
-            session.scalars(
-                select(AgentOperation)
-                .where(AgentOperation.id.in_(phase_ids))
-                .order_by(AgentOperation.id)
-            )
-        )
-        children_by_id = {child.id: child for child in children}
-        children_for_parent = tuple(
-            session.scalars(
-                select(AgentOperation)
-                .where(AgentOperation.parent_job_id == parent.id)
-                .order_by(AgentOperation.id)
-            )
-        )
-        if (
-            len(children_by_id) != len(children)
-            or any(child.id not in phase_ids for child in children_for_parent)
-            or any(
-                (child.parent_job_id != parent.id)
-                for child in children
-                if child.id in phase_ids
-            )
-        ):
-            raise StopPayloadRefused(
-                "recipe Start children differ from retained phases"
-            )
-        for phase_index, phase in enumerate(phases):
-            present = 0
-            for operation_id, node_id, raw_payload in phase:
-                child = children_by_id.get(operation_id)
-                if child is None:
-                    continue
-                present += 1
-                if (
-                    child.parent_job_id != parent.id
-                    or child.kind != "recipe.start"
-                    or child.node_id != node_id
-                    or child.authority_revision != parent.authority_revision
-                    or canonical_message(child.payload)
-                    != canonical_message(raw_payload)
-                    or hashlib.sha256(canonical_message(child.payload)).hexdigest()
-                    != child.payload_digest
-                ):
-                    raise StopPayloadRefused(
-                        "recipe Start child differs from retained phase"
-                    )
-                start = current_starts.get(operation_id)
-                if start is not None:
-                    node = requested[node_id]
-                    candidates[node_id].append(
-                        stop_payload_from_start(
-                            start,
-                            cancel_pending_start=cancel_pending_start,
-                        )
-                    )
-            # Queue insertion creates phase zero atomically; later phases are
-            # materialized together only after their predecessor succeeds.
-            if (phase_index == 0 and present != len(phase)) or (
-                phase_index > 0 and present not in {0, len(phase)}
-            ):
-                raise StopPayloadUnknown(
-                    "recipe Start phase materialization is incomplete",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-        # An undispatched later phase is still a target because its complete
-        # typed payload is inside the whole parent digest. Add it after checking
-        # every materialized child against that exact source.
-        for operation_id, start in current_starts.items():
-            node_id, _payload = planned[operation_id]
-            if operation_id not in children_by_id:
-                node = requested[node_id]
-                candidates[node_id].append(
-                    stop_payload_from_start(
-                        start,
-                        cancel_pending_start=cancel_pending_start,
-                    )
-                )
-
-    selected: dict[str, RecipeStopPayload] = {}
-    for node_id, payloads in candidates.items():
-        canonical = {canonical_message(payload) for payload in payloads}
-        if len(canonical) != 1:
-            raise StopPayloadInvalid(
-                "recipe Start target has ambiguous durable plans",
-                reason=InvalidRequestReason.CONFLICT,
-            )
-        selected[node_id] = payloads[0]
-    missing = set(requested) - set(selected)
-    if missing and not allow_missing_nodes:
-        raise StopPayloadUnknown(
-            "recipe Stop lacks an exact Start target for every node",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        )
-    return selected
-
-
-def _parent_contains_operation(parent: Job, operation: AgentOperation) -> bool:
-    phases = parent.payload.get("phases")
-    if not isinstance(phases, list):
-        return False
-    matches = []
-    for phase in phases:
-        if not isinstance(phase, list):
-            continue
-        for item in phase:
-            if (
-                not isinstance(item, Mapping)
-                or item.get("operation_id") != operation.id
-            ):
-                continue
-            matches.append(item)
-    return (
-        len(matches) == 1
-        and matches[0].get("node_id") == operation.node_id
-        and isinstance(matches[0].get("payload"), Mapping)
-        and canonical_message(matches[0]["payload"])
-        == canonical_message(operation.payload)
-    )
+        for node in nodes
+    }
