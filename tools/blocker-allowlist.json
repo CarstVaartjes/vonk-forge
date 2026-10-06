@@ -57,7 +57,7 @@
   },
   "max_debt": 9,
   "debt_ceiling": {
-    "total": 74,
+    "total": 73,
     "unaudited": 265,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -3171,16 +3171,6 @@
       ]
     },
     {
-      "family": "distributed_recovery.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class DistributedRecoveryInvalid is of the input-validation error type.",
-      "sites": [
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_aware", "distributed-recovery-clock-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-deadline-elapsed", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "recovery_start_plan", "distributed-recovery-phases-are-invalid", 1]
-      ]
-    },
-    {
       "family": "recipe_operations.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: class InstallAdmissionBusy is an unknown outcome with no proven retry loop.",
@@ -3597,7 +3587,10 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class DistributedRecoveryInvalid is of the input-validation error type.",
       "sites": [
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_marker", "distributed-recovery-authority-is-invalid", 1]
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_aware", "distributed-recovery-clock-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_marker", "distributed-recovery-authority-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-deadline-elapsed", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "recovery_start_plan", "distributed-recovery-phases-are-invalid", 1]
       ]
     }
   ]
