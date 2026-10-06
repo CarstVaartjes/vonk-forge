@@ -281,6 +281,14 @@ def test_recipe_operation_observation_is_readable_by_any_authenticated_actor() -
     assert observation["recipe_revision_id"] is None
     assert observation["recipe_content_sha256"] is None
     assert observation["residue"]["reason"] == "row-incomplete"
+    from cluster_profiles.generated_control.models.recipe_image_availability_response import (
+        RecipeImageAvailabilityResponse as GeneratedAvailabilityResponse,
+    )
+
+    generated = GeneratedAvailabilityResponse.from_dict(observation)
+    assert generated.request is None
+    assert generated.recipe_content_sha256 is None
+    assert generated.residue is not None
     for terminal_state in ("succeeded", "failed"):
         service.get_operator_operation.return_value = (
             service.get_operator_operation.return_value.model_copy(
@@ -297,6 +305,9 @@ def test_recipe_operation_observation_is_readable_by_any_authenticated_actor() -
     repaired = TestClient(app).get(f"/api/recipe/operations/{view.id}")
     assert repaired.status_code == 200, repaired.text
     assert repaired.json() == response.json()
+    generated_repaired = GeneratedAvailabilityResponse.from_dict(repaired.json())
+    assert generated_repaired.request is not None
+    assert generated_repaired.residue is None
 
 
 _REQUEST_KEY = "00000000-0000-4000-8000-000000000001"
