@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from types import SimpleNamespace
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -25,6 +24,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
+from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
@@ -171,6 +171,7 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
     )
     with sessions() as session:
         old = session.get(FleetProfileApplication, original.id)
+        assert old is not None
         assert restarted._adopted_application_scope(session, old) == (_node_id(1),)
         assert {
             claim.id
@@ -182,10 +183,10 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
                 )
             )
         } == kept_claim_ids
-        assert all(
-            session.get(ResourceReservation, identity).state == "released"
-            for identity in changed_claim_ids
-        )
+        for identity in changed_claim_ids:
+            changed_claim = session.get(ResourceReservation, identity)
+            assert changed_claim is not None
+            assert changed_claim.state == "released"
         port_claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -198,21 +199,26 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
             (_node_id(1), original.id),
             (_node_id(2), newer.id),
         }
+        newer_ordinal = newer.progress.workload_intent_ordinal
+        assert newer_ordinal is not None
         pending = AgentJobService.assess_superseded_agent_effects_in_session(
-            session, (_node_id(2),), newer.progress.workload_intent_ordinal, clock[0]
+            session, (_node_id(2),), newer_ordinal, clock[0]
         )
         assert [effect.operation_id for effect in pending] == [issued.id]
     # Resume the replacement adapter's persisted queue with the real issued
     # effect in SQL. Only physical child dispatch is intercepted here; cleanup
     # observation, fencing, attempts and late receipts are the production path.
     adapter = RunSwitchFleetProfileAdapter(
-        sessions, SimpleNamespace(_clock=lambda: clock[0])
+        sessions, RunSwitchOperationService(sessions, clock=lambda: clock[0])
     )
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, newer.id)
+        assert row is not None
+        intended = _persisted_profile_progress(row).intended_profile
+        assert intended is not None
         assignment = next(
             value
-            for value in _persisted_profile_progress(row).intended_profile.assignments
+            for value in intended.assignments
             if value.nodes[0].node_id == _node_id(2)
         )
         adapter._write_state(
@@ -240,9 +246,10 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
     adapter.advance(newer.id)
     assert not dispatched
     with sessions() as session:
-        stored = _persisted_profile_progress(
-            session.get(FleetProfileApplication, newer.id)
-        ).switch_adapter
+        row = session.get(FleetProfileApplication, newer.id)
+        assert row is not None
+        stored = _persisted_profile_progress(row).switch_adapter
+        assert stored is not None
         assert stored.pending_operation_ids == [issued.id]
     # A late exact cancellation receipt closes the original attempt. Advancing
     # the normal persisted backoff then releases C without another profile load.

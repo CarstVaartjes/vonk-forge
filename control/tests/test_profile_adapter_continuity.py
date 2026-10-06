@@ -2,7 +2,10 @@
 
 from types import SimpleNamespace
 
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import (
+    FleetProfileInput,
+    FleetProfileSwitchAdapterResult,
+)
 from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     _persisted_profile_progress,
@@ -13,6 +16,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchOperation,
     RunSwitchProgress,
 )
+from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .test_fleet_profile_continuity import _world
 from .test_fleet_profiles import NOW, _node_id, _uuid
@@ -47,8 +51,11 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
     # Begin this fixture with no standing single-lane authority; the two-lane
     # executor below is the original owner of both independent assignments.
     with sessions.begin() as session:
-        session.get(FleetProfileApplication, first.id).state = "succeeded"
-        session.delete(session.get(FleetProfileSelection, 1))
+        initial = session.get(FleetProfileApplication, first.id)
+        selection = session.get(FleetProfileSelection, 1)
+        assert initial is not None and selection is not None
+        initial.state = "succeeded"
+        session.delete(selection)
     both = service.apply(both_profile.id, request_key=_uuid(18100), actor="admin")
     choices = [
         {
@@ -77,14 +84,15 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
     selected = service.apply(changed.id, request_key=_uuid(18101), actor="admin")
     assert selected.id != both.id
     adapter = RunSwitchFleetProfileAdapter(
-        sessions, SimpleNamespace(_clock=lambda: NOW)
+        sessions, RunSwitchOperationService(sessions, clock=lambda: NOW)
     )
     active_id = _uuid(18102)
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, both.id)
-        assignments = tuple(
-            _persisted_profile_progress(row).intended_profile.assignments
-        )
+        assert row is not None
+        intended = _persisted_profile_progress(row).intended_profile
+        assert intended is not None
+        assignments = tuple(intended.assignments)
         by_node = {
             assignment.nodes[0].node_id: assignment for assignment in assignments
         }
@@ -118,19 +126,21 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
     adapter.advance(both.id)
     with sessions() as session:
         row = session.get(FleetProfileApplication, both.id)
-        assert (
-            _persisted_profile_progress(row).switch_adapter.active_operation_id
-            == active_id
-        )
+        assert row is not None
+        stored = _persisted_profile_progress(row).switch_adapter
+        assert stored is not None
+        assert stored.active_operation_id == active_id
     # Resume after a persisted checkpoint and a new adapter instance. The old
     # replaced item remains in history but its original index is never issued.
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, both.id)
+        assert row is not None
         state = adapter._state(row)
+        assert state is not None
         state.update(position=1, active_operation_id=None, active_kind=None)
         adapter._write_state(session, row, state)
     restarted = RunSwitchFleetProfileAdapter(
-        sessions, SimpleNamespace(_clock=lambda: NOW)
+        sessions, RunSwitchOperationService(sessions, clock=lambda: NOW)
     )
     issued = []
 
@@ -143,15 +153,21 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
     assert issued == [(by_node[_node_id(1)].id, (_node_id(1),), 2)]
     with sessions() as session:
         row = session.get(FleetProfileApplication, both.id)
+        assert row is not None
         stored = _persisted_profile_progress(row).switch_adapter
+        assert stored is not None
         assert stored.position == 2
         assert stored.queue[1].id == by_node[_node_id(2)].id
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, both.id)
+        assert row is not None
         state = restarted._state(row)
+        assert state is not None
         state.update(position=3, active_operation_id=None, active_kind=None)
         restarted._write_state(session, row, state)
     completed = restarted.advance(both.id)
+    assert isinstance(completed.result, FleetProfileSwitchAdapterResult)
+    assert completed.status_reason is not None
     assert completed.result.assignment_ids == [by_node[_node_id(1)].id]
     assert "other assignments were replaced" in completed.status_reason
 
@@ -188,8 +204,11 @@ def test_selected_cancel_observes_borrowed_agent_receipt_before_completion(monke
     )
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, second.id)
+        assert row is not None
         assert not service._stop_children(session, row)
         progress = _persisted_profile_progress(row)
+        assert progress.cancellation is not None
+        assert row.status_reason is not None
         assert progress.cancellation.pending_operation_ids == [_uuid(18202)]
         assert "adopted assignment effects" in row.status_reason
         ordinal = progress.cancellation.workload_intent_ordinal
@@ -198,5 +217,6 @@ def test_selected_cancel_observes_borrowed_agent_receipt_before_completion(monke
     pending.clear()
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, second.id)
+        assert row is not None
         assert service._stop_children(session, row)
     assert observations[:2] == [((_node_id(1),), ordinal)] * 2
