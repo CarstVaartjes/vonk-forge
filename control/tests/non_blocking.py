@@ -145,15 +145,15 @@ def assert_no_orphaned_holds(session_or_world: Session | MemoryWorld | object) -
             _assert_session(session)
 
 
-def assert_ended_without_blocking[World](
+def assert_ended_without_blocking[World, Receipt: Operation](
     world: World,
-    operation: Operation,
+    operation: Receipt,
     *,
-    end: Callable[[Operation], Operation],
-    fresh: Callable[[World], Operation],
+    end: Callable[[Receipt], Receipt],
+    fresh: Callable[[World], Receipt],
     assert_released: Callable[[], None] | None = None,
-    assert_reason: Callable[[Operation], None] | None = None,
-) -> tuple[Operation, Operation]:
+    assert_reason: Callable[[Receipt], None] | None = None,
+) -> tuple[Receipt, Receipt]:
     original_key = getattr(operation, "request_key", None) or getattr(
         operation, "request_id", None
     )
