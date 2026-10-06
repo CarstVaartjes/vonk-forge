@@ -106,10 +106,10 @@ def typescript_vocabulary() -> str:
     lines.append("} as const;")
     lines.append("")
     lines.append(
-        "/** The stored spelling of an agent result that waits for an operator. */"
+        "/** Retired wait spelling, adopted only when reading old rows. */"
     )
     lines.append(
-        "export const LEGACY_WAIT_STATE = AgentResultState.WAITING_FOR_OPERATOR;"
+        'export const LEGACY_WAIT_STATE = "waiting-for-operator";'
     )
     return "\n".join(lines) + "\n"
 

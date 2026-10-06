@@ -15,7 +15,7 @@ without running its code:
 * ``raises``: fail-closed raises in the audited modules
   (``tools/blocker-allowlist.json``, ``fail_closed``);
 * ``debt``: operator-wait debt entries plus raises categorised
-  ``bookkeeping-debt`` (``max_debt`` + ``debt_ceiling.total``).
+  ``bookkeeping-debt`` (``max_debt`` + ``debt_ceiling.total`` + ``debt_ceiling.unaudited``).
 
 Usage::
 
@@ -47,7 +47,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WRITERS = "tools/lifecycle-writers-allowlist.json"
 BLOCKERS = "tools/blocker-allowlist.json"
-KEYS = ("writers", "operator_waits", "raises", "debt")
+REPORT_KEYS = ("writers", "operator_waits", "raises", "debt")
+INVENTORIES = {
+    "untyped": "tools/untyped-mapping-allowlist.json",
+    "read_refusals": "tools/read-refusal-allowlist.json",
+    "unbounded_waits": "tools/unbounded-wait-allowlist.json",
+    "remedy_text": "tools/remedy-text-allowlist.json",
+    "ungated_tables": "tools/retention-allowlist.json",
+    "anti_principle_tests": "tools/anti-principle-tests-allowlist.json",
+}
+KEYS = (*REPORT_KEYS, *INVENTORIES)
 
 #: Files whose change must come with a before/after report.
 COVERED_PREFIXES = (
@@ -63,6 +72,7 @@ COVERED_EXACT = (
     "control/tests/blocker_boundaries.py",
     "control/tests/vocabulary_literals.py",
     "scripts/lifecycle-counts",
+    *INVENTORIES.values(),
 )
 
 Reader = Callable[[str], str]
@@ -71,9 +81,14 @@ Reader = Callable[[str], str]
 def count_documents(writers: dict, blockers: dict) -> dict[str, int]:
     """The four counts from the two allowlist documents."""
 
-    wait_groups: dict[tuple[str, str, str], int] = {}
+    wait_groups: dict[tuple[str, str, str, tuple[str, ...]], int] = {}
     for entry in blockers["operator_waits"]:
-        key = (entry["path"], entry["function"], entry["kind"])
+        key = (
+            entry["path"],
+            entry["function"],
+            entry["kind"],
+            tuple(sorted(entry.get("operation_kinds", []))),
+        )
         wait_groups[key] = int(entry["sites"])
     raises = sum(
         int(site[4]) for family in blockers["fail_closed"] for site in family["sites"]
@@ -82,7 +97,9 @@ def count_documents(writers: dict, blockers: dict) -> dict[str, int]:
         "writers": sum(int(entry["count"]) for entry in writers["writers"]),
         "operator_waits": sum(wait_groups.values()),
         "raises": raises,
-        "debt": int(blockers["max_debt"]) + int(blockers["debt_ceiling"]["total"]),
+        "debt": int(blockers["max_debt"])
+        + int(blockers["debt_ceiling"]["total"])
+        + int(blockers["debt_ceiling"].get("unaudited", 0)),
     }
 
 
@@ -96,7 +113,19 @@ def _writers_document(read: Reader) -> dict:
 
 
 def counts_from(read: Reader) -> dict[str, int]:
-    return count_documents(_writers_document(read), json.loads(read(BLOCKERS)))
+    counts = count_documents(_writers_document(read), json.loads(read(BLOCKERS)))
+    for key, path in INVENTORIES.items():
+        try:
+            document = json.loads(read(path))
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            counts[key] = 0
+            continue
+        counts[key] = sum(
+            int(e["count"])
+            for group in ("debt", "permanent", "exceptions")
+            for e in document.get(group, [])
+        )
+    return counts
 
 
 def _git(*args: str) -> str:
@@ -119,7 +148,9 @@ def covered_paths(paths: Iterable[str]) -> list[str]:
     return sorted(path for path in paths if is_covered(path.strip()))
 
 
-_LINE = re.compile(r"^\s*[-*]?\s*(before|after)\s*:\s*(.+?)\s*$", re.I | re.M)
+_LINE = re.compile(
+    r"^\s*[-*]?\s*(before|after)\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE
+)
 _PAIR = re.compile(r"([a-z_]+)\s*=\s*(\d+)")
 
 
@@ -133,7 +164,7 @@ def parse_report(body: str) -> dict[str, dict[str, int]]:
 
 
 def render(counts: dict[str, int]) -> str:
-    return " ".join(f"{key}={counts[key]}" for key in KEYS)
+    return " ".join(f"{key}={counts[key]}" for key in REPORT_KEYS)
 
 
 def report_block(before: dict[str, int], after: dict[str, int]) -> str:
@@ -156,9 +187,9 @@ def check(
                 f"lifecycle files ({', '.join(covered[:3])}"
                 f"{', ...' if len(covered) > 3 else ''}). Add:\n{template}"
             )
-        elif reported[label] != actual:
+        elif reported[label] != {key: actual[key] for key in REPORT_KEYS}:
             messages.append(
-                f"'{label}:' says {render(reported[label])} but the real counts are "
+                f"'{label}:' says {reported[label]} but the real counts are "
                 f"{render(actual)}. Use:\n{template}"
             )
     return messages

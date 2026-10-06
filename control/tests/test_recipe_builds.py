@@ -1551,7 +1551,7 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
             assert remaining is None
         else:
             assert remaining is not None
-            assert original_job.state == "needs-operator"
+            assert original_job.state == "observing"
 
 
 @pytest.mark.parametrize(

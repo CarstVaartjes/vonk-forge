@@ -12,7 +12,7 @@ import hashlib
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal, cast
 
 from sqlalchemy import and_, func, or_, select
@@ -243,6 +243,38 @@ def lock_reference_gates(
             )
         rows.append(locked)
     return tuple(rows)
+
+
+def has_pending_removal(
+    session: Session, identities: Iterable[ArtifactIdentity]
+) -> bool:
+    """Observe a wait dependency without acquiring an effect authority.
+
+    Claim loops already own their operation rows. This read takes no gate lock;
+    effect publication independently revalidates the exact storage gate.
+    """
+    wanted = tuple(identities)
+    if not wanted:
+        return False
+    return (
+        session.scalar(
+            select(ArtifactLifecycleGate.removal_owner_id)
+            .where(
+                or_(
+                    *(
+                        and_(
+                            ArtifactLifecycleGate.artifact_kind == item.kind,
+                            ArtifactLifecycleGate.artifact_sha256 == item.sha256,
+                        )
+                        for item in wanted
+                    )
+                ),
+                ArtifactLifecycleGate.removal_owner_id.is_not(None),
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def require_reference_open(
@@ -492,6 +524,83 @@ def dead_removal_identities(
     )
 
 
+def supersede_removal_nowait(
+    session: Session,
+    identity: ArtifactIdentity,
+    *,
+    owner_kind: RemovalOwnerKind,
+    request_id: str,
+    validate: Callable[
+        [ModelCacheOperation | Job, ModelCacheOperation | Job, str], bool
+    ],
+    cancel: Callable[[ModelCacheOperation | Job, str], None],
+    now: datetime,
+) -> bool:
+    """Reconcile a persisted newer request under this identity's storage lock.
+
+    The caller owns exactly one nonblocking storage lock outside this short SQL
+    transaction. Other deletion gates stay fenced, including any effect already
+    executing on another object; each is released under its own storage lock.
+    """
+    gate = _reference_sql(
+        lambda: session.scalar(
+            select(ArtifactLifecycleGate)
+            .where(
+                ArtifactLifecycleGate.artifact_kind == identity.kind,
+                ArtifactLifecycleGate.artifact_sha256 == identity.sha256,
+            )
+            .execution_options(populate_existing=True)
+            .with_for_update(nowait=True)
+        )
+    )
+    if (
+        gate is None
+        or gate.removal_owner_kind != owner_kind
+        or gate.removal_owner_id is None
+        or not gate.removal_fence
+        or gate.removal_owner_id == request_id
+    ):
+        return False
+    model = ModelCacheOperation if owner_kind == "model-cache-operation" else Job
+    locked: dict[str, ModelCacheOperation | Job] = {}
+    for row_id in sorted((request_id, gate.removal_owner_id)):
+        row = _reference_sql(
+            lambda row_id=row_id: session.scalar(
+                select(model)
+                .where(model.id == row_id)
+                .execution_options(populate_existing=True)
+                .with_for_update(nowait=True)
+            )
+        )
+        if row is None:
+            return False
+        locked[row_id] = row
+    requester, remover = locked[request_id], locked[gate.removal_owner_id]
+    live = (
+        model_cache_states.LIVE
+        if model is ModelCacheOperation
+        else job_states.words(
+            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+        )
+    )
+    if requester.state not in live or remover.state not in live:
+        return False
+    requested_at = requester.created_at
+    removed_at = remover.created_at
+    requested_at = (
+        requested_at if requested_at.tzinfo else requested_at.replace(tzinfo=UTC)
+    )
+    removed_at = removed_at if removed_at.tzinfo else removed_at.replace(tzinfo=UTC)
+    if requested_at < removed_at or not validate(
+        requester, remover, gate.removal_fence
+    ):
+        return False
+    cancel(remover, requester.id)
+    return release_dead_removal_nowait(
+        session, identity, owner_kind=owner_kind, now=now
+    )
+
+
 def release_dead_removal_nowait(
     session: Session,
     identity: ArtifactIdentity,
@@ -595,6 +704,7 @@ __all__ = [
     "check_removal_fence_nowait",
     "clear_removal",
     "dead_removal_identities",
+    "has_pending_removal",
     "lock_reference_gates",
     "reference_gate_is_open_nowait",
     "release_dead_removal_nowait",
@@ -602,4 +712,5 @@ __all__ = [
     "require_reference_open",
     "reserve_removal",
     "reserve_removal_owners",
+    "supersede_removal_nowait",
 ]

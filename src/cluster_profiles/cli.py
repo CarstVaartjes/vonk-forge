@@ -481,8 +481,8 @@ def _plain_language_error(code: object, detail: object) -> str:
             "Review the current plan and load again."
         ),
         "profile.preparation_unavailable": (
-            "A required model file or runtime image is not ready. Prepare the "
-            "named asset, then review the run again."
+            "A required model file or runtime image is not ready. The "
+            "Controller is preparing it and the load continues by itself."
         ),
         "controller.fleet.enrollment_denied": (
             "The Controller did not accept this Spark enrollment. Check that "

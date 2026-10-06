@@ -41,7 +41,7 @@ _WAIT = (
 )
 
 #: What the agent's result calls "I could not confirm the effect" (the wire word).
-WIRE_UNKNOWN = AgentResultState.WAITING_FOR_OPERATOR.value
+WIRE_UNKNOWN = AgentResultState.OBSERVING.value
 
 #: The retired spellings an old attempt row may carry (see ``legacy_observation_cause``).
 LEGACY_UNKNOWN = StateAlias.WAITING_FOR_OPERATOR.value
@@ -124,6 +124,7 @@ def lapse(attempt: Any) -> None:
 def record_wire_state(attempt: Any, wire_state: str) -> None:
     """Keep the executor's reported state on its attempt, in the core vocabulary."""
 
+    wire_state = AgentResultState(wire_state).value
     if wire_state == WIRE_UNKNOWN:
         attempt.state = OBSERVING
         attempt.observation_cause = ObservationCause.REPORTED_UNKNOWN.value

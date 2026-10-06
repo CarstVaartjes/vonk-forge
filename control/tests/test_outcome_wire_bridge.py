@@ -82,7 +82,7 @@ RESULTS = [
     ("succeeded", DONE),
     ("failed", FAILED),
     ("cancelled", CANCELLED),
-    ("waiting-for-operator", UNKNOWN),
+    ("observing", UNKNOWN),
 ]
 
 
