@@ -82,9 +82,29 @@ from .compatibility_preparation import CompatibilityPreparation
 from .compatibility_preparation_kind import CompatibilityPreparationKind
 from .compatibility_preparation_stage import CompatibilityPreparationStage
 from .compatibility_preparation_state import CompatibilityPreparationState
+from .compiled_artifact import CompiledArtifact
 from .compiled_artifact_contract import CompiledArtifactContract
 from .compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0
 from .compiled_artifact_contract_interface import CompiledArtifactContractInterface
+from .compiled_artifact_mount import CompiledArtifactMount
+from .compiled_endpoint import CompiledEndpoint
+from .compiled_environment_entry import CompiledEnvironmentEntry
+from .compiled_execution_plan import CompiledExecutionPlan
+from .compiled_identity import CompiledIdentity
+from .compiled_job import CompiledJob
+from .compiled_job_input import CompiledJobInput
+from .compiled_job_input_slot import CompiledJobInputSlot
+from .compiled_job_interface import CompiledJobInterface
+from .compiled_lifecycle import CompiledLifecycle
+from .compiled_model_identity import CompiledModelIdentity
+from .compiled_placement import CompiledPlacement
+from .compiled_runtime import CompiledRuntime
+from .compiled_runtime_image import CompiledRuntimeImage
+from .compiled_security import CompiledSecurity
+from .compiled_security_mount import CompiledSecurityMount
+from .compiled_security_mount_source import CompiledSecurityMountSource
+from .compiled_security_network_mode import CompiledSecurityNetworkMode
+from .compiled_topology import CompiledTopology
 from .conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
@@ -403,17 +423,23 @@ from .reason_code_vocabulary import ReasonCodeVocabulary
 from .recipe_alternative import RecipeAlternative
 from .recipe_alternative_cache import RecipeAlternativeCache
 from .recipe_alternative_fits_fleet import RecipeAlternativeFitsFleet
+from .recipe_build_adapter import RecipeBuildAdapter
+from .recipe_build_adapter_definition import RecipeBuildAdapterDefinition
 from .recipe_build_additional_context import RecipeBuildAdditionalContext
+from .recipe_build_base_image import RecipeBuildBaseImage
 from .recipe_build_cleanup_evidence import RecipeBuildCleanupEvidence
 from .recipe_build_code import RecipeBuildCode
 from .recipe_build_definition import RecipeBuildDefinition
 from .recipe_build_environment_argument import RecipeBuildEnvironmentArgument
 from .recipe_build_evidence import RecipeBuildEvidence
+from .recipe_build_limits import RecipeBuildLimits
 from .recipe_build_metadata import RecipeBuildMetadata
+from .recipe_build_network import RecipeBuildNetwork
 from .recipe_build_options import RecipeBuildOptions
 from .recipe_build_options_format import RecipeBuildOptionsFormat
 from .recipe_build_options_layer_compression import RecipeBuildOptionsLayerCompression
 from .recipe_build_options_squash import RecipeBuildOptionsSquash
+from .recipe_build_request import RecipeBuildRequest
 from .recipe_cancellation_request import RecipeCancellationRequest
 from .recipe_definition import RecipeDefinition
 from .recipe_detail_response import RecipeDetailResponse
@@ -648,7 +674,18 @@ from .stop_impact import StopImpact
 from .stop_outcome import StopOutcome
 from .stop_plan_code import StopPlanCode
 from .storage_demand_code import StorageDemandCode
+from .stored_admission_reason import StoredAdmissionReason
+from .stored_build_policy_report import StoredBuildPolicyReport
+from .stored_install_node_plan import StoredInstallNodePlan
+from .stored_installation_plan import StoredInstallationPlan
+from .stored_installation_plan_compiled_execution_plans import StoredInstallationPlanCompiledExecutionPlans
+from .stored_policy_finding import StoredPolicyFinding
+from .stored_prebuilt_decision import StoredPrebuiltDecision
 from .stored_run_endpoint import StoredRunEndpoint
+from .stored_run_node_plan import StoredRunNodePlan
+from .stored_run_node_plan_memory_kind import StoredRunNodePlanMemoryKind
+from .stored_run_node_plan_memory_pool import StoredRunNodePlanMemoryPool
+from .stored_run_plan import StoredRunPlan
 from .string_parameter import StringParameter
 from .supersede_code import SupersedeCode
 from .target_asset_state import TargetAssetState
@@ -746,9 +783,29 @@ __all__ = (
     "CompatibilityPreparationKind",
     "CompatibilityPreparationStage",
     "CompatibilityPreparationState",
+    "CompiledArtifact",
     "CompiledArtifactContract",
     "CompiledArtifactContractEngineType0",
     "CompiledArtifactContractInterface",
+    "CompiledArtifactMount",
+    "CompiledEndpoint",
+    "CompiledEnvironmentEntry",
+    "CompiledExecutionPlan",
+    "CompiledIdentity",
+    "CompiledJob",
+    "CompiledJobInput",
+    "CompiledJobInputSlot",
+    "CompiledJobInterface",
+    "CompiledLifecycle",
+    "CompiledModelIdentity",
+    "CompiledPlacement",
+    "CompiledRuntime",
+    "CompiledRuntimeImage",
+    "CompiledSecurity",
+    "CompiledSecurityMount",
+    "CompiledSecurityMountSource",
+    "CompiledSecurityNetworkMode",
+    "CompiledTopology",
     "ConditionalPostStopMemoryCheck",
     "ControllerAssetState",
     "ControllerAssetStateSource",
@@ -1067,17 +1124,23 @@ __all__ = (
     "RecipeAlternative",
     "RecipeAlternativeCache",
     "RecipeAlternativeFitsFleet",
+    "RecipeBuildAdapter",
+    "RecipeBuildAdapterDefinition",
     "RecipeBuildAdditionalContext",
+    "RecipeBuildBaseImage",
     "RecipeBuildCleanupEvidence",
     "RecipeBuildCode",
     "RecipeBuildDefinition",
     "RecipeBuildEnvironmentArgument",
     "RecipeBuildEvidence",
+    "RecipeBuildLimits",
     "RecipeBuildMetadata",
+    "RecipeBuildNetwork",
     "RecipeBuildOptions",
     "RecipeBuildOptionsFormat",
     "RecipeBuildOptionsLayerCompression",
     "RecipeBuildOptionsSquash",
+    "RecipeBuildRequest",
     "RecipeCancellationRequest",
     "RecipeDefinition",
     "RecipeDetailResponse",
@@ -1312,7 +1375,18 @@ __all__ = (
     "StopOutcome",
     "StopPlanCode",
     "StorageDemandCode",
+    "StoredAdmissionReason",
+    "StoredBuildPolicyReport",
+    "StoredInstallationPlan",
+    "StoredInstallationPlanCompiledExecutionPlans",
+    "StoredInstallNodePlan",
+    "StoredPolicyFinding",
+    "StoredPrebuiltDecision",
     "StoredRunEndpoint",
+    "StoredRunNodePlan",
+    "StoredRunNodePlanMemoryKind",
+    "StoredRunNodePlanMemoryPool",
+    "StoredRunPlan",
     "StringParameter",
     "SupersedeCode",
     "TargetAssetState",

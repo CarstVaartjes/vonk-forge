@@ -57,6 +57,7 @@ def _claims(sessions, run_id: str) -> set[tuple[str, str]]:
 
 
 @pytest.mark.parametrize("state", ["failed", "lost", "running"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_old_contract_run_on_both_sparks_does_not_block_a_new_load(
     tmp_path: Path, state: str
 ) -> None:

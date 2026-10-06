@@ -2795,6 +2795,7 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
     assert cache.called["plan_digest"] == "d" * 64
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
     tmp_path: Path,
 ) -> None:

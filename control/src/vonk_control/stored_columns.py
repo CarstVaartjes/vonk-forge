@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from pydantic import Field
-from vonk_agent_protocol import CacheReferenceReason
+from vonk_agent_protocol import CacheReferenceReason, RecipeBuildRequest
 from vonk_agent_protocol.inventory import Capability, NetworkInterface
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
@@ -32,6 +32,7 @@ from .fleet_profile_contract import (
     LabelName,
     LabelValue,
 )
+from .mapping_parameters import MappingParameters
 from .model_cache_contract import (
     CacheManifest,
     ModelCacheDownloadPayload,
@@ -39,7 +40,12 @@ from .model_cache_contract import (
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
 )
-from .recipe_execution_contract import StoredRunEndpoint
+from .recipe_execution_contract import (
+    StoredBuildPolicyReport,
+    StoredInstallationPlan,
+    StoredRunEndpoint,
+    StoredRunPlan,
+)
 from .stored_documents import RouteClaimMarker
 from .stored_json import bind
 
@@ -107,3 +113,9 @@ bind(
     "progress",
     ModelCacheOperationProgress,
 )
+
+bind("recipe_builds", "policy_report", StoredBuildPolicyReport)
+bind("recipe_builds", "plan", RecipeBuildRequest)
+bind("cluster_mappings", "parameters", MappingParameters)
+bind("recipe_installations", "plan", StoredInstallationPlan)
+bind("recipe_runs", "plan", StoredRunPlan)

@@ -56,6 +56,8 @@ from vonk_control.route_runtime import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .stored_documents_support import valid_policy_report
+
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 GATEWAY = "https://control.test.example/v1"
 
@@ -320,7 +322,7 @@ def setup(
             source_bundle_sha256="e" * 64,
             build_input_sha256="f" * 64,
             state="succeeded",
-            policy_report={"passed": True},
+            policy_report=valid_policy_report(),
             plan={},
             image_digest="sha256:" + "9" * 64,
             oci_layout_sha256="8" * 64,
@@ -751,6 +753,7 @@ def test_stale_or_failed_rank_blocks_gang_publication(
     assert applied == []
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_candidate_rank_identity_must_exactly_match_accepted_plan(
     tmp_path: Path,
 ) -> None:

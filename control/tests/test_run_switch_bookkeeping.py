@@ -97,6 +97,7 @@ def test_an_inspector_without_model_cache_binding_does_not_fail_composition(
     service.bind_model_cache(object())  # type: ignore[arg-type]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_stop_preview_rebuilds_a_damaged_run_plan_from_its_installation(
     tmp_path: Path,
 ) -> None:

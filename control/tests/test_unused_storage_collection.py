@@ -685,6 +685,7 @@ def _hard_linked_models(world: Catalog) -> tuple[list[str], list[str]]:
     return first, second
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_shared_model_files_free_only_with_the_last_installation_that_links_them(
     world: Catalog,
 ) -> None:
@@ -767,6 +768,7 @@ def test_a_model_that_only_shares_files_with_one_that_stays_is_not_offered(
     assert _kept(result, "shares its files with one that stays") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_admission_relief_removes_the_installations_of_a_model_together_and_frees_real_bytes(
     world: Catalog,
 ) -> None:
@@ -1444,6 +1446,7 @@ def test_receipt_a_live_operation_names_is_kept_and_a_recent_transfer_only_goes_
     assert named.exists() and not pulled.exists()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_receipt_an_installation_still_uses_is_kept(
     world: Catalog, tmp_path: Path
 ) -> None:
@@ -1658,6 +1661,7 @@ def test_model_a_profile_points_to_is_kept(world: Catalog, cached) -> None:
     assert _set_exists(world, set_digest)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_model_an_installation_or_a_live_operation_uses_is_kept(
     world: Catalog, cached
 ) -> None:

@@ -1988,6 +1988,23 @@ export interface components {
              */
             state: "unknown" | "missing" | "preparing" | "verifying" | "ready" | "failed" | "unsupported";
         };
+        /** CompiledArtifact */
+        CompiledArtifact: {
+            /** File Id */
+            file_id: string;
+            model: components["schemas"]["CompiledModelIdentity"];
+            mount: components["schemas"]["CompiledArtifactMount"];
+            /** Path */
+            path: string;
+            /** Roles */
+            roles: string[];
+            /** Selection Id */
+            selection_id: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
         /**
          * CompiledArtifactContract
          * @description The canonical typed artifact execution contract.
@@ -2014,6 +2031,227 @@ export interface components {
              * @constant
              */
             schema_version: 1;
+        };
+        /**
+         * CompiledArtifactMount
+         * @description A read-only model mount.
+         */
+        CompiledArtifactMount: {
+            /** Target */
+            target: string;
+        };
+        /**
+         * CompiledEndpoint
+         * @description An OpenAI-compatible endpoint.
+         */
+        CompiledEndpoint: {
+            /** Health Path */
+            health_path: string;
+            /** Model Aliases */
+            model_aliases: string[];
+            /** Port */
+            port: number;
+        };
+        /** CompiledEnvironmentEntry */
+        CompiledEnvironmentEntry: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+        };
+        /** CompiledExecutionPlan */
+        CompiledExecutionPlan: {
+            /** Artifacts */
+            artifacts: components["schemas"]["CompiledArtifact"][];
+            endpoint: components["schemas"]["CompiledEndpoint"] | null;
+            identity: components["schemas"]["CompiledIdentity"];
+            job: components["schemas"]["CompiledJob"] | null;
+            lifecycle: components["schemas"]["CompiledLifecycle"];
+            runtime: components["schemas"]["CompiledRuntime"];
+            runtime_image: components["schemas"]["CompiledRuntimeImage"];
+            security: components["schemas"]["CompiledSecurity"];
+            topology: components["schemas"]["CompiledTopology"];
+        };
+        /** CompiledIdentity */
+        CompiledIdentity: {
+            /** Model Artifact Set Sha256 */
+            model_artifact_set_sha256: string;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256: string;
+        };
+        /** CompiledJob */
+        CompiledJob: {
+            input: components["schemas"]["CompiledJobInput"] | null;
+            /**
+             * Interface
+             * @enum {string}
+             */
+            interface: "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job";
+            /** Timeout Seconds */
+            timeout_seconds: number;
+        };
+        /**
+         * CompiledJobInput
+         * @description Typed compiled form of the public ``RecipeJobInput`` declaration;
+         *     inputs are staged read-only under /inputs.
+         */
+        CompiledJobInput: {
+            /** Max Bytes */
+            max_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /** Required */
+            required: boolean;
+            /**
+             * Slots
+             * @default null
+             */
+            slots: components["schemas"]["CompiledJobInputSlot"][] | null;
+        };
+        /**
+         * CompiledJobInputSlot
+         * @description Agent-side parity model for the public ``RecipeInputSlot`` contract.
+         *
+         *     The agent protocol wheel intentionally cannot import the public recipe
+         *     contracts wheel.  Keep this fixed wire structure in lockstep with that
+         *     source contract; engine-specific job parameters remain elsewhere in the
+         *     job request and are deliberately extensible.
+         */
+        CompiledJobInputSlot: {
+            /** Description */
+            description: string;
+            /** Extensions */
+            extensions: string[];
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /** Min Files */
+            min_files: number;
+        };
+        /** CompiledLifecycle */
+        CompiledLifecycle: {
+            /** Stop Timeout Seconds */
+            stop_timeout_seconds: number;
+        };
+        /** CompiledModelIdentity */
+        CompiledModelIdentity: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+        };
+        /** CompiledPlacement */
+        CompiledPlacement: {
+            /**
+             * Endpoint Address
+             * Format: ip
+             */
+            endpoint_address: string | null;
+            /**
+             * Local Address
+             * Format: ip
+             */
+            local_address: string | null;
+            /**
+             * Master Address
+             * Format: ip
+             */
+            master_address: string | null;
+            /** Master Port */
+            master_port: number | null;
+            /** Memory Floor Bytes */
+            memory_floor_bytes: number;
+            /** Port */
+            port: number | null;
+            /** Rank */
+            rank: number;
+            /** Reserved Memory Bytes */
+            reserved_memory_bytes: number;
+            /** Role */
+            role: string;
+            /** World Size */
+            world_size: number;
+        };
+        /** CompiledRuntime */
+        CompiledRuntime: {
+            /** Argv */
+            argv: string[];
+            /** Env */
+            env: components["schemas"]["CompiledEnvironmentEntry"][];
+            /** Executable */
+            executable: string;
+            placement: components["schemas"]["CompiledPlacement"];
+        };
+        /**
+         * CompiledRuntimeImage
+         * @description A runtime image in the Controller's layered store.
+         *
+         *     ``image_digest`` is its manifest digest and ``oci_layout_sha256`` the same
+         *     digest's hex, its address in the store; ``image_bytes`` is the size of its
+         *     layers. Sparks pull it into Docker as
+         *     ``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``.
+         */
+        CompiledRuntimeImage: {
+            /** Build Id */
+            build_id: string;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Image Config Id */
+            local_image_config_id: string;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256: string;
+            /** Runtime Interface Label */
+            runtime_interface_label: string;
+        };
+        /**
+         * CompiledSecurity
+         * @description Per-workload security choices; everything else is a platform constant.
+         */
+        CompiledSecurity: {
+            /** Gpu */
+            gpu: boolean;
+            /** Mounts */
+            mounts: components["schemas"]["CompiledSecurityMount"][];
+            /**
+             * Network Mode
+             * @enum {string}
+             */
+            network_mode: "none" | "bridge" | "host";
+            /** User */
+            user: string;
+        };
+        /**
+         * CompiledSecurityMount
+         * @description Model and input mounts are read-only; the output mount is writable.
+         */
+        CompiledSecurityMount: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "inputs" | "outputs";
+            /** Target */
+            target: string;
+        };
+        /** CompiledTopology */
+        CompiledTopology: {
+            /** Name */
+            name: string;
+            /** Node Count */
+            node_count: number;
         };
         /**
          * ConditionalPostStopMemoryCheck
@@ -5998,12 +6236,57 @@ export interface components {
             /** Version */
             version: string;
         };
+        /**
+         * RecipeBuildAdapter
+         * @description The adaptation stage applied after the recipe image is built.
+         *
+         *     ``adapter_sha256`` is the canonical digest of ``definition``.  The agent
+         *     re-derives it from the received definition and refuses to adapt when they
+         *     disagree, so a Controller/agent drift cannot silently install a different
+         *     adaptation than the one the prepared-image identity recorded.
+         */
+        RecipeBuildAdapter: {
+            /** Adapter Sha256 */
+            adapter_sha256: string;
+            definition: components["schemas"]["RecipeBuildAdapterDefinition"];
+        };
+        /**
+         * RecipeBuildAdapterDefinition
+         * @description One reviewed, digest-identified platform adaptation of a built image.
+         *
+         *     The recipe Dockerfile owns the pinned upstream runtime, compilation, model
+         *     patches and engine arguments.  The platform owns the final Vonk contract
+         *     layered on top of that built image: the ``ai.vonkforge.runtime-interface``
+         *     label, the canonical ``/opt/vonk/bin/<engine>`` launcher and the runtime
+         *     user/ownership.  Hosting that in one reviewed adapter instead of recipe
+         *     boilerplate requires an identity that changes when the adaptation changes,
+         *     so this definition -- not the compatible ``v1`` label -- is what the digest
+         *     covers.  ``containerfile`` is the rendered, ordered adaptation stage and is
+         *     the only content the builder executes.
+         */
+        RecipeBuildAdapterDefinition: {
+            /** Adapter Id */
+            adapter_id: string;
+            /** Containerfile */
+            containerfile: string;
+            /** Engine */
+            engine: string;
+            /** Image User */
+            image_user: string;
+        };
         /** RecipeBuildAdditionalContext */
         RecipeBuildAdditionalContext: {
             /** Name */
             name: string;
             /** Path */
             path: string;
+        };
+        /** RecipeBuildBaseImage */
+        RecipeBuildBaseImage: {
+            /** Manifest Digest */
+            manifest_digest: string;
+            /** Reference */
+            reference: string;
         };
         /**
          * RecipeBuildCleanupEvidence
@@ -6042,12 +6325,39 @@ export interface components {
             /** Oci Layout Sha256 */
             oci_layout_sha256: string;
         };
+        /**
+         * RecipeBuildLimits
+         * @description Resource limits; builds never get a GPU, privileges, host mounts or a
+         *     container socket.
+         */
+        RecipeBuildLimits: {
+            /** Cpu Cores */
+            cpu_cores: number;
+            /** Memory Bytes */
+            memory_bytes: number;
+            /** Output Bytes */
+            output_bytes: number;
+            /** Processes */
+            processes: number;
+            /** Temporary Bytes */
+            temporary_bytes: number;
+            /** Timeout Seconds */
+            timeout_seconds: number;
+        };
         /** RecipeBuildMetadata */
         RecipeBuildMetadata: {
             /** Name */
             name: string;
             /** Value */
             value: string;
+        };
+        /**
+         * RecipeBuildNetwork
+         * @description Public hosts the build may reach; an empty list builds offline.
+         */
+        RecipeBuildNetwork: {
+            /** Hosts */
+            hosts: string[];
         };
         /** RecipeBuildOptions */
         RecipeBuildOptions: {
@@ -6113,6 +6423,36 @@ export interface components {
             unset_environment: string[];
             /** Unset Labels */
             unset_labels: string[];
+        };
+        /**
+         * RecipeBuildRequest
+         * @description Build one recipe image for linux/arm64.
+         */
+        RecipeBuildRequest: {
+            adapter: components["schemas"]["RecipeBuildAdapter"];
+            /** Base Image Storage Bytes */
+            base_image_storage_bytes: number;
+            /** Base Images */
+            base_images: components["schemas"]["RecipeBuildBaseImage"][];
+            /** Build Id */
+            build_id: string;
+            /** Build Input Sha256 */
+            build_input_sha256: string;
+            /** Capabilities */
+            capabilities: string[];
+            /** Dockerfile */
+            dockerfile: string;
+            limits: components["schemas"]["RecipeBuildLimits"];
+            network: components["schemas"]["RecipeBuildNetwork"];
+            options: components["schemas"]["RecipeBuildOptions"];
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Source Bundle Bytes */
+            source_bundle_bytes: number;
+            /** Source Bundle Sha256 */
+            source_bundle_sha256: string;
         };
         /** RecipeCancellationRequest */
         RecipeCancellationRequest: {
@@ -9023,10 +9363,210 @@ export interface components {
          * @enum {string}
          */
         StorageDemandCode: "storage.evicting" | "storage.insufficient_after_eviction" | "storage.eviction_timed_out";
+        /** StoredAdmissionReason */
+        StoredAdmissionReason: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+        };
+        /** StoredBuildPolicyReport */
+        StoredBuildPolicyReport: {
+            /** Artifact Format */
+            artifact_format: string;
+            /**
+             * Builder Binary Digest
+             * @default null
+             */
+            builder_binary_digest: string | null;
+            /** Dockerfile */
+            dockerfile: string;
+            /** Findings */
+            findings: components["schemas"]["StoredPolicyFinding"][];
+            /** Passed */
+            passed: boolean;
+            /** @default null */
+            prebuilt_decision: components["schemas"]["StoredPrebuiltDecision"] | null;
+            /**
+             * Prebuilt Image
+             * @default null
+             */
+            prebuilt_image: string | null;
+            /** Source Bundle Sha256 */
+            source_bundle_sha256: string;
+        };
+        /** StoredInstallNodePlan */
+        StoredInstallNodePlan: {
+            /** Active Reserved Bytes */
+            active_reserved_bytes: number;
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers: components["schemas"]["StoredAdmissionReason"][];
+            /** Disk Floor Bytes */
+            disk_floor_bytes: number;
+            /** Free After Bytes */
+            free_after_bytes: number | null;
+            /** Free Bytes */
+            free_bytes: number | null;
+            /** Inventory Observed At */
+            inventory_observed_at: string | null;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Required Bytes */
+            required_bytes: number;
+            /** Required Download Bytes */
+            required_download_bytes: number;
+            /**
+             * Required Payload Bytes
+             * @default null
+             */
+            required_payload_bytes: number | null;
+            /** Reused Bytes */
+            reused_bytes: number;
+            /** Role */
+            role: string;
+            /** Warnings */
+            warnings: components["schemas"]["StoredAdmissionReason"][];
+        };
+        /** StoredInstallationPlan */
+        StoredInstallationPlan: {
+            /** Allowed */
+            allowed: boolean;
+            /** Compiled Execution Plans */
+            compiled_execution_plans: {
+                [key: string]: components["schemas"]["CompiledExecutionPlan"];
+            };
+            /** Image Digest */
+            image_digest: string;
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Nodes */
+            nodes: components["schemas"]["StoredInstallNodePlan"][];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Build Id */
+            recipe_build_id: string | null;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+        };
+        /** StoredPolicyFinding */
+        StoredPolicyFinding: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Line */
+            line: number | null;
+            /** Path */
+            path: string;
+        };
+        /**
+         * StoredPrebuiltDecision
+         * @description Why the plan did or did not use the catalog's prebuilt image.
+         */
+        StoredPrebuiltDecision: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+        };
         /** StoredRunEndpoint */
         StoredRunEndpoint: {
             /** Url */
             url: string;
+        };
+        /** StoredRunNodePlan */
+        StoredRunNodePlan: {
+            /** Active Reserved Bytes */
+            active_reserved_bytes: number;
+            /** Allowed */
+            allowed: boolean;
+            /** Available Memory Bytes */
+            available_memory_bytes: number | null;
+            /** Blockers */
+            blockers: components["schemas"]["StoredAdmissionReason"][];
+            /** Endpoint Owner */
+            endpoint_owner: boolean;
+            /** Fabric Address */
+            fabric_address: string | null;
+            /** Fabric Bandwidth Mbps */
+            fabric_bandwidth_mbps: number | null;
+            /** Free After Bytes */
+            free_after_bytes: number | null;
+            /** Inventory Observed At */
+            inventory_observed_at: string | null;
+            /** Memory Floor Bytes */
+            memory_floor_bytes: number;
+            /**
+             * Memory Kind
+             * @enum {string}
+             */
+            memory_kind: "unified" | "host" | "accelerator";
+            /**
+             * Memory Pool
+             * @enum {string}
+             */
+            memory_pool: "shared" | "separate";
+            /** Node Id */
+            node_id: string;
+            /** Port */
+            port: number;
+            /** Rank */
+            rank: number;
+            /** Rendezvous Port */
+            rendezvous_port: number | null;
+            /** Required Memory Bytes */
+            required_memory_bytes: number;
+            /** Role */
+            role: string;
+            /** Warnings */
+            warnings: components["schemas"]["StoredAdmissionReason"][];
+        };
+        /** StoredRunPlan */
+        StoredRunPlan: {
+            /** Alias */
+            alias: string;
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Nodes */
+            nodes: components["schemas"]["StoredRunNodePlan"][];
+            /**
+             * Observation Schema Version
+             * @constant
+             */
+            observation_schema_version: 2;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
         };
         /** StringParameter */
         StringParameter: {

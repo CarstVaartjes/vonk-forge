@@ -131,6 +131,7 @@ def test_future_dated_inventory_cannot_discount_a_later_install(
 @pytest.mark.parametrize(
     "uncertainty", ["partial", "malformed", "mismatched", "unknown-owner"]
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_uncertain_install_reservations_keep_their_full_charge(tmp_path, uncertainty):
     sessions, lifecycle, _queue, mapping, build, nodes = setup_services(tmp_path)
     original = lifecycle.preview_install(mapping, build)

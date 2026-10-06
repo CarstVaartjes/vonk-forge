@@ -95,6 +95,7 @@ def _running_recipe(tmp_path: Path, *, nodes: int = 1):
 # ---------------------------------------------------------------- stored plans
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_damaged_run_plan_is_rebuilt_from_the_mapping_not_refused(tmp_path) -> None:
     sessions, service, _queue, _installation, run, node_ids = _running_recipe(tmp_path)
     before = service.preview_stop(run.owner_id)
@@ -119,6 +120,7 @@ def test_a_damaged_run_plan_is_rebuilt_from_the_mapping_not_refused(tmp_path) ->
     assert rebuilt[1] is True
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_run_membership_nobody_can_prove_is_retired_as_unknown(tmp_path) -> None:
     sessions, service, _queue, _installation, run, _nodes = _running_recipe(tmp_path)
     with sessions.begin() as session:
@@ -135,6 +137,7 @@ def test_run_membership_nobody_can_prove_is_retired_as_unknown(tmp_path) -> None
     assert service.run_status(run.owner_id).ranks
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_damaged_run_plan_still_finds_a_one_shot_run_by_its_activation(
     tmp_path,
 ) -> None:
@@ -171,6 +174,7 @@ def test_a_damaged_run_plan_still_finds_a_one_shot_run_by_its_activation(
         assert _run_observes_per_generation(stored) is True
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_damaged_installation_plan_is_skipped_and_prepared_afresh(tmp_path) -> None:
     sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(
         tmp_path, nodes=1
@@ -193,6 +197,7 @@ def test_a_damaged_installation_plan_is_skipped_and_prepared_afresh(tmp_path) ->
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_start_installation_rebuilds_its_damaged_plan_or_asks_to_retry(
     tmp_path,
 ) -> None:
@@ -776,6 +781,7 @@ def test_a_failed_build_with_no_failed_receipt_is_started_again(tmp_path) -> Non
     assert started.state == "running"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_retried_build_recovers_its_damaged_plan_from_the_previous_order(
     tmp_path,
 ) -> None:

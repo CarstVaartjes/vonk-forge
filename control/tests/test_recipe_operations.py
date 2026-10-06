@@ -3844,6 +3844,7 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
 
 
 @pytest.mark.parametrize("corruption", [None, "schema", "path", "permissions"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_uninstall_validates_stored_identity_without_requiring_launch_placement(
     tmp_path: Path,
     corruption: str | None,

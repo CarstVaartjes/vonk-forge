@@ -10,14 +10,9 @@
     "artifact_jobs.output_limits",
     "artifact_jobs.parameters",
     "artifact_jobs.result_evidence",
-    "cluster_mappings.parameters",
     "fleet_stream_events.payload",
     "jobs.payload",
-    "jobs.result",
-    "recipe_builds.plan",
-    "recipe_builds.policy_report",
-    "recipe_installations.plan",
-    "recipe_runs.plan"
+    "jobs.result"
   ],
   "untyped": []
 }

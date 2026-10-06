@@ -2856,6 +2856,7 @@ def test_a_spark_whose_agent_cannot_pull_images_asks_for_an_upgrade(
     assert [reason.node_ids for reason in upgrade] == [[nodes[0]]]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     tmp_path: Path,
 ) -> None:
@@ -5066,6 +5067,7 @@ def _record_successful_reconcile_member(
     return {}
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuilds_its_ranks(
     tmp_path: Path,
 ) -> None:
@@ -5115,6 +5117,7 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuild
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
     tmp_path: Path,
 ) -> None:
@@ -5223,6 +5226,7 @@ def test_reconcile_run_switch_releases_install_claims_after_group_cleanup(
     assert cleanup_result.final_verified is True
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
     tmp_path: Path,
 ) -> None:

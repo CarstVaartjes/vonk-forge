@@ -2904,6 +2904,64 @@
         "title": "CompatibilityPreparation",
         "type": "object"
       },
+      "CompiledArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "file_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "File Id",
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/CompiledModelIdentity"
+          },
+          "mount": {
+            "$ref": "#/components/schemas/CompiledArtifactMount"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Roles",
+            "type": "array"
+          },
+          "selection_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Selection Id",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "maximum": 17592186044416,
+            "minimum": 0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selection_id",
+          "file_id",
+          "path",
+          "sha256",
+          "size_bytes",
+          "roles",
+          "mount",
+          "model"
+        ],
+        "title": "CompiledArtifact",
+        "type": "object"
+      },
       "CompiledArtifactContract": {
         "additionalProperties": false,
         "description": "The canonical typed artifact execution contract.",
@@ -2970,6 +3028,650 @@
           "max_timeout_seconds"
         ],
         "title": "CompiledArtifactContract",
+        "type": "object"
+      },
+      "CompiledArtifactMount": {
+        "additionalProperties": false,
+        "description": "A read-only model mount.",
+        "properties": {
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "CompiledArtifactMount",
+        "type": "object"
+      },
+      "CompiledEndpoint": {
+        "additionalProperties": false,
+        "description": "An OpenAI-compatible endpoint.",
+        "properties": {
+          "health_path": {
+            "maxLength": 256,
+            "title": "Health Path",
+            "type": "string"
+          },
+          "model_aliases": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Model Aliases",
+            "type": "array"
+          },
+          "port": {
+            "maximum": 65535,
+            "minimum": 1024,
+            "title": "Port",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "port",
+          "model_aliases",
+          "health_path"
+        ],
+        "title": "CompiledEndpoint",
+        "type": "object"
+      },
+      "CompiledEnvironmentEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 65536,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "CompiledEnvironmentEntry",
+        "type": "object"
+      },
+      "CompiledExecutionPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/CompiledArtifact"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledEndpoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "identity": {
+            "$ref": "#/components/schemas/CompiledIdentity"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledJob"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/CompiledLifecycle"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/CompiledRuntime"
+          },
+          "runtime_image": {
+            "$ref": "#/components/schemas/CompiledRuntimeImage"
+          },
+          "security": {
+            "$ref": "#/components/schemas/CompiledSecurity"
+          },
+          "topology": {
+            "$ref": "#/components/schemas/CompiledTopology"
+          }
+        },
+        "required": [
+          "identity",
+          "runtime",
+          "artifacts",
+          "runtime_image",
+          "security",
+          "topology",
+          "lifecycle",
+          "endpoint",
+          "job"
+        ],
+        "title": "CompiledExecutionPlan",
+        "type": "object"
+      },
+      "CompiledIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "model_artifact_set_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Artifact Set Sha256",
+            "type": "string"
+          },
+          "recipe_revision_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Revision Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_revision_sha256",
+          "model_artifact_set_sha256"
+        ],
+        "title": "CompiledIdentity",
+        "type": "object"
+      },
+      "CompiledJob": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledJobInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "interface": {
+            "enum": [
+              "image-job",
+              "audio-job",
+              "video-job",
+              "mesh-job",
+              "artifact-job"
+            ],
+            "title": "Interface",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "interface",
+          "input",
+          "timeout_seconds"
+        ],
+        "title": "CompiledJob",
+        "type": "object"
+      },
+      "CompiledJobInput": {
+        "additionalProperties": false,
+        "description": "Typed compiled form of the public ``RecipeJobInput`` declaration;\ninputs are staged read-only under /inputs.",
+        "properties": {
+          "max_bytes": {
+            "maximum": 1073741824,
+            "minimum": 1,
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "media_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Media Types",
+            "type": "array"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "slots": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CompiledJobInputSlot"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Slots"
+          }
+        },
+        "required": [
+          "required",
+          "media_types",
+          "max_bytes"
+        ],
+        "title": "CompiledJobInput",
+        "type": "object"
+      },
+      "CompiledJobInputSlot": {
+        "additionalProperties": false,
+        "description": "Agent-side parity model for the public ``RecipeInputSlot`` contract.\n\nThe agent protocol wheel intentionally cannot import the public recipe\ncontracts wheel.  Keep this fixed wire structure in lockstep with that\nsource contract; engine-specific job parameters remain elsewhere in the\njob request and are deliberately extensible.",
+        "properties": {
+          "description": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "extensions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Extensions",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "max_file_bytes": {
+            "maximum": 536870912,
+            "minimum": 1,
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "max_total_bytes": {
+            "maximum": 1073741824,
+            "minimum": 1,
+            "title": "Max Total Bytes",
+            "type": "integer"
+          },
+          "media_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Media Types",
+            "type": "array"
+          },
+          "min_files": {
+            "maximum": 32,
+            "minimum": 0,
+            "title": "Min Files",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "media_types",
+          "extensions",
+          "min_files",
+          "max_files",
+          "max_file_bytes",
+          "max_total_bytes"
+        ],
+        "title": "CompiledJobInputSlot",
+        "type": "object"
+      },
+      "CompiledLifecycle": {
+        "additionalProperties": false,
+        "properties": {
+          "stop_timeout_seconds": {
+            "maximum": 600,
+            "minimum": 1,
+            "title": "Stop Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stop_timeout_seconds"
+        ],
+        "title": "CompiledLifecycle",
+        "type": "object"
+      },
+      "CompiledModelIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publisher",
+          "slug",
+          "content_sha256"
+        ],
+        "title": "CompiledModelIdentity",
+        "type": "object"
+      },
+      "CompiledPlacement": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "ip",
+            "title": "Endpoint Address"
+          },
+          "local_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "ip",
+            "title": "Local Address"
+          },
+          "master_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "ip",
+            "title": "Master Address"
+          },
+          "master_port": {
+            "anyOf": [
+              {
+                "maximum": 65535,
+                "minimum": 1024,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Master Port"
+          },
+          "memory_floor_bytes": {
+            "maximum": 17592186044416,
+            "minimum": 0,
+            "title": "Memory Floor Bytes",
+            "type": "integer"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "rank": {
+            "minimum": 0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "reserved_memory_bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 17592186044416,
+            "title": "Reserved Memory Bytes",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "world_size": {
+            "minimum": 1,
+            "title": "World Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endpoint_address",
+          "rank",
+          "role",
+          "world_size",
+          "local_address",
+          "master_address",
+          "master_port",
+          "port",
+          "reserved_memory_bytes",
+          "memory_floor_bytes"
+        ],
+        "title": "CompiledPlacement",
+        "type": "object"
+      },
+      "CompiledRuntime": {
+        "additionalProperties": false,
+        "properties": {
+          "argv": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4096,
+            "title": "Argv",
+            "type": "array"
+          },
+          "env": {
+            "items": {
+              "$ref": "#/components/schemas/CompiledEnvironmentEntry"
+            },
+            "maxItems": 128,
+            "title": "Env",
+            "type": "array"
+          },
+          "executable": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Executable",
+            "type": "string"
+          },
+          "placement": {
+            "$ref": "#/components/schemas/CompiledPlacement"
+          }
+        },
+        "required": [
+          "executable",
+          "argv",
+          "env",
+          "placement"
+        ],
+        "title": "CompiledRuntime",
+        "type": "object"
+      },
+      "CompiledRuntimeImage": {
+        "additionalProperties": false,
+        "description": "A runtime image in the Controller's layered store.\n\n``image_digest`` is its manifest digest and ``oci_layout_sha256`` the same\ndigest's hex, its address in the store; ``image_bytes`` is the size of its\nlayers. Sparks pull it into Docker as\n``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``.",
+        "properties": {
+          "build_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Build Id",
+            "type": "string"
+          },
+          "image_bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 17592186044416,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "local_image_config_id": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Local Image Config Id",
+            "type": "string"
+          },
+          "oci_layout_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Oci Layout Sha256",
+            "type": "string"
+          },
+          "runtime_interface_label": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Runtime Interface Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_digest",
+          "oci_layout_sha256",
+          "image_bytes",
+          "build_id",
+          "local_image_config_id",
+          "runtime_interface_label"
+        ],
+        "title": "CompiledRuntimeImage",
+        "type": "object"
+      },
+      "CompiledSecurity": {
+        "additionalProperties": false,
+        "description": "Per-workload security choices; everything else is a platform constant.",
+        "properties": {
+          "gpu": {
+            "title": "Gpu",
+            "type": "boolean"
+          },
+          "mounts": {
+            "items": {
+              "$ref": "#/components/schemas/CompiledSecurityMount"
+            },
+            "title": "Mounts",
+            "type": "array"
+          },
+          "network_mode": {
+            "enum": [
+              "none",
+              "bridge",
+              "host"
+            ],
+            "title": "Network Mode",
+            "type": "string"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gpu",
+          "network_mode",
+          "user",
+          "mounts"
+        ],
+        "title": "CompiledSecurity",
+        "type": "object"
+      },
+      "CompiledSecurityMount": {
+        "additionalProperties": false,
+        "description": "Model and input mounts are read-only; the output mount is writable.",
+        "properties": {
+          "source": {
+            "enum": [
+              "model",
+              "inputs",
+              "outputs"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target"
+        ],
+        "title": "CompiledSecurityMount",
+        "type": "object"
+      },
+      "CompiledTopology": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_count": {
+            "exclusiveMinimum": 0,
+            "title": "Node Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "node_count"
+        ],
+        "title": "CompiledTopology",
         "type": "object"
       },
       "ConditionalPostStopMemoryCheck": {
@@ -15548,6 +16250,61 @@
         "title": "RecipeAlternative",
         "type": "object"
       },
+      "RecipeBuildAdapter": {
+        "additionalProperties": false,
+        "description": "The adaptation stage applied after the recipe image is built.\n\n``adapter_sha256`` is the canonical digest of ``definition``.  The agent\nre-derives it from the received definition and refuses to adapt when they\ndisagree, so a Controller/agent drift cannot silently install a different\nadaptation than the one the prepared-image identity recorded.",
+        "properties": {
+          "adapter_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Adapter Sha256",
+            "type": "string"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/RecipeBuildAdapterDefinition"
+          }
+        },
+        "required": [
+          "adapter_sha256",
+          "definition"
+        ],
+        "title": "RecipeBuildAdapter",
+        "type": "object"
+      },
+      "RecipeBuildAdapterDefinition": {
+        "additionalProperties": false,
+        "description": "One reviewed, digest-identified platform adaptation of a built image.\n\nThe recipe Dockerfile owns the pinned upstream runtime, compilation, model\npatches and engine arguments.  The platform owns the final Vonk contract\nlayered on top of that built image: the ``ai.vonkforge.runtime-interface``\nlabel, the canonical ``/opt/vonk/bin/<engine>`` launcher and the runtime\nuser/ownership.  Hosting that in one reviewed adapter instead of recipe\nboilerplate requires an identity that changes when the adaptation changes,\nso this definition -- not the compatible ``v1`` label -- is what the digest\ncovers.  ``containerfile`` is the rendered, ordered adaptation stage and is\nthe only content the builder executes.",
+        "properties": {
+          "adapter_id": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+            "title": "Adapter Id",
+            "type": "string"
+          },
+          "containerfile": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Containerfile",
+            "type": "string"
+          },
+          "engine": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Engine",
+            "type": "string"
+          },
+          "image_user": {
+            "pattern": "^[1-9][0-9]*(:[1-9][0-9]*)?$",
+            "title": "Image User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "adapter_id",
+          "containerfile",
+          "engine",
+          "image_user"
+        ],
+        "title": "RecipeBuildAdapterDefinition",
+        "type": "object"
+      },
       "RecipeBuildAdditionalContext": {
         "additionalProperties": false,
         "properties": {
@@ -15570,6 +16327,28 @@
           "path"
         ],
         "title": "RecipeBuildAdditionalContext",
+        "type": "object"
+      },
+      "RecipeBuildBaseImage": {
+        "additionalProperties": false,
+        "properties": {
+          "manifest_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Manifest Digest",
+            "type": "string"
+          },
+          "reference": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "manifest_digest",
+          "reference"
+        ],
+        "title": "RecipeBuildBaseImage",
         "type": "object"
       },
       "RecipeBuildCleanupEvidence": {
@@ -15717,6 +16496,58 @@
         "title": "RecipeBuildEvidence",
         "type": "object"
       },
+      "RecipeBuildLimits": {
+        "additionalProperties": false,
+        "description": "Resource limits; builds never get a GPU, privileges, host mounts or a\ncontainer socket.",
+        "properties": {
+          "cpu_cores": {
+            "maximum": 256,
+            "minimum": 1,
+            "title": "Cpu Cores",
+            "type": "integer"
+          },
+          "memory_bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 17592186044416,
+            "title": "Memory Bytes",
+            "type": "integer"
+          },
+          "output_bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 17592186044416,
+            "title": "Output Bytes",
+            "type": "integer"
+          },
+          "processes": {
+            "maximum": 65535,
+            "minimum": 1,
+            "title": "Processes",
+            "type": "integer"
+          },
+          "temporary_bytes": {
+            "exclusiveMinimum": 0,
+            "maximum": 17592186044416,
+            "title": "Temporary Bytes",
+            "type": "integer"
+          },
+          "timeout_seconds": {
+            "maximum": 86400,
+            "minimum": 1,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu_cores",
+          "memory_bytes",
+          "output_bytes",
+          "processes",
+          "temporary_bytes",
+          "timeout_seconds"
+        ],
+        "title": "RecipeBuildLimits",
+        "type": "object"
+      },
       "RecipeBuildMetadata": {
         "additionalProperties": false,
         "properties": {
@@ -15739,6 +16570,25 @@
           "value"
         ],
         "title": "RecipeBuildMetadata",
+        "type": "object"
+      },
+      "RecipeBuildNetwork": {
+        "additionalProperties": false,
+        "description": "Public hosts the build may reach; an empty list builds offline.",
+        "properties": {
+          "hosts": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Hosts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hosts"
+        ],
+        "title": "RecipeBuildNetwork",
         "type": "object"
       },
       "RecipeBuildOptions": {
@@ -15943,6 +16793,101 @@
           "unset_labels"
         ],
         "title": "RecipeBuildOptions",
+        "type": "object"
+      },
+      "RecipeBuildRequest": {
+        "additionalProperties": false,
+        "description": "Build one recipe image for linux/arm64.",
+        "properties": {
+          "adapter": {
+            "$ref": "#/components/schemas/RecipeBuildAdapter"
+          },
+          "base_image_storage_bytes": {
+            "maximum": 17592186044416,
+            "minimum": 0,
+            "title": "Base Image Storage Bytes",
+            "type": "integer"
+          },
+          "base_images": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeBuildBaseImage"
+            },
+            "maxItems": 8,
+            "title": "Base Images",
+            "type": "array"
+          },
+          "build_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Build Id",
+            "type": "string"
+          },
+          "build_input_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Build Input Sha256",
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 11,
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "dockerfile": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Dockerfile",
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/RecipeBuildLimits"
+          },
+          "network": {
+            "$ref": "#/components/schemas/RecipeBuildNetwork"
+          },
+          "options": {
+            "$ref": "#/components/schemas/RecipeBuildOptions"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "source_bundle_bytes": {
+            "maximum": 67108864,
+            "minimum": 1,
+            "title": "Source Bundle Bytes",
+            "type": "integer"
+          },
+          "source_bundle_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Bundle Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "adapter",
+          "base_image_storage_bytes",
+          "base_images",
+          "capabilities",
+          "build_id",
+          "build_input_sha256",
+          "dockerfile",
+          "limits",
+          "network",
+          "options",
+          "recipe_content_sha256",
+          "recipe_revision_id",
+          "source_bundle_bytes",
+          "source_bundle_sha256"
+        ],
+        "title": "RecipeBuildRequest",
         "type": "object"
       },
       "RecipeCancellationRequest": {
@@ -25496,6 +26441,385 @@
         "title": "StorageDemandCode",
         "type": "string"
       },
+      "StoredAdmissionReason": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "StoredAdmissionReason",
+        "type": "object"
+      },
+      "StoredBuildPolicyReport": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_format": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Artifact Format",
+            "type": "string"
+          },
+          "builder_binary_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Builder Binary Digest"
+          },
+          "dockerfile": {
+            "title": "Dockerfile",
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/StoredPolicyFinding"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "prebuilt_decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoredPrebuiltDecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "prebuilt_image": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prebuilt Image"
+          },
+          "source_bundle_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Bundle Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "passed",
+          "source_bundle_sha256",
+          "dockerfile",
+          "findings",
+          "artifact_format"
+        ],
+        "title": "StoredBuildPolicyReport",
+        "type": "object"
+      },
+      "StoredInstallNodePlan": {
+        "additionalProperties": false,
+        "properties": {
+          "active_reserved_bytes": {
+            "minimum": 0,
+            "title": "Active Reserved Bytes",
+            "type": "integer"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAdmissionReason"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "disk_floor_bytes": {
+            "minimum": 0,
+            "title": "Disk Floor Bytes",
+            "type": "integer"
+          },
+          "free_after_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free After Bytes"
+          },
+          "free_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Bytes"
+          },
+          "inventory_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inventory Observed At"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "required_bytes": {
+            "minimum": 0,
+            "title": "Required Bytes",
+            "type": "integer"
+          },
+          "required_download_bytes": {
+            "minimum": 0,
+            "title": "Required Download Bytes",
+            "type": "integer"
+          },
+          "required_payload_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Required Payload Bytes"
+          },
+          "reused_bytes": {
+            "minimum": 0,
+            "title": "Reused Bytes",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAdmissionReason"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "allowed",
+          "inventory_observed_at",
+          "free_bytes",
+          "active_reserved_bytes",
+          "reused_bytes",
+          "required_download_bytes",
+          "required_bytes",
+          "disk_floor_bytes",
+          "free_after_bytes",
+          "blockers",
+          "warnings"
+        ],
+        "title": "StoredInstallNodePlan",
+        "type": "object"
+      },
+      "StoredInstallationPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "compiled_execution_plans": {
+            "patternProperties": {
+              "^spk_[0-9a-f]{32}$": {
+                "$ref": "#/components/schemas/CompiledExecutionPlan"
+              }
+            },
+            "title": "Compiled Execution Plans",
+            "type": "object"
+          },
+          "image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "minimum": 1,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/StoredInstallNodePlan"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_build_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Build Id"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "mapping_id",
+          "mapping_generation",
+          "recipe_build_id",
+          "image_digest",
+          "recipe_revision_id",
+          "recipe_content_sha256",
+          "allowed",
+          "nodes",
+          "plan_digest",
+          "compiled_execution_plans"
+        ],
+        "title": "StoredInstallationPlan",
+        "type": "object"
+      },
+      "StoredPolicyFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "path",
+          "line",
+          "detail"
+        ],
+        "title": "StoredPolicyFinding",
+        "type": "object"
+      },
+      "StoredPrebuiltDecision": {
+        "additionalProperties": false,
+        "description": "Why the plan did or did not use the catalog's prebuilt image.",
+        "properties": {
+          "code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "StoredPrebuiltDecision",
+        "type": "object"
+      },
       "StoredRunEndpoint": {
         "additionalProperties": false,
         "properties": {
@@ -25510,6 +26834,261 @@
           "url"
         ],
         "title": "StoredRunEndpoint",
+        "type": "object"
+      },
+      "StoredRunNodePlan": {
+        "additionalProperties": false,
+        "properties": {
+          "active_reserved_bytes": {
+            "minimum": 0,
+            "title": "Active Reserved Bytes",
+            "type": "integer"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "available_memory_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Memory Bytes"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAdmissionReason"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "endpoint_owner": {
+            "title": "Endpoint Owner",
+            "type": "boolean"
+          },
+          "fabric_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fabric Address"
+          },
+          "fabric_bandwidth_mbps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fabric Bandwidth Mbps"
+          },
+          "free_after_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free After Bytes"
+          },
+          "inventory_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inventory Observed At"
+          },
+          "memory_floor_bytes": {
+            "minimum": 0,
+            "title": "Memory Floor Bytes",
+            "type": "integer"
+          },
+          "memory_kind": {
+            "enum": [
+              "unified",
+              "host",
+              "accelerator"
+            ],
+            "title": "Memory Kind",
+            "type": "string"
+          },
+          "memory_pool": {
+            "enum": [
+              "shared",
+              "separate"
+            ],
+            "title": "Memory Pool",
+            "type": "string"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "port": {
+            "maximum": 65535,
+            "minimum": 1,
+            "title": "Port",
+            "type": "integer"
+          },
+          "rank": {
+            "minimum": 0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "rendezvous_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rendezvous Port"
+          },
+          "required_memory_bytes": {
+            "minimum": 0,
+            "title": "Required Memory Bytes",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAdmissionReason"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "endpoint_owner",
+          "port",
+          "allowed",
+          "inventory_observed_at",
+          "memory_kind",
+          "memory_pool",
+          "required_memory_bytes",
+          "available_memory_bytes",
+          "active_reserved_bytes",
+          "free_after_bytes",
+          "memory_floor_bytes",
+          "fabric_address",
+          "fabric_bandwidth_mbps",
+          "rendezvous_port",
+          "blockers",
+          "warnings"
+        ],
+        "title": "StoredRunNodePlan",
+        "type": "object"
+      },
+      "StoredRunPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+            "title": "Alias",
+            "type": "string"
+          },
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "minimum": 1,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/StoredRunNodePlan"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "observation_schema_version": {
+            "const": 2,
+            "title": "Observation Schema Version",
+            "type": "integer"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "run_generation": {
+            "minimum": 1,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "observation_schema_version",
+          "run_generation",
+          "installation_id",
+          "alias",
+          "mapping_id",
+          "mapping_generation",
+          "recipe_revision_id",
+          "plan_digest",
+          "nodes"
+        ],
+        "title": "StoredRunPlan",
         "type": "object"
       },
       "StringParameter": {
@@ -32584,8 +34163,20 @@
     "node_inventory_snapshots.network_interfaces": [
       "NetworkInterface"
     ],
+    "recipe_builds.plan": [
+      "RecipeBuildRequest"
+    ],
+    "recipe_builds.policy_report": [
+      "StoredBuildPolicyReport"
+    ],
+    "recipe_installations.plan": [
+      "StoredInstallationPlan"
+    ],
     "recipe_library_sync_runs.result": [
       "ManagedCatalogSyncResult"
+    ],
+    "recipe_runs.plan": [
+      "StoredRunPlan"
     ],
     "recipe_source_bundles.manifest": [
       "SourceBundleManifest"

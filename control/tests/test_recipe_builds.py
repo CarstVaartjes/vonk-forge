@@ -1301,6 +1301,7 @@ def test_planner_repairs_a_build_envelope_an_older_removal_fence_damaged(
         assert parse_stored_build_plan(repaired_document).build_id == planned.build_id
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_planner_fails_closed_for_an_in_flight_build_with_a_damaged_envelope(
     tmp_path: Path,
 ) -> None:

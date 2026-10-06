@@ -1002,6 +1002,7 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
     assert completed.result["progress"]["total_bytes"] < len(payload)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_production_composite_uncached_cache_then_two_target_distribution(
     agent_system,  # noqa: F811
     tmp_path: Path,
