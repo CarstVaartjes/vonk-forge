@@ -514,6 +514,16 @@ class FailureEvidenceService:
                 # advertised under as well as to the stored one.
                 and attempt in {job.current_attempt, max(1, job.current_attempt)}
             ):
+                result = dict(mapping(job.result) or {})
+                if (
+                    not (result.get("reason") or result.get("summary"))
+                    and job.status_reason
+                ):
+                    result["reason"] = job.status_reason
+                if "diagnostics" not in result:
+                    diagnostics = self._child_diagnostics(session, job.id)
+                    if diagnostics is not None:
+                        result["diagnostics"] = diagnostics.model_dump(mode="json")
                 return self._item(
                     job,
                     attempt=attempt,
@@ -521,7 +531,7 @@ class FailureEvidenceService:
                     node_ids=job.targets,
                     source="controller",
                     progress=None,
-                    result=self._job_result(session, job),
+                    result=result,
                 )
             cache = session.get(ModelCacheOperation, operation_id)
             if (
@@ -553,13 +563,13 @@ class FailureEvidenceService:
                 if "diagnostics" not in result:
                     child = self._application_child_diagnostics(session, application)
                     if child is not None:
-                        result["diagnostics"] = child
+                        result["diagnostics"] = child.model_dump(mode="json")
                 item["result"] = result
                 return item
         return None
 
     @staticmethod
-    def _child_diagnostics(session, job_id: str) -> dict[str, object] | None:
+    def _child_diagnostics(session, job_id: str) -> FailureDiagnostics | None:
         """The Spark-side diagnostics of the newest failed child of a Job.
 
         A Controller-owned parent fails because a child operation failed on a
@@ -588,22 +598,18 @@ class FailureEvidenceService:
             .limit(1)
         ).scalar_one_or_none()
         diagnostics = mapping((mapping(result) or {}).get("diagnostics"))
-        return dict(diagnostics) if diagnostics is not None else None
+        if diagnostics is None:
+            return None
+        try:
+            return sanitize_diagnostics(diagnostics)
+        except (TypeError, ValueError):
+            # A damaged latest receipt is unknown, not a failure of this read.
+            return None
 
     @classmethod
-    def _job_result(cls, session, job) -> dict[str, object]:
-        """A failed Job's result with its reason and its child's diagnostics."""
-        result = dict(mapping(job.result) or {})
-        if not (result.get("reason") or result.get("summary")) and job.status_reason:
-            result["reason"] = job.status_reason
-        if "diagnostics" not in result:
-            child = cls._child_diagnostics(session, job.id)
-            if child is not None:
-                result["diagnostics"] = child
-        return result
-
-    @classmethod
-    def _application_child_diagnostics(cls, session, application):
+    def _application_child_diagnostics(
+        cls, session, application
+    ) -> FailureDiagnostics | None:
         """Diagnostics of the newest failed run-switch child of an application."""
         result = session.execute(
             select(AgentOperationAttempt.result)
@@ -627,7 +633,13 @@ class FailureEvidenceService:
             .limit(1)
         ).scalar_one_or_none()
         diagnostics = mapping((mapping(result) or {}).get("diagnostics"))
-        return dict(diagnostics) if diagnostics is not None else None
+        if diagnostics is None:
+            return None
+        try:
+            return sanitize_diagnostics(diagnostics)
+        except (TypeError, ValueError):
+            # A damaged latest receipt is unknown, not a failure of this read.
+            return None
 
     @staticmethod
     def _item(
