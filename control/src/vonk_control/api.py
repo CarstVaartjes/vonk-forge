@@ -43,6 +43,7 @@ from vonk_agent_protocol import (
     CatalogCode,
     ControllerErrorCode,
     SecurityRefusalReason,
+    UnknownOutcomeError,
     canonical_message,
 )
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
@@ -71,6 +72,7 @@ from .auth import (
     TrustedProxyAgentIdentityMiddleware,
 )
 from .bounded_json import BoundedJSONError
+from .bounded_retry import REQUEST_PAUSES
 from .browser_auth import BrowserAuthenticationError, BrowserAuthService
 from .catalog_api import CatalogProblem, install_catalog_routes
 from .catalog_service import CatalogService
@@ -100,6 +102,7 @@ from .installation_reconciliation_api import (
 from .library_assessment import LibraryAssessment
 from .logging import configure_controller_logging, current_request_id
 from .metrics import MetricsRegistry, runnable_job_ages
+from .model_cache import ModelCacheService
 from .model_cache_api import (
     install_model_operator_routes,
     register_model_cache_operation_provider,
@@ -1234,6 +1237,29 @@ def create_app(
     return app
 
 
+async def _close_model_cache(model_cache: ModelCacheService) -> None:
+    """Bound shutdown checkpoint retries; durable transfers resume on restart."""
+    from .logging import log_event, redact_text
+
+    for attempt in range(len(REQUEST_PAUSES) + 1):
+        try:
+            model_cache.close()
+            return
+        except UnknownOutcomeError as error:
+            log_event(
+                _LOGGER,
+                "model_cache.shutdown_checkpoint_deferred",
+                service="control-api",
+                attempt=attempt + 1,
+                detail=redact_text(error),
+                resume="Controller restart"
+                if attempt == len(REQUEST_PAUSES)
+                else "next shutdown attempt",
+            )
+        if attempt < len(REQUEST_PAUSES):
+            await asyncio.sleep(REQUEST_PAUSES[attempt])
+
+
 def production_app(settings: Settings | None = None) -> FastAPI:
     configure_controller_logging()
     from sqlalchemy import func, select
@@ -1251,7 +1277,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from .jobs import JobService
     from .library_projection import LibraryProjection
     from .metrics import MetricsRegistry, OperationalMetricsCollector
-    from .model_cache import ModelCacheService
     from .models import Job
     from .operation_api import durable_operation_services
     from .presence import ManagementAddressPolicy
@@ -1570,7 +1595,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             await default_key_task
             if automatic_sync_task is not None:
                 await automatic_sync_task
-            model_cache.close()
+            await _close_model_cache(model_cache)
             recipe_image_production.close()
             recipe_library.close()
             agent_upgrades.close()
