@@ -108,6 +108,73 @@ fn last_failure_line(stream: &[u8]) -> Option<(usize, usize, usize, Option<usize
     header
 }
 
+/// The text of a log line without the prefix a supervised process adds
+/// (`(APIServer pid=54) `) or the engine's `ERROR 10-06 05:05:21 [file:1] `.
+fn line_content(line: &[u8]) -> String {
+    let text = String::from_utf8_lossy(line);
+    let mut rest: &str = text.trim_end_matches(['\r', '\n']);
+    if rest.starts_with('(')
+        && let Some(index) = rest.find(") ")
+    {
+        rest = &rest[index + 2..];
+    }
+    let level = rest.trim_start();
+    if ["ERROR ", "WARNING ", "INFO "]
+        .iter()
+        .any(|prefix| level.starts_with(prefix))
+        && let Some(index) = level.find("] ")
+    {
+        return level[index + 2..].to_owned();
+    }
+    rest.to_owned()
+}
+
+/// Whether a line continues a traceback block (frame, source line, caret
+/// marker, or the chaining sentence between two blocks) rather than closing it.
+fn continues_traceback(line: &[u8]) -> bool {
+    let content = line_content(line);
+    let trimmed = content.trim_start();
+    trimmed.is_empty()
+        || content.starts_with(char::is_whitespace)
+        || trimmed.starts_with("File \"")
+        || trimmed
+            .chars()
+            .all(|character| matches!(character, '^' | '~' | ' '))
+        || trimmed.starts_with("During handling of the above exception")
+        || trimmed.starts_with("The above exception was the direct cause")
+}
+
+/// The end of the exception line that closes the traceback opened by the line
+/// ending at `opener_end`, or `None` for a block cut off before its exception.
+fn traceback_exception_end(stream: &[u8], opener_end: usize) -> Option<usize> {
+    let mut offset = opener_end;
+    for line in stream[opener_end..].split_inclusive(|byte| *byte == b'\n') {
+        offset += line.len();
+        if contains(line, TRACEBACK) {
+            return None;
+        }
+        if !continues_traceback(line) {
+            // Whatever follows a block that never printed its exception is
+            // ordinary output, not the cause.
+            return names_an_exception(line).then_some(offset);
+        }
+    }
+    None
+}
+
+/// Whether a line opens with an exception class (`OSError: ...`,
+/// `torch.OutOfMemoryError: ...`) or is one bare (`KeyboardInterrupt`).
+fn names_an_exception(line: &[u8]) -> bool {
+    let content = line_content(line);
+    let name = content.split(':').next().unwrap_or_default().trim();
+    let class = name.rsplit('.').next().unwrap_or_default();
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.'))
+        && class.starts_with(|character: char| character.is_ascii_uppercase())
+}
+
 /// The retained byte range of one stream: an offset and a length.
 ///
 /// The window ends where the stream's own account of the failure ends, so it
@@ -136,6 +203,15 @@ fn window(stream: &[u8]) -> (usize, usize) {
     // Give way only when the cause above is itself a failure block.  A summary
     // that names its own cause -- "Engine core initialization failed" -- is more
     // than a pointer, and there is nothing above it to prefer.
+    // A traceback ends with the exception that explains it.  That exception's
+    // type is any class name, so the header list cannot name it; when the last
+    // failure line is the opener itself, the block's own closing line is the
+    // cause and the window ends there instead of on the opener.
+    let header_end = if header_start == block_start {
+        traceback_exception_end(stream, header_end).unwrap_or(header_end)
+    } else {
+        header_end
+    };
     let end = if header_start > block_start
         && cause_above.is_some()
         && SELF_REFERENTIAL
@@ -239,6 +315,34 @@ mod tests {
         let plain = String::from_utf8_lossy(&stream[stream.len() - RETAINED_BYTES..]);
         assert!(!plain.contains("drafter checkpoint is incompatible"));
         assert!(tail.text.contains("drafter checkpoint is incompatible"));
+    }
+
+    #[test]
+    fn a_traceback_ending_in_an_unlisted_exception_keeps_that_exception() {
+        // Wrong implementation: the window ended on the `Traceback` opener
+        // whenever the closing exception's class was not in the header list, so
+        // a crashed vLLM start reported one line and hid why it exited.
+        let mut stream = b"(APIServer pid=54) INFO starting\n".to_vec();
+        stream.extend(b"(APIServer pid=54) Traceback (most recent call last):\n");
+        for index in 0..24 {
+            stream.extend(
+                format!(
+                    "(APIServer pid=54)   File \"/usr/lib/vllm/engine.py\", line {index}, in run\n(APIServer pid=54)     return cls(\n(APIServer pid=54)            ^^^^^^^^\n"
+                )
+                .into_bytes(),
+            );
+        }
+        stream.extend(
+            b"(APIServer pid=54) torch.OutOfMemoryError: CUDA out of memory while loading weights\n",
+        );
+        stream.extend(b"(APIServer pid=54) INFO shutting down\n");
+        let tail = retain(&stream);
+        assert!(
+            tail.text.contains("OutOfMemoryError: CUDA out of memory"),
+            "{}",
+            tail.text
+        );
+        assert!(tail.text.len() <= RETAINED_BYTES);
     }
 
     #[test]
