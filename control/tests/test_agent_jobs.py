@@ -2822,7 +2822,7 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
             assert "abandoned" in parked.status_reason
             assert session.get(AgentOperation, second.id).state == "failed"
 
-    def fresh():
+    def fresh(_world: None) -> Job:
         new_job = parent(sessions, clock)
         operation = jobs.enqueue(
             new_job.id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
@@ -2832,7 +2832,7 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
         assert fenced_operation(sessions, claim.fence).id == operation.id
         return job_state(sessions, new_job.id)
 
-    def typed_reason(_ended) -> None:
+    def typed_reason(_ended: Job) -> None:
         from vonk_agent_protocol import AgentFailureResult, FailureCode
 
         with sessions() as session:
@@ -2845,13 +2845,16 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
             failure = AgentFailureResult.model_validate_json(json.dumps(attempt.result))
             assert failure.error_code == FailureCode.ARTIFACT_DISTRIBUTION_FAILED
 
+    def keep_ended(view: Job) -> Job:
+        return view
+
     ended, _ = assert_ended_without_blocking(
         None,
         job_state(sessions, job.id),
-        end=lambda view: view,
+        end=keep_ended,
         assert_released=released,
         assert_reason=typed_reason,
-        fresh=lambda _: fresh(),
+        fresh=fresh,
     )
     assert ended.state == "failed"
 
