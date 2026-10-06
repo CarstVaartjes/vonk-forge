@@ -132,7 +132,9 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
     runtime = lifecycle.preview_run(installed.owner_id, "memory-boundary")
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
     assert review.status_code == 200, review.text
-    assert review.json()["allowed"] == runtime.allowed == (headroom == 0)
+    # No Vonk claim holds memory here, so a shortfall against the declared
+    # envelope is an unverified fit, never a refusal; both views agree.
+    assert review.json()["allowed"] is runtime.allowed is True
     fit = review.json()["assessments"][0]["assessment"]["fit_current"]["nodes"][0]
     assert fit["memory_free_after_bytes"] == runtime.nodes[0].free_after_bytes
     assert fit["memory_required_bytes"] == runtime.nodes[0].required_memory_bytes
@@ -162,7 +164,8 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
     [
         "memory-reservation",
         "disk-reservation",
-        "memory-inventory",
+        # Not "memory-inventory": memory lost to something outside Vonk's claims
+        # is a shortfall nothing here can wait out, so it is no longer parked.
         "disk-inventory",
         "service-port",
         "rendezvous-port",
@@ -187,9 +190,7 @@ def test_load_parks_capacity_lost_after_its_last_preview(
         with sessions.begin() as session:
             snapshot = session.scalar(select(NodeInventorySnapshot))
             assert snapshot is not None
-            if change == "memory-inventory":
-                snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 0
-            elif change == "disk-inventory":
+            if change == "disk-inventory":
                 snapshot.disk_free_bytes = 0
             elif change.endswith("-port"):
                 revision = session.scalar(
