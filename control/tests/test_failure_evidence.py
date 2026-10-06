@@ -271,7 +271,7 @@ def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail() -> N
         }
     )
     cleaned = sanitize_diagnostics(diagnostics)
-    assert cleaned.stderr.text.endswith("the container exited here")
+    assert cleaned.stderr.text.endswith("the container exited here\n")
     assert len(cleaned.stderr.text.encode()) <= 2048
     assert cleaned.stderr.truncated
     assert (cleaned.stderr.dropped_bytes or 0) > 0
