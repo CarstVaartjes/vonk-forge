@@ -1418,6 +1418,81 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
     )
 
 
+def _anchor_start_budget(
+    session: Session, operation: StoredOperation, now: datetime
+) -> None:
+    """Begin a queued distributed start's budget when it is first dispatched.
+
+    The Controller binds ``start_deadline`` when it queues the start, but an
+    order may legitimately wait before any agent can run it: a mutating
+    operation on the same Spark (a long transfer or install) holds the node, so
+    the start is claimed only afterwards.  Time spent queued is not time spent
+    launching, so the first claim of the job's first order moves every unclaimed
+    deadline of the job to ``now + budget`` (the budget being the span the
+    Controller accepted at queue time).  The deadline is only ever extended, is
+    set once per job, and an exact-recovery start keeps its own recovery
+    deadline.  Later phases are issued from the job's stored phases, so they
+    carry the anchored deadline too.
+    """
+
+    job = session.get(Job, operation.parent_job_id, with_for_update=True)
+    if job is None or not isinstance(job.payload, Mapping):
+        return
+    if "recovery" in job.payload or job.payload.get("start_anchored_at") is not None:
+        return
+    queued_deadline = _operation_start_deadline(operation)
+    if queued_deadline is None:
+        return
+    budget = _aware(queued_deadline) - _aware(operation.created_at)
+    if budget <= timedelta(0):
+        return
+    anchored = (_aware(now) + budget).isoformat()
+    if _aware(now) + budget <= _aware(queued_deadline):
+        # Nothing waited: the queue-time deadline already is the anchored one.
+        return
+
+    def rebound(payload: Mapping[str, object]) -> dict[str, object]:
+        return {**payload, "start_deadline": anchored}
+
+    for sibling in session.scalars(
+        select(StoredOperation)
+        .where(
+            StoredOperation.parent_job_id == job.id,
+            StoredOperation.kind == AgentOperation.RECIPE_START.value,
+            StoredOperation.current_attempt == 0,
+        )
+        .with_for_update(of=StoredOperation)
+    ):
+        if _operation_start_deadline(sibling) is None:
+            continue
+        document = rebound(sibling.payload)
+        sibling.payload = document
+        sibling.payload_digest = hashlib.sha256(
+            canonical_payload(AgentOperation(sibling.kind), document)
+        ).hexdigest()
+    updated = dict(job.payload)
+    if "start_deadline" in updated:
+        updated["start_deadline"] = anchored
+    phases = updated.get("phases")
+    if isinstance(phases, Sequence) and not isinstance(phases, str):
+        updated["phases"] = [
+            [
+                {**item, "payload": rebound(item["payload"])}
+                if isinstance(item, Mapping)
+                and isinstance(item.get("payload"), Mapping)
+                and item["payload"].get("start_deadline") is not None
+                else item
+                for item in group
+            ]
+            if isinstance(group, Sequence) and not isinstance(group, str)
+            else group
+            for group in phases
+        ]
+    updated["start_anchored_at"] = _aware(now).isoformat()
+    job.payload = updated
+    job.payload_digest = hashlib.sha256(canonical_message(updated)).hexdigest()
+
+
 def _claim_condition_facts(
     check: str,
     operation: StoredOperation,
@@ -3217,6 +3292,11 @@ class AgentJobService:
                 )
                 operation.payload = json.loads(payload_bytes)
                 operation.payload_digest = hashlib.sha256(payload_bytes).hexdigest()
+            if (
+                operation.kind == AgentOperation.RECIPE_START.value
+                and operation.current_attempt == 0
+            ):
+                _anchor_start_budget(session, operation, now)
             fence = str(uuid.uuid4())
             deadline = now + timedelta(seconds=CLAIM_LEASE_SECONDS)
             # The claim consumes the schedule the previous attempt carried

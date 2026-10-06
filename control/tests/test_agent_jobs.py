@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_payload
 from vonk_control.agent_jobs import (
     AgentJobService,
     StaleAgentAttempt,
@@ -3763,3 +3764,66 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
         and fenced_operation(sessions, resumed).id == operation.id
         and fenced_attempt(sessions, resumed).attempt == 6
     )
+
+
+def test_a_start_budget_begins_when_the_start_is_first_dispatched(service) -> None:
+    # Wrong implementation: the deadline was fixed when the start was queued, so
+    # a start that waited behind a long mutating operation on its Spark (a model
+    # copy of 4947 s against a 3600 s budget) reached the agent already expired.
+    jobs, sessions, clock = service
+    queued_at = clock.now
+    budget = timedelta(seconds=3600)
+    payload = canonical_start_payload(start_deadline=queued_at + budget)
+    holder = parent(sessions, clock)
+    operation = jobs.enqueue(holder.id, NODE_A, "recipe.start", COMMIT, payload)
+    with sessions.begin() as session:
+        stored_parent = session.get(Job, holder.id)
+        assert stored_parent is not None
+        document = {
+            **stored_parent.payload,
+            "start_deadline": payload["start_deadline"],
+            "phases": [[{"node_id": NODE_A, "payload": payload}]],
+        }
+        stored_parent.payload = document
+        stored_parent.payload_digest = hashlib.sha256(
+            canonical_message(document)
+        ).hexdigest()
+
+    clock.advance(seconds=4947)
+    with sessions.begin() as session:
+        certificate = session.get(AgentCertificate, "serial-a")
+        assert certificate is not None
+        certificate.not_after = clock.now + timedelta(hours=3)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    anchored = (clock.now + budget).isoformat()
+    assert claim.payload["start_deadline"] == anchored
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None
+        assert stored.payload["start_deadline"] == anchored
+        assert (
+            stored.payload_digest
+            == hashlib.sha256(
+                canonical_payload(ProtocolAgentOperation.RECIPE_START, stored.payload)
+            ).hexdigest()
+        )
+        stored_parent = session.get(Job, holder.id)
+        assert stored_parent is not None
+        assert stored_parent.payload["start_deadline"] == anchored
+        assert stored_parent.payload["phases"][0][0]["payload"]["start_deadline"] == (
+            anchored
+        )
+        assert (
+            stored_parent.payload_digest
+            == hashlib.sha256(canonical_message(stored_parent.payload)).hexdigest()
+        )
+
+
+def test_a_prompt_start_keeps_its_queued_deadline(service) -> None:
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(seconds=90))
+    jobs.enqueue(parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    assert claim.payload["start_deadline"] == payload["start_deadline"]
