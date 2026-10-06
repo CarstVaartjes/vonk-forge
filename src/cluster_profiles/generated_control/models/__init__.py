@@ -1,5 +1,7 @@
 """ Contains all the data models used in inputs/outputs """
 
+from .activation_marker import ActivationMarker
+from .activation_marker_state import ActivationMarkerState
 from .admission_code import AdmissionCode
 from .agent_failure_kind import AgentFailureKind
 from .agent_failure_result import AgentFailureResult
@@ -490,6 +492,7 @@ from .resource_planning_code import ResourcePlanningCode
 from .resource_term import ResourceTerm
 from .resource_term_problem import ResourceTermProblem
 from .rollout_preparation import RolloutPreparation
+from .route_claim_marker import RouteClaimMarker
 from .route_publication_state import RoutePublicationState
 from .route_state import RouteState
 from .run_admission_code import RunAdmissionCode
@@ -609,6 +612,7 @@ from .stop_impact import StopImpact
 from .stop_outcome import StopOutcome
 from .stop_plan_code import StopPlanCode
 from .storage_demand_code import StorageDemandCode
+from .stored_run_endpoint import StoredRunEndpoint
 from .string_parameter import StringParameter
 from .supersede_code import SupersedeCode
 from .target_asset_state import TargetAssetState
@@ -623,6 +627,8 @@ from .wait_reason import WaitReason
 from .wait_verdict import WaitVerdict
 
 __all__ = (
+    "ActivationMarker",
+    "ActivationMarkerState",
     "AdmissionCode",
     "AgentFailureKind",
     "AgentFailureResult",
@@ -1113,6 +1119,7 @@ __all__ = (
     "ResourceTerm",
     "ResourceTermProblem",
     "RolloutPreparation",
+    "RouteClaimMarker",
     "RoutePublicationState",
     "RouteState",
     "RunAdmissionCode",
@@ -1232,6 +1239,7 @@ __all__ = (
     "StopOutcome",
     "StopPlanCode",
     "StorageDemandCode",
+    "StoredRunEndpoint",
     "StringParameter",
     "SupersedeCode",
     "TargetAssetState",

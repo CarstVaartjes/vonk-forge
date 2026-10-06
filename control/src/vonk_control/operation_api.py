@@ -2330,7 +2330,12 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
             raise RuntimeError(
                 f"contract component {name} conflicts with a route model"
             )
+    stored_schemas, json_columns = _stored_component_schemas()
+    for name, schema in stored_schemas.items():
+        # A model a route also exposes keeps the route's description of it.
+        components["schemas"].setdefault(name, schema)
     components["schemas"] = dict(sorted(components["schemas"].items()))
+    source["x-vonk-json-columns"] = json_columns
     return source
 
 
@@ -2351,3 +2356,41 @@ def _contract_component_schemas() -> dict[str, dict[str, object]]:
         ref_template="#/components/schemas/{model}",
     )
     return deepcopy(document["$defs"])
+
+
+def _stored_component_schemas() -> tuple[
+    dict[str, dict[str, object]], dict[str, list[str]]
+]:
+    """The contracts of the JSON columns, and where each column's contract is.
+
+    Every contract the JSON-column registry binds is published, so a generated
+    client (TypeScript, Python) reads a stored document exactly as the
+    Controller does.  They are described as the Controller writes them
+    (serialization mode).  The second answer maps ``table.column`` to the
+    component names of its contract's models (one per kind for a column that
+    stores several document families).
+    """
+
+    from pydantic import BaseModel
+    from pydantic.json_schema import JsonSchemaMode, models_json_schema
+
+    from .stored_json import bindings, contract_models
+
+    stored = {binding.key: contract_models(binding) for binding in bindings().values()}
+    members: list[tuple[type[BaseModel], JsonSchemaMode]] = [
+        (model, "serialization") for models in stored.values() for model in models
+    ]
+    references, document = models_json_schema(
+        members, ref_template="#/components/schemas/{model}"
+    )
+    columns = {
+        key: sorted(
+            {
+                str(references[(model, "serialization")]["$ref"]).rsplit("/", 1)[-1]
+                for model in models
+            }
+        )
+        for key, models in sorted(stored.items())
+        if models
+    }
+    return deepcopy(document["$defs"]), columns

@@ -1054,6 +1054,35 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActivationMarker */
+        ActivationMarker: {
+            /** Authority Id */
+            authority_id: string;
+            /** Directory */
+            directory: string;
+            /** Evidence Set Digest */
+            evidence_set_digest: string;
+            /** Generation */
+            generation: number;
+            /** Litellm Sha256 */
+            litellm_sha256: string;
+            /** Manifest Sha256 */
+            manifest_sha256: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Routes Sha256 */
+            routes_sha256: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "maintenance" | "published";
+        };
         /**
          * AdmissionCode
          * @description The shared admission lock refused because capacity is held by another admission.
@@ -6721,6 +6750,18 @@ export interface components {
             targets_ready: boolean;
         };
         /**
+         * RouteClaimMarker
+         * @description The marker of the one route publication claim row.
+         *
+         *     ``route_publications.activation_marker`` holds an activation marker for a
+         *     published or maintenance generation, and this ordinal for the claim row that
+         *     orders concurrent publication attempts.
+         */
+        RouteClaimMarker: {
+            /** Claim Ordinal */
+            claim_ordinal: number;
+        };
+        /**
          * RoutePublicationState
          * @description The phases of one atomic route publication.
          * @enum {string}
@@ -8277,6 +8318,11 @@ export interface components {
          * @enum {string}
          */
         StorageDemandCode: "storage.evicting" | "storage.insufficient_after_eviction" | "storage.eviction_timed_out";
+        /** StoredRunEndpoint */
+        StoredRunEndpoint: {
+            /** Url */
+            url: string;
+        };
         /** StringParameter */
         StringParameter: {
             /** Allowed Values */

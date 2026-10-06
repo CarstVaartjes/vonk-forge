@@ -23,12 +23,22 @@ from vonk_control.fleet_events import (
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.operation_api import durable_operation_services
+from vonk_control.stored_json import write_guard_mode
 from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def _rows_carry_private_values_on_purpose():
+    """These rows hold values no contract describes: the recorder must still
+    keep them out of public events, so the fixtures write them deliberately."""
+
+    with write_guard_mode(strict=False):
+        yield
 
 
 @pytest.fixture

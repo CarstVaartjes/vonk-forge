@@ -1,6 +1,77 @@
 {
   "components": {
     "schemas": {
+      "ActivationMarker": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_id": {
+            "title": "Authority Id",
+            "type": "string"
+          },
+          "directory": {
+            "pattern": "^[0-9]{8}-[0-9a-f]{64}$",
+            "title": "Directory",
+            "type": "string"
+          },
+          "evidence_set_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Evidence Set Digest",
+            "type": "string"
+          },
+          "generation": {
+            "exclusiveMinimum": 0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "litellm_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Litellm Sha256",
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Manifest Sha256",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "routes_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Routes Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "maintenance",
+              "published"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "generation",
+          "state",
+          "authority_id",
+          "plan_digest",
+          "evidence_set_digest",
+          "routes_sha256",
+          "litellm_sha256",
+          "directory",
+          "manifest_sha256"
+        ],
+        "title": "ActivationMarker",
+        "type": "object"
+      },
       "AdmissionCode": {
         "description": "The shared admission lock refused because capacity is held by another admission.",
         "enum": [
@@ -18111,6 +18182,22 @@
         "title": "RolloutPreparation",
         "type": "object"
       },
+      "RouteClaimMarker": {
+        "additionalProperties": false,
+        "description": "The marker of the one route publication claim row.\n\n``route_publications.activation_marker`` holds an activation marker for a\npublished or maintenance generation, and this ordinal for the claim row that\norders concurrent publication attempts.",
+        "properties": {
+          "claim_ordinal": {
+            "minimum": 1,
+            "title": "Claim Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "claim_ordinal"
+        ],
+        "title": "RouteClaimMarker",
+        "type": "object"
+      },
       "RoutePublicationState": {
         "description": "The phases of one atomic route publication.",
         "enum": [
@@ -23331,6 +23418,22 @@
         ],
         "title": "StorageDemandCode",
         "type": "string"
+      },
+      "StoredRunEndpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "StoredRunEndpoint",
+        "type": "object"
       },
       "StringParameter": {
         "additionalProperties": false,
@@ -30234,5 +30337,17 @@
         "summary": "Run Switch Operation"
       }
     }
+  },
+  "x-vonk-json-columns": {
+    "node_inventory_snapshots.network_interfaces": [
+      "NetworkInterface"
+    ],
+    "route_publications.activation_marker": [
+      "ActivationMarker",
+      "RouteClaimMarker"
+    ],
+    "run_nodes.endpoint": [
+      "StoredRunEndpoint"
+    ]
   }
 }
