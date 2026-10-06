@@ -132,7 +132,7 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
         available_memory_bytes(&runner, &meminfo, "unified").unwrap(),
         65432 * 1024
     );
-    let wire = serde_json::to_value(&inventory).unwrap();
+    let wire = serde_json::to_value(inventory.to_request(chrono::Utc::now().into())).unwrap();
     assert_eq!(wire["memory_pool"], "separate");
     assert_eq!(wire["host_memory_total_bytes"], 123456 * 1024);
     assert_eq!(wire["host_memory_free_bytes"], 65432 * 1024);
@@ -228,7 +228,7 @@ fn inventory_uses_host_memory_for_the_unified_memory_gb10() {
     assert_eq!(inventory.gpu_memory_total_bytes, 123456 * 1024);
     assert_eq!(inventory.gpu_memory_free_bytes, 65432 * 1024);
     assert_eq!(
-        serde_json::to_value(&inventory).unwrap()["memory_pool"],
+        serde_json::to_value(inventory.to_request(chrono::Utc::now().into())).unwrap()["memory_pool"],
         "shared"
     );
     assert_eq!(
@@ -258,7 +258,7 @@ fn numeric_gpu_counters_do_not_turn_gb10_into_a_dedicated_pool() {
     .collect()
     .unwrap();
     assert_eq!(
-        serde_json::to_value(&inventory).unwrap()["memory_pool"],
+        serde_json::to_value(inventory.to_request(chrono::Utc::now().into())).unwrap()["memory_pool"],
         "shared"
     );
     assert_eq!(inventory.gpu_memory_free_bytes, 65432 * 1024);

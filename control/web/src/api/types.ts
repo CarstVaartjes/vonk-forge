@@ -2,13 +2,14 @@ import type {components, paths} from "./generated";
 
 export type AuthSession = components["schemas"]["AuthSession"];
 export type AvailabilityOperationFailure = components["schemas"]["AvailabilityOperationFailure"];
-export type CliTokenDownload = {expiresAt: string};
+export type CliTokenDownload = components["schemas"]["CliTokenDownload"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
 export type FleetTelemetryState = components["schemas"]["TelemetryState"];
 export type VisualFleetNode = components["schemas"]["FleetNode"];
 export type VisualFleetSnapshot = components["schemas"]["FleetSnapshot"];
 export type EnrollmentGrantResponse = components["schemas"]["EnrollmentGrantResponse"];
 export type FleetActionResponse = components["schemas"]["FleetActionResponse"];
+export type FleetEnrollRequest = components["schemas"]["FleetEnrollRequest"];
 export type FleetNodeIdentity = components["schemas"]["FleetNodeIdentity"];
 export type FleetLogResponse = components["schemas"]["FleetLogResponse"];
 export type EnrollmentGrantStatus = components["schemas"]["EnrollmentGrantStatus"];
@@ -23,6 +24,7 @@ export type ProfileDefinition = components["schemas"]["FleetProfileDefinitionVie
 export type ReconcilePlan = components["schemas"]["RunSwitchPlan"];
 export type ActivityFilters = {state?: string; target?: string; requestId?: string};
 export type OperationsResponse = components["schemas"]["OperationsResponse"];
+export type OperationBlocker = components["schemas"]["OperationBlocker"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
 export type ModelLibrary = components["schemas"]["ModelLibraryResponse"];
@@ -172,7 +174,7 @@ export interface ControlApi extends LibraryApi {
   profileDefinition(number: number, signal?: AbortSignal): Promise<ProfileDefinition>;
   cancelProfileApplication(applicationId: string, profileNumber: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
-  enrollFleetNode(input: {name: string; request_key: string}, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
+  enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
   fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode>;
   renameFleetNode(selector: string, displayName: string): Promise<FleetNodeIdentity>;
   removeFleetNode(selector: string): Promise<FleetActionResponse>;

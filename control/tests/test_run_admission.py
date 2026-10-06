@@ -44,6 +44,7 @@ def setup(
     free_memory=300,
     port_reserved: bool | tuple[str, ...] = False,
     system_reserve=0,
+    peak_bytes=225,
     memory_pool: MemoryPool = "shared",
     denied_jurisdictions=(),
     github_release_source=False,
@@ -84,7 +85,7 @@ def setup(
     model = ModelDefinition.model_validate(model_document)
     document["models"][0]["model"]["content_sha256"] = document_sha256(model_document)
     memory = document["topology"]["roles"][0]["resources"]["memory"]
-    memory.update({"peak_bytes": 225, "reserve_bytes": system_reserve})
+    memory.update({"peak_bytes": peak_bytes, "reserve_bytes": system_reserve})
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -414,52 +415,103 @@ def test_territorial_license_run_admission_is_informational(tmp_path) -> None:
     )
 
 
-@pytest.mark.parametrize("platform_floor", [None, 50])
-def test_system_reserve_is_a_floor_not_workload_memory(
-    tmp_path, platform_floor
+def test_declared_reserve_is_informational_and_the_platform_floor_applies(
+    tmp_path,
 ) -> None:
+    # The recipe declares a 75-byte reserve; only the 50-byte platform floor counts.
     sessions, now, _node, installation = setup(
-        tmp_path,
-        free_memory=300,
-        system_reserve=75,
+        tmp_path, free_memory=275, system_reserve=75
     )
-    service = (
-        RunAdmissionService(sessions, inventory_max_age=300)
-        if platform_floor is None
-        else RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=50)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
     )
 
     plan = service.plan_run(installation, alias="qwen", now=now)
 
     assert plan.allowed is True
     assert plan.nodes[0].required_memory_bytes == 225
-    assert plan.nodes[0].free_after_bytes == 75
-    assert plan.nodes[0].memory_floor_bytes == 75
+    assert plan.nodes[0].free_after_bytes == 50
+    assert plan.nodes[0].memory_floor_bytes == 50
 
 
-@pytest.mark.parametrize("platform_floor", [None, 50])
-def test_system_reserve_still_blocks_a_run_without_headroom(
-    tmp_path, platform_floor
-) -> None:
-    sessions, now, _node, installation = setup(
-        tmp_path,
-        free_memory=299,
-        system_reserve=75,
+def _claim_memory(sessions, node, now, amount=1) -> None:
+    """A minimal active Vonk claim, so the Spark is no longer idle."""
+    with sessions.begin() as session:
+        session.add(
+            ResourceReservation(
+                node_id=node,
+                kind="unified-memory",
+                resource_key="other-vonk-workload",
+                amount_bytes=amount,
+                owner_kind="run",
+                owner_id="3" * 36,
+                state="active",
+                plan_digest="d" * 64,
+                created_at=now,
+            )
+        )
+
+
+def test_platform_floor_still_blocks_a_run_without_headroom(tmp_path) -> None:
+    sessions, now, node, installation = setup(
+        tmp_path, free_memory=274, system_reserve=75
     )
-    service = (
-        RunAdmissionService(sessions, inventory_max_age=300)
-        if platform_floor is None
-        else RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=50)
+    _claim_memory(sessions, node, now)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
     )
+
     plan = service.plan_run(installation, alias="qwen", now=now)
 
     assert plan.allowed is False
-    assert plan.nodes[0].required_memory_bytes == 225
-    assert plan.nodes[0].free_after_bytes == 74
-    assert plan.nodes[0].memory_floor_bytes == 75
+    assert plan.nodes[0].memory_floor_bytes == 50
     assert "run.insufficient_memory" in {
         reason.code for reason in plan.nodes[0].blockers
     }
+
+
+def test_envelope_larger_than_an_idle_spark_is_admitted_as_an_unverified_fit(
+    tmp_path,
+) -> None:
+    from vonk_control.run_admission import require_admissible
+
+    # A 1001-byte peak on a 1000-byte Spark with no Vonk claim: the declared
+    # envelope is an estimate, so the attempt is admitted and typed unverified.
+    sessions, now, _node, installation = setup(
+        tmp_path, free_memory=300, peak_bytes=1001
+    )
+    plan = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=0
+    ).plan_run(installation, alias="qwen", now=now)
+
+    assert plan.allowed is True
+    assert not plan.nodes[0].blockers
+    warnings = {reason.code for reason in plan.nodes[0].warnings}
+    assert {
+        "resource.envelope_unverified",
+        "resource.envelope_exceeds_capacity",
+    } <= warnings
+    require_admissible(plan)
+
+
+def test_envelope_larger_than_the_spark_with_another_claim_is_a_retryable_wait(
+    tmp_path,
+) -> None:
+    from vonk_control.run_admission import RunAdmissionBusy, require_admissible
+
+    sessions, now, node, installation = setup(
+        tmp_path, free_memory=300, peak_bytes=1001
+    )
+    _claim_memory(sessions, node, now)
+    plan = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=0
+    ).plan_run(installation, alias="qwen", now=now)
+
+    codes = {reason.code for reason in plan.nodes[0].blockers}
+    assert plan.allowed is False
+    assert codes == {"run.insufficient_memory"}
+    with pytest.raises(RunAdmissionBusy):
+        require_admissible(plan)
 
 
 def test_stopped_run_can_repeat_the_same_plan_digest(tmp_path) -> None:
@@ -509,6 +561,7 @@ def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
     sessions, now, node, installation = setup(
         tmp_path, free_memory=260, port_reserved=True
     )
+    _claim_memory(sessions, node, now)
     InventoryRepository(sessions, clock=lambda: now).record(
         InventorySnapshotInput(
             node,

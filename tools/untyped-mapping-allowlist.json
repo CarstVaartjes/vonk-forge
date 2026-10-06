@@ -200,6 +200,10 @@
   ],
   "debt": [
     {
+      "path": "agent_protocol/src/vonk_agent_protocol/optional_evidence.py",
+      "count": 3
+    },
+    {
       "path": "agent_protocol/src/vonk_agent_protocol/wire_model.py",
       "count": 2
     },
@@ -408,10 +412,6 @@
       "count": 6
     },
     {
-      "path": "control/src/vonk_control/platform_ports.py",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/prebuilt_images.py",
       "count": 8
     },
@@ -429,7 +429,7 @@
     },
     {
       "path": "control/src/vonk_control/recipe_builds.py",
-      "count": 25
+      "count": 26
     },
     {
       "path": "control/src/vonk_control/recipe_execution_contract.py",

@@ -18,6 +18,7 @@ import type {
   ActivityFilters,
   EnrollmentGrantStatus,
   FleetActionResponse,
+  FleetEnrollRequest,
   FleetLogResponse,
   FleetNodeIdentity,
   GatewayKeyCreated,
@@ -230,14 +231,14 @@ export class ApiClient implements ControlApi {
     anchor.click();
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
-    return {expiresAt: response.headers.get("X-Vonk-Token-Expires-At") ?? ""};
+    return {expires_at: response.headers.get("X-Vonk-Token-Expires-At") ?? ""};
   }
 
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {
     return resultData(await this.generated.GET("/api/fleet", {signal}));
   }
 
-  async enrollFleetNode(input: {name: string; request_key: string}, signal?: AbortSignal) {
+  async enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal) {
     return resultData(await this.generated.POST("/api/fleet/enroll", {body: input, signal}));
   }
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
 import logging
 import re
@@ -11,6 +12,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 from pydantic import TypeAdapter
@@ -24,6 +26,7 @@ from vonk_agent_protocol import (
     ReservationState,
     SecurityRefusalError,
     SecurityRefusalReason,
+    SourceBundleCode,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
@@ -90,6 +93,7 @@ from .source_bundles import (
     GeneratedSourceBundle,
     SourceBundleError,
     SourceBundleStoreProtocol,
+    generate_source_bundle,
 )
 from .source_policy import (
     SourcePolicyError,
@@ -104,6 +108,11 @@ _LOGGER = logging.getLogger(__name__)
 _OCI_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 BUILD_ARTIFACT_FORMAT = "docker-archive-v1"
+#: Bundle read problems that stored data damage does not explain: an invalid
+#: request digest, or a store that is unreachable (retry, never re-derive).
+_UNHEALABLE_BUNDLE_CODES = frozenset(
+    {SourceBundleCode.DIGEST_INVALID, SourceBundleCode.STORAGE_UNAVAILABLE}
+)
 MINIMUM_BUILD_DISK_RESERVE_BYTES = 4 * 1024**3
 MAXIMUM_BUILD_DISK_RESERVE_BYTES = 64 * 1024**3
 BUILD_INPUT_IDENTITY_SCHEMA_VERSION = 2
@@ -626,6 +635,51 @@ class PreparedBuildLookup(Protocol):
     ) -> PreparedBuildReceipt | None: ...
 
 
+class SourceBundleRederiver(Protocol):
+    """Produce a source bundle's archive again from the evidence the Controller kept.
+
+    The answer is only a candidate: the bundle store verifies it against the
+    digest at ingress, so a wrong or damaged derivation can never be trusted.
+    """
+
+    def __call__(
+        self,
+        projected: RecipeRevisionProjection,
+        context_path: str,
+        source_sha256: str,
+        /,
+    ) -> bytes | None: ...
+
+
+def rederive_source_bundle_from_closure(
+    projected: RecipeRevisionProjection, context_path: str, source_sha256: str
+) -> bytes | None:
+    """Rebuild the build-context bundle from the recipe package's stored closure.
+
+    The closure is the verified package contents the catalog import recorded
+    beside its digest-addressed package; the bundle is exactly the files under
+    the build context, generated the way the import generated it.
+    """
+
+    handle = projected.package_handle
+    if handle is None:
+        return None
+    closure = Path(handle.closure_path)
+    root = closure / context_path.strip("/")
+    try:
+        if (closure / ".complete").read_text(encoding="ascii") != handle.package_sha256:
+            return None
+        files = {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and not path.is_symlink()
+        }
+        bundle = generate_source_bundle(files)
+    except (OSError, ValueError, SourceBundleError):
+        return None
+    return bundle.archive if bundle.sha256 == source_sha256 else None
+
+
 class RecipeBuildService:
     def __init__(
         self,
@@ -635,9 +689,11 @@ class RecipeBuildService:
         inventory_max_age: int = 300,
         build_archive_available: Callable[[str, int], bool] | None = None,
         prepared_builds: PreparedBuildLookup | None = None,
+        source_rederiver: SourceBundleRederiver = rederive_source_bundle_from_closure,
     ) -> None:
         self._sessions = sessions
         self._bundles = bundles
+        self._source_rederiver = source_rederiver
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
         self._build_archive_available = build_archive_available
@@ -663,6 +719,78 @@ class RecipeBuildService:
         assert build.image_bytes is not None
         return self._stored_archive_present(build.oci_layout_sha256, build.image_bytes)
 
+    def _verified_bundle(
+        self,
+        projected: RecipeRevisionProjection,
+        build: Mapping[str, object],
+        source_sha256: str,
+    ) -> GeneratedSourceBundle:
+        """The stored source bundle, healed from evidence when the stored copy is damaged.
+
+        Source is verified at ingress; what the store holds afterwards can be
+        damaged (a lost or corrupted copy, metadata that no longer matches) and
+        a damaged stored copy is not a recipe fault. A bundle that cannot be
+        read, or that lacks the build's Dockerfile, is derived again from the
+        recipe package's closure and stored through the same ingress check (the
+        digest must match), then read again. Only what is still invalid after
+        that fresh verification is the recipe's own fault; when it cannot be
+        derived at all the build waits (a library sync restores it) instead of
+        being refused.
+        """
+
+        dockerfile = build.get("dockerfile")
+        context = build.get("context")
+        context_path = context.get("path") if isinstance(context, Mapping) else None
+
+        def read() -> GeneratedSourceBundle | SourceBundleError:
+            try:
+                return self._bundles.get(source_sha256)
+            except SourceBundleError as error:
+                return error
+
+        def damaged(value: GeneratedSourceBundle | SourceBundleError) -> bool:
+            if isinstance(value, SourceBundleError):
+                return value.code not in _UNHEALABLE_BUNDLE_CODES
+            return not isinstance(dockerfile, str) or dockerfile not in value.files
+
+        loaded = read()
+        if damaged(loaded):
+            healed = self._heal_source_bundle(projected, context_path, source_sha256)
+            if healed:
+                loaded = read()
+            elif isinstance(loaded, SourceBundleError):
+                raise RecipeBuildUnknown(loaded.code, str(loaded)) from loaded
+            else:
+                raise RecipeBuildUnknown(
+                    RecipeBuildCode.SOURCE_UNAVAILABLE,
+                    "stored source bundle lacks the recipe Dockerfile and cannot "
+                    "be derived again yet",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+        if isinstance(loaded, SourceBundleError):
+            raise RecipeBuildUnknown(loaded.code, str(loaded)) from loaded
+        return loaded
+
+    def _heal_source_bundle(
+        self,
+        projected: RecipeRevisionProjection,
+        context_path: object,
+        source_sha256: str,
+    ) -> bool:
+        if not isinstance(context_path, str):
+            return False
+        archive = self._source_rederiver(projected, context_path, source_sha256)
+        if archive is None:
+            return False
+        try:
+            self._bundles.put(source_sha256, io.BytesIO(archive))
+        except SourceBundleError:
+            return False
+        _LOGGER.warning(
+            "source bundle %s was damaged and was derived again", source_sha256
+        )
+        return True
+
     def check_source(self, recipe_revision_id: str) -> SourcePolicyReport:
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
@@ -683,10 +811,7 @@ class RecipeBuildService:
                     "verified source bundle is unavailable",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-        try:
-            bundle = self._bundles.get(source_sha256)
-        except SourceBundleError as error:
-            raise RecipeBuildUnknown(error.code, str(error)) from error
+        bundle = self._verified_bundle(projected, build, source_sha256)
         return inspect_build_source_policy(
             _source_policy_document(document, build, source_sha256), bundle
         )
@@ -721,13 +846,11 @@ class RecipeBuildService:
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
 
+        bundle = self._verified_bundle(projected, build, source_sha256)
         try:
-            bundle = self._bundles.get(source_sha256)
             enforce_build_source_policy(
                 _source_policy_document(document, build, source_sha256), bundle
             )
-        except SourceBundleError as error:
-            raise RecipeBuildUnknown(error.code, str(error)) from error
         except SourcePolicyError as error:
             raise RecipeSourcePolicyError(error.report) from error
 
@@ -1070,13 +1193,11 @@ class RecipeBuildService:
                     "verified source bundle is unavailable",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
+        bundle = self._verified_bundle(projected, build, source_sha256)
         try:
-            bundle = self._bundles.get(source_sha256)
             policy = enforce_build_source_policy(
                 _source_policy_document(document, build, source_sha256), bundle
             )
-        except SourceBundleError as error:
-            raise RecipeBuildUnknown(error.code, str(error)) from error
         except SourcePolicyError as error:
             raise RecipeSourcePolicyError(error.report) from error
         dockerfile_path = build.get("dockerfile") if isinstance(build, dict) else None

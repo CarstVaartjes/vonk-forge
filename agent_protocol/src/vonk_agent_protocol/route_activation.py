@@ -9,6 +9,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+try:
+    from .route_activation_words import ActivationState
+except ImportError:  # loaded standalone by the LiteLLM supervisor, beside its words
+    from route_activation_words import ActivationState  # type: ignore[no-redef]
+
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
@@ -35,7 +40,7 @@ class SupervisorAcknowledgement(BaseModel):
     child_pid: Annotated[int, Field(gt=0)]
     generation: Annotated[int, Field(gt=0)]
     litellm_sha256: Digest
-    state: Literal["maintenance", "published"]
+    state: ActivationState
 
     @field_validator("schema_version", mode="before")
     @classmethod
@@ -57,7 +62,7 @@ class ActivationManifest(BaseModel):
 
     schema_version: Literal[2]
     generation: Annotated[int, Field(gt=0)]
-    state: Literal["maintenance", "published"]
+    state: ActivationState
     authority_id: str
     plan_digest: Digest
     evidence_set_digest: Digest

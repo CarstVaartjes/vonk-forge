@@ -180,6 +180,18 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
+
+def strict_json_datetime(value: object) -> object:
+    """Parse a JSON string timestamp for a ``datetime`` field in strict mode."""
+
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError as error:
+            raise ValueError("timestamp is invalid") from error
+    return value
+
+
 # One stable failure-code rule is shared by the agent result contract, the
 # privileged host-helper response and the Controller's operator failure
 # evidence.  A producer and every consumer must accept and refuse exactly the

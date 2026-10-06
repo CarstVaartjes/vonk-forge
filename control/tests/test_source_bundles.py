@@ -120,10 +120,12 @@ def test_postgres_source_bundle_metadata_roundtrip_and_strict_reads(postgres_eng
         stored = session.get(RecipeSourceBundle, bundle.sha256)
         assert stored is not None
         stored.manifest = {**stored.manifest, "total_bytes": None}
-    for action in (
-        lambda: store.get(bundle.sha256),
-        lambda: store.put(bundle.sha256, io.BytesIO(bundle.archive)),
-    ):
-        with pytest.raises(SourceBundleError) as error:
-            action()
-        assert error.value.code == "bundle.manifest_invalid"
+    with pytest.raises(SourceBundleError) as error:
+        store.get(bundle.sha256)
+    assert error.value.code == "bundle.manifest_invalid"
+    # A damaged stored manifest is re-derived from the archive verified at this
+    # ingress, not a collision and not a recipe fault.
+    assert store.put(bundle.sha256, io.BytesIO(bundle.archive)).manifest == (
+        first.manifest
+    )
+    assert store.get(bundle.sha256).manifest == first.manifest

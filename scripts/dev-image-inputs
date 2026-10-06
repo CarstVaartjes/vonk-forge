@@ -13,6 +13,7 @@ CONTEXTS = {
     "litellm": (
         "deploy/compose/litellm",
         "agent_protocol/src/vonk_agent_protocol/route_activation.py",
+        "agent_protocol/src/vonk_agent_protocol/route_activation_words.py",
     ),
 }
 # Include the complete build/acceptance policy, including this input definition.

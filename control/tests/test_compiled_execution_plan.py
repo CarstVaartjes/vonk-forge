@@ -21,12 +21,12 @@ from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
-    CompiledExecutionPlan,
     CompiledExecutionPlanError,
     CompiledModelArtifact,
-    CompiledRuntimeImage,
     DistributionObjectReceipt,
+    VerifiedExecutionPlan,
     VerifiedModelObject,
+    VerifiedRuntimeImage,
     materialized_model_path,
     validate_compiled_launch_payload,
 )
@@ -50,6 +50,7 @@ from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
     _bind_compiled_execution_plan,
 )
+from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptWire,
@@ -81,17 +82,17 @@ def compile_verified_execution_plan(
     model_artifact_set_sha256: str,
     model_objects: list[dict[str, object]],
     runtime_image: Mapping[str, object],
-) -> CompiledExecutionPlan:
+) -> VerifiedExecutionPlan:
     return _compile_verified_plan(
         _typed(spec),
         model_artifact_set_sha256=model_artifact_set_sha256,
         model_objects=[VerifiedModelObject.model_validate(o) for o in model_objects],
-        runtime_image=CompiledRuntimeImage.model_validate(runtime_image),
+        runtime_image=VerifiedRuntimeImage.model_validate(runtime_image),
     )
 
 
 def _launch(
-    plan: CompiledExecutionPlan,
+    plan: VerifiedExecutionPlan,
     spec: Mapping[str, object],
     *,
     placement: Mapping[str, object],
@@ -251,7 +252,7 @@ def _compile(
     spec: dict[str, object] | None = None,
     *,
     image: dict[str, object] | None = None,
-) -> CompiledExecutionPlan:
+) -> VerifiedExecutionPlan:
     selected_image = _image() if image is None else image
     selected_spec = _spec() if spec is None else spec
     return compile_verified_execution_plan(
@@ -712,6 +713,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     entrypoint = _mapping(roles[0])
     resources = _mapping(entrypoint["resources"])
     memory = _mapping(resources["memory"])
+    # The recipe reserve is informational; the compiled floor is the platform floor.
     memory["reserve_bytes"] = 32_000_007
     model_document = canonical_example("model-definition.json")
     model_digest = document_sha256(model_document)
@@ -837,7 +839,9 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     payload = plans[node.node_id]
     payload_wire = payload
     assert payload_wire.identity.model_artifact_set_sha256 == artifact_set_digest
-    assert payload_wire.runtime.placement.memory_floor_bytes == 32_000_007
+    assert (
+        payload_wire.runtime.placement.memory_floor_bytes == PLATFORM_MEMORY_FLOOR_BYTES
+    )
     assert payload_wire.artifacts[0].path == "model.safetensors"
     assert payload_wire.runtime_image.build_id == "build-1"
     assert "repository" not in json.dumps(payload.model_dump(mode="json"))
@@ -1110,7 +1114,7 @@ def test_plan_rejects_two_files_materializing_to_one_selection_path() -> None:
     duplicate["file_id"] = "duplicate"
     document["artifacts"].append(duplicate)
     with pytest.raises(ValidationError, match="physical identity"):
-        CompiledExecutionPlan.model_validate(document)
+        VerifiedExecutionPlan.model_validate(document)
 
 
 def test_plan_rejects_duplicate_final_projection_target() -> None:
@@ -1119,7 +1123,7 @@ def test_plan_rejects_duplicate_final_projection_target() -> None:
     duplicate["id"] = "duplicate-projection"
     document["artifacts"].append(duplicate)
     with pytest.raises(ValidationError, match="mount target"):
-        CompiledExecutionPlan.model_validate(document)
+        VerifiedExecutionPlan.model_validate(document)
 
 
 def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None:
@@ -1128,7 +1132,7 @@ def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None
     duplicate["id"] = "second-projection"
     duplicate["mount"]["target"] = "/models/target"
     document["artifacts"].append(duplicate)
-    plan = CompiledExecutionPlan.model_validate(document)
+    plan = VerifiedExecutionPlan.model_validate(document)
     assert [(artifact.mount.target, artifact.path) for artifact in plan.artifacts] == [
         ("/models", "model.safetensors"),
         ("/models/target", "model.safetensors"),

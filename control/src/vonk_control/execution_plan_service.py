@@ -23,9 +23,9 @@ from vonk_forge_contracts.recipe import Scalar
 
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
-    CompiledRuntimeImage,
     DistributionObjectReceipt,
     VerifiedModelObject,
+    VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
 from .distribution import ModelCacheObjectSource
@@ -37,6 +37,7 @@ from .recipe_runtime_specs import (
     resolve_recipe_entities,
     split_option_choices,
 )
+from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .runtime_image_preparation import RuntimeImageReceipt
 from .runtime_spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
 
@@ -76,12 +77,15 @@ def compile_job_invocation(
         raise ExecutionPlanCompilationError(
             "job role differs from the accepted canonical workload"
         )
-    if type(memory_floor_bytes) is not int or memory_floor_bytes < max(
-        role.resources.memory.reserve_bytes, plan.runtime.placement.memory_floor_bytes
+    # The floor is the platform's, applied at review. Installed plans made before
+    # it replaced the recipe reserve may record a larger one, which must not strand
+    # their jobs, so a job may carry a smaller floor but never zero.
+    if (
+        type(memory_floor_bytes) is not int
+        or memory_floor_bytes < 0
+        or (memory_floor_bytes == 0 and plan.runtime.placement.memory_floor_bytes > 0)
     ):
-        raise ExecutionPlanCompilationError(
-            "job memory floor is below the accepted system reserve"
-        )
+        raise ExecutionPlanCompilationError("job memory floor is invalid")
     if type(reserved_memory_bytes) is not int or reserved_memory_bytes <= 0:
         raise ExecutionPlanCompilationError("job memory reservation is invalid")
     resolved = resolve_recipe_entities(session, revision.document)
@@ -138,7 +142,7 @@ def compile_job_invocation(
         runtime_spec,
         model_artifact_set_sha256=plan.identity.model_artifact_set_sha256,
         model_objects=objects,
-        runtime_image=CompiledRuntimeImage.model_validate(
+        runtime_image=VerifiedRuntimeImage.model_validate(
             plan.runtime_image.model_dump(mode="json")
         ),
     )
@@ -317,7 +321,7 @@ class ControllerExecutionPlanService:
         document: Mapping[str, object],
         build: RecipeBuild | None,
         runtime_spec: RuntimeSpec,
-    ) -> CompiledRuntimeImage:
+    ) -> VerifiedRuntimeImage:
         image_digest = _image_digest(runtime_spec.runtime.image)
         if self._runtime_image_preparer is not None:
             receipt = self._runtime_image_preparer(document, runtime_spec, build)
@@ -330,7 +334,7 @@ class ControllerExecutionPlanService:
                 "verified OCI archive receipt is unavailable for the selected runtime image"
             )
         try:
-            image = CompiledRuntimeImage.model_validate(value)
+            image = VerifiedRuntimeImage.model_validate(value)
         except Exception as error:
             raise ExecutionPlanCompilationError(
                 "verified runtime image receipt is invalid"
@@ -417,7 +421,7 @@ def _placement(
             f"mapped role {node.role!r} is absent from the canonical recipe topology"
         )
     reserved = role.resources.memory.peak_bytes
-    memory_floor = role.resources.memory.reserve_bytes
+    memory_floor = PLATFORM_MEMORY_FLOOR_BYTES
     if recipe.interfaces[0].adapter == "openai":
         if endpoint is None:
             raise ExecutionPlanCompilationError(

@@ -704,15 +704,32 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         ]
         assert row.capabilities == sorted(payload["capabilities"])
 
-    inconsistent = payload | {"nas_route_interface": "wlan9"}
+    # Optional evidence never costs the mandatory capacity report: a NAS route
+    # that names no reported NIC, or a fabric address outside the fabric policy,
+    # is dropped and the rest of the report is recorded.
+    later = (clock.now + timedelta(seconds=1)).isoformat()
+    inconsistent = payload | {"nas_route_interface": "wlan9", "observed_at": later}
     assert (
         client.post(
             "/agent/inventory",
             headers=agent_headers(NODE_A, "serial-a"),
             json=inconsistent,
         ).status_code
-        == 422
+        == 204
     )
+    with services.sessions() as session:
+        row = session.scalar(
+            select(NodeInventorySnapshot)
+            .where(NodeInventorySnapshot.node_id == NODE_A)
+            .order_by(NodeInventorySnapshot.observed_at.desc())
+        )
+        assert row is not None
+        assert row.nas_route_interface is None
+        assert row.disk_free_bytes == 700
+        assert [item["name"] for item in row.network_interfaces] == [
+            "enP7s7",
+            "wlP9s9",
+        ]
 
     denied = payload | {"fabric_address": "10.0.0.42"}
     assert (
@@ -720,6 +737,24 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
             "/agent/inventory",
             headers=agent_headers(NODE_B, "serial-b"),
             json=denied,
+        ).status_code
+        == 204
+    )
+    with services.sessions() as session:
+        row = session.scalar(
+            select(NodeInventorySnapshot).where(NodeInventorySnapshot.node_id == NODE_B)
+        )
+        assert row is not None
+        assert row.fabric_address is None and row.fabric_bandwidth_mbps is None
+        assert row.gpu_memory_total_bytes == 1000
+
+    # The mandatory core stays strict.
+    broken_core = payload | {"disk_free_bytes": 5000, "observed_at": later}
+    assert (
+        client.post(
+            "/agent/inventory",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=broken_core,
         ).status_code
         == 422
     )
@@ -1686,10 +1721,12 @@ def test_claim_uses_atomic_presence_consumer_not_post_commit(
     "hostname",
     ("", "-spark", "spark_3542", "spark 3542", "spark..lab", "a" * 256),
 )
-def test_authenticated_claim_rejects_invalid_reported_hostname(
+def test_authenticated_claim_drops_an_invalid_reported_hostname(
     agent_system, hostname: str
 ) -> None:
-    client, _services, _, _clock = agent_system
+    """The hostname is a hint: a malformed one never costs the Spark its claim."""
+
+    client, services, _, _clock = agent_system
 
     response = client.post(
         "/agent/claim",
@@ -1697,7 +1734,9 @@ def test_authenticated_claim_rejects_invalid_reported_hostname(
         json={"hostname": hostname},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 204
+    with services.sessions() as session:
+        assert session.get(AgentPresence, NODE_A) is not None
 
 
 @pytest.mark.parametrize(

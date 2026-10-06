@@ -3,6 +3,7 @@
 from .activation_marker import ActivationMarker
 from .activation_marker_state import ActivationMarkerState
 from .admission_code import AdmissionCode
+from .agent_evidence_code import AgentEvidenceCode
 from .agent_failure_kind import AgentFailureKind
 from .agent_failure_result import AgentFailureResult
 from .agent_install_result import AgentInstallResult
@@ -100,6 +101,7 @@ from .catalog_problem import CatalogProblem
 from .catalog_sync_code import CatalogSyncCode
 from .catalog_sync_state import CatalogSyncState
 from .certificate_state import CertificateState
+from .cli_token_download import CliTokenDownload
 from .cluster_mapping_code import ClusterMappingCode
 from .compatibility_identity import CompatibilityIdentity
 from .compatibility_preparation import CompatibilityPreparation
@@ -443,8 +445,8 @@ from .outcome_failed import OutcomeFailed
 from .outcome_kind import OutcomeKind
 from .outcome_unknown import OutcomeUnknown
 from .output_limits import OutputLimits
+from .package_activation_phase import PackageActivationPhase
 from .package_activation_receipt import PackageActivationReceipt
-from .package_activation_receipt_phase import PackageActivationReceiptPhase
 from .package_rollback_authority import PackageRollbackAuthority
 from .package_rollback_source import PackageRollbackSource
 from .placement_install_state import PlacementInstallState
@@ -825,6 +827,7 @@ __all__ = (
     "ActivationMarker",
     "ActivationMarkerState",
     "AdmissionCode",
+    "AgentEvidenceCode",
     "AgentFailureKind",
     "AgentFailureResult",
     "AgentInstallResult",
@@ -922,6 +925,7 @@ __all__ = (
     "CatalogSyncCode",
     "CatalogSyncState",
     "CertificateState",
+    "CliTokenDownload",
     "ClusterMappingCode",
     "CompatibilityIdentity",
     "CompatibilityPreparation",
@@ -1265,8 +1269,8 @@ __all__ = (
     "OutcomeKind",
     "OutcomeUnknown",
     "OutputLimits",
+    "PackageActivationPhase",
     "PackageActivationReceipt",
-    "PackageActivationReceiptPhase",
     "PackageRollbackAuthority",
     "PackageRollbackSource",
     "PlacementInstallState",

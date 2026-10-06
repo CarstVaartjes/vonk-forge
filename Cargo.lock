@@ -3128,6 +3128,7 @@ dependencies = [
  "thiserror",
  "time",
  "url",
+ "vonk-agent-protocol",
  "x509-parser",
 ]
 

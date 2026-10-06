@@ -59,6 +59,10 @@ def export_schema() -> dict[str, object]:
         definition = schema["$defs"][
             references[model, "validation"]["$ref"].rsplit("/", 1)[-1]
         ]
+        if model.model_config.get("extra") == "ignore":
+            # A retained record must stay readable after an upgrade that adds or
+            # drops a field: the generated reader discards unknown keys for it.
+            definition["x-vonk-ignore-unknown"] = True
         for name, field in model.model_fields.items():
             property_schema = definition.get("properties", {}).get(name, {})
             if field.default_factory is list:

@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, StringConstraints, model_validator
+from pydantic import Field, StringConstraints, model_validator
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -18,21 +18,17 @@ PreparationState = Literal[
 ]
 
 
-from .strict_json import StrictJSONModel
+from .strict_json import StrictModel
 
 
-class _StrictModel(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-
-
-class PreparationReason(_StrictModel):
+class PreparationReason(StrictModel):
     code: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,95}$")
     detail: str = Field(min_length=1, max_length=512)
     severity: Literal["blocker", "warning", "info"]
     node_ids: list[NodeId] = Field(default_factory=list, max_length=64)
 
 
-class ControllerAssetState(_StrictModel):
+class ControllerAssetState(StrictModel):
     """Availability of one immutable asset in Controller/NAS storage."""
 
     state: PreparationState
@@ -68,7 +64,7 @@ class ControllerAssetState(_StrictModel):
         return self
 
 
-class TargetAssetState(_StrictModel):
+class TargetAssetState(StrictModel):
     """Staging and verification state for one immutable asset on one Spark."""
 
     node_id: NodeId
@@ -104,7 +100,7 @@ class TargetAssetState(_StrictModel):
         return self
 
 
-class ModelArtifactIdentity(_StrictModel):
+class ModelArtifactIdentity(StrictModel):
     """Exact model set, independent of transfer progress and verification time."""
 
     artifact_set_sha256: Digest
@@ -174,7 +170,7 @@ class ModelArtifactPreparation(ModelArtifactIdentity):
         return self
 
 
-class RuntimeImageIdentity(_StrictModel):
+class RuntimeImageIdentity(StrictModel):
     """Executable OCI identity, independent of its transfer observations."""
 
     image_digest: ImageDigest
@@ -222,7 +218,7 @@ def controller_assets_ready(
     )
 
 
-class CompatibilityIdentity(_StrictModel):
+class CompatibilityIdentity(StrictModel):
     """Immutable inputs for an exceptional reusable preparation artifact."""
 
     recipe_revision_sha256: Digest
@@ -232,7 +228,7 @@ class CompatibilityIdentity(_StrictModel):
     hardware_profile_sha256: Digest | None = None
 
 
-class CompatibilityPreparation(_StrictModel):
+class CompatibilityPreparation(StrictModel):
     """Explicit reusable work that cannot be embedded in the base image."""
 
     kind: Literal["engine-generation", "jit", "tuning"]
@@ -268,7 +264,7 @@ class CompatibilityPreparation(_StrictModel):
         return self
 
 
-class RolloutPreparation(_StrictModel):
+class RolloutPreparation(StrictModel):
     """Normalized preparation identity shared by profiles, Run, web and CLI."""
 
     schema_version: Literal[2] = 2

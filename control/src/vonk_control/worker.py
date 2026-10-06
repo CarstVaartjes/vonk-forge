@@ -22,6 +22,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
 
 from .jobs import JobService
 from .logging import log_event, redact_text
+from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .worker_memory_contract import WorkerMemoryComponent
 
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
@@ -466,6 +467,7 @@ def assemble_production_worker(
         run_admission=RunAdmissionService(
             sessions,
             inventory_max_age=300,
+            memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
         ),
         agent_jobs=agent_jobs,
         clock=clock,
@@ -476,6 +478,7 @@ def assemble_production_worker(
     )
     run_switch_operations = RunSwitchOperationService(
         sessions,
+        memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
         lifecycle=lifecycle,
         clock=clock,
         mappings=ClusterMappingService(sessions),

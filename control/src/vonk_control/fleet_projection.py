@@ -68,7 +68,7 @@ from .recipe_update_notice import (
     newest_active_revisions,
     recipe_update_notice,
 )
-from .strict_json import StrictJSONModel
+from .strict_json import StrictModel
 from .telemetry import (
     CPU_LOW_CLOCK_MIN_SECONDS,
     TelemetryRepository,
@@ -258,10 +258,6 @@ def _run_degraded_reason(value: str | None) -> RunDegradedReason | None:
     return _RUN_DEGRADED_REASON_ADAPTER.validate_python(str(value), strict=True)
 
 
-class _StrictModel(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-
-
 # Extra history beyond the one-minute rule, so a slightly late sample still
 # leaves an unbroken run to measure.
 _LOW_CLOCK_LOOKBACK_SLACK = 30
@@ -281,7 +277,7 @@ def _low_clock_detail(sample: TelemetrySampleView) -> str:
     )
 
 
-class InstallPartialEvidence(_StrictModel):
+class InstallPartialEvidence(StrictModel):
     """Why one recipe installation group on a Spark is not complete."""
 
     installation_id: Text128
@@ -302,7 +298,7 @@ class InstallPartialEvidence(_StrictModel):
     required_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
 
 
-class ProjectionReason(_StrictModel):
+class ProjectionReason(StrictModel):
     code: ProjectionCode
     detail: Text256
     severity: Literal["info", "warning", "error"]
@@ -312,7 +308,7 @@ class ProjectionReason(_StrictModel):
     recommendation: Text256 | None = None
 
 
-class NodeConnection(_StrictModel):
+class NodeConnection(StrictModel):
     agent_state: AgentState
     certificate_state: CertificateStateField
     online_state: Literal["online", "offline", "unregistered"]
@@ -321,7 +317,7 @@ class NodeConnection(_StrictModel):
     last_seen_age_seconds: float | None = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
 
 
-class InventoryState(_StrictModel):
+class InventoryState(StrictModel):
     observed_at: datetime
     received_at: datetime
     age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
@@ -345,7 +341,7 @@ class InventoryState(_StrictModel):
     nas_route_interface: str | None = Field(default=None, max_length=15)
 
 
-class TelemetryPoint(_StrictModel):
+class TelemetryPoint(StrictModel):
     model_config = ConfigDict(regex_engine="python-re")
 
     id: UuidId
@@ -372,13 +368,13 @@ class TelemetryPoint(_StrictModel):
     cpu_frequency_max_mhz: int | None = Field(default=None, ge=1, le=20_000)
 
 
-class TelemetryState(_StrictModel):
+class TelemetryState(StrictModel):
     age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     freshness: Literal["live", "delayed", "stale"]
     sample: TelemetryPoint
 
 
-class RecipePresence(_StrictModel):
+class RecipePresence(StrictModel):
     installation_id: Text128
     recipe_id: Text128
     recipe_revision_id: Text128
@@ -400,7 +396,7 @@ class RecipePresence(_StrictModel):
     required_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
 
 
-class RunPresence(_StrictModel):
+class RunPresence(StrictModel):
     run_id: Text128
     installation_id: Text128
     recipe_id: Text128
@@ -429,7 +425,7 @@ class RunPresence(_StrictModel):
     recipe_update: RecipeUpdateNotice | None = None
 
 
-class CapacityReservations(_StrictModel):
+class CapacityReservations(StrictModel):
     disk_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     unified_memory_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     host_memory_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
@@ -437,7 +433,7 @@ class CapacityReservations(_StrictModel):
     port_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
 
 
-class FleetNode(_StrictModel):
+class FleetNode(StrictModel):
     id: NodeId
     display_name: Text200
     hostname: Annotated[str, StringConstraints(max_length=255)]
@@ -453,14 +449,14 @@ class FleetNode(_StrictModel):
     warnings: list[ProjectionReason] = Field(max_length=128)
 
 
-class FleetSnapshot(_StrictModel):
+class FleetSnapshot(StrictModel):
     event_cursor: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     generated_at: datetime
     authority_revision: AuthorityRevision
     nodes: list[FleetNode] = Field(max_length=_MAX_FLEET_NODES)
 
 
-class FleetNodeIdentity(_StrictModel):
+class FleetNodeIdentity(StrictModel):
     id: NodeId
     display_name: Text200
     hostname: Annotated[str, StringConstraints(max_length=255)]

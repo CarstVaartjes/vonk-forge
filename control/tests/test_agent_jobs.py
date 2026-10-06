@@ -1315,6 +1315,37 @@ def test_heartbeat_persists_canonical_progress_and_renews_lease(service) -> None
         assert attempt.progress["last_progress_at"] == clock.now.isoformat()
 
 
+def test_heartbeat_with_progress_that_regresses_still_renews_the_lease(
+    service,
+) -> None:
+    """Progress is optional evidence on a lease heartbeat.
+
+    Catches refusing the heartbeat (and so losing the lease) because the
+    progress document went backwards: it is dropped, the lease is renewed.
+    """
+
+    jobs, sessions, clock = service
+    jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 10}, 60)
+    clock.advance(seconds=30)
+
+    directive = jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 3}, 60)
+
+    assert directive.deadline >= clock.now + timedelta(seconds=60)
+    with sessions() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        assert attempt is not None
+        assert attempt.progress["completed_bytes"] == 10
+
+
 def test_heartbeat_never_shortens_a_longer_existing_lease(service) -> None:
     jobs, sessions, clock = service
     jobs.enqueue(

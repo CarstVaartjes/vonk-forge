@@ -29,8 +29,8 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
 from vonk_control.compiled_execution_plan import (
-    CompiledRuntimeImage,
     VerifiedModelObject,
+    VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
 from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placement
@@ -48,7 +48,7 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 INPUTS = Path(__file__).resolve().parent / "fixtures" / "catalog_launch"
 PAYLOADS = REPOSITORY / "agent_protocol" / "tests" / "fixtures" / "catalog-launch"
 
-_SYNTHETIC_IMAGE = CompiledRuntimeImage(
+_SYNTHETIC_IMAGE = VerifiedRuntimeImage(
     image_digest="sha256:" + "a" * 64,
     oci_layout_sha256="f" * 64,
     image_bytes=4096,

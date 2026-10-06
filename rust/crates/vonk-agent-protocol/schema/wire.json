@@ -257,6 +257,21 @@
       "title": "AgentDirective",
       "type": "object"
     },
+    "AgentEvidenceCode": {
+      "description": "Optional agent evidence that was dropped so the mandatory report is kept.\n\nAn agent report carries a mandatory core (identity, lease, capacity, outcome)\nand optional evidence (NICs, the NAS route, fabric details, readings,\nprogress, diagnostics). Invalid optional evidence is never a reason to refuse\nthe core: the evidence is dropped and one of these words names what was lost,\non the agent that dropped it and on the Controller that received it.",
+      "enum": [
+        "agent_evidence.claim_hint_dropped",
+        "agent_evidence.failure_diagnostics_dropped",
+        "agent_evidence.inventory_fabric_dropped",
+        "agent_evidence.inventory_nas_route_dropped",
+        "agent_evidence.inventory_network_dropped",
+        "agent_evidence.inventory_network_interface_dropped",
+        "agent_evidence.progress_dropped",
+        "agent_evidence.telemetry_reading_dropped"
+      ],
+      "title": "AgentEvidenceCode",
+      "type": "string"
+    },
     "AgentFailureKind": {
       "enum": [
         "temporary-dependency",
@@ -481,6 +496,55 @@
       "title": "AgentFailureResult",
       "type": "object"
     },
+    "AgentGenerationPointer": {
+      "additionalProperties": false,
+      "description": "The active identity generation, switched last when an identity rotates.",
+      "properties": {
+        "generation": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "generation"
+      ],
+      "title": "AgentGenerationPointer",
+      "type": "object"
+    },
+    "AgentIdentityMetadata": {
+      "additionalProperties": false,
+      "description": "The certificate facts persisted beside an agent identity's key.",
+      "properties": {
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "generation": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "serial": {
+          "title": "Serial",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "generation",
+        "node_id",
+        "serial"
+      ],
+      "title": "AgentIdentityMetadata",
+      "type": "object"
+    },
     "AgentInstallResult": {
       "additionalProperties": false,
       "properties": {
@@ -560,6 +624,7 @@
     },
     "AgentProgress": {
       "additionalProperties": false,
+      "description": "The fence is the mandatory lease heartbeat; the progress document is\noptional evidence, dropped when invalid so the lease is still renewed.",
       "properties": {
         "fence": {
           "format": "uuid",
@@ -587,8 +652,54 @@
       "title": "AgentProgress",
       "type": "object"
     },
+    "AgentReadinessReceipt": {
+      "additionalProperties": false,
+      "description": "The Controller-accepted proof that this exact agent process is running.",
+      "properties": {
+        "accepted_at": {
+          "format": "date-time",
+          "title": "Accepted At",
+          "type": "string"
+        },
+        "boot_id": {
+          "title": "Boot Id",
+          "type": "string"
+        },
+        "pid": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Pid",
+          "type": "integer"
+        },
+        "process_start_ticks": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Process Start Ticks",
+          "type": "integer"
+        },
+        "runtime_identity": {
+          "$ref": "#/$defs/AgentRuntimeIdentity"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "pid",
+        "process_start_ticks",
+        "boot_id",
+        "accepted_at",
+        "runtime_identity"
+      ],
+      "title": "AgentReadinessReceipt",
+      "type": "object"
+    },
     "AgentResult": {
       "additionalProperties": false,
+      "description": "The fence, state and outcome (its failure identity: reason, error code,\nsummary, kind) are mandatory; the diagnostics, the failing stage and the\nhelper's own code are optional evidence, dropped when invalid so the outcome\nis still recorded.",
       "properties": {
         "fence": {
           "format": "uuid",
@@ -1093,6 +1204,7 @@
     },
     "ClaimRequest": {
       "additionalProperties": false,
+      "description": "The claim identity is mandatory; the hostname and the last preflight\nfingerprint are hints, dropped when malformed instead of refusing the claim.",
       "properties": {
         "hostname": {
           "anyOf": [
@@ -2818,6 +2930,127 @@
       "title": "HelperErrorCode",
       "type": "string"
     },
+    "HostArchiveIdentity": {
+      "additionalProperties": false,
+      "description": "The inode a loaded image archive had when it was received.",
+      "properties": {
+        "bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "changed_nanoseconds": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Changed Nanoseconds",
+          "type": "integer"
+        },
+        "changed_seconds": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Changed Seconds",
+          "type": "integer"
+        },
+        "device": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Device",
+          "type": "integer"
+        },
+        "inode": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Inode",
+          "type": "integer"
+        },
+        "modified_nanoseconds": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Modified Nanoseconds",
+          "type": "integer"
+        },
+        "modified_seconds": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Modified Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "device",
+        "inode",
+        "bytes",
+        "modified_seconds",
+        "modified_nanoseconds",
+        "changed_seconds",
+        "changed_nanoseconds"
+      ],
+      "title": "HostArchiveIdentity",
+      "type": "object"
+    },
+    "HostArchiveRuntimeImageReceipt": {
+      "description": "The receipt an agent before the layered image store wrote for an archive.\n\nAn installation that names it keeps starting until it is replaced; the image\nitself is still compared live.",
+      "properties": {
+        "archive_bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Archive Bytes",
+          "type": "integer"
+        },
+        "archive_config_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Archive Config Id",
+          "type": "string"
+        },
+        "archive_identity": {
+          "$ref": "#/$defs/HostArchiveIdentity"
+        },
+        "archive_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Archive Sha256",
+          "type": "string"
+        },
+        "image_config_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Image Config Id",
+          "type": "string"
+        },
+        "local_image_reference": {
+          "title": "Local Image Reference",
+          "type": "string"
+        },
+        "platform_manifest_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Platform Manifest Digest",
+          "type": "string"
+        },
+        "registry_index_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Registry Index Digest",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "registry_index_digest",
+        "platform_manifest_digest",
+        "archive_sha256",
+        "archive_bytes",
+        "archive_identity",
+        "archive_config_id",
+        "image_config_id",
+        "local_image_reference"
+      ],
+      "title": "HostArchiveRuntimeImageReceipt",
+      "type": "object",
+      "x-vonk-ignore-unknown": true
+    },
     "HostHelperGrantClaims": {
       "additionalProperties": false,
       "properties": {
@@ -3057,6 +3290,40 @@
         }
       ]
     },
+    "HostOperationOutcome": {
+      "additionalProperties": false,
+      "description": "The privileged helper's durable result for one operation.",
+      "properties": {
+        "exit_code": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/HostHelperResponseStatus"
+        }
+      },
+      "required": [
+        "schema_version",
+        "status"
+      ],
+      "title": "HostOperationOutcome",
+      "type": "object"
+    },
     "HostRuntimeGrantRequest": {
       "additionalProperties": false,
       "properties": {
@@ -3200,6 +3467,39 @@
         "request_sha256"
       ],
       "title": "HostRuntimeGrantRequest",
+      "type": "object"
+    },
+    "HostRuntimeImageReceipt": {
+      "additionalProperties": false,
+      "description": "The helper's proof that one pinned image was pulled to one local reference.\n\nThe manifest digest identifies the image in the Controller's layered store;\nthe daemon image id identifies the pulled object, so later uses compare it\nlive.",
+      "properties": {
+        "image_config_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Image Config Id",
+          "type": "string"
+        },
+        "local_image_reference": {
+          "title": "Local Image Reference",
+          "type": "string"
+        },
+        "platform_manifest_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Platform Manifest Digest",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 3,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "platform_manifest_digest",
+        "image_config_id",
+        "local_image_reference"
+      ],
+      "title": "HostRuntimeImageReceipt",
       "type": "object"
     },
     "HostRuntimeRequest": {
@@ -3399,6 +3699,91 @@
       "title": "InstallVonkDebOperation",
       "type": "object"
     },
+    "InstallationMetadataEntry": {
+      "additionalProperties": false,
+      "description": "One file of an installation, as it was verified.",
+      "properties": {
+        "ctime_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Ctime Ns",
+          "type": "integer"
+        },
+        "dev": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Dev",
+          "type": "integer"
+        },
+        "ino": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Ino",
+          "type": "integer"
+        },
+        "mtime_ns": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Mtime Ns",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "selection_id": {
+          "title": "Selection Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "selection_id",
+        "path",
+        "sha256",
+        "size_bytes",
+        "dev",
+        "ino",
+        "mtime_ns",
+        "ctime_ns"
+      ],
+      "title": "InstallationMetadataEntry",
+      "type": "object"
+    },
+    "InstallationMetadataReceipt": {
+      "additionalProperties": false,
+      "description": "The verified file set of one installed model.",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/InstallationMetadataEntry"
+          },
+          "title": "Entries",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "entries"
+      ],
+      "title": "InstallationMetadataReceipt",
+      "type": "object"
+    },
     "InstallationNodeState": {
       "description": "The condition of one rank of an installation on its Spark.",
       "enum": [
@@ -3409,6 +3794,84 @@
       ],
       "title": "InstallationNodeState",
       "type": "string"
+    },
+    "InstallationReconciliationCheckpoint": {
+      "additionalProperties": false,
+      "description": "Where a recipe installation's reconciliation stopped, for crash recovery.",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/RecipeReconciliationIdentity"
+        },
+        "installation_device": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Installation Device",
+          "type": "integer"
+        },
+        "installation_inode": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Installation Inode",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": 3,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "prepared",
+            "removing",
+            "complete"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "state",
+        "identity",
+        "installation_device",
+        "installation_inode"
+      ],
+      "title": "InstallationReconciliationCheckpoint",
+      "type": "object"
+    },
+    "InstallationReconciliationReceipt": {
+      "additionalProperties": false,
+      "description": "The helper's record of the installation a reconciliation removes.",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/RecipeReconciliationIdentity"
+        },
+        "installation_device": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Installation Device",
+          "type": "integer"
+        },
+        "installation_inode": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Installation Inode",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": 3,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "identity",
+        "installation_device",
+        "installation_inode"
+      ],
+      "title": "InstallationReconciliationReceipt",
+      "type": "object"
     },
     "InstallationState": {
       "description": "The condition of a recipe installation across its Sparks.",
@@ -3870,7 +4333,7 @@
     },
     "InventoryRequest": {
       "additionalProperties": false,
-      "description": "Canonical Controller body and Rust agent inventory wire shape.",
+      "description": "Canonical Controller body and Rust agent inventory wire shape.\n\nThe mandatory core is the capacity, pool, capability and version evidence.\nThe network interfaces, the NAS route and the fabric pair are optional\nevidence: when one is inconsistent it is dropped (and named in\n``evidence_warnings``) instead of refusing the core.",
       "properties": {
         "artifact_store_read_only": {
           "title": "Artifact Store Read Only",
@@ -4499,6 +4962,513 @@
       "title": "ModelFileState",
       "type": "string"
     },
+    "NasEd25519KeyRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "title": "NasEd25519KeyRequest",
+      "type": "object"
+    },
+    "NasGeneratedSecrets": {
+      "additionalProperties": false,
+      "properties": {
+        "ed25519_pkcs8_pem": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NasEd25519KeyRequest"
+          },
+          "title": "Ed25519 Pkcs8 Pem",
+          "type": "array"
+        },
+        "postgres_urls": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NasPostgresUrlRequest"
+          },
+          "title": "Postgres Urls",
+          "type": "array"
+        },
+        "random_text": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NasRandomTextRequest"
+          },
+          "title": "Random Text",
+          "type": "array"
+        }
+      },
+      "title": "NasGeneratedSecrets",
+      "type": "object"
+    },
+    "NasGroupReadableSecrets": {
+      "additionalProperties": false,
+      "description": "Secrets read by capability-free containers through one supplementary group.",
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "gid": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Gid",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "gid",
+        "files"
+      ],
+      "title": "NasGroupReadableSecrets",
+      "type": "object"
+    },
+    "NasHermesPrompt": {
+      "additionalProperties": false,
+      "properties": {
+        "disabled_value": {
+          "title": "Disabled Value",
+          "type": "string"
+        },
+        "enabled_value": {
+          "title": "Enabled Value",
+          "type": "string"
+        },
+        "env": {
+          "title": "Env",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "env",
+        "prompt",
+        "enabled_value",
+        "disabled_value"
+      ],
+      "title": "NasHermesPrompt",
+      "type": "object"
+    },
+    "NasInstallModes": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "default": "secure-remote",
+          "title": "Default",
+          "type": "string"
+        },
+        "lab_value": {
+          "title": "Lab Value",
+          "type": "string"
+        },
+        "lab_values": {
+          "items": {
+            "$ref": "#/$defs/NasInternalValue"
+          },
+          "title": "Lab Values",
+          "type": "array"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "secure_remote_value": {
+          "title": "Secure Remote Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt",
+        "lab_value",
+        "secure_remote_value",
+        "lab_values"
+      ],
+      "title": "NasInstallModes",
+      "type": "object"
+    },
+    "NasInstallTemplate": {
+      "additionalProperties": false,
+      "description": "The canonical NAS Compose template with its install questions.",
+      "properties": {
+        "docker_compose_yaml": {
+          "title": "Docker Compose Yaml",
+          "type": "string"
+        },
+        "generated_secrets": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NasGeneratedSecrets"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "group_readable_secrets": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NasGroupReadableSecrets"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hermes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NasHermesPrompt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "install_modes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NasInstallModes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "internal_values": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NasInternalValue"
+          },
+          "title": "Internal Values",
+          "type": "array"
+        },
+        "optional_values": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional Values",
+          "type": "array"
+        },
+        "preflight": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Preflight",
+          "type": "array"
+        },
+        "required_values": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NasRequiredValuePrompt"
+          },
+          "title": "Required Values",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "secrets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NasSecretPrompt"
+          },
+          "title": "Secrets",
+          "type": "array"
+        },
+        "step_ca_controller": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NasStepCaControllerRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "schema_version",
+        "docker_compose_yaml"
+      ],
+      "title": "NasInstallTemplate",
+      "type": "object"
+    },
+    "NasInternalValue": {
+      "additionalProperties": false,
+      "description": "An environment value the installer writes without asking.",
+      "properties": {
+        "env": {
+          "title": "Env",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "env",
+        "value"
+      ],
+      "title": "NasInternalValue",
+      "type": "object"
+    },
+    "NasPostgresUrlRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "database": {
+          "title": "Database",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "password_file": {
+          "title": "Password File",
+          "type": "string"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 0,
+          "title": "Port",
+          "type": "integer"
+        },
+        "scheme": {
+          "title": "Scheme",
+          "type": "string"
+        },
+        "username": {
+          "title": "Username",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "password_file",
+        "scheme",
+        "username",
+        "host",
+        "port",
+        "database"
+      ],
+      "title": "NasPostgresUrlRequest",
+      "type": "object"
+    },
+    "NasRandomTextRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "prefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefix"
+        }
+      },
+      "required": [
+        "file",
+        "bytes"
+      ],
+      "title": "NasRandomTextRequest",
+      "type": "object"
+    },
+    "NasRequiredValuePrompt": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "env": {
+          "title": "Env",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "validation": {
+          "default": "non_empty",
+          "enum": [
+            "non_empty",
+            "ipv4",
+            "cidr_list",
+            "optional_cidr_list",
+            "hostname"
+          ],
+          "title": "Validation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "env",
+        "prompt"
+      ],
+      "title": "NasRequiredValuePrompt",
+      "type": "object"
+    },
+    "NasSecretPrompt": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "secure_remote_only": {
+          "default": false,
+          "title": "Secure Remote Only",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "file",
+        "prompt"
+      ],
+      "title": "NasSecretPrompt",
+      "type": "object"
+    },
+    "NasStepCaControllerFiles": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_config": {
+          "title": "Ca Config",
+          "type": "string"
+        },
+        "controller_server_certificate": {
+          "title": "Controller Server Certificate",
+          "type": "string"
+        },
+        "controller_server_private_key": {
+          "title": "Controller Server Private Key",
+          "type": "string"
+        },
+        "intermediate_certificate": {
+          "title": "Intermediate Certificate",
+          "type": "string"
+        },
+        "intermediate_private_key": {
+          "title": "Intermediate Private Key",
+          "type": "string"
+        },
+        "password": {
+          "title": "Password",
+          "type": "string"
+        },
+        "provisioner_private_jwk": {
+          "title": "Provisioner Private Jwk",
+          "type": "string"
+        },
+        "provisioner_public_jwk": {
+          "title": "Provisioner Public Jwk",
+          "type": "string"
+        },
+        "root_certificate": {
+          "title": "Root Certificate",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root_certificate",
+        "intermediate_certificate",
+        "intermediate_private_key",
+        "controller_server_certificate",
+        "controller_server_private_key",
+        "provisioner_private_jwk",
+        "provisioner_public_jwk",
+        "ca_config",
+        "password"
+      ],
+      "title": "NasStepCaControllerFiles",
+      "type": "object"
+    },
+    "NasStepCaControllerRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "$ref": "#/$defs/NasStepCaControllerFiles"
+        },
+        "hostname_env": {
+          "title": "Hostname Env",
+          "type": "string"
+        },
+        "password_bytes": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Password Bytes",
+          "type": "integer"
+        },
+        "provisioner_name": {
+          "title": "Provisioner Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hostname_env",
+        "provisioner_name",
+        "password_bytes",
+        "files"
+      ],
+      "title": "NasStepCaControllerRequest",
+      "type": "object"
+    },
     "NetworkInterface": {
       "additionalProperties": false,
       "description": "One NIC as the agent reads it from sysfs.",
@@ -4512,6 +5482,7 @@
             "wired",
             "wifi",
             "fabric",
+            "tunnel",
             "other"
           ],
           "title": "Kind",
@@ -5420,6 +6391,19 @@
       "title": "PackageActivationGrantRequest",
       "type": "object"
     },
+    "PackageActivationPhase": {
+      "description": "Where a package activation transaction stands.",
+      "enum": [
+        "armed",
+        "activation_failed",
+        "acknowledged",
+        "rolling_back",
+        "rolled_back",
+        "rollback_failed"
+      ],
+      "title": "PackageActivationPhase",
+      "type": "string"
+    },
     "PackageActivationReceipt": {
       "additionalProperties": false,
       "properties": {
@@ -5461,16 +6445,7 @@
           "type": "string"
         },
         "phase": {
-          "enum": [
-            "armed",
-            "activation_failed",
-            "acknowledged",
-            "rolling_back",
-            "rolled_back",
-            "rollback_failed"
-          ],
-          "title": "Phase",
-          "type": "string"
+          "$ref": "#/$defs/PackageActivationPhase"
         },
         "schema_version": {
           "const": 2,
@@ -5582,6 +6557,78 @@
         "helper_sha256"
       ],
       "title": "PackageRollbackSource",
+      "type": "object"
+    },
+    "PackageRollbackTransaction": {
+      "additionalProperties": false,
+      "description": "The root-custody package activation transaction, restored after a crash.",
+      "properties": {
+        "candidate_binary_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Binary Sha256",
+          "type": "string"
+        },
+        "candidate_helper_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Helper Sha256",
+          "type": "string"
+        },
+        "candidate_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Sha256",
+          "type": "string"
+        },
+        "candidate_version": {
+          "title": "Candidate Version",
+          "type": "string"
+        },
+        "created_at": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Created At",
+          "type": "integer"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "outcome": {
+          "title": "Outcome",
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/PackageActivationPhase"
+        },
+        "rollback": {
+          "$ref": "#/$defs/PackageRollbackAuthority"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "updated_at": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Updated At",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "node_id",
+        "candidate_sha256",
+        "candidate_version",
+        "candidate_binary_sha256",
+        "candidate_helper_sha256",
+        "rollback",
+        "phase",
+        "created_at",
+        "updated_at",
+        "outcome"
+      ],
+      "title": "PackageRollbackTransaction",
       "type": "object"
     },
     "PlacementInstallState": {
@@ -5717,6 +6764,9 @@
         "admission_code": {
           "$ref": "#/$defs/AdmissionCode"
         },
+        "agent_evidence_code": {
+          "$ref": "#/$defs/AgentEvidenceCode"
+        },
         "artifact_lifecycle_code": {
           "$ref": "#/$defs/ArtifactLifecycleCode"
         },
@@ -5843,6 +6893,7 @@
       },
       "required": [
         "admission_code",
+        "agent_evidence_code",
         "artifact_lifecycle_code",
         "cache_reference_reason",
         "catalog_code",
@@ -7619,6 +8670,8 @@
     "ResourcePlanningCode": {
       "description": "Resource planning (memory, disk, parallelism) refusals and unknowns.",
       "enum": [
+        "resource.envelope_exceeds_capacity",
+        "resource.envelope_unverified",
         "resource.estimate_uncertain",
         "resource.evidence_invalid",
         "resource.evidence_unknown",
@@ -7728,6 +8781,39 @@
       ],
       "title": "RunDegradedReason",
       "type": "string"
+    },
+    "RunLifecycleRecord": {
+      "description": "The lifecycle a running recipe was started with.\n\nTolerant of fields an older or newer agent wrote: an unknown field must not\nmake a retained run unreadable.",
+      "properties": {
+        "installation_id": {
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "placement": {
+          "$ref": "#/$defs/CompiledPlacement"
+        },
+        "run_generation": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Generation"
+        }
+      },
+      "required": [
+        "installation_id",
+        "placement"
+      ],
+      "title": "RunLifecycleRecord",
+      "type": "object",
+      "x-vonk-ignore-unknown": true
     },
     "RunState": {
       "description": "The condition of a recipe run (and of each of its ranks).",
@@ -7901,6 +8987,8 @@
         "run-switch.cleanup-waiting-without-child",
         "run-switch.cleanup-returned-no-evidence",
         "run-switch.resource.capacity_unknown",
+        "run-switch.resource.envelope_exceeds_capacity",
+        "run-switch.resource.envelope_unverified",
         "run-switch.resource.estimate_uncertain",
         "run-switch.resource.evidence_invalid",
         "run-switch.resource.evidence_unknown",
@@ -7941,6 +9029,46 @@
       ],
       "title": "RunSwitchCode",
       "type": "string"
+    },
+    "RuntimeGenerationFence": {
+      "additionalProperties": false,
+      "description": "The highest run generation admitted for one runtime, and whether it ended.",
+      "properties": {
+        "cancelled": {
+          "title": "Cancelled",
+          "type": "boolean"
+        },
+        "highest_generation": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Highest Generation",
+          "type": "integer"
+        },
+        "installation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "runtime_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Runtime Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "installation_id",
+        "runtime_id",
+        "highest_generation",
+        "cancelled"
+      ],
+      "title": "RuntimeGenerationFence",
+      "type": "object"
     },
     "RuntimeImageCode": {
       "description": "Runtime image preparation, receipt and registry problems.",
@@ -8304,6 +9432,45 @@
       "title": "SignedHostHelperGrant",
       "type": "object"
     },
+    "SitePorts": {
+      "additionalProperties": false,
+      "description": "The ports the Spark firewall authorises, read by Controller and setup.",
+      "properties": {
+        "endpoint_host_ports": {
+          "items": {
+            "maximum": 65535,
+            "minimum": 1024,
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Endpoint Host Ports",
+          "type": "array"
+        },
+        "host_endpoint_ports": {
+          "items": {
+            "maximum": 65535,
+            "minimum": 1024,
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Host Endpoint Ports",
+          "type": "array"
+        },
+        "rendezvous_port": {
+          "maximum": 65535,
+          "minimum": 1024,
+          "title": "Rendezvous Port",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "endpoint_host_ports",
+        "host_endpoint_ports",
+        "rendezvous_port"
+      ],
+      "title": "SitePorts",
+      "type": "object"
+    },
     "SourceBundleCode": {
       "description": "Recipe source bundle validation problems.",
       "enum": [
@@ -8472,6 +9639,328 @@
       "title": "SourcePolicyCode",
       "type": "string"
     },
+    "SparkApplyEnvelope": {
+      "additionalProperties": false,
+      "description": "What the privileged phase of the Spark setup applies, in one frame.",
+      "properties": {
+        "caller_uid": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Caller Uid",
+          "type": "integer"
+        },
+        "plan": {
+          "$ref": "#/$defs/SparkApplyOperation"
+        },
+        "release_manifest": {
+          "pattern": "^(?:[0-9a-f]{2})*$",
+          "title": "Release Manifest",
+          "type": "string"
+        },
+        "release_signature": {
+          "pattern": "^(?:[0-9a-f]{2})*$",
+          "title": "Release Signature",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "caller_uid",
+        "release_manifest",
+        "release_signature",
+        "plan"
+      ],
+      "title": "SparkApplyEnvelope",
+      "type": "object"
+    },
+    "SparkApplyFresh": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_pem": {
+          "pattern": "^(?:[0-9a-f]{2})*$",
+          "title": "Ca Pem",
+          "type": "string"
+        },
+        "ca_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Ca Sha256",
+          "type": "string"
+        },
+        "controller_url": {
+          "title": "Controller Url",
+          "type": "string"
+        },
+        "enrollment_url": {
+          "title": "Enrollment Url",
+          "type": "string"
+        },
+        "firewall": {
+          "$ref": "#/$defs/SparkFirewallConfig"
+        },
+        "helper_authority": {
+          "pattern": "^(?:[0-9a-f]{2})*$",
+          "title": "Helper Authority",
+          "type": "string"
+        },
+        "host_mapping": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SparkHostMapping"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "operation": {
+          "const": "fresh",
+          "title": "Operation",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "pairing_token": {
+          "title": "Pairing Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "enrollment_url",
+        "controller_url",
+        "ca_sha256",
+        "ca_pem",
+        "node_id",
+        "pairing_token",
+        "firewall",
+        "helper_authority"
+      ],
+      "title": "SparkApplyFresh",
+      "type": "object"
+    },
+    "SparkApplyOperation": {
+      "discriminator": {
+        "mapping": {
+          "fresh": "#/$defs/SparkApplyFresh",
+          "pair": "#/$defs/SparkApplyPair",
+          "recover": "#/$defs/SparkApplyRecover",
+          "reenroll": "#/$defs/SparkApplyReenroll",
+          "upgrade": "#/$defs/SparkApplyUpgrade"
+        },
+        "propertyName": "operation"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SparkApplyFresh"
+        },
+        {
+          "$ref": "#/$defs/SparkApplyPair"
+        },
+        {
+          "$ref": "#/$defs/SparkApplyReenroll"
+        },
+        {
+          "$ref": "#/$defs/SparkApplyRecover"
+        },
+        {
+          "$ref": "#/$defs/SparkApplyUpgrade"
+        }
+      ]
+    },
+    "SparkApplyPair": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Ca Sha256",
+          "type": "string"
+        },
+        "enrollment_url": {
+          "title": "Enrollment Url",
+          "type": "string"
+        },
+        "operation": {
+          "const": "pair",
+          "title": "Operation",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "pairing_token": {
+          "title": "Pairing Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "enrollment_url",
+        "ca_sha256",
+        "pairing_token"
+      ],
+      "title": "SparkApplyPair",
+      "type": "object"
+    },
+    "SparkApplyRecover": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "recover",
+          "title": "Operation",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "SparkApplyRecover",
+      "type": "object"
+    },
+    "SparkApplyReenroll": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Ca Sha256",
+          "type": "string"
+        },
+        "enrollment_url": {
+          "title": "Enrollment Url",
+          "type": "string"
+        },
+        "operation": {
+          "const": "reenroll",
+          "title": "Operation",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "pairing_token": {
+          "title": "Pairing Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "enrollment_url",
+        "ca_sha256",
+        "pairing_token"
+      ],
+      "title": "SparkApplyReenroll",
+      "type": "object"
+    },
+    "SparkApplyUpgrade": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "upgrade",
+          "title": "Operation",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "SparkApplyUpgrade",
+      "type": "object"
+    },
+    "SparkFirewallConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "endpoint_host_ports": {
+          "items": {
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Endpoint Host Ports",
+          "type": "array"
+        },
+        "fabric_bandwidth_mbps": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Fabric Bandwidth Mbps",
+          "type": "integer"
+        },
+        "host_endpoint_ports": {
+          "items": {
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Host Endpoint Ports",
+          "type": "array"
+        },
+        "nas_management_ip": {
+          "format": "ip",
+          "title": "Nas Management Ip",
+          "type": "string"
+        },
+        "node_fabric_ip": {
+          "format": "ip",
+          "title": "Node Fabric Ip",
+          "type": "string"
+        },
+        "node_management_ip": {
+          "format": "ip",
+          "title": "Node Management Ip",
+          "type": "string"
+        },
+        "peer_fabric_ip": {
+          "format": "ip",
+          "title": "Peer Fabric Ip",
+          "type": "string"
+        },
+        "rendezvous_port": {
+          "maximum": 65535,
+          "minimum": 0,
+          "title": "Rendezvous Port",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "nas_management_ip",
+        "node_management_ip",
+        "node_fabric_ip",
+        "peer_fabric_ip",
+        "endpoint_host_ports",
+        "host_endpoint_ports",
+        "rendezvous_port",
+        "fabric_bandwidth_mbps"
+      ],
+      "title": "SparkFirewallConfig",
+      "type": "object"
+    },
+    "SparkHostMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "title": "Address",
+          "type": "string"
+        },
+        "hostnames": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Hostnames",
+          "type": "array"
+        }
+      },
+      "required": [
+        "address",
+        "hostnames"
+      ],
+      "title": "SparkHostMapping",
+      "type": "object"
+    },
     "StateAlias": {
       "description": "The retired spellings of a stored lifecycle state.\n\nThey are accepted as input for one release (API filters, CLI arguments) and\nadopted when an old row is read; nothing writes them any more.  This is the\nonly place the words may be spelled: the vocabulary ratchet allows them\nnowhere else.",
       "enum": [
@@ -8612,6 +10101,7 @@
     },
     "TelemetrySample": {
       "additionalProperties": false,
+      "description": "One host sample. The capacity scalars are the core; the 4.1 readings\n(temperature, CPU clocks) are optional evidence dropped when invalid.",
       "properties": {
         "boot_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -8907,9 +10397,12 @@
     "AgentClaim": "vonk_agent_protocol.contracts.AgentClaim",
     "AgentDirective": "vonk_agent_protocol.contracts.AgentDirective",
     "AgentFailureResult": "vonk_agent_protocol.contracts.AgentFailureResult",
+    "AgentGenerationPointer": "vonk_agent_protocol.agent_state.AgentGenerationPointer",
+    "AgentIdentityMetadata": "vonk_agent_protocol.agent_state.AgentIdentityMetadata",
     "AgentInstallResult": "vonk_agent_protocol.contracts.AgentInstallResult",
     "AgentPackageSource": "vonk_agent_protocol.package_source.AgentPackageSource",
     "AgentProgress": "vonk_agent_protocol.contracts.AgentProgress",
+    "AgentReadinessReceipt": "vonk_agent_protocol.agent_state.AgentReadinessReceipt",
     "AgentResult": "vonk_agent_protocol.contracts.AgentResult",
     "AgentRuntimeIdentity": "vonk_agent_protocol.claims.AgentRuntimeIdentity",
     "AgentUpgradeGrantRequest": "vonk_control.agent_api.AgentUpgradeGrantRequest",
@@ -8948,14 +10441,22 @@
     "FailureDiagnostics": "vonk_agent_protocol.failure_evidence.FailureDiagnostics",
     "FailureLogTail": "vonk_agent_protocol.failure_evidence.FailureLogTail",
     "FailureProperty": "vonk_agent_protocol.failure_evidence.FailureProperty",
+    "HostArchiveIdentity": "vonk_agent_protocol.agent_state.HostArchiveIdentity",
+    "HostArchiveRuntimeImageReceipt": "vonk_agent_protocol.agent_state.HostArchiveRuntimeImageReceipt",
     "HostHelperGrantClaims": "vonk_agent_protocol.host_helper.HostHelperGrantClaims",
     "HostHelperGrantResponse": "vonk_control.agent_api.HostHelperGrantResponse",
     "HostHelperProcessLogs": "vonk_agent_protocol.helper_response.HostHelperProcessLogs",
     "HostHelperResponse": "vonk_agent_protocol.helper_response.HostHelperResponse",
     "HostHelperSignature": "vonk_agent_protocol.host_helper.HostHelperSignature",
+    "HostOperationOutcome": "vonk_agent_protocol.agent_state.HostOperationOutcome",
     "HostRuntimeGrantRequest": "vonk_control.agent_api.HostRuntimeGrantRequest",
+    "HostRuntimeImageReceipt": "vonk_agent_protocol.agent_state.HostRuntimeImageReceipt",
     "HostRuntimeRequest": "vonk_agent_protocol.host_helper.HostRuntimeRequest",
     "InstallVonkDebOperation": "vonk_agent_protocol.host_helper.InstallVonkDebOperation",
+    "InstallationMetadataEntry": "vonk_agent_protocol.agent_state.InstallationMetadataEntry",
+    "InstallationMetadataReceipt": "vonk_agent_protocol.agent_state.InstallationMetadataReceipt",
+    "InstallationReconciliationCheckpoint": "vonk_agent_protocol.agent_state.InstallationReconciliationCheckpoint",
+    "InstallationReconciliationReceipt": "vonk_agent_protocol.agent_state.InstallationReconciliationReceipt",
     "InstallerAcceptanceBaselineRelease": "vonk_agent_protocol.installer_release.InstallerAcceptanceBaselineRelease",
     "InstallerBaselineArtifacts": "vonk_agent_protocol.installer_release.InstallerBaselineArtifacts",
     "InstallerBaselineBootstraps": "vonk_agent_protocol.installer_release.InstallerBaselineBootstraps",
@@ -8971,6 +10472,19 @@
     "InventoryRequest": "vonk_agent_protocol.inventory.InventoryRequest",
     "IssuedCertificateResponse": "vonk_agent_protocol.enrollment.IssuedCertificateResponse",
     "LifecycleVocabulary": "vonk_agent_protocol.lifecycle_vocabulary.LifecycleVocabulary",
+    "NasEd25519KeyRequest": "vonk_agent_protocol.installer_setup.NasEd25519KeyRequest",
+    "NasGeneratedSecrets": "vonk_agent_protocol.installer_setup.NasGeneratedSecrets",
+    "NasGroupReadableSecrets": "vonk_agent_protocol.installer_setup.NasGroupReadableSecrets",
+    "NasHermesPrompt": "vonk_agent_protocol.installer_setup.NasHermesPrompt",
+    "NasInstallModes": "vonk_agent_protocol.installer_setup.NasInstallModes",
+    "NasInstallTemplate": "vonk_agent_protocol.installer_setup.NasInstallTemplate",
+    "NasInternalValue": "vonk_agent_protocol.installer_setup.NasInternalValue",
+    "NasPostgresUrlRequest": "vonk_agent_protocol.installer_setup.NasPostgresUrlRequest",
+    "NasRandomTextRequest": "vonk_agent_protocol.installer_setup.NasRandomTextRequest",
+    "NasRequiredValuePrompt": "vonk_agent_protocol.installer_setup.NasRequiredValuePrompt",
+    "NasSecretPrompt": "vonk_agent_protocol.installer_setup.NasSecretPrompt",
+    "NasStepCaControllerFiles": "vonk_agent_protocol.installer_setup.NasStepCaControllerFiles",
+    "NasStepCaControllerRequest": "vonk_agent_protocol.installer_setup.NasStepCaControllerRequest",
     "NetworkInterface": "vonk_agent_protocol.inventory.NetworkInterface",
     "OperationCheckpoint": "vonk_agent_protocol.wire_model.OperationCheckpoint",
     "OperationMemberProgress": "vonk_agent_protocol.wire_model.OperationMemberProgress",
@@ -8984,6 +10498,7 @@
     "PackageActivationReceipt": "vonk_agent_protocol.package_upgrade.PackageActivationReceipt",
     "PackageRollbackAuthority": "vonk_agent_protocol.package_upgrade.PackageRollbackAuthority",
     "PackageRollbackSource": "vonk_agent_protocol.package_upgrade.PackageRollbackSource",
+    "PackageRollbackTransaction": "vonk_agent_protocol.agent_state.PackageRollbackTransaction",
     "ReasonCodeVocabulary": "vonk_agent_protocol.reason_codes.ReasonCodeVocabulary",
     "RecipeBuildAdapter": "vonk_agent_protocol.build_import.RecipeBuildAdapter",
     "RecipeBuildAdapterDefinition": "vonk_agent_protocol.build_import.RecipeBuildAdapterDefinition",
@@ -9024,14 +10539,25 @@
     "RecipeUninstallResult": "vonk_agent_protocol.recipe_operations.RecipeUninstallResult",
     "RenewRequest": "vonk_agent_protocol.enrollment.RenewRequest",
     "RequestValidationProblem": "vonk_control.operation_api.RequestValidationProblem",
+    "RunLifecycleRecord": "vonk_agent_protocol.agent_state.RunLifecycleRecord",
+    "RuntimeGenerationFence": "vonk_agent_protocol.agent_state.RuntimeGenerationFence",
     "RuntimePreflightFinding": "vonk_agent_protocol.runtime_preflight.RuntimePreflightFinding",
     "RuntimePreflightRequest": "vonk_agent_protocol.runtime_preflight.RuntimePreflightRequest",
     "RuntimePreflightResult": "vonk_agent_protocol.runtime_preflight.RuntimePreflightResult",
     "SecurityRefusal": "vonk_agent_protocol.outcome.SecurityRefusal",
     "SignedHostHelperGrant": "vonk_agent_protocol.host_helper.SignedHostHelperGrant",
+    "SitePorts": "vonk_agent_protocol.installer_setup.SitePorts",
     "SourceBundleDigestManifest": "vonk_agent_protocol.source_bundles.SourceBundleDigestManifest",
     "SourceBundleFile": "vonk_agent_protocol.source_bundles.SourceBundleFile",
     "SourceBundleManifest": "vonk_agent_protocol.source_bundles.SourceBundleManifest",
+    "SparkApplyEnvelope": "vonk_agent_protocol.installer_setup.SparkApplyEnvelope",
+    "SparkApplyFresh": "vonk_agent_protocol.installer_setup.SparkApplyFresh",
+    "SparkApplyPair": "vonk_agent_protocol.installer_setup.SparkApplyPair",
+    "SparkApplyRecover": "vonk_agent_protocol.installer_setup.SparkApplyRecover",
+    "SparkApplyReenroll": "vonk_agent_protocol.installer_setup.SparkApplyReenroll",
+    "SparkApplyUpgrade": "vonk_agent_protocol.installer_setup.SparkApplyUpgrade",
+    "SparkFirewallConfig": "vonk_agent_protocol.installer_setup.SparkFirewallConfig",
+    "SparkHostMapping": "vonk_agent_protocol.installer_setup.SparkHostMapping",
     "SupervisorAcknowledgement": "vonk_agent_protocol.route_activation.SupervisorAcknowledgement",
     "TelemetryRequest": "vonk_agent_protocol.telemetry.TelemetryRequest",
     "TelemetrySample": "vonk_agent_protocol.telemetry.TelemetrySample",
@@ -9044,9 +10570,12 @@
     "AgentClaim": "#/$defs/AgentClaim",
     "AgentDirective": "#/$defs/AgentDirective",
     "AgentFailureResult": "#/$defs/AgentFailureResult",
+    "AgentGenerationPointer": "#/$defs/AgentGenerationPointer",
+    "AgentIdentityMetadata": "#/$defs/AgentIdentityMetadata",
     "AgentInstallResult": "#/$defs/AgentInstallResult",
     "AgentPackageSource": "#/$defs/AgentPackageSource",
     "AgentProgress": "#/$defs/AgentProgress",
+    "AgentReadinessReceipt": "#/$defs/AgentReadinessReceipt",
     "AgentResult": "#/$defs/AgentResult",
     "AgentRuntimeIdentity": "#/$defs/AgentRuntimeIdentity",
     "AgentUpgradeGrantRequest": "#/$defs/AgentUpgradeGrantRequest",
@@ -9085,14 +10614,22 @@
     "FailureDiagnostics": "#/$defs/FailureDiagnostics",
     "FailureLogTail": "#/$defs/FailureLogTail",
     "FailureProperty": "#/$defs/FailureProperty",
+    "HostArchiveIdentity": "#/$defs/HostArchiveIdentity",
+    "HostArchiveRuntimeImageReceipt": "#/$defs/HostArchiveRuntimeImageReceipt",
     "HostHelperGrantClaims": "#/$defs/HostHelperGrantClaims",
     "HostHelperGrantResponse": "#/$defs/HostHelperGrantResponse",
     "HostHelperProcessLogs": "#/$defs/HostHelperProcessLogs",
     "HostHelperResponse": "#/$defs/HostHelperResponse",
     "HostHelperSignature": "#/$defs/HostHelperSignature",
+    "HostOperationOutcome": "#/$defs/HostOperationOutcome",
     "HostRuntimeGrantRequest": "#/$defs/HostRuntimeGrantRequest",
+    "HostRuntimeImageReceipt": "#/$defs/HostRuntimeImageReceipt",
     "HostRuntimeRequest": "#/$defs/HostRuntimeRequest",
     "InstallVonkDebOperation": "#/$defs/InstallVonkDebOperation",
+    "InstallationMetadataEntry": "#/$defs/InstallationMetadataEntry",
+    "InstallationMetadataReceipt": "#/$defs/InstallationMetadataReceipt",
+    "InstallationReconciliationCheckpoint": "#/$defs/InstallationReconciliationCheckpoint",
+    "InstallationReconciliationReceipt": "#/$defs/InstallationReconciliationReceipt",
     "InstallerAcceptanceBaselineRelease": "#/$defs/InstallerAcceptanceBaselineRelease",
     "InstallerBaselineArtifacts": "#/$defs/InstallerBaselineArtifacts",
     "InstallerBaselineBootstraps": "#/$defs/InstallerBaselineBootstraps",
@@ -9108,6 +10645,19 @@
     "InventoryRequest": "#/$defs/InventoryRequest",
     "IssuedCertificateResponse": "#/$defs/IssuedCertificateResponse",
     "LifecycleVocabulary": "#/$defs/LifecycleVocabulary",
+    "NasEd25519KeyRequest": "#/$defs/NasEd25519KeyRequest",
+    "NasGeneratedSecrets": "#/$defs/NasGeneratedSecrets",
+    "NasGroupReadableSecrets": "#/$defs/NasGroupReadableSecrets",
+    "NasHermesPrompt": "#/$defs/NasHermesPrompt",
+    "NasInstallModes": "#/$defs/NasInstallModes",
+    "NasInstallTemplate": "#/$defs/NasInstallTemplate",
+    "NasInternalValue": "#/$defs/NasInternalValue",
+    "NasPostgresUrlRequest": "#/$defs/NasPostgresUrlRequest",
+    "NasRandomTextRequest": "#/$defs/NasRandomTextRequest",
+    "NasRequiredValuePrompt": "#/$defs/NasRequiredValuePrompt",
+    "NasSecretPrompt": "#/$defs/NasSecretPrompt",
+    "NasStepCaControllerFiles": "#/$defs/NasStepCaControllerFiles",
+    "NasStepCaControllerRequest": "#/$defs/NasStepCaControllerRequest",
     "NetworkInterface": "#/$defs/NetworkInterface",
     "OperationCheckpoint": "#/$defs/OperationCheckpoint",
     "OperationMemberProgress": "#/$defs/OperationMemberProgress",
@@ -9121,6 +10671,7 @@
     "PackageActivationReceipt": "#/$defs/PackageActivationReceipt",
     "PackageRollbackAuthority": "#/$defs/PackageRollbackAuthority",
     "PackageRollbackSource": "#/$defs/PackageRollbackSource",
+    "PackageRollbackTransaction": "#/$defs/PackageRollbackTransaction",
     "ReasonCodeVocabulary": "#/$defs/ReasonCodeVocabulary",
     "RecipeBuildAdapter": "#/$defs/RecipeBuildAdapter",
     "RecipeBuildAdapterDefinition": "#/$defs/RecipeBuildAdapterDefinition",
@@ -9161,14 +10712,25 @@
     "RecipeUninstallResult": "#/$defs/RecipeUninstallResult",
     "RenewRequest": "#/$defs/RenewRequest",
     "RequestValidationProblem": "#/$defs/RequestValidationProblem",
+    "RunLifecycleRecord": "#/$defs/RunLifecycleRecord",
+    "RuntimeGenerationFence": "#/$defs/RuntimeGenerationFence",
     "RuntimePreflightFinding": "#/$defs/RuntimePreflightFinding",
     "RuntimePreflightRequest": "#/$defs/RuntimePreflightRequest",
     "RuntimePreflightResult": "#/$defs/RuntimePreflightResult",
     "SecurityRefusal": "#/$defs/SecurityRefusal",
     "SignedHostHelperGrant": "#/$defs/SignedHostHelperGrant",
+    "SitePorts": "#/$defs/SitePorts",
     "SourceBundleDigestManifest": "#/$defs/SourceBundleDigestManifest",
     "SourceBundleFile": "#/$defs/SourceBundleFile",
     "SourceBundleManifest": "#/$defs/SourceBundleManifest",
+    "SparkApplyEnvelope": "#/$defs/SparkApplyEnvelope",
+    "SparkApplyFresh": "#/$defs/SparkApplyFresh",
+    "SparkApplyPair": "#/$defs/SparkApplyPair",
+    "SparkApplyRecover": "#/$defs/SparkApplyRecover",
+    "SparkApplyReenroll": "#/$defs/SparkApplyReenroll",
+    "SparkApplyUpgrade": "#/$defs/SparkApplyUpgrade",
+    "SparkFirewallConfig": "#/$defs/SparkFirewallConfig",
+    "SparkHostMapping": "#/$defs/SparkHostMapping",
     "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
     "TelemetryRequest": "#/$defs/TelemetryRequest",
     "TelemetrySample": "#/$defs/TelemetrySample",

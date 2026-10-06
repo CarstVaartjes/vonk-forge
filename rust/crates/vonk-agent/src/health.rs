@@ -1,22 +1,7 @@
 use std::{net::IpAddr, time::Duration};
 
 use chrono::{DateTime, FixedOffset, Utc};
-use serde::Serialize;
 use thiserror::Error;
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct HealthEvidence {
-    pub recipe_revision_id: String,
-    pub recipe_content_sha256: String,
-    pub image_digest: String,
-    pub artifact_set_digest: String,
-    pub model_identity: String,
-    pub rank: u32,
-    pub world_size: u32,
-    pub endpoint: String,
-    pub memory_reservation_bytes: u64,
-    pub ready: bool,
-}
 
 #[derive(Debug, Error)]
 pub enum HealthError {

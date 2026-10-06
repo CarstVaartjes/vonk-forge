@@ -16,7 +16,10 @@ bookkeeping that should become *unknown*: observe, reconcile, continue.
 
 ``python -m control.tests.blocker_classifier --summary`` prints the counts per
 category and rule; ``--classify-new`` appends the proposed families; ``--demote-unproven`` moves
-every already-retried unknown-outcome site without a proven retry loop to debt.
+every already-retried unknown-outcome site without a proven retry loop to debt;
+``--promote-proven`` moves every debt site whose retry is proven on every call
+path to its module's ``proven-retry`` family; ``--rebalance`` does both (demote
+first), so the allowlist says exactly what the proof says.
 """
 
 from __future__ import annotations
@@ -43,7 +46,7 @@ from .blocker_boundaries import (
     parsed_modules,
     scan_raises,
 )
-from .blocker_retries import demote_unproven, proven, unknown_classes
+from .blocker_retries import demote_unproven, promote_proven, proven, unknown_classes
 
 SECURITY = BlockerCategory.SECURITY_EDGE.value
 INPUT = BlockerCategory.INPUT_VALIDATION.value
@@ -515,6 +518,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         moved = demote_unproven(document)
         ALLOWLIST_PATH.write_text(dump_document(document), encoding="utf-8")
         print(f"moved {moved} unproven already-retried sites to bookkeeping-debt")
+        return 0
+    if arguments == ["--promote-proven"]:
+        moved = promote_proven(document)
+        ALLOWLIST_PATH.write_text(dump_document(document), encoding="utf-8")
+        print(f"moved {moved} proven unknown-outcome sites out of bookkeeping-debt")
+        return 0
+    if arguments == ["--rebalance"]:
+        demoted = demote_unproven(document)
+        promoted = promote_proven(document)
+        ALLOWLIST_PATH.write_text(dump_document(document), encoding="utf-8")
+        print(f"moved {demoted} sites to bookkeeping-debt and {promoted} out of it")
         return 0
     print(__doc__)
     return 2

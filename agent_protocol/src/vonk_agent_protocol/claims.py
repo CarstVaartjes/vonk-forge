@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field, model_validator
 
+from .optional_evidence import (
+    EvidenceGroup,
+    OptionalEvidenceModel,
+    fail_open_on_optional_evidence,
+)
 from .package_upgrade import PackageActivationReceipt
+from .reason_codes import AgentEvidenceCode
 from .wire_model import Digest, WireModel
 
 
@@ -26,7 +32,17 @@ class AgentRuntimeIdentity(WireModel):
 AGENT_PROTOCOL_VERSION = 4
 
 
-class ClaimRequest(WireModel):
+class ClaimRequest(OptionalEvidenceModel, WireModel):
+    """The claim identity is mandatory; the hostname and the last preflight
+    fingerprint are hints, dropped when malformed instead of refusing the claim."""
+
+    EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
+        EvidenceGroup(
+            AgentEvidenceCode.CLAIM_HINT_DROPPED,
+            (("hostname",), ("preflight_fingerprint",)),
+        ),
+    )
+
     hostname: str | None = Field(
         default=None,
         min_length=1,
@@ -56,3 +72,5 @@ class ClaimRequest(WireModel):
                     "Controller; reinstall the Spark agent"
                 )
         return value
+
+    drop_invalid_optional_evidence = fail_open_on_optional_evidence()

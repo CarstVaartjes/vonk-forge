@@ -1,12 +1,13 @@
 import {useEffect, useRef} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import {AdminMenu} from "./admin-menu";
+import type {CliTokenDownload} from "../api/types";
 import {ActivityIcon, FleetIcon, LibraryIcon} from "./icons";
 
 export type AppRoute = "fleet" | "library" | "keys" | "activity";
 
 type Operator = {
-  onDownloadCliToken(): Promise<{expiresAt: string}>;
+  onDownloadCliToken(): Promise<CliTokenDownload>;
   logoutError: string;
   loggingOut: boolean;
   onLogout(): void;

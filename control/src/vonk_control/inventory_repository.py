@@ -124,8 +124,8 @@ class InventoryRepository:
             memory_pool=validated.memory_pool,
             artifact_store_read_only=value.artifact_store_read_only,
             capabilities=sorted(value.capabilities),
-            fabric_address=value.fabric_address,
-            fabric_bandwidth_mbps=value.fabric_bandwidth_mbps,
+            fabric_address=validated.fabric_address,
+            fabric_bandwidth_mbps=validated.fabric_bandwidth_mbps,
             nvidia_driver_version=value.nvidia_driver_version,
             container_runtime_version=value.container_runtime_version,
             network_interfaces=(

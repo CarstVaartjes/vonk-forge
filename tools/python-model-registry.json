@@ -1,0 +1,347 @@
+{
+  "schema": 1,
+  "note": "Modules allowed to define Pydantic data models; one model per name and field set across them.",
+  "modules": [
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/agent_state.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/build_import.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/claims.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/compiled_execution_plan.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/contracts.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/distribution.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/enrollment.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/failure_evidence.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/helper_response.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/host_helper.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/installer_release.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/installer_setup.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/inventory.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/job_inputs.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/optional_evidence.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/outcome.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/package_source.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/package_upgrade.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/reason_codes.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/recipe_jobs.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/recipe_observations.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/recipe_operations.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/route_activation.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/runtime_preflight.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/source_bundles.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/telemetry.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/wire_model.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "control/src/vonk_control/agent_api.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/artifact_blob_store.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/artifact_job_api.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/artifact_job_evidence.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/artifact_jobs.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/artifact_maintenance.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/auth_api.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/cache_removal_review.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/catalog_api.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/catalog_revision_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/catalog_sync_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/compiled_artifact_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/compiled_execution_plan.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/distribution_assignment.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/endpoint_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/enrollment_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/failure_evidence.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_event_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_projection.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_stream_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/gateway_keys.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/harnesses/canonical_metadata.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/job_documents.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/library_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/lifecycle_preflight.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/model_cache.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/model_cache_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/operation_api.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/operation_blockers.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/operation_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/operator_projection_api.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/preparation_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/profile_stop_authority.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/recipe_availability_intent.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/recipe_build_cancellation.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/recipe_execution_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/recipe_image_availability_api.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/recipe_image_removal_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/recipe_lifecycle_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/recipe_packages.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/recipe_update_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/recipe_update_notice.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/run_switch_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/runtime_image_preparation.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/runtime_spec_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/step_ca.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/stored_documents.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/strict_json.py",
+      "kind": "declared",
+      "reason": "base class of the Controller contract models, shared by every *_contract module"
+    },
+    {
+      "module": "control/src/vonk_control/worker_memory_contract.py",
+      "kind": "controller-contract"
+    }
+  ],
+  "allowed_duplicates": []
+}

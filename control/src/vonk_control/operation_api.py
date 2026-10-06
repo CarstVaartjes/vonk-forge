@@ -88,7 +88,11 @@ from .operation_contract import (
 from .operation_progress import aggregate_progress, project_progress
 from .route_runtime import verify_active_route_bundle
 from .state_filters import state_filter
-from .strict_json import StrictJSONModel, read_stored_model, warn_unreadable_once
+from .strict_json import (
+    StrictModel,
+    read_stored_model,
+    warn_unreadable_once,
+)
 
 COMMIT_PATTERN = r"^[0-9a-f]{40}$"
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
@@ -157,10 +161,6 @@ class _ActiveRouteSnapshot:
     owner_generation: int
     publication_generation: int
     plan_digest: str
-
-
-class StrictModel(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class EmptyBody(StrictModel):
@@ -2347,11 +2347,14 @@ def _contract_component_schemas() -> dict[str, dict[str, object]]:
         ReasonCodeVocabulary,
     )
 
+    from .auth_api import CliTokenDownload
+
     _references, document = models_json_schema(
         [
             (LifecycleVocabulary, "validation"),
             (ReasonCodeVocabulary, "validation"),
             (ErrorCatalog, "validation"),
+            (CliTokenDownload, "validation"),
         ],
         ref_template="#/components/schemas/{model}",
     )

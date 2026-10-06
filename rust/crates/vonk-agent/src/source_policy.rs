@@ -3,10 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::compose_document::ComposeDocument;
-use serde::Serialize;
 use vonk_agent_protocol::generated::SourcePolicyCode;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFinding {
     pub code: SourcePolicyCode,
     pub path: String,
@@ -14,7 +13,7 @@ pub struct SourceFinding {
     pub detail: &'static str,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourcePolicyReport {
     pub passed: bool,
     pub dockerfile: String,

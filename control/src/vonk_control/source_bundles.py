@@ -128,13 +128,18 @@ class SourceBundleStore:
         destination = directory / f"{expected_sha256}.tar"
         directory.mkdir(parents=True, exist_ok=True)
         if destination.exists():
-            existing = destination.read_bytes()
-            if _inspect_archive(existing, self._limits).sha256 != expected_sha256:
-                raise SourceBundleError(
-                    SourceBundleCode.STORAGE_COLLISION,
-                    "stored source bundle is inconsistent",
+            try:
+                existing = destination.read_bytes()
+                present = (
+                    _inspect_archive(existing, self._limits).sha256 == expected_sha256
                 )
-            return StoredBundle(destination, manifest, len(existing))
+            except (OSError, SourceBundleError):
+                present = False
+            if present:
+                return StoredBundle(destination, manifest, len(existing))
+            # A stored copy that no longer verifies is damaged data, and the
+            # archive just verified at this ingress is its evidence: it is
+            # replaced atomically below, never trusted and never a collision.
 
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{expected_sha256}.", suffix=".tmp", dir=directory
@@ -220,19 +225,22 @@ class DatabaseSourceBundleStore:
         with self._sessions.begin() as session:
             metadata = session.get(RecipeSourceBundle, expected_sha256)
             stored = session.get(SourceBundleArchive, expected_sha256)
-            if (
-                metadata is not None
-                and parse_source_bundle_manifest(metadata.manifest) != manifest
+            # Stored rows that no longer verify are damaged data, and the archive
+            # just verified at this ingress is their evidence: they are rewritten
+            # from it, never trusted and never a collision.
+            if metadata is not None and not _stored_manifest_matches(
+                metadata.manifest, manifest
             ):
-                raise SourceBundleError(
-                    SourceBundleCode.STORAGE_COLLISION,
-                    "stored source manifest is inconsistent",
-                )
-            if stored is not None and stored.archive != archive:
-                raise SourceBundleError(
-                    SourceBundleCode.STORAGE_COLLISION,
-                    "stored source bundle is inconsistent",
-                )
+                metadata.media_type = "application/vnd.vonk-forge.source-bundle.v1+tar"
+                metadata.archive_bytes = len(archive)
+                metadata.total_bytes = manifest.total_bytes
+                metadata.file_count = len(manifest.files)
+                metadata.storage_key = f"postgres:{manifest.sha256}"
+                metadata.manifest = json.loads(canonical_message(manifest))
+            if stored is not None and not _stored_archive_verifies(
+                stored.archive, expected_sha256, self._limits
+            ):
+                stored.archive = archive
             if stored is not None and metadata is not None:
                 # Verified again just now: a bundle a new revision is about to
                 # name must not look old to the unreferenced-bundle sweep.
@@ -289,6 +297,22 @@ class DatabaseSourceBundleStore:
                 "stored source bundle is inconsistent",
             )
         return _generated_bundle(archive, manifest, self._limits)
+
+
+def _stored_manifest_matches(value: object, manifest: SourceBundleManifest) -> bool:
+    try:
+        return parse_source_bundle_manifest(value) == manifest
+    except SourceBundleError:
+        return False
+
+
+def _stored_archive_verifies(
+    archive: bytes, expected_sha256: str, limits: BundleLimits
+) -> bool:
+    try:
+        return _inspect_archive(archive, limits).sha256 == expected_sha256
+    except SourceBundleError:
+        return False
 
 
 def parse_source_bundle_manifest(value: object) -> SourceBundleManifest:

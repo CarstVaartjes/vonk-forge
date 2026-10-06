@@ -9,7 +9,6 @@ from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import (
     BeforeValidator,
-    ConfigDict,
     Field,
     StringConstraints,
     model_validator,
@@ -49,9 +48,10 @@ from .run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchProfileStopScope,
     RunSwitchReason,
+    SparkGroupNode,
     StopImpact,
 )
-from .strict_json import StrictJSONModel
+from .strict_json import StrictModel
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -190,11 +190,7 @@ FleetProfileEndpointState = Annotated[
 ]
 
 
-class _StrictModel(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-
-
-class FleetProfileEndpointProjectionIssue(_StrictModel):
+class FleetProfileEndpointProjectionIssue(StrictModel):
     """Safe diagnostic for immutable profile history that cannot be read."""
 
     code: Literal[ProfileReasonCode.APPLICATION_INTENT_INVALID]
@@ -225,7 +221,7 @@ class FleetProfileEndpointIntent:
     projection_issue: FleetProfileEndpointProjectionIssue | None = None
 
 
-class FleetProfileEndpointAssignmentView(_StrictModel):
+class FleetProfileEndpointAssignmentView(StrictModel):
     assignment_id: UuidId
     recipe_title: Name
     desired_state: DesiredAssignmentStateField
@@ -250,7 +246,7 @@ class FleetProfileEndpointAssignmentView(_StrictModel):
         return self
 
 
-class FleetProfileEndpointsView(_StrictModel):
+class FleetProfileEndpointsView(StrictModel):
     number: int = Field(ge=1)
     profile_id: UuidId | None = None
     application_id: UuidId | None = None
@@ -274,14 +270,11 @@ class FleetProfileEndpointsView(_StrictModel):
         return self
 
 
-class FleetProfileNode(_StrictModel):
-    node_id: NodeId
-    rank: int = Field(ge=0, le=31)
-    role: Annotated[str, StringConstraints(min_length=1, max_length=64)]
-    endpoint_owner: bool = False
+class FleetProfileNode(SparkGroupNode):
+    """One rank of a profile assignment, the same shape a Spark group names it."""
 
 
-class FleetProfileScope(_StrictModel):
+class FleetProfileScope(StrictModel):
     """Frozen complete fleet boundary for a single execution plan.
 
     User profiles do not author this field.  It is captured from the enrolled
@@ -300,7 +293,7 @@ class FleetProfileScope(_StrictModel):
         return self
 
 
-class FleetProfileAssignmentInput(_StrictModel):
+class FleetProfileAssignmentInput(StrictModel):
     """Permissive autosaved recipe choice, not an execution assignment.
 
     A logical model variant is selected by its canonical identity.  The
@@ -330,7 +323,7 @@ class FleetProfileAssignmentInput(_StrictModel):
         return self
 
 
-class StoredFleetProfileAssignment(_StrictModel):
+class StoredFleetProfileAssignment(StrictModel):
     """Resolved assignment retained in an immutable execution snapshot."""
 
     id: UuidId
@@ -373,7 +366,7 @@ class FleetProfileAssignment(StoredFleetProfileAssignment):
     ) = None
 
 
-class FleetAssignmentModelView(_StrictModel):
+class FleetAssignmentModelView(StrictModel):
     """The model an assignment runs, as the operator reads it."""
 
     selector: str | None = None
@@ -383,7 +376,7 @@ class FleetAssignmentModelView(_StrictModel):
     content_sha256: str | None = None
 
 
-class FleetAssignmentRecipeView(_StrictModel):
+class FleetAssignmentRecipeView(StrictModel):
     """The recipe revision an assignment runs, as the operator reads it."""
 
     selector: str
@@ -392,7 +385,7 @@ class FleetAssignmentRecipeView(_StrictModel):
     revision_id: str | None = None
 
 
-class FleetCacheSummary(_StrictModel):
+class FleetCacheSummary(StrictModel):
     """How many assignments of a profile are cached, missing or unknown."""
 
     cached: int = Field(default=0, ge=0)
@@ -400,7 +393,7 @@ class FleetCacheSummary(_StrictModel):
     unknown: int = Field(default=0, ge=0)
 
 
-class FleetNodeView(_StrictModel):
+class FleetNodeView(StrictModel):
     """One Spark of the fleet and whether the profile assigns it."""
 
     selector: str
@@ -408,7 +401,7 @@ class FleetNodeView(_StrictModel):
     state: str
 
 
-class FleetProfileAssignmentView(_StrictModel):
+class FleetProfileAssignmentView(StrictModel):
     """Canonical read projection of one logical profile assignment."""
 
     selector: Alias
@@ -437,7 +430,7 @@ class FleetProfileAssignmentView(_StrictModel):
         return self
 
 
-class FleetProfileDefinition(_StrictModel):
+class FleetProfileDefinition(StrictModel):
     """Saved authoring intent, independent of execution and cache projections."""
 
     name: Name = "Default"
@@ -479,7 +472,7 @@ class FleetProfileInput(FleetProfileDefinition):
     expected_revision: int = Field(default=0, ge=0)
 
 
-class FleetProfileDefinitionView(_StrictModel):
+class FleetProfileDefinitionView(StrictModel):
     id: UuidId | None
     number: int = Field(ge=1)
     revision: int = Field(ge=0)
@@ -494,7 +487,7 @@ class FleetProfileDefinitionView(_StrictModel):
         return self
 
 
-class FleetProfileView(_StrictModel):
+class FleetProfileView(StrictModel):
     id: UuidId
     number: int = Field(ge=1)
     # Zero until the first save, matching the definition view and PUT's
@@ -519,18 +512,18 @@ class FleetProfileView(_StrictModel):
     updated_at: datetime
 
 
-class FleetProfileList(_StrictModel):
+class FleetProfileList(StrictModel):
     generated_at: datetime
     profiles: list[FleetProfileView] = Field(max_length=128)
 
 
-class FleetProfileReason(_StrictModel):
+class FleetProfileReason(StrictModel):
     code: Annotated[str, StringConstraints(min_length=1, max_length=80)]
     detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
     severity: Literal["info", "warning", "error"]
 
 
-class FleetProfileAssignmentPreview(_StrictModel):
+class FleetProfileAssignmentPreview(StrictModel):
     assignment_id: UuidId
     recipe_revision_id: UuidId
     recipe_title: Name
@@ -548,7 +541,7 @@ class FleetProfileAssignmentPreview(_StrictModel):
         return self
 
 
-class FleetProfileScopePreview(_StrictModel):
+class FleetProfileScopePreview(StrictModel):
     node_ids: list[NodeId] = Field(max_length=32)
     idle_node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
 
@@ -563,7 +556,7 @@ class FleetProfileScopePreview(_StrictModel):
         return self
 
 
-class FleetProfilePlanStep(_StrictModel):
+class FleetProfilePlanStep(StrictModel):
     index: int = Field(ge=0, le=1023)
     kind: FleetProfilePlanStepKind
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
@@ -576,7 +569,7 @@ class FleetProfilePlanStep(_StrictModel):
         return self
 
 
-class FleetProfilePlanSummary(_StrictModel):
+class FleetProfilePlanSummary(StrictModel):
     already_correct: int = Field(ge=0, le=64)
     placements: int = Field(ge=0, le=64)
     builds: int = Field(ge=0, le=64)
@@ -588,17 +581,17 @@ class FleetProfilePlanSummary(_StrictModel):
     blockers: int = Field(ge=0, le=2048)
 
 
-class FleetProfileAssignmentPreparation(_StrictModel):
+class FleetProfileAssignmentPreparation(StrictModel):
     assignment_id: UuidId
     preparation: RolloutPreparation
 
 
-class FleetProfileAssignmentAssessment(_StrictModel):
+class FleetProfileAssignmentAssessment(StrictModel):
     assignment_id: UuidId
     assessment: RunSwitchAssessment
 
 
-class FleetProfileResourceRequirement(_StrictModel):
+class FleetProfileResourceRequirement(StrictModel):
     """Stable demand and eligibility, separate from observed free capacity."""
 
     node_id: NodeId
@@ -612,7 +605,7 @@ class FleetProfileResourceRequirement(_StrictModel):
     resource_demand: ResourceDemandEvidence | None
 
 
-class FleetProfileAdmissionDecision(_StrictModel):
+class FleetProfileAdmissionDecision(StrictModel):
     assignment_id: UuidId
     alias: Alias | None
     allowed: bool
@@ -655,7 +648,7 @@ class FleetProfileAdmissionDecision(_StrictModel):
         )
 
 
-class FleetProfileCompatibilityDecision(_StrictModel):
+class FleetProfileCompatibilityDecision(StrictModel):
     kind: Literal["engine-generation", "jit", "tuning"]
     stage: Literal["controller-prepare", "target-prepare"]
     compatibility: CompatibilityIdentity
@@ -664,7 +657,7 @@ class FleetProfileCompatibilityDecision(_StrictModel):
     ready: bool
 
 
-class FleetProfilePreparationDecision(_StrictModel):
+class FleetProfilePreparationDecision(StrictModel):
     """Exact assets and reuse decisions; byte counters are observations only."""
 
     assignment_id: UuidId
@@ -740,7 +733,7 @@ class FleetProfilePreparationDecision(_StrictModel):
         )
 
 
-class FleetProfileRunEffect(_StrictModel):
+class FleetProfileRunEffect(StrictModel):
     run_id: UuidId
     installation_id: UuidId
     alias: Alias
@@ -765,19 +758,19 @@ class FleetProfileRunEffect(_StrictModel):
         return self
 
 
-class FleetProfileInstallationEffect(_StrictModel):
+class FleetProfileInstallationEffect(StrictModel):
     installation_id: UuidId
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     action: Literal["keep", "remove"]
 
 
-class FleetProfilePendingEffect(_StrictModel):
+class FleetProfilePendingEffect(StrictModel):
     kind: Literal["job", "profile-application"]
     id: UuidId
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
 
 
-class FleetProfileEffects(_StrictModel):
+class FleetProfileEffects(StrictModel):
     """Identified live effects, including complete distributed membership."""
 
     runs: list[FleetProfileRunEffect]
@@ -785,7 +778,7 @@ class FleetProfileEffects(_StrictModel):
     superseded: list[FleetProfilePendingEffect]
 
 
-class FleetProfileChildProgress(_StrictModel):
+class FleetProfileChildProgress(StrictModel):
     """Typed progress emitted by the profile-owned Run switch adapter."""
 
     operation: OperationProgress | None = None
@@ -815,7 +808,7 @@ class FleetProfileChildProgress(_StrictModel):
 FleetProfileSwitchChildKind = Literal["install", "run", "stop", "cleanup"]
 
 
-class FleetProfileSwitchQueueItem(_StrictModel):
+class FleetProfileSwitchQueueItem(StrictModel):
     """One durable Run/Switch child in the profile reconciliation queue."""
 
     kind: FleetProfileSwitchChildKind
@@ -829,7 +822,7 @@ class FleetProfileSwitchQueueItem(_StrictModel):
         return self
 
 
-class FleetProfileSwitchChildState(_StrictModel):
+class FleetProfileSwitchChildState(StrictModel):
     """Terminal receipt for a child already completed by the adapter."""
 
     operation_id: UuidId
@@ -838,14 +831,14 @@ class FleetProfileSwitchChildState(_StrictModel):
     result: FleetProfileSwitchChildResult | None = None
 
 
-class FleetProfileAssignmentFailure(_StrictModel):
+class FleetProfileAssignmentFailure(StrictModel):
     assignment_id: UuidId | None = None
     operation_id: UuidId | None = None
     reason: Annotated[str, StringConstraints(min_length=1, max_length=512)]
     terminal: bool = False
 
 
-class FleetProfileSwitchAdapterResult(_StrictModel):
+class FleetProfileSwitchAdapterResult(StrictModel):
     """Complete result of reconciling every assignment in a profile scope."""
 
     children: list[FleetProfileSwitchChildState] = Field(max_length=128)
@@ -858,7 +851,7 @@ class FleetProfileSwitchAdapterResult(_StrictModel):
         return self
 
 
-class FleetProfileSwitchAdapterState(_StrictModel):
+class FleetProfileSwitchAdapterState(StrictModel):
     """Persisted state used to resume a profile switch after restart."""
 
     schema_version: Literal[2] = 2
@@ -900,7 +893,7 @@ class FleetProfileSwitchAdapterState(_StrictModel):
         return self
 
 
-class FleetProfileSwitchChildResult(_StrictModel):
+class FleetProfileSwitchChildResult(StrictModel):
     """Profile child receipt containing the public Run/Switch result tree."""
 
     run_switch_operation_id: UuidId
@@ -912,7 +905,7 @@ class FleetProfileSwitchChildResult(_StrictModel):
 FleetProfileSwitchChildState.model_rebuild()
 
 
-class FleetProfileVerificationResult(_StrictModel):
+class FleetProfileVerificationResult(StrictModel):
     """Small result used by profile switch adapters that verify directly."""
 
     verified: bool
@@ -925,7 +918,7 @@ FleetProfileChildResult = (
 )
 
 
-class FleetProfileStepResult(_StrictModel):
+class FleetProfileStepResult(StrictModel):
     """Result receipt for one completed profile plan step."""
 
     operation_id: UuidId
@@ -933,7 +926,7 @@ class FleetProfileStepResult(_StrictModel):
     result: FleetProfileChildResult | None = None
 
 
-class FleetProfileIntendedConfiguration(_StrictModel):
+class FleetProfileIntendedConfiguration(StrictModel):
     """Immutable desired configuration captured when execution is admitted."""
 
     profile_digest: Digest
@@ -944,7 +937,7 @@ class FleetProfileIntendedConfiguration(_StrictModel):
     assignments: list[FleetProfileAssignment] = Field(max_length=64)
 
 
-class FleetProfileApplicationCancellationIntent(_StrictModel):
+class FleetProfileApplicationCancellationIntent(StrictModel):
     """Durable identity and authority for an explicit or superseding cancel."""
 
     request_key: UuidId
@@ -959,7 +952,7 @@ class FleetProfileApplicationCancellationIntent(_StrictModel):
     observation_deadline_at: datetime | None = None
 
 
-class FleetProfileApplicationEffect(_StrictModel):
+class FleetProfileApplicationEffect(StrictModel):
     """One exact profile or child effect in the cancellation receipt."""
 
     effect_id: Annotated[str, StringConstraints(min_length=1, max_length=200)]
@@ -971,7 +964,7 @@ class FleetProfileApplicationEffect(_StrictModel):
     outcome: Literal["succeeded", "failed", "cancelled", "pending", "not-issued"]
 
 
-class FleetProfileApplicationCancellationView(_StrictModel):
+class FleetProfileApplicationCancellationView(StrictModel):
     """Live projection of completed, pending, and unissued cancelled effects."""
 
     request_key: UuidId
@@ -987,7 +980,7 @@ class FleetProfileApplicationCancellationView(_StrictModel):
     deadline_at: datetime | None = None
 
 
-class FleetProfileApplicationProgress(_StrictModel):
+class FleetProfileApplicationProgress(StrictModel):
     """Typed progress tree persisted with every profile application."""
 
     attempt: int = Field(default=1, ge=1)
@@ -1024,14 +1017,14 @@ class FleetProfileApplicationProgress(_StrictModel):
         return self
 
 
-class FleetProfileApplicationResult(_StrictModel):
+class FleetProfileApplicationResult(StrictModel):
     """Terminal result for one profile application."""
 
     changed: bool
     completed_steps: int = Field(ge=0, le=1024)
 
 
-class FleetProfileChildOperation(_StrictModel):
+class FleetProfileChildOperation(StrictModel):
     """Stable child operation envelope independent of the Run service module."""
 
     id: UuidId
@@ -1134,7 +1127,7 @@ class FleetProfileSwitchAdapter(Protocol):
         ...
 
 
-class FleetProfileReviewedDecision(_StrictModel):
+class FleetProfileReviewedDecision(StrictModel):
     """The reviewable semantic decision that owns the reconciliation digest."""
 
     schema_version: Literal[2] = 2
@@ -1185,19 +1178,19 @@ class FleetProfilePreview(FleetProfileReviewedDecision):
         )
 
 
-class FleetProfileLoadRequest(_StrictModel):
+class FleetProfileLoadRequest(StrictModel):
     request_key: UuidId
     #: The ``effects_digest`` of the preview the caller showed. Omitted means
     #: "the current plan": nothing was reviewed, so nothing can be stale.
     reviewed_effects_digest: Digest | None = None
 
 
-class FleetProfileApplicationCancelRequest(_StrictModel):
+class FleetProfileApplicationCancelRequest(StrictModel):
     profile_number: int = Field(ge=1)
     request_key: UuidId
 
 
-class FleetProfileApplicationView(_StrictModel):
+class FleetProfileApplicationView(StrictModel):
     id: UuidId
     request_key: UuidId
     profile_id: UuidId
