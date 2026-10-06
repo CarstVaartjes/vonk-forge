@@ -747,6 +747,7 @@ fn ungranted_inspection_frame_can_only_inspect() {
     );
 
     let frame = canonical_json(&RecipeRunInspectionRequest {
+        include_logs: None,
         request_id: Uuid::new_v4(),
         request_sha256: "a".repeat(64),
     })

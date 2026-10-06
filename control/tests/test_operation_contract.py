@@ -253,7 +253,13 @@ def test_failure_evidence_restored_diagnostics_obey_the_byte_limit() -> None:
     }
     kept = sanitize_failure_evidence(evidence)
     assert len(json.dumps(kept, sort_keys=True, separators=(",", ":")).encode()) <= 8192
-    assert kept["diagnostics"]["preflight"][0]["value"] == "oom_killed"
-    assert kept["diagnostics"]["stderr"]["text"].startswith("Killed")
-    assert kept["diagnostics"]["stderr"]["truncated"] is True
-    assert kept["diagnostics"]["stderr"]["dropped_bytes"] > 0
+    diagnostics = require_mapping(kept["diagnostics"], "diagnostics retained")
+    preflight = require_sequence(diagnostics["preflight"], "exit facts retained")
+    cause = require_mapping(preflight[0], "cause retained")
+    assert cause["value"] == "oom_killed"
+    stderr = require_mapping(diagnostics["stderr"], "stderr retained")
+    tail = text(stderr["text"])
+    assert tail is not None and tail.startswith("Killed")
+    assert stderr["truncated"] is True
+    dropped = stderr["dropped_bytes"]
+    assert isinstance(dropped, int) and dropped > 0

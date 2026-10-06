@@ -335,8 +335,10 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
                     None,
                 )
                 if ancillary is not None:
-                    diagnostics[ancillary].pop()
-                    continue
+                    observations = diagnostics[ancillary]
+                    if isinstance(observations, list):
+                        observations.pop()
+                        continue
             strings: list[tuple[dict[str, object], str, str]] = []
 
             def candidates(
@@ -357,17 +359,17 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
             if not strings:
                 # Only bounded structural/scalar fields remain at this point.
                 raise ValueError("failure evidence structure exceeds byte limit")
-            document, key, value = max(
+            document, key, longest_text = max(
                 strings, key=lambda item: len(json.dumps(item[2]).encode())
             )
-            shortened = value[: len(value) // 2]
+            shortened = longest_text[: len(longest_text) // 2]
             document[key] = shortened
             if key == "text" and "truncated" in document:
                 document["truncated"] = True
                 prior = document.get("dropped_bytes")
                 document["dropped_bytes"] = (
                     prior if isinstance(prior, int) else 0
-                ) + len(value[len(shortened) :].encode())
+                ) + len(longest_text[len(shortened) :].encode())
                 # A cut within a line does not prove how many complete lines
                 # were omitted; preserve unknown rather than inventing a count.
                 document["dropped_lines"] = None
