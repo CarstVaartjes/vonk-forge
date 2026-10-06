@@ -34,7 +34,7 @@ readonly scratch=$(mktemp -d /tmp/vonk-hermes-release.XXXXXXXXXX)
   printf '%s\n' 'Hermes release scratch path is unsafe' >&2
   exit 1
 }
-cleanup() { rm -rf -- "$scratch"; }
+cleanup() { rm -rf -- "${scratch:?}"; }
 trap cleanup EXIT INT TERM
 
 known_absent() {

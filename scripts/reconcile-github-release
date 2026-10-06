@@ -33,7 +33,7 @@ readonly scratch=$(mktemp -d /tmp/vonk-github-release.XXXXXXXXXX)
   printf '%s\n' 'GitHub release scratch path is unsafe' >&2
   exit 1
 }
-cleanup() { rm -rf -- "$scratch"; }
+cleanup() { rm -rf -- "${scratch:?}"; }
 trap cleanup EXIT INT TERM
 
 release_json="$scratch/release.json"

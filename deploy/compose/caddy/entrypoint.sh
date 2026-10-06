@@ -21,6 +21,7 @@ normalize_hostname() {
   esac
   saved_ifs=$IFS
   IFS=.
+  # shellcheck disable=SC2086 # the normalized list is split into words on purpose
   set -- $normalized
   IFS=$saved_ifs
   for label in "$@"; do

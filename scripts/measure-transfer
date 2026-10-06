@@ -35,7 +35,7 @@ if [[ -f $credentials/active.json ]]; then
     credentials=$(printf '%s/generation-%020d' "$credentials" "$generation")
 fi
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+trap 'rm -rf -- "${work:?}"' EXIT
 umask 077
 cat "$credentials/certificate.pem" "$credentials/chain.pem" >"$work/certificate.pem"
 url="${controller%/}/agent/distribution/objects/$object?plan_digest=$plan"
