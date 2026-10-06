@@ -142,6 +142,9 @@ def test_selected_model_payload_does_not_strip_context_prefix() -> None:
     )
 
 
+# Builds and validates the whole contract recipe-library snapshot end to end;
+# ~12-13 s alone on CI runners.
+@pytest.mark.slow(30)
 def test_contract_recipe_library_snapshot_is_validated_end_to_end() -> None:
     candidate = _candidate_library_or_skip()
     result = _run(
