@@ -38,6 +38,8 @@ class RecipeBuildParent:
             execution_mode (Literal['one-shot-jobs'] | None | Unset):
             force_rebuild (bool | None | Unset):
             phases (list[list[BuildPhaseOperation]] | None | Unset):
+            prebuilt_claim_owner (None | str | Unset):
+            prebuilt_claim_until (None | str | Unset):
             prebuilt_image (None | str | Unset):
             prebuilt_node_id (None | str | Unset):
             workload_intent_ordinal (int | None | Unset):
@@ -51,6 +53,8 @@ class RecipeBuildParent:
     execution_mode: Literal['one-shot-jobs'] | None | Unset = UNSET
     force_rebuild: bool | None | Unset = UNSET
     phases: list[list[BuildPhaseOperation]] | None | Unset = UNSET
+    prebuilt_claim_owner: None | str | Unset = UNSET
+    prebuilt_claim_until: None | str | Unset = UNSET
     prebuilt_image: None | str | Unset = UNSET
     prebuilt_node_id: None | str | Unset = UNSET
     workload_intent_ordinal: int | None | Unset = UNSET
@@ -108,6 +112,18 @@ class RecipeBuildParent:
         else:
             phases = self.phases
 
+        prebuilt_claim_owner: None | str | Unset
+        if isinstance(self.prebuilt_claim_owner, Unset):
+            prebuilt_claim_owner = UNSET
+        else:
+            prebuilt_claim_owner = self.prebuilt_claim_owner
+
+        prebuilt_claim_until: None | str | Unset
+        if isinstance(self.prebuilt_claim_until, Unset):
+            prebuilt_claim_until = UNSET
+        else:
+            prebuilt_claim_until = self.prebuilt_claim_until
+
         prebuilt_image: None | str | Unset
         if isinstance(self.prebuilt_image, Unset):
             prebuilt_image = UNSET
@@ -143,6 +159,10 @@ class RecipeBuildParent:
             field_dict["force_rebuild"] = force_rebuild
         if phases is not UNSET:
             field_dict["phases"] = phases
+        if prebuilt_claim_owner is not UNSET:
+            field_dict["prebuilt_claim_owner"] = prebuilt_claim_owner
+        if prebuilt_claim_until is not UNSET:
+            field_dict["prebuilt_claim_until"] = prebuilt_claim_until
         if prebuilt_image is not UNSET:
             field_dict["prebuilt_image"] = prebuilt_image
         if prebuilt_node_id is not UNSET:
@@ -246,6 +266,26 @@ class RecipeBuildParent:
         phases = _parse_phases(d.pop("phases", UNSET))
 
 
+        def _parse_prebuilt_claim_owner(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        prebuilt_claim_owner = _parse_prebuilt_claim_owner(d.pop("prebuilt_claim_owner", UNSET))
+
+
+        def _parse_prebuilt_claim_until(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        prebuilt_claim_until = _parse_prebuilt_claim_until(d.pop("prebuilt_claim_until", UNSET))
+
+
         def _parse_prebuilt_image(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -285,6 +325,8 @@ class RecipeBuildParent:
             execution_mode=execution_mode,
             force_rebuild=force_rebuild,
             phases=phases,
+            prebuilt_claim_owner=prebuilt_claim_owner,
+            prebuilt_claim_until=prebuilt_claim_until,
             prebuilt_image=prebuilt_image,
             prebuilt_node_id=prebuilt_node_id,
             workload_intent_ordinal=workload_intent_ordinal,
