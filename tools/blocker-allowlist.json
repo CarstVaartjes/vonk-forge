@@ -2957,7 +2957,7 @@
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "persisted-application-review-source-is-unavailable", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "profile-application-was-superseded-by-a-later-intent", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "selected-profile-differs-from-its-accepted-snapshot", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "selected-profile-retry-lost-its-current-selection", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileSelectionLost", "FleetProfileService._queue_application", "selected-profile-retry-lost-its-current-selection", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._queue_application", "selected-profile-revision-is-unavailable", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._recipe_identity", "recipe-selector-is-not-an-exact-unique-active-recipe", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._recipe_identity", "recipe-selector-must-use-canonical-publisher-slug-form", 1],
@@ -3049,7 +3049,7 @@
       "category": "security-edge",
       "reason": "Destructive-effect owner guard: a new durable selector reference to an artifact whose exact removal is in flight is serialized with that removal by the artifact lifecycle owner (ArtifactLifecycleError: gate busy, fenced for deletion, or not safely inspectable), and the save relays that fence (the same security-edge the artifact-lifecycle family carries). Nothing is stored; the save succeeds once the removal completed.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileConflict", "FleetProfileService._reserve_saved_profile_references", "message", 1]
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAssetReservationConflict", "FleetProfileService._reserve_saved_profile_references", "message", 1]
       ]
     },
     {

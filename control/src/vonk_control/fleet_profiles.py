@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Protocol, TypedDict
+from typing import TYPE_CHECKING, ClassVar, Protocol, TypedDict
 from typing import cast as _typing_cast
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
@@ -746,8 +746,34 @@ _PROFILE_PHASE_BY_RUN_PHASE = {
 }
 
 
+#: A conflict that only time can resolve (a lock, capacity, a pending repair): the
+#: application parks and the Controller retries it with backoff.
+RETRY_WAIT = "wait"
+#: A conflict whose inputs do not change by waiting (a stale review, a lost or moved
+#: selection, a superseded intent): the application ends ``superseded`` so the
+#: client reviews and submits again.
+RETRY_SUPERSEDE = "supersede"
+
+
 class FleetProfileConflict(RuntimeError):
-    """A Fleet profile is invalid, stale, or cannot be safely applied."""
+    """A Fleet profile is invalid, stale, or cannot be safely applied.
+
+    ``retry_disposition`` says what an automatic retry does with it, and every
+    subclass declares it: ``RETRY_WAIT`` parks for retry, ``RETRY_SUPERSEDE``
+    (the default for an untyped conflict, which is a state check that waiting
+    cannot change) ends the application ``superseded`` with ``supersede_code``.
+    """
+
+    retry_disposition: ClassVar[str] = RETRY_SUPERSEDE
+    supersede_code: ClassVar[FleetProfileSupersedeCode] = (
+        "effects-changed-during-admission"
+    )
+
+
+def retry_disposition_of(error: BaseException) -> str | None:
+    """What an automatic retry does with ``error``; None for a non-conflict."""
+
+    return getattr(type(error), "retry_disposition", None)
 
 
 class FleetProfileAdmissionBusy(FleetProfileConflict):
@@ -758,6 +784,7 @@ class FleetProfileAdmissionBusy(FleetProfileConflict):
     """
 
     code = "profile.admission_busy"
+    retry_disposition = RETRY_WAIT
 
     def __init__(self, message: str, *, holder: str | None = None) -> None:
         super().__init__(message)
@@ -767,33 +794,63 @@ class FleetProfileAdmissionBusy(FleetProfileConflict):
 class FleetProfileAdmissionStorageError(FleetProfileConflict):
     """A persisted intent awaits correction of a database constraint failure."""
 
+    retry_disposition = RETRY_WAIT
+
 
 class FleetProfileAdmissionEffectBusy(FleetProfileConflict):
     """A live effect owner must finish before a superseding plan can bind."""
 
     code = "profile.admission_effect_busy"
+    retry_disposition = RETRY_WAIT
 
 
 class FleetProfileResourceRecheckUnavailable(FleetProfileAdmissionEffectBusy):
     """The resource recheck under the admission fence failed for a named cause."""
 
     code = "profile.resource_recheck_unavailable"
+    retry_disposition = RETRY_WAIT
 
 
 class FleetProfileStalePlanConflict(FleetProfileConflict):
     """Admission refused because the caller's reviewed plan is no longer current."""
 
     code = "profile.stale_plan"
+    retry_disposition = RETRY_SUPERSEDE
+    supersede_code = "effects-changed-during-admission"
 
 
 class FleetProfileReviewStale(FleetProfileStalePlanConflict):
     """The reviewed effects differ from the current plan; nothing was accepted."""
 
     code = "profile.review_stale"
+    retry_disposition = RETRY_SUPERSEDE
+    supersede_code = "effects-changed-during-admission"
 
 
 class _FleetProfileSupersededIntentConflict(FleetProfileStalePlanConflict):
     """A later accepted intent owns an overlapping workload effect scope."""
+
+    retry_disposition = RETRY_SUPERSEDE
+    supersede_code = "superseded-by-intent"
+
+
+class FleetProfileSelectionLost(FleetProfileStalePlanConflict):
+    """A retry has no current selection to continue (it moved or was replaced).
+
+    Waiting cannot give it one back; the retry's parent no longer owns the
+    selected profile, so adopting it would undo a newer load.
+    """
+
+    code = "profile.selection_lost"
+    retry_disposition = RETRY_SUPERSEDE
+    supersede_code = "effects-changed-during-admission"
+
+
+class FleetProfileAssetReservationConflict(FleetProfileConflict):
+    """A profile asset could not be reserved right now; a later attempt may."""
+
+    code = "profile.asset_reservation_unavailable"
+    retry_disposition = RETRY_WAIT
 
 
 class FleetProfilePermissionDenied(PermissionError):
@@ -802,6 +859,8 @@ class FleetProfilePermissionDenied(PermissionError):
 
 class _FleetProfileRecoveryBindingConflict(FleetProfileConflict):
     """Recovery cannot adopt the currently available artifact identity."""
+
+    retry_disposition = RETRY_WAIT
 
 
 def _recovery_preparation_identity(preparation: RolloutPreparation) -> object:
@@ -6294,7 +6353,7 @@ class FleetProfileService:
                     or selected_application_id is None
                     or selected_roster_digest is None
                 ):
-                    raise FleetProfileConflict(
+                    raise FleetProfileSelectionLost(
                         "Selected profile retry lost its current selection"
                     )
                 row.selection_generation = selected_generation
@@ -6690,14 +6749,24 @@ class FleetProfileService:
         row: FleetProfileApplication,
         progress: FleetProfileApplicationProgress,
         blockers: Sequence[OperationBlocker],
+        *,
+        because: BaseException | None = None,
     ) -> None:
         """Record why an application waits and when it will be checked again.
+
+        ``because`` is the error that sends the application here: only an error
+        declared retryable-by-waiting may park, anything else is a defect in the
+        caller (waiting would never resolve it).
 
         The application is not failed: it keeps its accepted intent and the
         Controller retries it when conditions change. Its blockers replace the
         previous list, and one log line names a change of reason (not every retry).
         """
 
+        assert because is None or retry_disposition_of(because) == RETRY_WAIT, (
+            f"{type(because).__name__} is not retryable by waiting and must "
+            "not park an application"
+        )
         now = _aware(self._clock())
         due = FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
         blockers = bound_blockers(blockers)
@@ -7705,6 +7774,7 @@ class FleetProfileService:
                                     "profile.recovery_cache_pending", str(error)
                                 )
                             ],
+                            because=error,
                         )
                         recovery_deferred = True
                 # No replacement intent or unknown-output build was admitted.
@@ -7714,24 +7784,29 @@ class FleetProfileService:
                     row = session.get(
                         FleetProfileApplication, application_id, with_for_update=True
                     )
+                    disposition = retry_disposition_of(error)
                     if (
                         row is not None
-                        and isinstance(error, FleetProfileReviewStale)
+                        and disposition == RETRY_SUPERSEDE
                         and self._lifecycle.retry_pending(row)
                     ):
-                        # A stale review never becomes valid by waiting: end the
-                        # application so the client re-reviews and re-submits.
+                        # What waiting cannot change (a stale review, a lost
+                        # selection, a superseded intent) never becomes valid:
+                        # end the application so the client re-reviews and
+                        # re-submits instead of parking it forever.
                         self._lifecycle.supersede(
                             row,
                             str(error),
                             _aware(self._clock()),
-                            code="effects-changed-during-admission",
+                            code=error.supersede_code
+                            if isinstance(error, FleetProfileConflict)
+                            else "effects-changed-during-admission",
                             session=session,
                         )
                         recovery_deferred = True
                     elif (
                         row is not None
-                        and not isinstance(error, FleetProfilePermissionDenied)
+                        and disposition == RETRY_WAIT
                         and not is_security_failure(error_code(error))
                         and self._retry_eligible(session, row)
                     ):
@@ -7744,6 +7819,7 @@ class FleetProfileService:
                                     str(error) or "The profile could not be retried",
                                 )
                             ],
+                            because=error,
                         )
                         recovery_deferred = True
             else:
@@ -9152,7 +9228,9 @@ class FleetProfileService:
                     now=now,
                 )
         except ArtifactLifecycleError as error:
-            raise FleetProfileConflict(f"{error.code}: {error.detail}") from error
+            raise FleetProfileAssetReservationConflict(
+                f"{error.code}: {error.detail}"
+            ) from error
 
     @staticmethod
     def _reserve_preview_assets(
@@ -10014,12 +10092,16 @@ class FleetProfileService:
 
 
 __all__ = [
+    "RETRY_SUPERSEDE",
+    "RETRY_WAIT",
     "FleetProfileAdmissionBusy",
     "FleetProfileAdmissionEffectBusy",
     "FleetProfileConflict",
     "FleetProfileResourceRecheckUnavailable",
     "FleetProfileReviewStale",
+    "FleetProfileSelectionLost",
     "FleetProfileService",
     "FleetProfileStalePlanConflict",
     "RunSwitchFleetProfileAdapter",
+    "retry_disposition_of",
 ]
