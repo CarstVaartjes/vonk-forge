@@ -119,3 +119,20 @@ def test_unreadable_live_authority_defers_pruning_until_repaired(
         assert owner is not None
         owner.kind = "history-test"
     assert collector.collect()["jobs"] == 1
+
+
+def test_retained_oldest_rows_do_not_starve_later_unreferenced_history(
+    history_sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    retained = _job(now - timedelta(days=3))
+    removable = _job(now - timedelta(days=2))
+    live = _job(now, state="running", payload={"operation_id": retained.id})
+    with history_sessions.begin() as session:
+        session.add_all((retained, removable, live))
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now, batch=1)
+    assert not collector.collect()
+    assert collector.collect()["jobs"] == 1
+    with history_sessions() as session:
+        assert session.get(Job, retained.id) is not None
+        assert session.get(Job, removable.id) is None

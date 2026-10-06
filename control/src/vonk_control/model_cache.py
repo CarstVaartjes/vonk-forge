@@ -1880,6 +1880,7 @@ class ModelCacheService:
         self._max_parallel_downloads = max_parallel_downloads
         self._streams = StreamGovernor(max_download_streams)
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._removal_gate_after: tuple[str, str] | None = None
         self._http = http_client
         # Local file and caller-supplied HTTP sources are useful for isolated
         # fixture tests, but are never enabled by the production constructor.
@@ -4088,10 +4089,19 @@ class ModelCacheService:
             return 0
         with self._session() as session:
             identities = dead_removal_identities(
-                session, owner_kind="model-cache-operation", limit=limit
+                session,
+                owner_kind="model-cache-operation",
+                limit=limit,
+                after=self._removal_gate_after,
             )
+        if not identities:
+            self._removal_gate_after = None
         released = 0
+        deadline = time.monotonic() + 0.25
         for identity in identities:
+            if time.monotonic() >= deadline:
+                break
+            self._removal_gate_after = (identity.kind, identity.sha256)
             try:
                 with (
                     self._model_storage_lock(

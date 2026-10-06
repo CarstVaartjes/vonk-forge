@@ -13,7 +13,7 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import datetime
 
-from sqlalchemy import delete, exists, or_, select
+from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import DistributionAssignmentState, RunState
@@ -61,6 +61,7 @@ class TerminalHistoryCollector:
         self._clock = clock
         self._batch = batch
         self._due_at: datetime | None = None
+        self._after: dict[str, tuple[datetime, str]] = {}
 
     def tick(self) -> bool:
         now = self._clock()
@@ -139,23 +140,34 @@ class TerminalHistoryCollector:
             (
                 RecipeRun,
                 RecipeRun.updated_at,
-                RecipeRun.state == RunState.STOPPED.value,
+                RecipeRun.state.in_((RunState.STOPPED.value, RunState.FAILED.value)),
             ),
         )
         for model, stamp, ended in specs:
+            statement = select(model.id, stamp).where(stamp <= cutoff, ended)
+            boundary = self._after.get(model.__tablename__)
+            if boundary is not None:
+                at, identity = boundary
+                statement = statement.where(
+                    or_(stamp > at, and_(stamp == at, model.id > identity))
+                )
             with self._sessions() as session:
                 candidates = tuple(
-                    session.scalars(
-                        select(model.id)
-                        .where(stamp <= cutoff, ended)
-                        .order_by(stamp, model.id)
-                        .limit(self._batch)
+                    session.execute(
+                        statement.order_by(stamp, model.id).limit(self._batch)
                     )
                 )
-            for identity in candidates:
+            if not candidates:
+                self._after.pop(model.__tablename__, None)
+            elif len(candidates) >= self._batch:
+                self._due_at = now
+            for identity, observed_at in candidates:
                 if time.monotonic() >= deadline:
                     self._due_at = now
                     return +removed
+                # Retained and contended rows cannot starve unrelated history.
+                # Restarting loses only this observation cursor, not authority.
+                self._after[model.__tablename__] = (observed_at, identity)
                 try:
                     with self._sessions.begin() as session:
                         row = session.scalar(

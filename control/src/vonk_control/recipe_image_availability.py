@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
@@ -867,6 +868,7 @@ class RecipeImageAvailabilityService:
         self._transport = transport
         self._builder = builder
         self._clock = clock
+        self._removal_gate_after: tuple[str, str] | None = None
         self._lifecycle = ImageAvailabilityAdapter(clock=clock)
         self._model_cache = model_cache
         self._max_parallel = max_parallel
@@ -2118,10 +2120,19 @@ class RecipeImageAvailabilityService:
     def reconcile_removal_gates(self, *, limit: int = 64) -> int:
         with self._sessions() as session:
             identities = dead_removal_identities(
-                session, owner_kind="recipe-image-job", limit=limit
+                session,
+                owner_kind="recipe-image-job",
+                limit=limit,
+                after=self._removal_gate_after,
             )
+        if not identities:
+            self._removal_gate_after = None
         released = 0
+        deadline = time.monotonic() + 0.25
         for identity in identities:
+            if time.monotonic() >= deadline:
+                break
+            self._removal_gate_after = (identity.kind, identity.sha256)
             if identity.kind != "runtime-image":
                 continue
             try:

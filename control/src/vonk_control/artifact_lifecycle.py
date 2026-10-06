@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, cast
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
@@ -440,7 +440,11 @@ def reference_gate_is_open_nowait(session: Session, identity: ArtifactIdentity) 
 
 
 def dead_removal_identities(
-    session: Session, *, owner_kind: RemovalOwnerKind, limit: int
+    session: Session,
+    *,
+    owner_kind: RemovalOwnerKind,
+    limit: int,
+    after: tuple[str, str] | None = None,
 ) -> tuple[ArtifactIdentity, ...]:
     """Bounded orphan inventory; no storage lock is acquired in this read."""
     model = ModelCacheOperation if owner_kind == "model-cache-operation" else Job
@@ -456,7 +460,7 @@ def dead_removal_identities(
             LifecycleState.SUPERSEDED,
         )
     )
-    rows = session.execute(
+    statement = (
         select(
             ArtifactLifecycleGate.artifact_kind, ArtifactLifecycleGate.artifact_sha256
         )
@@ -467,10 +471,22 @@ def dead_removal_identities(
             or_(model.id.is_(None), model.state.in_(terminal)),
         )
         .order_by(
-            ArtifactLifecycleGate.updated_at, ArtifactLifecycleGate.artifact_sha256
+            ArtifactLifecycleGate.artifact_kind, ArtifactLifecycleGate.artifact_sha256
         )
         .limit(limit)
     )
+    if after is not None:
+        kind, digest = after
+        statement = statement.where(
+            or_(
+                ArtifactLifecycleGate.artifact_kind > kind,
+                and_(
+                    ArtifactLifecycleGate.artifact_kind == kind,
+                    ArtifactLifecycleGate.artifact_sha256 > digest,
+                ),
+            )
+        )
+    rows = session.execute(statement)
     return tuple(
         ArtifactIdentity(cast(ArtifactKind, kind), digest) for kind, digest in rows
     )
