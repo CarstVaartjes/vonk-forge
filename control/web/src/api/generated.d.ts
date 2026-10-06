@@ -1853,6 +1853,11 @@ export interface components {
             /** Recipe Revision Id */
             recipe_revision_id: string;
             /**
+             * Removal Archives
+             * @default null
+             */
+            removal_archives: string[] | null;
+            /**
              * Removal Fence
              * @default null
              */

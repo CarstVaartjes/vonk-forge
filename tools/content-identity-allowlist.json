@@ -938,6 +938,20 @@
       "kind": "provenance_comparison",
       "expression": "document.get('recipe_revision_id') == revision.id",
       "reason": "Reads the stored installation plan's own identity against the installation's relational revision; disagreement reports the membership not exact, never trusted."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService.reconcile_requested_removals.validate",
+      "kind": "provenance_comparison",
+      "expression": "requester.authority_revision == payload.recipe_revision_id",
+      "reason": "Security and ownership edge: before cancelling an older remover, prove the durable accepted request row names the same exact authority and target as its canonical stored payload. This does not decide image reuse or content equivalence; a damaged request leaves the removal fence intact."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService.reconcile_requested_removals.validate",
+      "kind": "provenance_comparison",
+      "expression": "requester.targets == [payload.recipe_revision_id]",
+      "reason": "Security and ownership edge: before cancelling an older remover, prove the durable accepted request row names the same exact authority and target as its canonical stored payload. This does not decide image reuse or content equivalence; a damaged request leaves the removal fence intact."
     }
   ]
 }
