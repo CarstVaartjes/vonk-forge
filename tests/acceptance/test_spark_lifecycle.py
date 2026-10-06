@@ -2693,6 +2693,7 @@ class SparkLifecycle:
         recovery must reconnect, adopt them and complete subsequent cleanup.
         """
         assert self.agent_installed and self.temporary_root is not None
+        temporary_root = self.temporary_root
         if UUID.fullmatch(run_id) is None or NODE_ID.fullmatch(node_id) is None:
             raise LifecycleError("journal recovery canary identity is invalid")
         name = f"vonk-{run_id}"
@@ -2700,7 +2701,7 @@ class SparkLifecycle:
         def container_identity() -> str:
             observed = self._run_command(
                 ["docker", "inspect", "--format", "{{.Id}} {{.State.Running}}", name],
-                cwd=self.temporary_root,
+                cwd=temporary_root,
                 timeout=30,
             ).stdout.strip()
             if re.fullmatch(r"[0-9a-f]{64} true", observed) is None:
@@ -2710,7 +2711,7 @@ class SparkLifecycle:
         def running_managed_containers() -> list[str]:
             lines = self._run_command(
                 ["docker", "ps", "--no-trunc", "--format", "{{.ID}} {{.Names}}"],
-                cwd=self.temporary_root,
+                cwd=temporary_root,
                 timeout=30,
             ).stdout.splitlines()
             return sorted(
@@ -2743,7 +2744,7 @@ class SparkLifecycle:
         )
         self._run_command(
             ["sudo", "/usr/bin/systemctl", "stop", "vonk-forge-agent.service"],
-            cwd=self.temporary_root,
+            cwd=temporary_root,
             timeout=30,
         )
         # The service is stopped: no live SQLite writer is being overwritten.
@@ -2760,12 +2761,12 @@ class SparkLifecycle:
                 ),
                 os.fspath(AGENT_DATA / "state.sqlite"),
             ],
-            cwd=self.temporary_root,
+            cwd=temporary_root,
             timeout=30,
         )
         self._run_command(
             ["sudo", "/usr/bin/systemctl", "start", "vonk-forge-agent.service"],
-            cwd=self.temporary_root,
+            cwd=temporary_root,
             timeout=30,
         )
         deadline = time.monotonic() + _CANARY_ROUTE_SECONDS
@@ -2824,7 +2825,7 @@ class SparkLifecycle:
                 ),
                 os.fspath(AGENT_DATA),
             ],
-            cwd=self.temporary_root,
+            cwd=temporary_root,
             timeout=30,
         ).stdout.strip()
         if evidence != "True":
