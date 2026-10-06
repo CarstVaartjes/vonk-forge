@@ -2104,6 +2104,12 @@ export interface components {
          * @enum {string}
          */
         BlockerCategory: "security-edge" | "input-validation" | "already-retried" | "bookkeeping-debt";
+        /**
+         * BookkeepingReason
+         * @description Why bookkeeping was treated as unknown instead of refused.
+         * @enum {string}
+         */
+        BookkeepingReason: "persisted-state-damaged" | "evidence-mismatch" | "evidence-unavailable" | "row-incomplete";
         /** BooleanParameter */
         BooleanParameter: {
             /** Allowed Values */
@@ -7920,15 +7926,16 @@ export interface components {
             kind: "recipe.image.availability.v2";
             /** Next Attempt At */
             next_attempt_at?: string | null;
-            progress: components["schemas"]["OperationProgress"];
+            progress: components["schemas"]["OperationProgress"] | null;
             /** Recipe Content Sha256 */
-            recipe_content_sha256: string;
+            recipe_content_sha256: string | null;
             /** Recipe Revision Id */
-            recipe_revision_id: string;
+            recipe_revision_id: string | null;
             /** Request */
-            request: components["schemas"]["RecipeSelectorIntent"] | components["schemas"]["RecipeRevisionIntent"] | components["schemas"]["RecipeRetryIntent"];
+            request: (components["schemas"]["RecipeSelectorIntent"] | components["schemas"]["RecipeRevisionIntent"] | components["schemas"]["RecipeRetryIntent"]) | null;
             /** Request Id */
             request_id: string;
+            residue?: components["schemas"]["Residue"] | null;
             result?: components["schemas"]["RecipeImageAvailabilityResult"] | null;
             /**
              * State
@@ -9506,6 +9513,25 @@ export interface components {
          * @enum {string}
          */
         ReservationState: "active" | "promised" | "released" | "expired";
+        /**
+         * Residue
+         * @description A typed ``unknown``: what was damaged, why, and what the caller does next.
+         *
+         *     It is a value, not an exception: the caller retires the damaged row or skips
+         *     the element and carries on.
+         */
+        Residue: {
+            /** Kind */
+            kind: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            reason: components["schemas"]["BookkeepingReason"];
+            /** Subject */
+            subject: string;
+        };
         /**
          * ResourceBlockerCode
          * @description The capacity-fit codes the resource planner gives a node that cannot fit.

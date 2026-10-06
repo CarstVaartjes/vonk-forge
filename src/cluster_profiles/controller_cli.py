@@ -2223,6 +2223,9 @@ def _follow_cache_operation(
         result,
         args,
         validate=same_operation,
+        terminal=lambda observed: (
+            _state(observed) in _TERMINAL_STATES and observed.get("residue") is None
+        ),
     )
 
 

@@ -45,3 +45,21 @@ test("a download keeps being observed through a temporary disconnection and then
   expect(screen.queryByText(/Reconnecting/)).toBeNull();
   expect(screen.getByRole("button", {name: "Download recipe"})).toBeEnabled();
 });
+
+test("damaged terminal evidence is observed until the same operation is readable", async () => {
+  vi.useFakeTimers();
+  const recipeCacheOperation = vi.fn()
+    .mockResolvedValueOnce({...running, state: "succeeded", progress: null, residue: {kind: "availability", subject: "op-1", reason: "persisted-state-damaged", note: "stored metadata is unreadable"}})
+    .mockResolvedValue({...running, state: "succeeded", residue: null});
+  setup(recipeCacheOperation);
+  await click();
+  await advance(1_000);
+  expect(screen.getByRole("button", {name: "Observing…"})).toBeDisabled();
+  expect(screen.getByText(/Stored operation evidence is unavailable/)).toBeVisible();
+  expect(screen.queryByText("Recipe downloaded.")).toBeNull();
+  expect(screen.queryByRole("button", {name: /Cancel/})).toBeNull();
+  await advance(1_000);
+  expect(recipeCacheOperation).toHaveBeenCalledTimes(2);
+  expect(screen.getByText("Recipe downloaded.")).toBeVisible();
+  expect(screen.getByRole("button", {name: "Download recipe"})).toBeEnabled();
+});
