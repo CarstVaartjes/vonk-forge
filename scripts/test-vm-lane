@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Run the Linux lane in the vonk-ci OrbStack VM against a git ref.
+#
+# Usage: scripts/test-vm-lane <ref> [-- PYTEST_ARGS...]
+#
+# A worktree's gitdir lives under /opt, which the VM cannot see, and a checkout
+# shared with the host would share its compiled artifacts too. So the ref is
+# cloned (from this repository's object store, via a bundle-free local clone)
+# into a unique directory the VM can see, the lane runs there with its own
+# VM-side venv, and only that directory is removed afterwards.
+set -euo pipefail
+
+ref=${1:?usage: scripts/test-vm-lane <ref> [-- PYTEST_ARGS...]}
+shift
+[[ ${1:-} == -- ]] && shift
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+sha=$(git -C "$root" rev-parse --verify "$ref^{commit}")
+
+# /private/tmp is shared with the VM (/opt is not).
+base=${VONK_VM_LANE_BASE:-/private/tmp}
+work=$(mktemp -d "$base/vonk-vm-lane.XXXXXX")
+cleanup() { [[ -n ${work:-} && -d $work ]] && rm -rf -- "$work"; }
+trap cleanup EXIT
+
+git clone --quiet --no-hardlinks "$root" "$work/repo"
+git -C "$work/repo" checkout --quiet --detach "$sha"
+
+recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
+printf -v guest_repo '%q' "$work/repo"
+printf -v guest_args '%q ' "$@"
+tag=$(basename "$work")
+
+orb -m vonk-ci bash -lc "
+    set -euo pipefail
+    cd $guest_repo
+    export UV_CACHE_DIR=\"\$HOME/.cache/vonk-vm-lane-uv\" \
+        UV_PROJECT_ENVIRONMENT=\"\$HOME/venv-$tag\" \
+        VONK_CLI_DEPENDENCY_ENV=\"\$HOME/cli-deps-$tag\" \
+        VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") \
+        CARGO_TARGET_DIR=\"\$HOME/target-vonk-vm-lane\"
+    trap 'rm -rf \"\$HOME/venv-$tag\" \"\$HOME/cli-deps-$tag\"' EXIT
+    uv sync --project control --frozen --quiet
+    scripts/sync-cli-dependencies
+    uv run --project control --frozen pytest -q ${guest_args:-tests/cluster_profiles/test_cli_update.py -k installed_cli}
+"

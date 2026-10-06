@@ -61,15 +61,24 @@ def cli_dependency_site_packages() -> Path:
     """
 
     root = Path(__file__).resolve().parents[2]
-    environment = Path(
-        os.environ.get("VONK_CLI_DEPENDENCY_ENV", root / ".cli-dependencies")
-    )
-    found = sorted(environment.glob("lib/python3.*/site-packages"))
-    if not found:
+    found, reason = _cli_dependencies_module(root).site_packages(root)
+    if found is None:
         prerequisite_unavailable(
-            "the CLI dependency environment is missing; run scripts/sync-cli-dependencies"
+            f"the CLI dependency environment is unusable: {reason}"
         )
-    return found[0]
+    return found
+
+
+def _cli_dependencies_module(root: Path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "vonk_cli_dependencies", root / "tools" / "cli_dependencies.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def install_cli_wheel(uv: str, venv: Path, wheel: Path, env: dict[str, str]) -> Path:
