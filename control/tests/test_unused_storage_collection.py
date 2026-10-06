@@ -23,6 +23,7 @@ from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
+from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
@@ -815,6 +816,7 @@ def test_a_load_waiting_to_be_admitted_does_not_keep_what_it_waits_for_space_fro
         world,
         {"steps": [{"node_ids": [NODE]}]},
         state="queued",
+        canonical=True,
         progress={
             "admission_pending": True,
             "admission_attempt": 86,
@@ -883,6 +885,7 @@ def _application(
     state: str,
     selected: bool = False,
     progress: dict[str, object] | None = None,
+    canonical: bool = False,
 ) -> None:
     with world.sessions.begin() as session:
         profile = session.scalar(select(FleetProfile))
@@ -890,11 +893,54 @@ def _application(
             _profile(world, "vonk-forge/other")
             profile = session.scalar(select(FleetProfile))
         assert profile is not None
+        plan_digest = uuid.uuid4().hex + uuid.uuid4().hex
+        if canonical:
+            # A readable accepted scope can wait for capacity without making
+            # every obsolete installation on that Spark a live asset reference.
+            plan = FleetProfilePreview.model_validate(
+                {
+                    "profile_id": profile.id,
+                    "profile_name": "Capacity waiter",
+                    "profile_digest": "1" * 64,
+                    "profile_revision": None,
+                    "profile_definition": None,
+                    "allowed": False,
+                    "scope": {"node_ids": [NODE], "idle_node_ids": []},
+                    "summary": {
+                        "already_correct": 0,
+                        "placements": 0,
+                        "builds": 0,
+                        "distributions": 0,
+                        "installs": 0,
+                        "starts": 0,
+                        "stops": 0,
+                        "uninstalls": 0,
+                        "blockers": 0,
+                    },
+                    "assignments": [],
+                    "resolved_assignments": [],
+                    "admission_decisions": [],
+                    "preparation_decisions": [],
+                    "effects": {"runs": [], "installations": [], "superseded": []},
+                    "steps": [
+                        {
+                            "index": 0,
+                            "kind": "switch",
+                            "node_ids": [NODE],
+                            "label": "Wait for capacity",
+                        }
+                    ],
+                    "reasons": [],
+                    "generated_at": OLD,
+                    "assessments": [],
+                    "plan_digest": plan_digest,
+                }
+            ).model_dump(mode="json")
         application = FleetProfileApplication(
             request_key=str(uuid.uuid4()),
             profile_id=profile.id,
             profile_digest="1" * 64,
-            plan_digest=uuid.uuid4().hex + uuid.uuid4().hex,
+            plan_digest=plan_digest,
             state=state,
             plan=plan,
             actor="test",
@@ -2100,6 +2146,7 @@ def test_a_load_waiting_for_this_disk_does_not_keep_the_installations_it_needs_g
         world,
         {"steps": [{"node_ids": [NODE]}]},
         state="queued",
+        canonical=True,
         progress={
             "blockers": [
                 {
