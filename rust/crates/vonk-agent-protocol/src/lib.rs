@@ -293,7 +293,13 @@ impl HostRuntimeRequest {
                 {
                     return Err(HostRuntimeRequestRule::PlanBinding);
                 }
-                validate_runtime_plan_size(plan, &plan.compiled_execution_plan)?;
+                let encoded = canonical_json(plan).map_err(|_| HostRuntimeRequestRule::Encoding)?;
+                if encoded.len() > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES {
+                    return Err(HostRuntimeRequestRule::PlanBytes {
+                        limit: MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as u64,
+                        observed: encoded.len() as u64,
+                    });
+                }
             }
             _ if self.start_plan.is_some()
                 || self.job_plan.is_some()
@@ -1436,7 +1442,10 @@ mod recipe_start_tests {
             "recipe_revision_id": start["recipe_revision_id"],
             "mapping_id": start["mapping_id"],
             "plan_digest": start["plan_digest"],
-            "compiled_execution_plan": start["compiled_execution_plan"],
+            "rank": start["compiled_execution_plan"]["runtime"]["placement"]["rank"],
+            "role": start["compiled_execution_plan"]["runtime"]["placement"]["role"],
+            "recipe_content_sha256": start["compiled_execution_plan"]["identity"]["recipe_revision_sha256"],
+            "stop_timeout_seconds": start["compiled_execution_plan"]["lifecycle"]["stop_timeout_seconds"],
             "cancel_pending_start": false,
         })
     }
@@ -1869,7 +1878,6 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
 }
 
 fn validate_recipe_stop(value: &RecipeStopRequest) -> bool {
-    let placement = &value.compiled_execution_plan.runtime.placement;
     value.run_id.get_version() == Some(uuid::Version::Random)
         && value.target_runtime_id.get_version() == Some(uuid::Version::Random)
         && (1..=i32::MAX as u32).contains(&value.run_generation)
@@ -1877,8 +1885,9 @@ fn validate_recipe_stop(value: &RecipeStopRequest) -> bool {
         && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
         && value.mapping_id.get_version() == Some(uuid::Version::Random)
         && lower_hex(&value.plan_digest, 64)
-        && placement.rank < placement.world_size
-        && valid_role(&placement.role)
+        && lower_hex(&value.recipe_content_sha256, 64)
+        && valid_role(&value.role)
+        && (1..=600).contains(&value.stop_timeout_seconds)
 }
 
 /// A start's placement, addresses and image all come from its compiled plan;

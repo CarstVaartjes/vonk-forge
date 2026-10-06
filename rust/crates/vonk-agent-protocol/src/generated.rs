@@ -8714,13 +8714,16 @@ pub struct RecipeStartResult {
 #[derive(Eq)]
 pub struct RecipeStopPayload {
     pub cancel_pending_start: bool,
-    pub compiled_execution_plan: CompiledExecutionPlan,
     pub installation_id: ::uuid::Uuid,
     pub mapping_id: ::uuid::Uuid,
     pub plan_digest: ::std::string::String,
+    pub rank: u64,
+    pub recipe_content_sha256: ::std::string::String,
     pub recipe_revision_id: ::uuid::Uuid,
+    pub role: ::std::string::String,
     pub run_generation: u32,
     pub run_id: ::uuid::Uuid,
+    pub stop_timeout_seconds: u32,
     pub target_runtime_id: ::uuid::Uuid,
 }
 #[derive(::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -24512,26 +24515,32 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopPayload {
         #[derive(Eq)]
         struct Raw {
             pub cancel_pending_start: bool,
-            pub compiled_execution_plan: CompiledExecutionPlan,
             pub installation_id: ::uuid::Uuid,
             pub mapping_id: ::uuid::Uuid,
             pub plan_digest: ::std::string::String,
+            pub rank: u64,
+            pub recipe_content_sha256: ::std::string::String,
             pub recipe_revision_id: ::uuid::Uuid,
+            pub role: ::std::string::String,
             pub run_generation: u32,
             pub run_id: ::uuid::Uuid,
+            pub stop_timeout_seconds: u32,
             pub target_runtime_id: ::uuid::Uuid,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             cancel_pending_start: raw.cancel_pending_start,
-            compiled_execution_plan: raw.compiled_execution_plan,
             installation_id: raw.installation_id,
             mapping_id: raw.mapping_id,
             plan_digest: raw.plan_digest,
+            rank: raw.rank,
+            recipe_content_sha256: raw.recipe_content_sha256,
             recipe_revision_id: raw.recipe_revision_id,
+            role: raw.role,
             run_generation: raw.run_generation,
             run_id: raw.run_id,
+            stop_timeout_seconds: raw.stop_timeout_seconds,
             target_runtime_id: raw.target_runtime_id,
         })
     }

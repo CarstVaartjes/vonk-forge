@@ -427,9 +427,7 @@ impl HostRuntimeBoundary<'_> {
             HostRuntimeAction::Stop => lifecycle_plan
                 .as_ref()
                 .and_then(|plan| match plan {
-                    HostRuntimePlan::Stop(stop) => Some(u64::from(
-                        stop.compiled_execution_plan.lifecycle.stop_timeout_seconds,
-                    )),
+                    HostRuntimePlan::Stop(stop) => Some(u64::from(stop.stop_timeout_seconds)),
                     _ => None,
                 })
                 .filter(|value| (1..=600).contains(value))

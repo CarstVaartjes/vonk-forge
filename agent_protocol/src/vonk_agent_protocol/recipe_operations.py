@@ -93,6 +93,12 @@ class RecipeStartPayload(_StrictPayload):
 
 
 class RecipeStopPayload(_StrictPayload):
+    """Exact cleanup authority, independent of historical launch-plan readability.
+
+    The Controller binds these identities and timeout into the signed helper
+    grant; the helper reconciles only the matching runtime generation.
+    """
+
     run_id: CanonicalUuid
     target_runtime_id: CanonicalUuid
     run_generation: RunGeneration
@@ -100,7 +106,10 @@ class RecipeStopPayload(_StrictPayload):
     recipe_revision_id: CanonicalUuid
     mapping_id: CanonicalUuid
     plan_digest: Digest
-    compiled_execution_plan: CompiledExecutionPlan
+    rank: Annotated[int, Field(ge=0, strict=True)]
+    role: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
+    recipe_content_sha256: Digest
+    stop_timeout_seconds: Annotated[int, Field(ge=1, le=600, strict=True)]
     cancel_pending_start: bool = False
 
 

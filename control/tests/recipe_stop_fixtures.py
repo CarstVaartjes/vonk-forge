@@ -29,6 +29,9 @@ def recipe_stop_payload(node_id: str, *, plan_digest: str) -> dict[str, object]:
         recipe_revision_id=_RECIPE_REVISION_ID,
         mapping_id=_MAPPING_ID,
         plan_digest=plan_digest,
-        compiled_execution_plan=_COMPILED_PLAN,
+        rank=_COMPILED_PLAN.runtime.placement.rank,
+        role=_COMPILED_PLAN.runtime.placement.role,
+        recipe_content_sha256=_COMPILED_PLAN.identity.recipe_revision_sha256,
+        stop_timeout_seconds=_COMPILED_PLAN.lifecycle.stop_timeout_seconds,
         cancel_pending_start=True,
     ).model_dump(mode="json")

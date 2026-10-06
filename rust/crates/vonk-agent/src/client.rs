@@ -4348,7 +4348,10 @@ mod tests {
                 "recipe_revision_id": plan.recipe_revision_id,
                 "mapping_id": plan.mapping_id,
                 "plan_digest": plan.plan_digest,
-                "compiled_execution_plan": plan.compiled_execution_plan,
+                "rank": plan.compiled_execution_plan.runtime.placement.rank,
+                "role": plan.compiled_execution_plan.runtime.placement.role,
+                "recipe_content_sha256": plan.compiled_execution_plan.identity.recipe_revision_sha256,
+                "stop_timeout_seconds": plan.compiled_execution_plan.lifecycle.stop_timeout_seconds,
                 "cancel_pending_start": false
             }))
             .unwrap();
