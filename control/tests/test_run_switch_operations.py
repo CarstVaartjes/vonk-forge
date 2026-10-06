@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
+from vonk_control.distribution_executor import _ChildView
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.failure_classification import is_security_failure
 from vonk_control.install_admission import (
@@ -76,11 +77,15 @@ from vonk_control.recipe_runtime_specs import (
 )
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract import (
+    ArtifactVerificationEvidence,
     InvocationMetadata,
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
+    RunSwitchCleanupResult,
     RunSwitchCleanupVerifyResult,
+    RunSwitchDistributionChildResult,
+    RunSwitchFinalVerifyResult,
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchPhase,
@@ -231,13 +236,17 @@ def _child_operation_id(view: RunSwitchOperation) -> str:
     return child_id
 
 
-def _target_copy_evidence(plan, phase, progress=None) -> dict[str, object]:
+def _target_copy_evidence(
+    plan, phase, progress=None
+) -> RunSwitchTargetTransferEvidenceResult:
     del progress
     node_id = phase.node_ids[0] if getattr(phase, "node_ids", ()) else "spk_" + "0" * 32
-    return {
-        "node_id": node_id,
-        "copied_bytes": getattr(plan.storage, "missing_spark_bytes", 0),
-    }
+    return RunSwitchTargetTransferEvidenceResult(
+        phase="transfer",
+        subphase="target-copy",
+        node_id=node_id,
+        copied_bytes=getattr(plan.storage, "missing_spark_bytes", 0),
+    )
 
 
 def _runtime_receipt(
@@ -358,11 +367,89 @@ class ModelCacheManifestProvider(ModelCacheService):
         }
 
 
+def _fixture_execution(plan, phase, *, result=None, **kwargs) -> PhaseExecution:
+    """Publish canonical evidence from a synthetic successful phase producer."""
+    if isinstance(result, dict):
+        result = dict(result)
+        if phase.kind == "cleanup":
+            result.setdefault("nas_evicted", False)
+        if result == {"phase": phase.kind}:
+            if phase.kind == "prepare":
+                result = {"prepared": True}
+            elif phase.kind in {"start", "stop"}:
+                result = {"run_id": plan.run_id or str(uuid.uuid4())}
+            elif phase.kind == "final_verify":
+                result = {
+                    "final_verified": True,
+                    "run_id": plan.run_id or str(uuid.uuid4()),
+                    "state": "running",
+                    "route_state": "published",
+                    "healthy": True,
+                    "ranks": [],
+                }
+        result = _phase_result(result, phase=phase)
+    return PhaseExecution(result=result, **kwargs)
+
+
+def _fixture_child_result(
+    plan, phase, payload=None
+) -> RunSwitchDistributionChildResult:
+    """Typed measured child checkpoint, independent of the terminal receipt."""
+    payload = payload or {}
+    raw_progress = dict(payload.get("progress", {}))
+    if "operation" in payload:
+        raw_progress["operation"] = payload["operation"]
+    total = raw_progress.get("total_bytes")
+    raw_progress["total_bytes_known"] = total is not None
+    raw_members = (
+        raw_progress.get("members")
+        or payload.get("members")
+        or [{"node_id": phase.node_ids[0], "phase": "transfer", "state": "pending"}]
+    )
+    raw_progress["members"] = raw_members
+    evidence = payload.get("evidence", [])
+    return RunSwitchDistributionChildResult.model_validate_json(
+        canonical_message(
+            {
+                "phase": "transfer",
+                "subphase": "target-copy",
+                "progress": raw_progress,
+                "members": raw_members,
+                "evidence": evidence,
+                "reason": payload.get("reason"),
+                "failure_kind": payload.get("failure_kind"),
+                "error_code": payload.get("error_code"),
+            }
+        ),
+        strict=True,
+    )
+
+
+def _replace_child(executor, child_id, *, state=None, payload=None, result=None):
+    child = executor.children[child_id]
+    if payload is not None:
+        prior = child.result
+        assert isinstance(prior, RunSwitchDistributionChildResult)
+        node_id = prior.members[0].node_id
+        phase = RunSwitchPhase(
+            index=0,
+            kind="transfer",
+            subphase="target-copy",
+            state="planned",
+            node_ids=[node_id],
+            detail="Fixture child checkpoint",
+        )
+        result = _fixture_child_result(None, phase, payload)
+    updated = replace(child, state=state or child.state, result=result or child.result)
+    executor.children[child_id] = updated
+    return updated
+
+
 class RecordingArtifactExecutor:
     def __init__(self, *, child_transfer: bool = False) -> None:
         self.child_transfer = child_transfer
         self.calls: list[str] = []
-        self.children: dict[str, SimpleNamespace] = {}
+        self.children: dict[str, _ChildView] = {}
         self.abandoned: list[str] = []
 
     def execute(
@@ -378,7 +465,9 @@ class RecordingArtifactExecutor:
         self.calls.append(phase.kind)
         if phase.kind == "transfer" and self.child_transfer:
             child_id = str(uuid.uuid4())
-            self.children[child_id] = SimpleNamespace(state="queued", result=None)
+            self.children[child_id] = _ChildView(
+                state="queued", result=_fixture_child_result(plan, phase)
+            )
             return PhaseExecution(
                 operation_id=child_id,
                 result=None,
@@ -390,26 +479,32 @@ class RecordingArtifactExecutor:
             )
             image_digest = getattr(runtime_image, "image_digest", "sha256:" + "1" * 64)
             archive_sha256 = getattr(runtime_image, "oci_layout_sha256", "3" * 64)
-            return PhaseExecution(
+            return _fixture_execution(
+                plan,
+                phase,
                 result={
                     "verified": True,
                     "verified_digests": digests,
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": image_digest,
                     "verified_oci_layout_sha256": archive_sha256,
-                }
+                },
             )
         if phase.kind == "cleanup":
-            return PhaseExecution(
+            return _fixture_execution(
+                plan,
+                phase,
                 result={
                     "scope": "spark-local",
                     "reclaimed_bytes": 0,
                     "protected_referenced_bytes": 0,
                     "reclaimed_digests": [],
                     "protected_digests": [],
-                }
+                },
             )
-        return PhaseExecution(result=_target_copy_evidence(plan, phase))
+        return _fixture_execution(
+            plan, phase, result=_target_copy_evidence(plan, phase)
+        )
 
     def get(self, operation_id: str):
         return self.children.get(operation_id)
@@ -420,8 +515,11 @@ class RecordingArtifactExecutor:
         child = self.children.get(operation_id)
         if child is None or child.state != "waiting-for-operator":
             return False
-        child.state = "cancelled"
-        child.reason = reason
+        self.children[operation_id] = replace(
+            child,
+            state="cancelled",
+            result=child.result.model_copy(update={"reason": reason}),
+        )
         self.abandoned.append(operation_id)
         return True
 
@@ -437,7 +535,7 @@ class SynchronousPhaseExecutor:
         request_key,
         progress,
     ) -> PhaseExecution:
-        return PhaseExecution(result={"phase": phase.kind})
+        return _fixture_execution(_plan, phase, result={"phase": phase.kind})
 
 
 class PendingBuilds(RecipeBuildService):
@@ -506,7 +604,7 @@ class BuildThenCopyExecutor:
     """Drive the real build phase and retain a durable child for the test."""
 
     def __init__(self, lifecycle, sessions) -> None:
-        self.children: dict[str, SimpleNamespace] = {}
+        self.children: dict[str, _ChildView] = {}
         self.build_preview_calls = 0
         self.build_start_calls = 0
         self.receipts: list[object] = []
@@ -540,14 +638,15 @@ class BuildThenCopyExecutor:
                 progress=progress,
             )
             if execution.operation_id is not None:
-                self.children[execution.operation_id] = SimpleNamespace(
-                    state="running",
-                    result=None,
+                self.children[execution.operation_id] = _ChildView(
+                    state="running", result=_fixture_child_result(plan, phase)
                 )
             return execution
         if phase.subphase == "target-copy":
             self.receipts.append(effective_build_receipt(plan, progress))
-            return PhaseExecution(result=_target_copy_evidence(plan, phase, progress))
+            return _fixture_execution(
+                plan, phase, result=_target_copy_evidence(plan, phase, progress)
+            )
         if phase.subphase == "runtime-image":
             with self._sessions() as session:
                 build = session.get(RecipeBuild, plan.recipe_build_id)
@@ -555,7 +654,9 @@ class BuildThenCopyExecutor:
                 assert build.image_digest is not None
                 assert build.oci_layout_sha256 is not None
                 assert build.image_bytes is not None
-                return PhaseExecution(
+                return _fixture_execution(
+                    plan,
+                    phase,
                     result={
                         "runtime_image": _runtime_receipt(
                             plan,
@@ -567,20 +668,24 @@ class BuildThenCopyExecutor:
                         "image_digest": build.image_digest,
                         "oci_layout_sha256": build.oci_layout_sha256,
                         "image_bytes": build.image_bytes,
-                    }
+                    },
                 )
         if phase.subphase in {"runtime-plan", "runtime-install"}:
             if phase.subphase == "runtime-plan":
-                return PhaseExecution(
+                return _fixture_execution(
+                    plan,
+                    phase,
                     result={
                         "installation_id": str(uuid.uuid4()),
                         "mapping_id": str(uuid.uuid4()),
                         "install_plan_digest": plan.plan_digest,
                         "compiled_plan_persisted": True,
-                    }
+                    },
                 )
-            return PhaseExecution(result={"installation_id": str(uuid.uuid4())})
-        return PhaseExecution(result={"phase": phase.kind})
+            return _fixture_execution(
+                plan, phase, result={"installation_id": str(uuid.uuid4())}
+            )
+        return _fixture_execution(plan, phase, result={"phase": phase.kind})
 
     def get(self, operation_id: str):
         return self.children.get(operation_id)
@@ -607,7 +712,9 @@ class ColdStartPhaseExecutor:
         self.events.append(identity)
         if phase.subphase == "model-download":
             total = plan.storage.missing_nas_bytes
-            return PhaseExecution(
+            return _fixture_execution(
+                plan,
+                phase,
                 result={
                     "schema_version": 2,
                     "artifact_set_sha256": plan.preparation.model.artifact_set_sha256,
@@ -620,28 +727,34 @@ class ColdStartPhaseExecutor:
                         "total_bytes": total,
                         "total_bytes_known": True,
                     },
-                }
+                },
             )
         if phase.subphase == "runtime-image":
-            return PhaseExecution(
+            return _fixture_execution(
+                plan,
+                phase,
                 result={
                     "runtime_image": _runtime_receipt(plan),
                     "image_digest": plan.build.image_digest,
                     "oci_layout_sha256": plan.build.oci_layout_sha256,
                     "image_bytes": plan.build.image_bytes,
-                }
+                },
             )
         if phase.kind == "transfer" and phase.subphase == "target-copy":
-            return PhaseExecution(result=_target_copy_evidence(plan, phase))
+            return _fixture_execution(
+                plan, phase, result=_target_copy_evidence(plan, phase)
+            )
         if phase.kind == "verify":
-            return PhaseExecution(
+            return _fixture_execution(
+                plan,
+                phase,
                 result={
                     "verified": True,
                     "verified_digests": list(plan.storage.artifact_digests),
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
-                }
+                },
             )
         if phase.subphase == "runtime-plan":
             mapping = getattr(plan, "mapping", None)
@@ -649,24 +762,28 @@ class ColdStartPhaseExecutor:
             installation_id = getattr(plan, "installation_id", None) or str(
                 uuid.uuid4()
             )
-            return PhaseExecution(
+            return _fixture_execution(
+                plan,
+                phase,
                 result={
                     "installation_id": installation_id,
                     "mapping_id": mapping_id,
                     "install_plan_digest": plan.plan_digest,
                     "compiled_plan_persisted": True,
-                }
+                },
             )
         if phase.subphase == "runtime-install":
-            return PhaseExecution(
+            return _fixture_execution(
+                plan,
+                phase,
                 result={
                     "installation_id": getattr(plan, "installation_id", None)
                     or str(uuid.uuid4())
-                }
+                },
             )
         # ``runtime-install`` represents the real admission/compile boundary
         # in this focused driver; the asserted event ordering is the contract.
-        return PhaseExecution(result={"prepared": True})
+        return _fixture_execution(plan, phase, result={"prepared": True})
 
     def get(self, operation_id: str):
         raise KeyError(operation_id)
@@ -978,21 +1095,29 @@ def test_child_activity_change_persists_without_clock_only_writes(
         if _result(service.get(operation.operation_id)).child_operation_id is not None:
             break
     child = executor.children[_child_operation_id(service.get(operation.operation_id))]
-    child.result = {
-        "operation": {
-            "phase": "transfer",
-            "completed_bytes": 0,
-            "total_bytes_known": False,
-            "activity": "active",
-            "observed_at": NOW.isoformat(),
-        }
-    }
+    child = _replace_child(
+        executor,
+        _child_operation_id(service.get(operation.operation_id)),
+        payload={
+            "operation": {
+                "phase": "transfer",
+                "completed_bytes": 0,
+                "total_bytes_known": False,
+                "activity": "active",
+                "observed_at": NOW.isoformat(),
+            }
+        },
+    )
     assert service.tick() is True
     before = _result(service.get(operation.operation_id)).operation
     assert before is not None and before.activity == "active"
-    child.result["operation"]["observed_at"] = (NOW + timedelta(seconds=1)).isoformat()
+    assert isinstance(child.result, RunSwitchDistributionChildResult)
+    assert child.result.progress.operation is not None
+    child.result.progress.operation.observed_at = (
+        NOW + timedelta(seconds=1)
+    ).isoformat()
     assert service.tick() is False
-    child.result["operation"]["activity"] = "waiting"
+    child.result.progress.operation.activity = "waiting"
     assert service.tick() is True
     after = _result(service.get(operation.operation_id)).operation
     assert after is not None and after.activity == "waiting"
@@ -1544,7 +1669,9 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
             self.events.append(identity)
             if phase.subphase == "model-download":
                 model_cache.ready = True
-                return PhaseExecution(
+                return _fixture_execution(
+                    plan,
+                    phase,
                     result={
                         "schema_version": 2,
                         "artifact_set_sha256": plan.preparation.model.artifact_set_sha256,
@@ -1557,7 +1684,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                             "total_bytes": plan.storage.missing_nas_bytes,
                             "total_bytes_known": True,
                         },
-                    }
+                    },
                 )
             if phase.subphase == "runtime-image":
                 with sessions() as session:
@@ -1597,7 +1724,9 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                         },
                         now=NOW,
                     )
-                return PhaseExecution(
+                return _fixture_execution(
+                    plan,
+                    phase,
                     result={
                         "runtime_image": receipt.to_mapping(),
                         "image_digest": receipt.image_digest,
@@ -1606,7 +1735,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                         # ``oci_archive_sha256`` field.
                         "oci_layout_sha256": receipt.oci_archive_sha256,
                         "image_bytes": receipt.image_bytes,
-                    }
+                    },
                 )
             if phase.subphase in {"runtime-plan", "runtime-install"}:
                 return self.delegate.execute(
@@ -1618,18 +1747,22 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     progress=progress,
                 )
             if phase.kind == "transfer" and phase.subphase == "target-copy":
-                return PhaseExecution(result=_target_copy_evidence(plan, phase))
+                return _fixture_execution(
+                    plan, phase, result=_target_copy_evidence(plan, phase)
+                )
             if phase.kind == "verify":
-                return PhaseExecution(
+                return _fixture_execution(
+                    plan,
+                    phase,
                     result={
                         "verified": True,
                         "verified_digests": list(plan.storage.artifact_digests),
                         "verified_build_id": getattr(plan, "recipe_build_id", None),
                         "verified_image_digest": plan.image_digest,
                         "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
-                    }
+                    },
                 )
-            return PhaseExecution(result={"phase": phase.kind})
+            return _fixture_execution(plan, phase, result={"phase": phase.kind})
 
         def get(self, operation_id: str):
             return self.delegate.get(operation_id)
@@ -1824,27 +1957,33 @@ class _ColdCompileExecutor:
                 progress=progress,
             )
         if phase.subphase == "runtime-image":
-            return PhaseExecution(
+            return _fixture_execution(
+                plan,
+                phase,
                 result={
                     "runtime_image": _runtime_receipt(plan),
                     "image_digest": plan.build.image_digest,
                     "oci_layout_sha256": plan.build.oci_layout_sha256,
                     "image_bytes": plan.build.image_bytes,
-                }
+                },
             )
         if phase.kind == "transfer":
-            return PhaseExecution(result=_target_copy_evidence(plan, phase))
+            return _fixture_execution(
+                plan, phase, result=_target_copy_evidence(plan, phase)
+            )
         if phase.kind == "verify":
-            return PhaseExecution(
+            return _fixture_execution(
+                plan,
+                phase,
                 result={
                     "verified": True,
                     "verified_digests": list(plan.storage.artifact_digests),
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
-                }
+                },
             )
-        return PhaseExecution(result={"phase": phase.kind})
+        return _fixture_execution(plan, phase, result={"phase": phase.kind})
 
     def get(self, operation_id: str):
         return self.delegate.get(operation_id)
@@ -2393,7 +2532,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
             state="building",
             plan_digest=plan.build_input_sha256,
             nodes=(),
-            result=None,
+            lifecycle_result=None,
         )
 
     lifecycle.preview_build = preview_build
@@ -2462,7 +2601,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert build_preview_calls == []
     assert build_start_calls == ["start"]
 
-    executor.children[child_id].state = "succeeded"
+    _replace_child(executor, child_id, state="succeeded")
     with sessions.begin() as session:
         completed = session.get(RecipeBuild, build_id)
         assert completed is not None
@@ -2475,8 +2614,9 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert resumed.current_phase == "prepare"
     assert resumed.progress.subphase == "runtime-image"
     assert resumed.result is not None
-    receipt = effective_build_receipt(plan, resumed.result.model_dump(mode="json"))
-    assert receipt == {
+    receipt = effective_build_receipt(plan, resumed.result)
+    assert receipt is not None
+    assert receipt.model_dump(mode="json") == {
         "build_id": build_id,
         "build_input_sha256": build_plan.build_input_sha256,
         "image_digest": "sha256:" + "1" * 64,
@@ -2740,8 +2880,8 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
             )
             is reused
         )
-    assert receipt["build_id"] == build_id
-    assert receipt["state"] == "succeeded"
+    assert receipt.build_id == build_id
+    assert receipt.state == "succeeded"
 
 
 def test_present_rebuilt_image_replaces_installation_bound_to_missing_build(
@@ -3031,7 +3171,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
             state="running",
             plan_digest=build_plan.build_input_sha256,
             nodes=(),
-            result=None,
+            lifecycle_result=None,
         )
 
     lifecycle_stub.build = start_build
@@ -3581,9 +3721,9 @@ def test_artifact_child_checkpoint_advances_to_verify(
     pending = service.get(operation.operation_id)
     assert pending.current_phase == "transfer"
     child_id = _child_operation_id(pending)
-    artifact_executor.children[child_id].state = "succeeded"
-    artifact_executor.children[child_id].result = _target_copy_evidence(
-        plan, plan.phases[0]
+    _replace_child(artifact_executor, child_id, state="succeeded")
+    _replace_child(
+        artifact_executor, child_id, result=_target_copy_evidence(plan, plan.phases[0])
     )
     assert service.tick() is True
     assert service.get(operation.operation_id).current_phase == "verify"
@@ -3619,22 +3759,26 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
 
     assert service.tick() is True
     child_id = _child_operation_id(service.get(operation.operation_id))
-    artifact_executor.children[child_id].state = "running"
-    artifact_executor.children[child_id].result = {
-        "progress": {
-            "completed_bytes": 512,
-            "total_bytes": 1024,
-            "members": [
-                {
-                    "node_id": nodes[0],
-                    "phase": "transfer",
-                    "state": "running",
-                    "completed_bytes": 512,
-                    "total_bytes": 1024,
-                }
-            ],
-        }
-    }
+    _replace_child(artifact_executor, child_id, state="running")
+    _replace_child(
+        artifact_executor,
+        child_id,
+        payload={
+            "progress": {
+                "completed_bytes": 512,
+                "total_bytes": 1024,
+                "members": [
+                    {
+                        "node_id": nodes[0],
+                        "phase": "transfer",
+                        "state": "running",
+                        "completed_bytes": 512,
+                        "total_bytes": 1024,
+                    }
+                ],
+            }
+        },
+    )
     assert service.tick() is True
     waiting = service.get(operation.operation_id)
     assert waiting.progress.completed_bytes == 512
@@ -3658,19 +3802,23 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert resumed.progress.completed_bytes == 512
     assert resumed.progress.members[0].completed_bytes == 512
 
-    artifact_executor.children[child_id].state = "succeeded"
+    _replace_child(artifact_executor, child_id, state="succeeded")
     assert plan.preparation is not None
     runtime_image = plan.preparation.runtime_image
     assert runtime_image is not None
-    artifact_executor.children[child_id].result = {
-        "copied_bytes": 1024,
-        "evidence": [
-            {
-                "node_id": nodes[0],
-                "downloaded_bytes": 1024,
-            }
-        ],
-    }
+    _replace_child(
+        artifact_executor,
+        child_id,
+        payload={
+            "copied_bytes": 1024,
+            "evidence": [
+                {
+                    "node_id": nodes[0],
+                    "downloaded_bytes": 1024,
+                }
+            ],
+        },
+    )
     assert restarted.tick() is True
     completed_transfer = restarted.get(operation.operation_id)
     assert completed_transfer.progress.completed_bytes == 1024
@@ -3722,11 +3870,15 @@ def test_typed_transient_child_failure_is_retried_automatically(
 
     assert service._advance(operation.operation_id) is True
     child_id = _child_operation_id(service.get(operation.operation_id))
-    artifact_executor.children[child_id].state = "failed"
-    artifact_executor.children[child_id].result = {
-        "error_code": "agent.copy.timeout",
-        "failure_kind": "temporary-dependency",
-    }
+    _replace_child(artifact_executor, child_id, state="failed")
+    _replace_child(
+        artifact_executor,
+        child_id,
+        payload={
+            "error_code": "agent.copy.timeout",
+            "failure_kind": "temporary-dependency",
+        },
+    )
     assert service._advance(operation.operation_id) is True
     retrying = service.get(operation.operation_id)
     assert retrying.state == "running"
@@ -3884,11 +4036,15 @@ def test_cleanup_adapter_retries_when_executor_reports_nas_eviction(
         def execute(self, plan, phase, **kwargs):
             if phase.kind == "cleanup":
                 return PhaseExecution(
-                    result={
-                        "scope": "nas",
-                        "reclaimed_bytes": 30,
-                        "nas_evicted": True,
-                    }
+                    result=RunSwitchCleanupResult.model_construct(
+                        phase="cleanup",
+                        scope="nas",
+                        reclaimed_bytes=30,
+                        protected_referenced_bytes=0,
+                        reclaimed_digests=[],
+                        protected_digests=[],
+                        nas_evicted=True,
+                    )
                 )
             return super().execute(plan, phase, **kwargs)
 
@@ -4367,9 +4523,10 @@ def test_overlapping_ticks_cannot_apply_completion_to_the_next_checkpoint(
     service.tick()
     if child_completion:
         child_id = _child_operation_id(service.get(operation.operation_id))
-        child = executor.children[child_id]
-        child.state = "succeeded"
-        child.result = _target_copy_evidence(plan, plan.phases[0])
+        _replace_child(executor, child_id, state="succeeded")
+        _replace_child(
+            executor, child_id, result=_target_copy_evidence(plan, plan.phases[0])
+        )
         service.tick()
     current = service.get(operation.operation_id)
     assert current.progress.phase_index == 1
@@ -4421,9 +4578,10 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
     )
     service.tick()
     assert service.get(operation.operation_id).state == "running"
-    child = executor.children[child_id]
-    child.state = "succeeded"
-    child.result = _target_copy_evidence(plan, plan.phases[0])
+    _replace_child(executor, child_id, state="succeeded")
+    _replace_child(
+        executor, child_id, result=_target_copy_evidence(plan, plan.phases[0])
+    )
     restarted = _service(
         sessions,
         NOW,
@@ -4478,7 +4636,7 @@ def test_cancel_closes_a_transfer_parked_for_an_operator_instead_of_waiting(tmp_
     )
     service.tick()
     child_id = _child_operation_id(service.get(operation.operation_id))
-    executor.children[child_id].state = "waiting-for-operator"
+    _replace_child(executor, child_id, state="waiting-for-operator")
     for _ in range(3):
         service.tick()
     assert service.get(operation.operation_id).state == LifecycleState.OBSERVING
@@ -4525,9 +4683,20 @@ def test_succeeded_child_with_invalid_receipt_is_observed_again_not_failed(tmp_p
     )
     service.tick()
     child_id = _child_operation_id(service.get(operation.operation_id))
-    child = executor.children[child_id]
-    child.state = "succeeded"
-    child.result = {"evidence": [{"phase": "transfer", "unexpected": True}]}
+    _replace_child(executor, child_id, state="succeeded")
+    _replace_child(
+        executor,
+        child_id,
+        result=executor.children[child_id].result.model_copy(
+            update={
+                "evidence": [
+                    ArtifactVerificationEvidence.model_construct(
+                        node_id="", downloaded_bytes=-1
+                    )
+                ]
+            }
+        ),
+    )
     for _ in range(3):
         service.tick()
     held = service.get(operation.operation_id)
@@ -4686,10 +4855,10 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
     assert completed.operation_id is None
     assert completed.result is not None
     receipt = _phase_result(completed.result, phase=phase)
-    assert receipt["state"] == "succeeded"
-    assert receipt["image_digest"] == "sha256:" + "a" * 64
-    assert receipt["oci_layout_sha256"] == "b" * 64
-    assert receipt["image_bytes"] == 123
+    assert receipt.state == "succeeded"
+    assert receipt.image_digest == "sha256:" + "a" * 64
+    assert receipt.oci_layout_sha256 == "b" * 64
+    assert receipt.image_bytes == 123
     # Success never substitutes defaults for incomplete immutable evidence.
     with sessions.begin() as session:
         stale = session.get(RecipeBuild, selected.build_id)
@@ -6232,12 +6401,13 @@ def test_stop_verification_keeps_waiting_for_a_lost_run_that_is_not_stopped(
         item_index=0,
         actor="admin",
         request_key=str(uuid.uuid4()),
-        progress={},
+        progress=RunSwitchOperationResult(),
     )
 
     assert execution.waiting is True
     assert execution.result is not None
-    assert execution.result["final_verified"] is False
+    assert isinstance(execution.result, RunSwitchFinalVerifyResult)
+    assert execution.result.final_verified is False
 
 
 def test_installation_verification_refuses_a_lost_run_that_still_has_residue(
@@ -6304,7 +6474,7 @@ def test_installation_verification_refuses_a_lost_run_that_still_has_residue(
             item_index=0,
             actor="admin",
             request_key=str(uuid.uuid4()),
-            progress={},
+            progress=RunSwitchOperationResult(),
         )
 
 
