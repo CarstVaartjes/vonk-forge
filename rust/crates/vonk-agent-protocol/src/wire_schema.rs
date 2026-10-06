@@ -149,81 +149,67 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn materialize(schema: &Value, value: &mut Value) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SchemaTransform {
+    ReadAliases,
+    Defaults,
+}
+
+// Traverse the canonical schema once per transformation phase. Aliases are
+// adopted before validation; defaults only after validation. Neither phase
+// invents field rules or modifies external passthrough content.
+fn transform(schema: &Value, value: &mut Value, phase: SchemaTransform) {
     if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
         if let Some(schema) = reference
             .strip_prefix('#')
             .and_then(|pointer| SCHEMA.pointer(pointer))
         {
-            materialize(schema, value);
+            transform(schema, value, phase);
         }
         return;
     }
-    // Defaults in union members are materialized by their generated nested
-    // deserializers, after the matching member has been selected and validated.
+    if phase == SchemaTransform::ReadAliases
+        && let Some(old) = value.as_str()
+        && let Some(current) = schema["x-vonk-read-aliases"].get(old)
+    {
+        *value = current.clone();
+    }
     if let (Some(properties), Some(object)) = (
         schema.get("properties").and_then(Value::as_object),
         value.as_object_mut(),
     ) {
         for (name, property) in properties {
-            if !object.contains_key(name)
+            if phase == SchemaTransform::Defaults
+                && !object.contains_key(name)
                 && let Some(default) = property.get("default")
             {
                 object.insert(name.clone(), default.clone());
             }
             if let Some(child) = object.get_mut(name) {
-                materialize(property, child);
+                transform(property, child, phase);
             }
         }
     }
     if let (Some(items), Some(array)) = (schema.get("items"), value.as_array_mut()) {
         for child in array {
-            materialize(items, child);
+            transform(items, child, phase);
         }
     }
-}
-
-// Adopt only explicitly retired enum spellings declared by the Pydantic source.
-// This never supplies defaults or changes external passthrough content.
-fn adopt_read_aliases(schema: &Value, value: &mut Value) {
-    if let Some(reference) = schema["$ref"].as_str()
-        && let Some(definition) = SCHEMA.pointer(reference.trim_start_matches('#'))
-    {
-        adopt_read_aliases(definition, value);
-        return;
-    }
-    if let Some(old) = value.as_str()
-        && let Some(current) = schema["x-vonk-read-aliases"].get(old)
-    {
-        *value = current.clone();
-    }
-    if let (Some(properties), Some(object)) =
-        (schema["properties"].as_object(), value.as_object_mut())
-    {
-        for (name, property) in properties {
-            if let Some(child) = object.get_mut(name) {
-                adopt_read_aliases(property, child);
-            }
-        }
-    }
-    if let Some(array) = value.as_array_mut()
-        && let Some(items) = schema.get("items")
-    {
-        for child in array {
-            adopt_read_aliases(items, child);
-        }
-    }
-    for key in ["anyOf", "oneOf", "allOf"] {
-        if let Some(variants) = schema[key].as_array() {
-            for variant in variants {
-                adopt_read_aliases(variant, value);
+    // Defaults in union members remain the responsibility of their generated
+    // nested deserializers, after the matching member has been validated.
+    if phase == SchemaTransform::ReadAliases {
+        for key in ["anyOf", "oneOf", "allOf"] {
+            if let Some(variants) = schema[key].as_array() {
+                for variant in variants {
+                    transform(variant, value, phase);
+                }
             }
         }
     }
 }
 
 pub(crate) fn validate_and_materialize(name: &str, value: &mut Value) -> Result<(), String> {
-    adopt_read_aliases(&SCHEMA["$defs"][name], value);
+    transform(&SCHEMA["$defs"][name], value, SchemaTransform::ReadAliases);
     let pointer = format!("#/$defs/{name}");
     // A model declared tolerant (`extra="ignore"`) drops keys it does not know
     // before validation, so a record written by another release stays readable.
@@ -245,6 +231,6 @@ pub(crate) fn validate_and_materialize(name: &str, value: &mut Value) -> Result<
         ));
     }
     strict_numbers(&pointer, value)?;
-    materialize(&SCHEMA["$defs"][name], value);
+    transform(&SCHEMA["$defs"][name], value, SchemaTransform::Defaults);
     Ok(())
 }
