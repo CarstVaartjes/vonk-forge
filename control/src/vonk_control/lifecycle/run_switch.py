@@ -671,7 +671,7 @@ class RunSwitchAdapter:
 
         return self.settle(
             job,
-            {},
+            RunSwitchOperationResult(),
             Reported(Outcome.FAILED, retryable=False, reason=reason),
             now,
             reason=reason,
