@@ -3591,6 +3591,14 @@
       "sites": [
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_profile_build_dependencies", "build.consumer_invalid", 1]
       ]
+    },
+    {
+      "family": "distributed_recovery.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class DistributedRecoveryInvalid is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_recovery_marker", "distributed-recovery-authority-is-invalid", 1]
+      ]
     }
   ]
 }
