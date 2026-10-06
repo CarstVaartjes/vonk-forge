@@ -1956,6 +1956,9 @@ def render_payload(
 def progress_line(observed: Mapping[str, object]) -> str:
     """Describe measured work, and what it waits for when it is waiting."""
     line = _measured_progress(observed)
+    residue = _optional(observed.get("residue"), "evidence residue")
+    if residue:
+        return f"{line} | evidence unavailable: {_text(residue.get('reason'))}"
     blockers = observed.get("blockers")
     first = blockers[0] if isinstance(blockers, list) and blockers else None
     if isinstance(first, Mapping):
