@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol import OperationCheckpoint, canonical_message
@@ -224,3 +226,40 @@ def test_canonical_progress_retains_default_zero_false_and_empty_members() -> No
         "total_bytes_known": False,
         "members": [],
     }
+
+
+def test_failure_evidence_restored_diagnostics_obey_the_byte_limit() -> None:
+    # Reattaching diagnostics after dropping padding must not bypass the bound.
+    evidence = {
+        "error_code": "recipe_start_failed",
+        "summary": "capacity failure",
+        "padding": ["x" * 1024 for _ in range(32)],
+        "diagnostics": {
+            "stdout": {
+                "text": "界" * 1024,
+                "truncated": False,
+                "dropped_bytes": 0,
+                "dropped_lines": 0,
+            },
+            "stderr": {
+                "text": "Killed\n" + "界" * 1024,
+                "truncated": False,
+                "dropped_bytes": 0,
+                "dropped_lines": 0,
+            },
+            "preflight": [{"name": "exit_cause", "value": "oom_killed"}],
+            "collector_errors": ["界" * 256 for _ in range(8)],
+        },
+    }
+    kept = sanitize_failure_evidence(evidence)
+    assert len(json.dumps(kept, sort_keys=True, separators=(",", ":")).encode()) <= 8192
+    diagnostics = require_mapping(kept["diagnostics"], "diagnostics retained")
+    preflight = require_sequence(diagnostics["preflight"], "exit facts retained")
+    cause = require_mapping(preflight[0], "cause retained")
+    assert cause["value"] == "oom_killed"
+    stderr = require_mapping(diagnostics["stderr"], "stderr retained")
+    tail = text(stderr["text"])
+    assert tail is not None and tail.startswith("Killed")
+    assert stderr["truncated"] is True
+    dropped = stderr["dropped_bytes"]
+    assert isinstance(dropped, int) and dropped > 0

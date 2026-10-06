@@ -196,6 +196,20 @@
       "annotation": "dict[str, object]",
       "count": 1,
       "reason": "Generic canonical-JSON digest utility over a document the caller built from typed values."
+    },
+    {
+      "path": "control/src/vonk_control/operation_contract.py",
+      "function": "sanitize_failure_evidence",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
+    },
+    {
+      "path": "control/src/vonk_control/operation_contract.py",
+      "function": "sanitize_failure_evidence.candidates",
+      "annotation": "dict[str, object]",
+      "count": 2,
+      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
     }
   ],
   "debt": [

@@ -174,7 +174,7 @@ def safe_text(value: str) -> str:
             lines.append(
                 _OPAQUE_SECRET.sub("[redacted opaque value]", redact_text(line))
             )
-    return "\n".join(lines)
+    return "\n".join(lines) + ("\n" if value.endswith("\n") else "")
 
 
 def _keep_end(text: str, limit: int) -> tuple[str, int]:
@@ -552,8 +552,18 @@ class FailureEvidenceService:
             if (
                 job is not None
                 and job.state in FAILED_ATTEMPT_STATES
-                and job.current_attempt == attempt
+                # Activity numbers a Job's first attempt 1 although the row
+                # counts from 0; the download answers to the number it was
+                # advertised under as well as to the stored one.
+                and attempt in {job.current_attempt, max(1, job.current_attempt)}
             ):
+                result = OperationResultFacts.model_validate(job.result)
+                if not (result.reason or result.summary) and job.status_reason:
+                    result = result.model_copy(update={"reason": job.status_reason})
+                if result.diagnostics is None and not result.diagnostics_invalid:
+                    diagnostics = self._child_diagnostics(session, job.id)
+                    if diagnostics is not None:
+                        result = result.model_copy(update={"diagnostics": diagnostics})
                 return self._item(
                     job,
                     attempt=attempt,
@@ -561,7 +571,7 @@ class FailureEvidenceService:
                     node_ids=job.targets,
                     source="controller",
                     progress=None,
-                    result=job.result,
+                    result=result,
                 )
             cache = session.get(ModelCacheOperation, operation_id)
             if (
@@ -587,11 +597,15 @@ class FailureEvidenceService:
                 )
                 if projected.attempt != attempt:
                     return None
-                failure = (
-                    None
-                    if projected.failure is None
-                    else projected.failure.model_dump(mode="json")
+                result = (
+                    projected.result
+                    or OperationResultFacts.of(projected.failure)
+                    or OperationResultFacts()
                 )
+                if result.diagnostics is None and not result.diagnostics_invalid:
+                    child = self._application_child_diagnostics(session, application.id)
+                    if child is not None:
+                        result = result.model_copy(update={"diagnostics": child})
                 return FailedAttempt(
                     id=projected.id,
                     attempt=projected.attempt,
@@ -599,18 +613,89 @@ class FailureEvidenceService:
                     node_ids=projected.node_ids,
                     updated_at=projected.updated_at or "",
                     source="controller",
-                    # The Controller owns this record: no Spark operation ran, so
-                    # there are no agent observations to be missing.
+                    # The Controller owns this record; exact children own the
+                    # captured Spark diagnostics carried above.
                     agent_operation=False,
                     progress=AttemptPhase.model_validate(projected.progress),
-                    result=(
-                        OperationResultFacts.model_validate(failure)
-                        if projected.result is None
-                        else projected.result
-                    ),
+                    result=result,
                     blockers=projected.blockers,
                 )
         return None
+
+    @staticmethod
+    def _child_diagnostics(session: Session, job_id: str) -> FailureDiagnostics | None:
+        """The Spark-side diagnostics of the newest failed child of a Job.
+
+        A Controller-owned parent fails because a child operation failed on a
+        Spark, and that child's receipt holds the container's exit facts and
+        log tails.  Reporting only the parent's reason text was how a workload
+        that exited left empty stdout/stderr and category ``unknown``.
+        """
+        result = session.execute(
+            select(AgentOperationAttempt.result)
+            .join(
+                AgentOperation,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
+            )
+            .where(
+                AgentOperation.parent_job_id == job_id,
+                failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+                AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
+            )
+            .order_by(
+                AgentOperation.updated_at.desc(),
+                AgentOperationAttempt.attempt.desc(),
+            )
+            # Select the newest receipt that actually contains evidence, rather
+            # than cutting off an arbitrary window of unrelated empty receipts.
+            # One persisted receipt has the producer's bounded evidence size.
+            .limit(1)
+        ).scalar_one_or_none()
+        facts = OperationResultFacts.model_validate(result)
+        diagnostics = facts.diagnostics
+        if diagnostics is None:
+            return None
+        try:
+            return sanitize_diagnostics(diagnostics)
+        except (TypeError, ValueError):
+            # A damaged latest receipt is unknown, not a failure of this read.
+            return None
+
+    @classmethod
+    def _application_child_diagnostics(
+        cls, session: Session, application_id: str
+    ) -> FailureDiagnostics | None:
+        """Diagnostics of the newest failed run-switch child of an application."""
+        result = session.execute(
+            select(AgentOperationAttempt.result)
+            .join(
+                AgentOperation,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
+            )
+            .join(Job, AgentOperation.parent_job_id == Job.id)
+            .where(
+                Job.kind == "recipe.run-switch.v2",
+                Job.state.in_(FAILED_ATTEMPT_STATES),
+                Job.result["profile_application_id"].as_string() == application_id,
+                failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+                AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
+            )
+            .order_by(
+                Job.updated_at.desc(),
+                AgentOperation.updated_at.desc(),
+                AgentOperationAttempt.attempt.desc(),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        facts = OperationResultFacts.model_validate(result)
+        diagnostics = facts.diagnostics
+        if diagnostics is None:
+            return None
+        try:
+            return sanitize_diagnostics(diagnostics)
+        except (TypeError, ValueError):
+            # A damaged latest receipt is unknown, not a failure of this read.
+            return None
 
     @staticmethod
     def _item(
