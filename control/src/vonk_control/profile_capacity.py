@@ -787,6 +787,35 @@ def prepared_profile_installation(
     return identities.pop()
 
 
+def release_replaced_profile_claims(
+    session: Session,
+    application: FleetProfileApplication,
+    *,
+    node_ids: Sequence[str],
+    now: datetime,
+) -> None:
+    """Release only unconsumed promises on siblings fenced by newer intent.
+
+    Continuing nodes retain their original owner. Materialized claims have
+    changed owner under the consumer's atomic handoff and are untouched.
+    """
+    for claim in session.scalars(
+        select(ResourceReservation)
+        .where(
+            ResourceReservation.owner_kind == "fleet-profile",
+            ResourceReservation.owner_id == application.id,
+            ResourceReservation.node_id.in_(node_ids),
+            ResourceReservation.state.in_(
+                (ReservationState.ACTIVE, ReservationState.PROMISED)
+            ),
+        )
+        .order_by(ResourceReservation.node_id, ResourceReservation.id)
+        .with_for_update(nowait=True)
+    ):
+        claim.state = ReservationState.RELEASED
+        claim.released_at = now
+
+
 def release_unassigned_profile_claims(
     session: Session, application: FleetProfileApplication, *, now: datetime
 ) -> None:

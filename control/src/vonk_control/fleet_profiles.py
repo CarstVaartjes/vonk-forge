@@ -183,6 +183,7 @@ from .operation_contract import OperationFailureEvidence
 from .operation_progress import project_progress
 from .preparation_contract import RolloutPreparation, RuntimeImageIdentity
 from .profile_capacity import (
+    release_replaced_profile_claims,
     release_unassigned_profile_claims,
     reserve_profile_disk,
     reserve_profile_memory,
@@ -7150,24 +7151,12 @@ class FleetProfileService:
                         # the consumer's atomic handoff and remain until exact
                         # effect reconciliation. Continuing promises stay owned
                         # by the original application and are never duplicated.
-                        for claim in session.scalars(
-                            select(ResourceReservation)
-                            .where(
-                                ResourceReservation.owner_kind == "fleet-profile",
-                                ResourceReservation.owner_id == prior_application.id,
-                                ResourceReservation.node_id.in_(fenced_nodes),
-                                ResourceReservation.state.in_(
-                                    (ReservationState.ACTIVE, ReservationState.PROMISED)
-                                ),
-                            )
-                            .order_by(
-                                ResourceReservation.node_id, ResourceReservation.id
-                            )
-                            .with_for_update(nowait=True)
-                        ):
-                            claim: ResourceReservation
-                            claim.state = ReservationState.RELEASED
-                            claim.released_at = now
+                        release_replaced_profile_claims(
+                            session,
+                            prior_application,
+                            node_ids=tuple(sorted(fenced_nodes)),
+                            now=now,
+                        )
                         # Flush replaced promises before a successor inserts the
                         # same unique promised port; this is not capacity freed.
                         session.flush()
