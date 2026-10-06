@@ -36,6 +36,7 @@ def test_canonical_retry_recovers_after_persisted_restart() -> None:
     assert pending.state is State.BACKOFF
     assert progress.observation_due_at is not None
     job.result = _persisted_result(progress)
+    assert job.result is not None
     assert isinstance(job.result["observation_due_at"], str)
 
     restarted = RunSwitchAdapter(clock=lambda: now + timedelta(seconds=60))

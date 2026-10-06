@@ -4864,6 +4864,7 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
     assert completed.operation_id is None
     assert completed.result is not None
     receipt = _phase_result(completed.result, phase=phase)
+    assert isinstance(receipt, RunSwitchContainerBuildResult)
     assert receipt.state == "succeeded"
     assert receipt.image_digest == "sha256:" + "a" * 64
     assert receipt.oci_layout_sha256 == "b" * 64

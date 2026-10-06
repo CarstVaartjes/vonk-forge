@@ -21,6 +21,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.run_switch_contract import (
+    ArtifactVerificationEvidence,
     RunSwitchApplyRequest,
     RunSwitchFinalVerifyResult,
     SparkGroup,
@@ -40,6 +41,7 @@ from .test_recipe_operations import (
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
+    _replace_child,
     _request,
     _service,
 )
@@ -127,8 +129,20 @@ def test_postgres_invalid_terminal_child_is_retried_without_nested_row_lock(
     assert persisted.result is not None
     child_id = persisted.result.child_operation_id
     assert child_id is not None
-    artifacts.children[child_id].state = "succeeded"
-    artifacts.children[child_id].result = None
+    _replace_child(artifacts, child_id, state="succeeded")
+    _replace_child(
+        artifacts,
+        child_id,
+        result=artifacts.children[child_id].result.model_copy(
+            update={
+                "evidence": [
+                    ArtifactVerificationEvidence.model_construct(
+                        node_id="", copied_bytes=-1
+                    )
+                ]
+            },
+        ),
+    )
     service.tick()
     # A receipt that does not validate is an unknown, not a failure: the operation
     # is decided under the one lock it already holds (no nested row lock) and the

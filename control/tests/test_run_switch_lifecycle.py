@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -39,11 +39,15 @@ from vonk_control.lifecycle import (
 )
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter
 from vonk_control.models import Job
-from vonk_control.run_switch_contract import RunSwitchApplyRequest
+from vonk_control.run_switch_contract import (
+    RunSwitchApplyRequest,
+    RunSwitchOperationResult,
+)
 from vonk_control.run_switch_operations import (
     PhaseExecution,
     RunSwitchOperationConflict,
     _phase_result,
+    _read_progress,
 )
 
 from .test_recipe_operations import NOW, installed_recipe, setup_services
@@ -52,6 +56,7 @@ from .test_run_switch_operations import (
     RecordingArtifactExecutor,
     _child_operation_id,
     _parked_start_switch,
+    _replace_child,
     _request,
     _result,
     _service,
@@ -217,13 +222,13 @@ def test_no_run_switch_state_can_wait_for_an_operator(stored: str, shape: str) -
     adapter = RunSwitchAdapter()
     job = _job(stored, dict(_SHAPES[shape]))
     now = NOW + timedelta(hours=1)
-    row = adapter.lifecycle(job, job.result or {}, now)
+    row = adapter.lifecycle(job, _read_progress(job.result), now)
     assert adapter.irreversible(row) is False
     assert adapter.actions(row) == ()
     for event in _EVENTS:
         if row.state is State.NEEDS_OPERATOR and isinstance(event, LeaseLapsed):
             continue  # a lease lapse says nothing about a row that holds none
-        decision = adapter.decide(job, job.result or {}, event, now)
+        decision = adapter.decide(job, _read_progress(job.result), event, now)
         assert decision.row.state is not State.NEEDS_OPERATOR, (event, stored, shape)
 
 
@@ -231,15 +236,16 @@ def test_a_legacy_operator_wait_is_re_evaluated_by_the_first_decision() -> None:
     adapter = RunSwitchAdapter()
     job = _job("waiting-for-operator", {})
     now = NOW
-    row = adapter.lifecycle(job, job.result or {}, now)
+    row = adapter.lifecycle(job, _read_progress(job.result), now)
     assert row.state is State.NEEDS_OPERATOR  # legacy, only ever read
-    healed = adapter.decide(job, job.result or {}, Tick(), now).row
+    healed = adapter.decide(job, _read_progress(job.result), Tick(), now).row
     assert healed.state is State.BACKOFF
     assert healed.next_action_at is not None and healed.next_action_at > now
     # with a clock it was already an observation (what its view presents)
     clocked = _job("waiting-for-operator", dict(_SHAPES["clock"]))
     assert (
-        adapter.lifecycle(clocked, clocked.result or {}, now).state is State.OBSERVING
+        adapter.lifecycle(clocked, _read_progress(clocked.result), now).state
+        is State.OBSERVING
     )
 
 
@@ -252,7 +258,7 @@ def test_a_live_child_is_left_untouched_by_a_tick(tmp_path: Path) -> None:
     harness = _Harness(tmp_path, RecordingArtifactExecutor(child_transfer=True))
     harness.service.tick()
     child_id = _child_operation_id(harness.view())
-    harness.executor.children[child_id].state = "running"
+    _replace_child(harness.executor, child_id, state="running")
     harness.service.tick()
     before = harness.row()
     for _ in range(3):
@@ -269,7 +275,7 @@ def test_a_legacy_operator_wait_with_a_live_child_is_observed_not_failed(
     harness = _Harness(tmp_path, RecordingArtifactExecutor(child_transfer=True))
     harness.service.tick()
     child_id = _child_operation_id(harness.view())
-    harness.executor.children[child_id].state = "running"
+    _replace_child(harness.executor, child_id, state="running")
     harness.make_legacy_operator_wait()
     assert harness.view().state == LifecycleState.NEEDS_OPERATOR
 
@@ -309,7 +315,7 @@ def test_a_cancel_completes_when_the_stop_stays_unconfirmed(tmp_path: Path) -> N
     harness = _Harness(tmp_path, RecordingArtifactExecutor(child_transfer=True))
     harness.service.tick()
     child_id = _child_operation_id(harness.view())
-    harness.executor.children[child_id].state = "running"
+    _replace_child(harness.executor, child_id, state="running")
     harness.service.cancel(
         harness.id, actor="admin", request_key=str(uuid.uuid4()), reason="stop it"
     )
@@ -333,7 +339,7 @@ def test_a_cancel_survives_a_restart_in_the_middle(tmp_path: Path) -> None:
     harness = _Harness(tmp_path, RecordingArtifactExecutor(child_transfer=True))
     harness.service.tick()
     child_id = _child_operation_id(harness.view())
-    harness.executor.children[child_id].state = "running"
+    _replace_child(harness.executor, child_id, state="running")
     harness.service.cancel(
         harness.id, actor="admin", request_key=str(uuid.uuid4()), reason="stop it"
     )
@@ -353,13 +359,13 @@ def test_a_cancel_ends_when_the_child_ends_without_waiting_for_its_clock(
     harness = _Harness(tmp_path, RecordingArtifactExecutor(child_transfer=True))
     harness.service.tick()
     child_id = _child_operation_id(harness.view())
-    harness.executor.children[child_id].state = "running"
+    _replace_child(harness.executor, child_id, state="running")
     harness.service.cancel(
         harness.id, actor="admin", request_key=str(uuid.uuid4()), reason="stop it"
     )
     harness.service.tick()
     assert harness.view().state == "running"
-    harness.executor.children[child_id].state = "cancelled"
+    _replace_child(harness.executor, child_id, state="cancelled")
     harness.service.tick()  # the clock has not moved
     assert harness.view().state == "cancelled"
     assert "cancel-effect-unknown" not in (harness.view().status_reason or "")
@@ -371,7 +377,7 @@ def test_a_cancel_that_is_not_due_is_not_reported_as_progress(tmp_path: Path) ->
     harness = _Harness(tmp_path, RecordingArtifactExecutor(child_transfer=True))
     harness.service.tick()
     child_id = _child_operation_id(harness.view())
-    harness.executor.children[child_id].state = "running"
+    _replace_child(harness.executor, child_id, state="running")
     harness.service.cancel(
         harness.id, actor="admin", request_key=str(uuid.uuid4()), reason="stop it"
     )
@@ -674,7 +680,7 @@ def test_a_retry_never_lands_before_the_evidence_it_waits_for_can_exist() -> Non
     threshold = NOW + timedelta(seconds=26)
     for _ in range(200):
         job = _job("running", {})
-        progress: dict[str, Any] = {}
+        progress = RunSwitchOperationResult()
         adapter.retry(
             job,
             progress,
@@ -682,7 +688,8 @@ def test_a_retry_never_lands_before_the_evidence_it_waits_for_can_exist() -> Non
             NOW,
             retry_after=threshold,
         )
-        due = datetime.fromisoformat(str(progress["observation_due_at"]))
+        due = progress.observation_due_at
+        assert due is not None
         assert due >= threshold, (due, job.id)
 
 
