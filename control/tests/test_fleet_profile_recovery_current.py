@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileInput,
@@ -378,7 +378,7 @@ def test_a_changed_saved_draft_does_not_cancel_accepted_parked_application(
 
     ended = service.application(first.id)
     assert ended.state in {"cancelled", "failed", "queued", "running"}
-    assert ended.state != "waiting-for-operator"
+    assert ended.state != LifecycleState.NEEDS_OPERATOR
     assert ended.status_reason
 
 
@@ -451,7 +451,7 @@ def test_exhausted_profile_retry_keeps_an_automatic_due_time(
     candidate = service._automatic_profile_recovery(due + timedelta(seconds=1))
     assert candidate == (first.id, "admin")
     # Scheduling recovery does not rewrite the parked row into a new state.
-    assert service.application(first.id).state == "waiting-for-operator"
+    assert service.application(first.id).state == LifecycleState.NEEDS_OPERATOR
 
 
 def test_retry_of_a_failed_order_with_a_live_child_resumes_it(tmp_path: Path) -> None:

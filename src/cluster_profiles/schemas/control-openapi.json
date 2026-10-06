@@ -4242,9 +4242,9 @@
             "type": "string"
           },
           "state": {
-            "default": "cancelling",
+            "default": "observing",
             "enum": [
-              "cancelling",
+              "observing",
               "cancelled"
             ],
             "title": "State",
@@ -4375,7 +4375,7 @@
           },
           "state": {
             "enum": [
-              "cancelling",
+              "observing",
               "cancelled"
             ],
             "title": "State",
@@ -4816,7 +4816,7 @@
             "enum": [
               "queued",
               "running",
-              "waiting-for-operator",
+              "needs-operator",
               "succeeded",
               "failed",
               "cancelled",
@@ -5774,7 +5774,7 @@
                 "enum": [
                   "queued",
                   "running",
-                  "waiting-for-operator",
+                  "needs-operator",
                   "succeeded",
                   "failed",
                   "cancelled",
@@ -6978,7 +6978,7 @@
             "enum": [
               "queued",
               "running",
-              "waiting-for-operator",
+              "needs-operator",
               "succeeded",
               "failed",
               "cancelled",

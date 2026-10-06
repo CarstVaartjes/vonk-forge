@@ -278,6 +278,9 @@ STATE_ALIASES: Mapping[LifecycleSubject, Mapping[StateAlias, AdoptedState]] = {
     },
     LifecycleSubject.FLEET_PROFILE_APPLICATION: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        # The state of the application's cancellation intent (its progress document):
+        # a cancel being driven is observed.
+        StateAlias.CANCELLING: _CANCELLING,
     },
 }
 

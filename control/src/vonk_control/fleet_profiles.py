@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Protocol, TypedDict
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 from typing import cast as _typing_cast
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
@@ -20,11 +20,11 @@ from sqlalchemy import String, case, cast, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, object_session, sessionmaker
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message, input_state
 from vonk_forge_contracts import RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology
 
-from . import job_states
+from . import fleet_profile_states, job_states
 from .admission_locking import (
     AdmissionLockBusy,
     acquire_admission_keys,
@@ -218,7 +218,7 @@ _CHILD_PENDING_STATES = frozenset(
         "starting",
         "stopping",
         "installing",
-        "waiting-for-operator",
+        *job_states.words(LifecycleState.NEEDS_OPERATOR),
     }
 )
 _CHILD_FAILED_STATES = frozenset(
@@ -276,7 +276,9 @@ def _profile_activity_pending(state, cancellation_state):
         if isinstance(state, str)
         else state.in_(_PROFILE_ACTIVITY_ACTIVE_STATES)
     )
-    return active & (cancellation_state == "cancelling")
+    if isinstance(cancellation_state, str) or cancellation_state is None:
+        return active & fleet_profile_states.cancel_in_flight(cancellation_state)
+    return active & cancellation_state.in_(fleet_profile_states.CANCEL_IN_FLIGHT)
 
 
 def _profile_activity_state(
@@ -287,18 +289,23 @@ def _profile_activity_state(
     if _profile_activity_pending(
         state, cancellation.state if cancellation is not None else None
     ):
-        return "cancelling"
+        return fleet_profile_states.OBSERVING
     return state
 
 
 def _profile_activity_state_expression():
     return case(
         (
-            _profile_activity_pending(
-                FleetProfileApplication.state,
-                FleetProfileApplication.progress["cancellation"]["state"].as_string(),
+            _typing_cast(
+                Any,
+                _profile_activity_pending(
+                    FleetProfileApplication.state,
+                    FleetProfileApplication.progress["cancellation"][
+                        "state"
+                    ].as_string(),
+                ),
             ),
-            "cancelling",
+            fleet_profile_states.OBSERVING,
         ),
         # A failed application with a scheduled retry is presented as queued.
         (
@@ -2644,7 +2651,7 @@ class RunSwitchFleetProfileAdapter:
             if child.state
             in job_states.words(LifecycleState.OBSERVING, LifecycleState.NEEDS_OPERATOR)
             else child.state,
-            default="running",
+            default=LifecycleState.RUNNING,
         )
         result = self._child_receipt(child)
         attempt = child.result.retry_attempt if child.result is not None else None
@@ -2669,7 +2676,9 @@ class RunSwitchFleetProfileAdapter:
         application: FleetProfileApplication,
         state: Mapping[str, object],
     ) -> FleetProfileChildOperation:
-        child_state = _operation_state(state.get("state"), default="running")
+        child_state = _operation_state(
+            state.get("state"), default=LifecycleState.RUNNING
+        )
         raw_progress = state.get("child_progress")
         progress = (
             # The stored document is JSON that the database driver already
@@ -4169,10 +4178,14 @@ class FleetProfileService:
                 elif run is not None and run.route_state == "failed":
                     state = "unavailable"
                     run_id = None
-                elif application_state == "succeeded":
+                elif application_state == LifecycleState.SUCCEEDED:
                     state = "withdrawn"
                     run_id = None
-                elif application_state in {"failed", "cancelled", "superseded"}:
+                elif application_state in {
+                    LifecycleState.FAILED,
+                    LifecycleState.CANCELLED,
+                    LifecycleState.SUPERSEDED,
+                }:
                     state = "unavailable"
                     run_id = None
                 else:
@@ -5672,7 +5685,7 @@ class FleetProfileService:
                 if isinstance(error, _FleetProfileSupersededIntentConflict):
                     self._finish_pending_admission(
                         pending.id,
-                        state="superseded",
+                        state=LifecycleState.SUPERSEDED,
                         reason=str(error),
                         code="superseded-by-intent",
                     )
@@ -7026,8 +7039,14 @@ class FleetProfileService:
                     FleetProfileApplication.id.desc(),
                 )
                 if isinstance(state, str):
+                    # A filter may still name a retired spelling (one release).
+                    named = input_state(state)
                     base_statement = base_statement.where(
-                        _profile_activity_state_expression() == state
+                        _profile_activity_state_expression().in_(
+                            fleet_profile_states.words(named)
+                            if named is not None
+                            else (state,)
+                        )
                     )
                 if isinstance(query.request_id, str):
                     base_statement = base_statement.where(
@@ -7181,12 +7200,12 @@ class FleetProfileService:
                 error_code="fleet_profile_application_failed",
                 summary=(
                     "Profile application needs attention"
-                    if state == "waiting-for-operator"
+                    if state in fleet_profile_states.NEEDS_OPERATOR
                     else "Profile application failed"
                 ),
                 detail=redact_text(reason),
                 retryable=retry_available,
-                uncertain=state == "waiting-for-operator",
+                uncertain=state in fleet_profile_states.NEEDS_OPERATOR,
             ).model_dump(mode="json")
         return {
             "id": row.id,
@@ -7550,7 +7569,7 @@ class FleetProfileService:
                     LifecycleState.NEEDS_OPERATOR,
                 )
             )
-            & (cancellation_state == "cancelling")
+            & cancellation_state.in_(fleet_profile_states.CANCEL_IN_FLIGHT)
             & (func.coalesce(observation_due, "") <= now.isoformat())
         )
         with self._sessions() as session:
@@ -7604,7 +7623,7 @@ class FleetProfileService:
                 )
                 return True
             intent = current.cancellation
-            if intent is None or intent.state != "cancelling":
+            if intent is None or intent.state != LifecycleState.OBSERVING:
                 return False
             if (
                 intent.observation_due_at is not None
@@ -7723,7 +7742,7 @@ class FleetProfileService:
                 raise
             self._finish_pending_admission(
                 pending.id,
-                state="superseded",
+                state=LifecycleState.SUPERSEDED,
                 reason=str(error),
                 code="superseded-by-intent",
             )
@@ -7732,7 +7751,7 @@ class FleetProfileService:
                 raise
             self._finish_pending_admission(
                 pending.id,
-                state="failed",
+                state=LifecycleState.FAILED,
                 reason=str(error) or "Profile reconcile failed",
             )
         return True
@@ -7835,7 +7854,7 @@ class FleetProfileService:
                 select(FleetProfileApplication)
                 .where(
                     FleetProfileApplication.state.in_(("queued", "running")),
-                    cancellation_state != "cancelling",
+                    cancellation_state.not_in(fleet_profile_states.CANCEL_IN_FLIGHT),
                     admission_pending.is_(False),
                 )
                 .order_by(
@@ -7872,7 +7891,7 @@ class FleetProfileService:
             progress = stored
             if (
                 progress.cancellation is not None
-                and progress.cancellation.state == "cancelling"
+                and progress.cancellation.state == LifecycleState.OBSERVING
             ):
                 # Defensive parity with the SQL exclusion above. Never let a
                 # malformed query or dialect quirk monopolize ordinary work.
@@ -8235,7 +8254,7 @@ class FleetProfileService:
         except (FleetProfileConflict, KeyError) as error:
             self._finish_pending_admission(
                 application_id,
-                state="failed",
+                state=LifecycleState.FAILED,
                 reason=str(error) or "Profile admission could not be resumed",
             )
             return None
@@ -8243,7 +8262,7 @@ class FleetProfileService:
             if not _profile_preview_is_waitable(fresh):
                 self._finish_pending_admission(
                     application_id,
-                    state="failed",
+                    state=LifecycleState.FAILED,
                     reason="Fleet profile intent contains a security or contract blocker",
                 )
                 return None
@@ -8555,7 +8574,7 @@ class FleetProfileService:
         except FleetProfileStalePlanConflict as error:
             self._finish_pending_admission(
                 application_id,
-                state="superseded",
+                state=LifecycleState.SUPERSEDED,
                 reason=f"Pending profile intent was superseded: {error}",
                 code="effects-changed-during-admission",
             )
@@ -8563,7 +8582,7 @@ class FleetProfileService:
         except (FleetProfileConflict, FleetProfilePermissionDenied, KeyError) as error:
             self._finish_pending_admission(
                 application_id,
-                state="failed",
+                state=LifecycleState.FAILED,
                 reason=str(error) or "Profile admission could not be resumed",
             )
             return True
@@ -8627,8 +8646,7 @@ class FleetProfileService:
                                 "state"
                             ].as_string(),
                             "",
-                        )
-                        != "cancelling",
+                        ).not_in(fleet_profile_states.CANCEL_IN_FLIGHT),
                     )
                     .order_by(
                         FleetProfileApplication.created_at,
@@ -8961,7 +8979,7 @@ class FleetProfileService:
         state = _OPERATION_STATE_ADAPTER.validate_python(row.state, strict=True)
         if progress.cancellation is not None:
             return state, None
-        if state == "failed":
+        if state == LifecycleState.FAILED:
             session = object_session(row)
             try:
                 retrying = session is not None and self._recovery_wanted(
@@ -8973,14 +8991,14 @@ class FleetProfileService:
                 # Automatic recovery always has a next attempt; name it even
                 # when the failure recorded no explicit due time.
                 return (
-                    "queued",
+                    LifecycleState.QUEUED,
                     progress.retry_due_at
                     or FleetProfileAdapter.next_retry(
                         row.id, progress.attempt, _aware(row.updated_at)
                     ),
                 )
             return state, None
-        if state == "queued" and progress.admission_pending:
+        if state == LifecycleState.QUEUED and progress.admission_pending:
             return state, progress.admission_retry_at
         return state, None
 

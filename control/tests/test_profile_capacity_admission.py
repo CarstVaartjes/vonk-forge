@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
+from vonk_agent_protocol import LifecycleState
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
@@ -1109,7 +1110,9 @@ def test_late_admission_outcome_preserves_concurrent_winner(
             profiles._discard_pending_application(pending.id)
         else:
             profiles._finish_pending_admission(
-                pending.id, state="failed", reason="obsolete observer failure"
+                pending.id,
+                state=LifecycleState.FAILED,
+                reason="obsolete observer failure",
             )
 
     owner = sessions()

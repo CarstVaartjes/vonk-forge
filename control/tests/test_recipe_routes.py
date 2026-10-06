@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -1244,7 +1245,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
             number=number,
             profile_id="00000000-0000-4000-8000-000000000101",
             application_id="00000000-0000-4000-8000-000000000102",
-            application_state="succeeded",
+            application_state=LifecycleState.SUCCEEDED,
             assignments=(
                 FleetProfileEndpointAssignmentIntent(
                     assignment_id="00000000-0000-4000-8000-000000000103",
@@ -1289,7 +1290,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
             number=number,
             profile_id="00000000-0000-4000-8000-000000000101",
             application_id="00000000-0000-4000-8000-000000000102",
-            application_state="succeeded",
+            application_state=LifecycleState.SUCCEEDED,
             assignments=(
                 FleetProfileEndpointAssignmentIntent(
                     assignment_id="00000000-0000-4000-8000-000000000103",

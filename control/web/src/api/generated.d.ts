@@ -2390,10 +2390,10 @@ export interface components {
             requested_at: string;
             /**
              * State
-             * @default cancelling
+             * @default observing
              * @enum {string}
              */
-            state: "cancelling" | "cancelled";
+            state: "observing" | "cancelled";
             /** Successor Application Id */
             successor_application_id?: string | null;
             /** Workload Intent Ordinal */
@@ -2434,7 +2434,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "cancelling" | "cancelled";
+            state: "observing" | "cancelled";
         };
         /**
          * FleetProfileApplicationEffect
@@ -2568,7 +2568,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
+            state: "queued" | "running" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
             /** Status Reason */
             status_reason: string | null;
             /** Superseded By */
@@ -2870,7 +2870,7 @@ export interface components {
             /** Application Id */
             application_id?: string | null;
             /** Application State */
-            application_state?: ("queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded") | null;
+            application_state?: ("queued" | "running" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "superseded") | null;
             /** Assignments */
             assignments: components["schemas"]["FleetProfileEndpointAssignmentView"][] | null;
             /** Number */
@@ -3255,7 +3255,7 @@ export interface components {
              * @default queued
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
+            state: "queued" | "running" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
             /** Status Reason */
             status_reason?: string | null;
             /**

@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import Engine, Table, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -539,12 +540,14 @@ class _SwitchAdapter:
         ]
         self._states[operation_id] = 0
         self._operations[operation_id] = [
-            FleetProfileChildOperation(id=operation_id, state="running", progress=item)
+            FleetProfileChildOperation(
+                id=operation_id, state=LifecycleState.RUNNING, progress=item
+            )
             for item in progress
         ] + [
             FleetProfileChildOperation(
                 id=operation_id,
-                state="succeeded",
+                state=LifecycleState.SUCCEEDED,
                 progress=progress[-1],
                 result=FleetProfileVerificationResult(verified=True),
             )
@@ -3538,10 +3541,10 @@ def test_child_operation_state_unknown_is_observed_never_refused() -> None:
     never refuses the read and never reads as a terminal state it did not reach.
     """
 
-    assert _operation_state(None, default="running") == "running"
-    assert _operation_state("succeeded", default="queued") == "succeeded"
-    assert _operation_state("not-a-state", default="running") == "running"
-    assert _operation_state(7, default="running") == "running"
+    assert _operation_state(None, default=LifecycleState.RUNNING) == "running"
+    assert _operation_state("succeeded", default=LifecycleState.QUEUED) == "succeeded"
+    assert _operation_state("not-a-state", default=LifecycleState.RUNNING) == "running"
+    assert _operation_state(7, default=LifecycleState.RUNNING) == "running"
 
 
 def _exact_cleanup_profile(tmp_path: Path, *, engine=None):
@@ -4070,11 +4073,13 @@ def test_every_application_state_is_active_or_named_ended() -> None:
         FleetProfileOperationState,
     )
 
-    active = {"queued", "running", "waiting-for-operator"}
-    assert set(get_args(FleetProfileOperationState)) == active | set(
+    active = {"queued", "running", "needs-operator"}
+    literal = next(
+        arg for arg in get_args(FleetProfileOperationState) if hasattr(arg, "__args__")
+    )
+    assert {str(state) for state in get_args(literal)} == active | set(
         FLEET_PROFILE_ENDED_STATES
     )
-    assert "superseded" in FLEET_PROFILE_ENDED_STATES
 
 
 def test_a_superseded_application_names_its_reason_and_never_a_failure() -> None:

@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select, text
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
@@ -392,7 +393,9 @@ def test_clock_rollback_cannot_make_later_accepted_receipt_older(
     bound_newer = _application(sessions, newer.id)
     assert bound_newer.progress["workload_intent_ordinal"] == 1
     profiles._finish_pending_admission(
-        newer.id, state="failed", reason="A later terminal receipt still owns order"
+        newer.id,
+        state=LifecycleState.FAILED,
+        reason="A later terminal receipt still owns order",
     )
 
     # A second service submitter observes an older injected wallclock, but its
@@ -448,7 +451,9 @@ def test_direct_queue_cannot_overtake_later_terminal_receipt(
     newer = _pending(profiles, newer_review, str(uuid4()))
     profiles._prepare_pending_admission(newer.id, newer_review)
     profiles._finish_pending_admission(
-        newer.id, state="failed", reason="A later terminal receipt still owns order"
+        newer.id,
+        state=LifecycleState.FAILED,
+        reason="A later terminal receipt still owns order",
     )
     assert older.created_at < newer.created_at
 

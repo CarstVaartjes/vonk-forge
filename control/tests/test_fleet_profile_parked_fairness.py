@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileChildOperation
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import AgentNode, Base, FleetProfileApplication
@@ -49,7 +50,7 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
     adapter._operations[parked_child_id] = [
         FleetProfileChildOperation(
             id=parked_child_id,
-            state="waiting-for-operator",
+            state=LifecycleState.NEEDS_OPERATOR,
             status_reason="Waiting for exact interrupted-effect reconciliation",
         )
     ]

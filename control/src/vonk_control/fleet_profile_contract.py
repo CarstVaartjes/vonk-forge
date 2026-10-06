@@ -7,8 +7,19 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
-from pydantic import ConfigDict, Field, StringConstraints, model_validator
-from vonk_agent_protocol import LifecycleState, OperationProgress
+from pydantic import (
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
+from vonk_agent_protocol import (
+    LifecycleState,
+    LifecycleSubject,
+    OperationProgress,
+    state_adopter,
+)
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .endpoint_contract import EndpointResponse
@@ -105,15 +116,31 @@ RecipeSelector = Annotated[
 # from the set the model will accept, so the two cannot disagree without a
 # type error.
 FleetProfileInstallationPolicy = Literal["keep-cached", "exact"]
-FleetProfileOperationState = Literal[
-    "queued",
-    "running",
-    "waiting-for-operator",
-    "succeeded",
-    "failed",
-    "cancelled",
-    "superseded",
-]
+if TYPE_CHECKING:
+    # A type checker reads the state as the contract's enum: comparing it with a
+    # state word then narrows nothing, as a closed set of enum literals would.
+    FleetProfileOperationState = LifecycleState
+    FleetProfileCancellationState = LifecycleState
+else:
+    FleetProfileOperationState = Annotated[
+        Literal[
+            LifecycleState.QUEUED,
+            LifecycleState.RUNNING,
+            LifecycleState.NEEDS_OPERATOR,
+            LifecycleState.SUCCEEDED,
+            LifecycleState.FAILED,
+            LifecycleState.CANCELLED,
+            LifecycleState.SUPERSEDED,
+        ],
+        # An application written before the rename may still say ``waiting-for-operator``.
+        BeforeValidator(state_adopter(LifecycleSubject.FLEET_PROFILE_APPLICATION)),
+    ]
+    #: The state of a cancellation intent: observed while it is being driven (it was
+    #: ``cancelling``), then cancelled.
+    FleetProfileCancellationState = Annotated[
+        Literal[LifecycleState.OBSERVING, LifecycleState.CANCELLED],
+        BeforeValidator(state_adopter(LifecycleSubject.FLEET_PROFILE_APPLICATION)),
+    ]
 #: Why an application ended ``superseded`` (never ``failed``): a newer accepted
 #: intent, or the Controller's own automatic retry, took over its work.
 FleetProfileSupersedeCode = Literal[
@@ -809,7 +836,7 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     )
     actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     request_id: UuidId
-    state: FleetProfileOperationState = "queued"
+    state: FleetProfileOperationState = LifecycleState.QUEUED
     child_progress: FleetProfileChildProgress | None = None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     observation_due_at: datetime | None = None
@@ -881,7 +908,7 @@ class FleetProfileApplicationCancellationIntent(_StrictModel):
     request_key: UuidId
     actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     requested_at: datetime
-    state: Literal["cancelling", "cancelled"] = "cancelling"
+    state: FleetProfileCancellationState = LifecycleState.OBSERVING
     cause: Literal["operator", "superseded"]
     successor_application_id: UuidId | None = None
     workload_intent_ordinal: int | None = Field(default=None, ge=1)
@@ -908,7 +935,7 @@ class FleetProfileApplicationCancellationView(_StrictModel):
     request_key: UuidId
     actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     requested_at: datetime
-    state: Literal["cancelling", "cancelled"]
+    state: FleetProfileCancellationState
     cause: Literal["operator", "superseded"]
     completed_effects: list[FleetProfileApplicationEffect] = Field(max_length=1024)
     pending_effects: list[FleetProfileApplicationEffect] = Field(max_length=1024)
@@ -1173,7 +1200,7 @@ class FleetProfileApplicationView(_StrictModel):
                     "successful application must complete every planned step"
                 )
         if (
-            self.state in {"failed", "waiting-for-operator"}
+            self.state in {LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR}
             and not (self.status_reason or "").strip()
         ):
             raise ValueError("failed or waiting application requires a failure reason")
