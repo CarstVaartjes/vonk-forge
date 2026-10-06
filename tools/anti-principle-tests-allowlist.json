@@ -180,7 +180,7 @@
       "path": "control/tests/test_agent_jobs.py",
       "function": "test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retry",
       "kind": "transient-failed-assertion",
-      "count": 2
+      "count": 1
     },
     {
       "path": "control/tests/test_agent_jobs.py",
@@ -311,18 +311,6 @@
     {
       "path": "control/tests/test_agent_operation_lifecycle.py",
       "function": "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_outcome.py",
-      "function": "test_a_typed_report_keeps_its_state_word_and_projects_to_the_stored_body",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_restart_recovery_wire_bridge.py",
-      "function": "test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim",
       "kind": "operator-wait-assertion",
       "count": 1
     },
@@ -1559,12 +1547,6 @@
     {
       "path": "control/tests/test_recipe_builds.py",
       "function": "test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_builds.py",
-      "function": "test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed",
       "kind": "transient-failed-assertion",
       "count": 1
     },
@@ -2737,6 +2719,14 @@
       "justification": "Tests exact cancellation fencing under newer selection; retained borrowed child effects cannot be claimed released before receipt."
     },
     {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_damaged_clock_fields_keep_independent_live_lease_and_cancel_budget",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Pure lifecycle adapter fence test preserves the independent live executor lease and immutable cancellation deadline under damaged clock fields. At observer-budget expiry the effect remains explicitly UNKNOWN; no resource release or fresh service admission is claimed."
+    },
+    {
       "path": "control/tests/test_model_cache.py",
       "function": "test_missing_source_observations_follow_exact_file_and_survive_restart",
       "kind": "transient-failed-assertion",
@@ -2767,6 +2757,14 @@
       "count": 1,
       "reason": "security-edge",
       "justification": "Tests retaining live authorized adopted work across aggregate failure and releasing only replaced exact effects; the final lost-child observation intentionally preserves adopted authority."
+    },
+    {
+      "path": "control/tests/test_recipe_image_availability_bookkeeping.py",
+      "function": "test_model_child_cancel_intent_survives_unrelated_payload_damage",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "Pure reader test verifies a canonical accepted cancellation object survives unrelated manifest damage and a malformed cancellation is not authorized. No service operation is ended and no effect or capacity release is inferred."
     }
   ]
 }
