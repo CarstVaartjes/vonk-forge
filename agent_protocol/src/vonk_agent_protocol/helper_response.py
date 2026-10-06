@@ -33,5 +33,11 @@ class HostHelperResponse(WireModel):
     error_code: ErrorCode | None = None
     # Set only in the reply to a RecipeRunInspectionRequest.
     process_running: bool | None = None
+    # One-line exit account of a container (exit code, OOM flag, cause token).
+    # Carried by a rejected run inspection and by an executed one-shot job that
+    # exited unsuccessfully or timed out.
     diagnostic: Annotated[str, Field(max_length=8192)] | None = None
+    # The container's own bounded output, captured before the helper removed it
+    # (a failed job or an exited workload) or read while it ran (an inspection
+    # that asked for logs).
     process_logs: HostHelperProcessLogs | None = None

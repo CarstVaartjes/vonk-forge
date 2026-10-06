@@ -110,6 +110,9 @@ pub enum OperationError {
         /// log could not be read; the reason is then reported instead.
         logs: Option<Box<HostHelperProcessLogs>>,
         capture_error: Option<&'static str>,
+        /// How the runtime says it ended (exit code, OOM flag, cause token).
+        /// Never empty: see `runtime_logs::exit_summary`.
+        exit_summary: String,
     },
     #[error("exact runtime container is absent")]
     RuntimeRunMissing,
@@ -429,6 +432,39 @@ impl CommandRunner for ProcessCommandRunner {
     }
 }
 
+/// The one place a process-exit failure is built.  Whatever could not be read
+/// is named in the failure, so it can never read as a container with nothing to
+/// say: it carries its logs, or a typed reason they are missing, and an exit
+/// summary.
+pub(crate) fn process_exited(
+    logs: Result<CommandOutput, String>,
+    exit: Result<crate::runtime_logs::ContainerExit, &'static str>,
+) -> OperationError {
+    let (logs, capture_error) = match logs {
+        // An unread log is reported as unread; it never becomes an empty tail
+        // that reads like a container with nothing to say.
+        Ok(logs) if logs.success => (
+            Some(Box::new(crate::runtime_logs::retain_container(
+                &logs.stdout,
+                &logs.stderr,
+            ))),
+            None,
+        ),
+        Ok(_) => (None, Some("the container log command failed")),
+        Err(_) => (None, Some("the container log command did not run")),
+    };
+    let exit_summary = crate::runtime_logs::exit_summary(
+        exit.as_ref().map_err(|e| *e),
+        logs.as_deref(),
+        capture_error,
+    );
+    OperationError::RuntimeProcessExited {
+        logs,
+        capture_error,
+        exit_summary,
+    }
+}
+
 #[cfg(test)]
 mod process_command_runner_tests {
     #[cfg(target_os = "linux")]
@@ -473,6 +509,26 @@ use vonk_agent_protocol::generated::{
 
 struct RuntimeRequestOutcome {
     exit_code: Option<i32>,
+    /// A one-shot job's own output and exit account, captured before the
+    /// container was removed; present for a job that did not exit cleanly.
+    evidence: Option<Box<JobEvidence>>,
+}
+
+/// How a one-shot job container ended, with its retained output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobEvidence {
+    pub logs: Option<Box<HostHelperProcessLogs>>,
+    pub summary: String,
+}
+
+/// What one read-only inspection of a managed run found.
+#[derive(Debug)]
+pub struct RunInspection {
+    pub running: bool,
+    /// The running container's bounded tail, when the caller asked for it.
+    pub logs: Option<Box<HostHelperProcessLogs>>,
+    /// Why the requested tail could not be read; never both `logs` and this.
+    pub log_error: Option<&'static str>,
 }
 
 const LEGACY_RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION: u8 = 2;
@@ -792,7 +848,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .validate()
             .map_err(|_| OperationError::InvalidOperation)?;
         self.require_directory(&self.roots.data)?;
-        let (status, exit_code) = match operation {
+        let (status, exit_code, evidence) = match operation {
             HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
                 package_sha256,
                 package_signature,
@@ -805,7 +861,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     rollback,
                     observation_node_id.ok_or(OperationError::InvalidOperation)?,
                 )?;
-                (HostHelperResponseStatus::PackageInstalled, None)
+                (HostHelperResponseStatus::PackageInstalled, None, None)
             }
             HostOperation::ConfirmPackageActivationOperation(
                 ConfirmPackageActivationOperation {
@@ -821,7 +877,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         attempt_nonce,
                     )
                     .map_err(|_| OperationError::PackagePreflightFailed)?;
-                (HostHelperResponseStatus::PackageActivationConfirmed, None)
+                (
+                    HostHelperResponseStatus::PackageActivationConfirmed,
+                    None,
+                    None,
+                )
             }
             HostOperation::ExecuteContainerRuntimeRequestOperation(
                 ExecuteContainerRuntimeRequestOperation {
@@ -854,24 +914,28 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     },
                     request_sha256,
                 );
-                let (status, exit_code) = match outcome {
+                let (status, exit_code, evidence) = match outcome {
                     Ok(outcome) => (
                         HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
                         outcome.exit_code,
+                        outcome.evidence,
                     ),
                     Err(OperationError::StopUncertain) => (
                         HostHelperResponseStatus::ContainerRuntimeStopUncertain,
                         Some(124),
+                        None,
                     ),
                     Err(error) => return Err(error),
                 };
-                (status, exit_code)
+                (status, exit_code, evidence)
             }
         };
         Ok(OperationOutcome {
             schema_version: 1,
             status,
             exit_code: exit_code.map(i64::from),
+            diagnostic: evidence.as_ref().map(|evidence| evidence.summary.clone()),
+            process_logs: evidence.and_then(|evidence| evidence.logs),
         })
     }
 
@@ -892,6 +956,44 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return self.runtime_run_container_running(run_id);
         }
         self.runtime_run_inspect(&request.arguments, false)
+    }
+
+    /// Like `inspect_recipe_run`, and when asked also reads the running
+    /// container's bounded output.  Read-only: nothing is stopped or removed.
+    /// An exited container is reported as the process-exit rejection with its
+    /// output, exactly as a privileged inspection reports it.
+    pub fn inspect_recipe_run_with_logs(
+        &self,
+        request_sha256: &str,
+        include_logs: bool,
+    ) -> Result<RunInspection, OperationError> {
+        if !include_logs {
+            return self
+                .inspect_recipe_run(request_sha256)
+                .map(|running| RunInspection {
+                    running,
+                    logs: None,
+                    log_error: None,
+                });
+        }
+        self.require_directory(&self.roots.data)?;
+        let request = self.read_runtime_request(request_sha256)?;
+        if request.action != HostRuntimeAction::RunInspect
+            || request.installation_id.is_some()
+            || request.reconciliation_identity.is_some()
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        if let [run_id] = request.arguments.as_slice() {
+            // Without the full run identity the container cannot be proven to
+            // be this run's, so its output is never read.
+            return Ok(RunInspection {
+                running: self.runtime_run_container_running(run_id)?,
+                logs: None,
+                log_error: Some("the run identity was too short to authorise reading its output"),
+            });
+        }
+        self.runtime_run_inspect_detail(&request.arguments, true, true)
     }
 
     /// Whether the exact managed container `vonk-<run_id>` is running.
@@ -1140,19 +1242,31 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .map_err(|_| OperationError::CommandFailed)?;
                 Ok(RuntimeRequestOutcome {
                     exit_code: Some(code),
+                    evidence: None,
                 })
             }
-            HostRuntimeAction::ImagePull => self
-                .runtime_image_pull(&request.arguments)
-                .map(|()| RuntimeRequestOutcome { exit_code: None }),
-            HostRuntimeAction::ImageInspect => self
-                .runtime_image_inspect(&request.arguments)
-                .map(|()| RuntimeRequestOutcome { exit_code: None }),
+            HostRuntimeAction::ImagePull => {
+                self.runtime_image_pull(&request.arguments)
+                    .map(|()| RuntimeRequestOutcome {
+                        exit_code: None,
+                        evidence: None,
+                    })
+            }
+            HostRuntimeAction::ImageInspect => {
+                self.runtime_image_inspect(&request.arguments)
+                    .map(|()| RuntimeRequestOutcome {
+                        exit_code: None,
+                        evidence: None,
+                    })
+            }
             HostRuntimeAction::RunInspect => {
                 if !self.runtime_run_inspect(&request.arguments, true)? {
                     return Err(OperationError::InvalidArtifact);
                 }
-                Ok(RuntimeRequestOutcome { exit_code: None })
+                Ok(RuntimeRequestOutcome {
+                    exit_code: None,
+                    evidence: None,
+                })
             }
             HostRuntimeAction::Start => {
                 let Some(AuthorizedRuntimeEffect::Start {
@@ -1169,7 +1283,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     logical_run_id,
                     &plan_digest,
                 )
-                .map(|exit_code| RuntimeRequestOutcome { exit_code })
+                .map(|(exit_code, evidence)| RuntimeRequestOutcome {
+                    exit_code,
+                    evidence,
+                })
             }
             HostRuntimeAction::Stop => {
                 let Some(AuthorizedRuntimeEffect::Stop {
@@ -1189,7 +1306,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     stop_timeout_seconds,
                     cancel_pending_start,
                 )
-                .map(|()| RuntimeRequestOutcome { exit_code: None })
+                .map(|()| RuntimeRequestOutcome {
+                    exit_code: None,
+                    evidence: None,
+                })
             }
             HostRuntimeAction::InstallationCleanup => {
                 let installation_id = request
@@ -1204,7 +1324,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 } else {
                     self.runtime_installation_cleanup(&installation_id.to_string())?;
                 }
-                Ok(RuntimeRequestOutcome { exit_code: None })
+                Ok(RuntimeRequestOutcome {
+                    exit_code: None,
+                    evidence: None,
+                })
             }
         }
     }
@@ -2115,7 +2238,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
         plan_digest: &str,
-    ) -> Result<Option<i32>, OperationError> {
+    ) -> Result<(Option<i32>, Option<Box<JobEvidence>>), OperationError> {
         let installation_id = identity.installation_id.to_string();
         let started_at = Instant::now();
         let (launch, active_start) = {
@@ -2135,8 +2258,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 timeout_seconds,
                 started_at,
             ),
-            RuntimeStartLaunch::TimedOut => Ok(Some(124)),
-            RuntimeStartLaunch::Service => Ok(None),
+            RuntimeStartLaunch::TimedOut => Ok((Some(124), None)),
+            RuntimeStartLaunch::Service => Ok((None, None)),
         };
         drop(active_start);
         outcome
@@ -2296,7 +2419,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         plan_digest: &str,
         timeout_seconds: u16,
         started_at: Instant,
-    ) -> Result<Option<i32>, OperationError> {
+    ) -> Result<(Option<i32>, Option<Box<JobEvidence>>), OperationError> {
         let remaining =
             Duration::from_secs(u64::from(timeout_seconds)).saturating_sub(started_at.elapsed());
         let target = format!("vonk-{}", identity.runtime_id);
@@ -2309,28 +2432,53 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 remaining,
             )
         };
+        // The container is read before cleanup removes it: a job that exits
+        // unsuccessfully or runs out of time keeps its own output and exit
+        // account instead of only a status code.
+        let capture = |this: &Self| {
+            let (logs, exit) =
+                this.container_exit_evidence(&format!("vonk-{}", identity.runtime_id));
+            match process_exited(logs, exit) {
+                OperationError::RuntimeProcessExited {
+                    logs, exit_summary, ..
+                } => Some(Box::new(JobEvidence {
+                    logs,
+                    summary: exit_summary,
+                })),
+                _ => None,
+            }
+        };
         match waited {
             Ok(output) if output.success => {
                 let exit_code = bounded_container_wait_exit_code(&output);
+                let evidence = if exit_code == 0 { None } else { capture(self) };
                 self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, false)?;
                 if self.job_cancellation.was_cancelled(identity)? {
-                    Ok(Some(124))
+                    Ok((Some(124), None))
                 } else {
-                    Ok(Some(exit_code))
+                    Ok((Some(exit_code), evidence))
                 }
             }
             Ok(_) => {
                 let cancelled = self.job_cancellation.was_cancelled(identity)?;
+                let evidence = if cancelled { None } else { capture(self) };
                 self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, !cancelled)?;
                 if cancelled {
-                    Ok(Some(124))
+                    Ok((Some(124), None))
                 } else {
                     Err(OperationError::CommandFailed)
                 }
             }
             Err(_) => {
+                // A timeout: the job still runs, so its tail so far is read
+                // before the stop that ends it.
+                let evidence = if self.job_cancellation.was_cancelled(identity)? {
+                    None
+                } else {
+                    capture(self)
+                };
                 self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, true)?;
-                Ok(Some(124))
+                Ok((Some(124), evidence))
             }
         }
     }
@@ -2584,6 +2732,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
         arguments: &[String],
         capture_failure: bool,
     ) -> Result<bool, OperationError> {
+        self.runtime_run_inspect_detail(arguments, capture_failure, false)
+            .map(|inspection| inspection.running)
+    }
+
+    fn runtime_run_inspect_detail(
+        &self,
+        arguments: &[String],
+        capture_failure: bool,
+        include_logs: bool,
+    ) -> Result<RunInspection, OperationError> {
+        let not_running = RunInspection {
+            running: false,
+            logs: None,
+            log_error: None,
+        };
         let [
             archive_sha256,
             registry_index_digest,
@@ -2637,15 +2800,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map(|text| text.split('\t').collect::<Vec<_>>())
             .unwrap_or_default();
         let [container_id, running, digest, managed, run_id] = fields.as_slice() else {
-            return Ok(false);
+            return Ok(not_running);
         };
         if !lower_hex(container_id, 64) || *managed != "true" || *run_id != validated.run_id {
-            return Ok(false);
+            return Ok(not_running);
         }
         if *digest != semantic_digest {
             if capture_failure {
                 // A launch check is strict: this exact request started it.
-                return Ok(false);
+                return Ok(not_running);
             }
             // Observation: this run's own container under its own name, launched
             // from a request an earlier agent rendered differently. It is still
@@ -2656,13 +2819,17 @@ impl<R: CommandRunner> OperationExecutor<R> {
             );
         }
         if *running == "true" {
-            return Ok(true);
-        }
-        if *running == "false" && capture_failure {
-            // Read only the exact inspected container, never a reusable name.
-            // Capture before the agent removes it; failed or foreign identity
-            // checks above must never grant access to container logs.
-            let logs = self.runner.run_with_timeout(
+            if !include_logs {
+                return Ok(RunInspection {
+                    running: true,
+                    logs: None,
+                    log_error: None,
+                });
+            }
+            // Read-only: the exact, identity-checked container's tail while it
+            // runs. Nothing is stopped, so a workload that is merely slow to
+            // become ready is left alone and only described.
+            let (logs, log_error) = match self.runner.run_with_timeout(
                 Path::new("/usr/bin/docker"),
                 &[
                     "logs".into(),
@@ -2671,28 +2838,73 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     (*container_id).into(),
                 ],
                 Duration::from_secs(30),
-            );
-            return Err(match logs {
-                Ok(logs) if logs.success => OperationError::RuntimeProcessExited {
-                    logs: Some(Box::new(crate::runtime_logs::retain_container(
-                        &logs.stdout,
-                        &logs.stderr,
+            ) {
+                Ok(output) if output.success => (
+                    Some(Box::new(crate::runtime_logs::retain_container(
+                        &output.stdout,
+                        &output.stderr,
                     ))),
-                    capture_error: None,
-                },
-                // An unread log is reported as unread; it never becomes an
-                // empty tail that reads like a container with nothing to say.
-                Ok(_) => OperationError::RuntimeProcessExited {
-                    logs: None,
-                    capture_error: Some("the container log command failed"),
-                },
-                Err(_) => OperationError::RuntimeProcessExited {
-                    logs: None,
-                    capture_error: Some("the container log command did not run"),
-                },
+                    None,
+                ),
+                Ok(_) => (None, Some("the container log command failed")),
+                Err(_) => (None, Some("the container log command did not run")),
+            };
+            return Ok(RunInspection {
+                running: true,
+                logs,
+                log_error,
             });
         }
-        Ok(false)
+        if *running == "false" && capture_failure {
+            // Read only the exact inspected container, never a reusable name.
+            // Capture before the agent removes it; failed or foreign identity
+            // checks above must never grant access to container logs.
+            // Exit state and output of the same exact container id, read
+            // before the agent removes it.
+            let (logs, exit) = self.container_exit_evidence(container_id);
+            return Err(process_exited(logs, exit));
+        }
+        Ok(not_running)
+    }
+
+    /// The container's retained output and how it ended, read from `target`
+    /// (an exact container id or name) before anything removes it.  A silent
+    /// crash leaves no output at all; the exit code, the OOM flag and the
+    /// runtime's own error are then the only evidence there will ever be.
+    fn container_exit_evidence(
+        &self,
+        target: &str,
+    ) -> (
+        Result<CommandOutput, String>,
+        Result<crate::runtime_logs::ContainerExit, &'static str>,
+    ) {
+        let logs = self.runner.run_with_timeout(
+            Path::new("/usr/bin/docker"),
+            &[
+                "logs".into(),
+                "--tail".into(),
+                crate::runtime_logs::CAPTURE_LINES.into(),
+                target.into(),
+            ],
+            Duration::from_secs(30),
+        );
+        let exit = match self.runner.run_with_timeout(
+            Path::new("/usr/bin/docker"),
+            &[
+                "container".into(),
+                "inspect".into(),
+                "--format".into(),
+                crate::runtime_logs::EXIT_FORMAT.into(),
+                target.into(),
+            ],
+            Duration::from_secs(30),
+        ) {
+            Ok(output) if output.success => crate::runtime_logs::parse_exit(&output.stdout)
+                .ok_or("the container exit state was not readable"),
+            Ok(_) => Err("the container exit inspection failed"),
+            Err(_) => Err("the container exit inspection did not run"),
+        };
+        (logs, exit)
     }
 
     fn prepare_runtime_access(&self, run: &ValidatedDockerRun) -> Result<(), OperationError> {
@@ -4749,6 +4961,49 @@ mod tests {
     use vonk_agent_protocol::{RecipeReconciliationIdentity, canonical_json};
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
+
+    #[test]
+    fn a_process_exit_always_carries_logs_or_a_typed_reason_none_were_read() {
+        // The class guard: every way the exit can be observed yields a failure
+        // with its logs, or the reason they are missing, plus the exit account.
+        let output = |success: bool, stdout: &str, stderr: &str| CommandOutput {
+            success,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+            exit_code: None,
+        };
+        let state = crate::runtime_logs::ContainerExit {
+            exit_code: Some(137),
+            oom_killed: Some(true),
+            error: String::new(),
+        };
+        let logs: Vec<Result<CommandOutput, String>> = vec![
+            Ok(output(true, "", "")),
+            Ok(output(true, "a\n", "b\n")),
+            Ok(output(false, "", "")),
+            Err("spawn failed".to_owned()),
+        ];
+        for log in logs {
+            for exit in [
+                Ok(state.clone()),
+                Err("the container exit inspection failed"),
+            ] {
+                let OperationError::RuntimeProcessExited {
+                    logs,
+                    capture_error,
+                    exit_summary,
+                } = super::process_exited(log.clone(), exit)
+                else {
+                    panic!("a process exit must stay a process exit");
+                };
+                assert!(
+                    logs.is_some() || capture_error.is_some(),
+                    "no logs and no reason: {exit_summary}"
+                );
+                assert!(exit_summary.contains("exit_cause="), "{exit_summary}");
+            }
+        }
+    }
 
     #[derive(Clone, Copy)]
     struct MissingContainerRunner;

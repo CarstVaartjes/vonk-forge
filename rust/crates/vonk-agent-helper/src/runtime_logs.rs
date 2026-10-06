@@ -261,6 +261,181 @@ pub fn retain_container(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
     }
 }
 
+/// How the container runtime says the container ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContainerExit {
+    pub exit_code: Option<i32>,
+    pub oom_killed: Option<bool>,
+    /// The runtime's own start/exit error (`exec format error`, a missing
+    /// executable, a refused device), empty when it recorded none.
+    pub error: String,
+}
+
+/// Format for `docker container inspect --format`, read back by `parse_exit`.
+pub const EXIT_FORMAT: &str = "{{.State.ExitCode}}\t{{.State.OOMKilled}}\t{{.State.Error}}";
+
+/// Read the three fields of `EXIT_FORMAT`; the error text may hold tabs.
+pub fn parse_exit(output: &[u8]) -> Option<ContainerExit> {
+    let text = std::str::from_utf8(output).ok()?.trim_end_matches('\n');
+    let mut fields = text.splitn(3, '\t');
+    let exit_code = fields.next()?.trim().parse::<i32>().ok()?;
+    let oom_killed = match fields.next()?.trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    };
+    let error: String = fields
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(160)
+        .collect();
+    Some(ContainerExit {
+        exit_code: Some(exit_code),
+        oom_killed,
+        error,
+    })
+}
+
+/// Why a container exited, as a stable token the Controller can show and group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExitCause {
+    OomKilled,
+    BadArguments,
+    MissingFile,
+    UnsupportedGpuArch,
+    ImageArchMismatch,
+    StartRefused,
+    CrashedBySignal,
+    Unclassified,
+}
+
+impl ExitCause {
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::OomKilled => "oom_killed",
+            Self::BadArguments => "bad_arguments",
+            Self::MissingFile => "missing_file",
+            Self::UnsupportedGpuArch => "unsupported_gpu_arch",
+            Self::ImageArchMismatch => "image_arch_mismatch",
+            Self::StartRefused => "start_refused",
+            Self::CrashedBySignal => "crashed_by_signal",
+            Self::Unclassified => "unclassified",
+        }
+    }
+}
+
+fn has(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+/// Classify from the exit state first (it is authoritative), then from the
+/// container's own words.  Only the retained tails are read.
+pub fn classify(exit: Option<&ContainerExit>, logs: Option<&HostHelperProcessLogs>) -> ExitCause {
+    let output = logs
+        .map(|logs| format!("{}\n{}", logs.stdout.text, logs.stderr.text).to_lowercase())
+        .unwrap_or_default();
+    let runtime_error = exit.map(|e| e.error.to_lowercase()).unwrap_or_default();
+    let code = exit.and_then(|e| e.exit_code);
+    if exit.and_then(|e| e.oom_killed) == Some(true) || code == Some(137) {
+        return ExitCause::OomKilled;
+    }
+    if has(&runtime_error, &["exec format error"]) {
+        return ExitCause::ImageArchMismatch;
+    }
+    if has(
+        &runtime_error,
+        &[
+            "executable file not found",
+            "no such file",
+            "not found in $path",
+        ],
+    ) || code == Some(127)
+    {
+        return ExitCause::MissingFile;
+    }
+    if !runtime_error.is_empty() {
+        return ExitCause::StartRefused;
+    }
+    if has(
+        &output,
+        &[
+            "no kernel image is available",
+            "nokernelimagefordevice",
+            "unsupported gpu architecture",
+            "invalid device function",
+        ],
+    ) {
+        return ExitCause::UnsupportedGpuArch;
+    }
+    if has(
+        &output,
+        &[
+            "unknown argument",
+            "unrecognized argument",
+            "unrecognized option",
+            "invalid argument",
+            "error: invalid",
+            "usage:",
+        ],
+    ) {
+        return ExitCause::BadArguments;
+    }
+    if has(
+        &output,
+        &[
+            "no such file or directory",
+            "failed to open",
+            "file not found",
+            "failed to load model",
+            "error loading model",
+        ],
+    ) {
+        return ExitCause::MissingFile;
+    }
+    if matches!(code, Some(134 | 135 | 139)) {
+        return ExitCause::CrashedBySignal;
+    }
+    ExitCause::Unclassified
+}
+
+/// The one-line, machine-readable account of an exited container.  It is never
+/// empty: when the runtime could not be asked, that is itself the account, so a
+/// process-exit failure always says either what happened or why that is unknown.
+pub fn exit_summary(
+    exit: Result<&ContainerExit, &'static str>,
+    logs: Option<&HostHelperProcessLogs>,
+    log_error: Option<&'static str>,
+) -> String {
+    let cause = classify(exit.ok(), logs);
+    let mut parts = Vec::new();
+    match exit {
+        Ok(state) => {
+            if let Some(code) = state.exit_code {
+                parts.push(format!("exit_code={code}"));
+            }
+            if let Some(oom) = state.oom_killed {
+                parts.push(format!("oom_killed={oom}"));
+            }
+            if !state.error.is_empty() {
+                parts.push(format!("runtime_error={:?}", state.error));
+            }
+        }
+        Err(reason) => parts.push(format!("exit_state_unavailable={reason:?}")),
+    }
+    parts.push(format!("exit_cause={}", cause.token()));
+    match (logs, log_error) {
+        (Some(logs), _) if logs.stdout.text.is_empty() && logs.stderr.text.is_empty() => {
+            parts.push("no_output=true".to_owned())
+        }
+        (None, Some(reason)) => parts.push(format!("logs_unavailable={reason:?}")),
+        (None, None) => parts.push("logs_unavailable=\"not captured\"".to_owned()),
+        _ => {}
+    }
+    parts.join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,5 +701,117 @@ mod tests {
         assert_eq!(tail.text, "");
         assert_eq!(tail.dropped_bytes, Some(0));
         assert!(!tail.truncated);
+    }
+
+    fn exit(code: i32, oom: bool, error: &str) -> ContainerExit {
+        ContainerExit {
+            exit_code: Some(code),
+            oom_killed: Some(oom),
+            error: error.to_owned(),
+        }
+    }
+
+    fn logs(stdout: &str, stderr: &str) -> HostHelperProcessLogs {
+        retain_container(stdout.as_bytes(), stderr.as_bytes())
+    }
+
+    #[test]
+    fn the_exit_state_is_read_back_from_the_inspect_format() {
+        let state = parse_exit(b"137\ttrue\t\n").unwrap();
+        assert_eq!(state, exit(137, true, ""));
+        let state = parse_exit(b"1\tfalse\tfailed: exec format error\n").unwrap();
+        assert_eq!(state.error, "failed: exec format error");
+        assert!(parse_exit(b"not-a-number\ttrue\t").is_none());
+        assert!(parse_exit(b"").is_none());
+    }
+
+    #[test]
+    fn common_exit_causes_are_named() {
+        // Wrong implementation this catches: every exit read as `unclassified`,
+        // which is how a silent OOM-kill looked like any other crash.
+        let silent = logs("", "");
+        for (state, output, cause) in [
+            (exit(137, true, ""), &silent, ExitCause::OomKilled),
+            (exit(137, false, ""), &silent, ExitCause::OomKilled),
+            (
+                exit(255, false, "exec format error"),
+                &silent,
+                ExitCause::ImageArchMismatch,
+            ),
+            (exit(127, false, ""), &silent, ExitCause::MissingFile),
+            (
+                exit(1, false, ""),
+                &logs("", "error: unknown argument: --foo\n"),
+                ExitCause::BadArguments,
+            ),
+            (
+                exit(1, false, ""),
+                &logs(
+                    "",
+                    "gguf_init_from_file: failed to open '/models/x.gguf': No such file or directory\n",
+                ),
+                ExitCause::MissingFile,
+            ),
+            (
+                exit(1, false, ""),
+                &logs(
+                    "",
+                    "CUDA error: no kernel image is available for execution on the device\n",
+                ),
+                ExitCause::UnsupportedGpuArch,
+            ),
+            (exit(139, false, ""), &silent, ExitCause::CrashedBySignal),
+            (exit(3, false, ""), &silent, ExitCause::Unclassified),
+        ] {
+            assert_eq!(classify(Some(&state), Some(output)), cause, "{state:?}");
+        }
+        // A normal GPU banner is not a failure marker.
+        assert_eq!(
+            classify(
+                Some(&exit(3, false, "")),
+                Some(&logs(
+                    "Device 0: NVIDIA GB10, compute capability 12.1\n",
+                    ""
+                ))
+            ),
+            ExitCause::Unclassified
+        );
+    }
+
+    #[test]
+    fn an_exit_summary_is_never_empty_and_names_what_could_not_be_read() {
+        // The class guard: whatever the helper could or could not read, a
+        // process-exit failure says what happened or why that is unknown.
+        let states: [Result<&ContainerExit, &'static str>; 2] = [
+            Ok(&ContainerExit {
+                exit_code: Some(1),
+                oom_killed: Some(false),
+                error: String::new(),
+            }),
+            Err("inspect failed"),
+        ];
+        let empty = logs("", "");
+        let some = logs("", "boom\n");
+        for state in states {
+            for (output, error) in [
+                (None, Some("log command failed")),
+                (None, None),
+                (Some(&empty), None),
+                (Some(&some), None),
+            ] {
+                let summary = exit_summary(state, output, error);
+                assert!(summary.contains("exit_cause="), "{summary}");
+                assert!(
+                    summary.contains("exit_code=") || summary.contains("exit_state_unavailable="),
+                    "{summary}"
+                );
+                if output.is_none() {
+                    assert!(summary.contains("logs_unavailable="), "{summary}");
+                }
+                if output == Some(&empty) {
+                    assert!(summary.contains("no_output=true"), "{summary}");
+                }
+            }
+        }
     }
 }

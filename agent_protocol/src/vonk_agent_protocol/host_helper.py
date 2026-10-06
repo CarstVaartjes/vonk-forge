@@ -367,11 +367,15 @@ class RecipeRunInspectionRequest(WireModel):
 
     Unlike every other helper operation it needs no Controller grant: it only
     reports whether the exact container of an agent-written ``run-inspect``
-    runtime request is running.
+    runtime request is running.  With ``include_logs`` it also returns the
+    bounded tail of that exact container's own output (``process_logs``), read
+    without stopping it, so a workload that is running but not ready leaves
+    evidence of what it was doing.
     """
 
     request_id: Uuid4Text
     request_sha256: Digest
+    include_logs: bool | None = None
 
 
 def host_helper_grant_signing_bytes(claims: HostHelperGrantClaims) -> bytes:

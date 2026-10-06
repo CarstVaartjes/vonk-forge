@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol import canonical_message
@@ -224,3 +226,34 @@ def test_canonical_progress_retains_default_zero_false_and_empty_members() -> No
         "total_bytes_known": False,
         "members": [],
     }
+
+
+def test_failure_evidence_restored_diagnostics_obey_the_byte_limit() -> None:
+    # Reattaching diagnostics after dropping padding must not bypass the bound.
+    evidence = {
+        "error_code": "recipe_start_failed",
+        "summary": "capacity failure",
+        "padding": ["x" * 1024 for _ in range(32)],
+        "diagnostics": {
+            "stdout": {
+                "text": "界" * 1024,
+                "truncated": False,
+                "dropped_bytes": 0,
+                "dropped_lines": 0,
+            },
+            "stderr": {
+                "text": "Killed\n" + "界" * 1024,
+                "truncated": False,
+                "dropped_bytes": 0,
+                "dropped_lines": 0,
+            },
+            "preflight": [{"name": "exit_cause", "value": "oom_killed"}],
+            "collector_errors": ["界" * 256 for _ in range(8)],
+        },
+    }
+    kept = sanitize_failure_evidence(evidence)
+    assert len(json.dumps(kept, sort_keys=True, separators=(",", ":")).encode()) <= 8192
+    assert kept["diagnostics"]["preflight"][0]["value"] == "oom_killed"
+    assert kept["diagnostics"]["stderr"]["text"].startswith("Killed")
+    assert kept["diagnostics"]["stderr"]["truncated"] is True
+    assert kept["diagnostics"]["stderr"]["dropped_bytes"] > 0
