@@ -415,7 +415,7 @@ def test_a_receipt_that_does_not_validate_is_retried_not_failed(tmp_path: Path) 
     held = harness.view()
     assert executor.calls.count("verify") == 1
     assert _retrying(held), (held.state, held.status_reason)
-    assert _result(held).retry_reason in _retried_codes()
+    assert _result(held).retry_reason == "run-switch phase receipt is invalid"
     assert _result(held).failed_phase is None
 
     # restart in the middle of the retry: the same checkpoint, nothing repeated

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import errno
 import hashlib
 import json
@@ -641,7 +642,7 @@ class BuildThenCopyExecutor:
             )
             if execution.operation_id is not None:
                 self.children[execution.operation_id] = _ChildView(
-                    state="running", result=_fixture_child_result(plan, phase)
+                    state="running", result=execution.result
                 )
             return execution
         if phase.subphase == "target-copy":
@@ -1115,11 +1116,13 @@ def test_child_activity_change_persists_without_clock_only_writes(
     assert before is not None and before.activity == "active"
     assert isinstance(child.result, RunSwitchDistributionChildResult)
     assert child.result.progress.operation is not None
-    child.result.progress.operation.observed_at = (
-        NOW + timedelta(seconds=1)
-    ).isoformat()
+    child.result.progress.operation = child.result.progress.operation.model_copy(
+        update={"observed_at": (NOW + timedelta(seconds=1)).isoformat()}
+    )
     assert service.tick() is False
-    child.result.progress.operation.activity = "waiting"
+    child.result.progress.operation = child.result.progress.operation.model_copy(
+        update={"activity": "waiting"}
+    )
     assert service.tick() is True
     after = _result(service.get(operation.operation_id)).operation
     assert after is not None and after.activity == "waiting"
@@ -1202,6 +1205,11 @@ def test_malformed_operation_is_rejected_without_aborting_the_batch(
     malformed_id = "00000000-0000-4000-8000-000000000000"
     assert malformed_id < valid.operation_id
     with sessions.begin() as session:
+        accepted = session.get(Job, valid.operation_id)
+        assert accepted is not None
+        payload = copy.deepcopy(accepted.payload)
+        if damage == "plan":
+            payload["plan"] = {"not": "a plan"}
         session.add(
             Job(
                 id=malformed_id,
@@ -1212,11 +1220,7 @@ def test_malformed_operation_is_rejected_without_aborting_the_batch(
                 authority_revision="a" * 64,
                 targets=[nodes[0]],
                 payload_digest="a" * 64,
-                payload=(
-                    {"plan": {"not": "a plan"}}
-                    if damage == "plan"
-                    else {"plan": plan.model_dump(mode="json")}
-                ),
+                payload=payload,
                 result=["malformed"] if damage == "result" else None,
                 created_at=NOW,
                 updated_at=NOW,
@@ -6407,7 +6411,12 @@ def test_stop_verification_keeps_waiting_for_a_lost_run_that_is_not_stopped(
 
     execution = service.execute(
         plan,  # type: ignore[arg-type]
-        SimpleNamespace(kind="final_verify"),  # type: ignore[arg-type]
+        RunSwitchPhase(
+            index=0,
+            kind="final_verify",
+            state="planned",
+            detail="Verify lifecycle state",
+        ),
         item_index=0,
         actor="admin",
         request_key=str(uuid.uuid4()),
@@ -6480,7 +6489,12 @@ def test_installation_verification_refuses_a_lost_run_that_still_has_residue(
     ):
         service.execute(
             plan,  # type: ignore[arg-type]
-            SimpleNamespace(kind="final_verify"),  # type: ignore[arg-type]
+            RunSwitchPhase(
+                index=0,
+                kind="final_verify",
+                state="planned",
+                detail="Verify lifecycle state",
+            ),
             item_index=0,
             actor="admin",
             request_key=str(uuid.uuid4()),

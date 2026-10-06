@@ -151,7 +151,7 @@ def test_postgres_invalid_terminal_child_is_retried_without_nested_row_lock(
     assert held.state == LifecycleState.RUNNING
     assert held.result is not None
     assert held.result.failure_code is None
-    assert held.result.retry_reason == "run-switch.transfer-returned-invalid-evidence"
+    assert held.result.retry_reason == "run-switch phase receipt is invalid"
     assert held.result.child_operation_id is None
     assert held.result.observation_due_at is not None
 
