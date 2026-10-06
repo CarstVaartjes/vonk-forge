@@ -242,6 +242,7 @@ def test_definition_preserves_authoring_fields_without_consulting_cache() -> Non
 
     service._cache_resolver = unavailable
     read = service.definition_number(created.number)
+    assert read.definition is not None
     assert read.definition.model_dump() == value.model_dump(
         exclude={"expected_revision"}
     )
@@ -278,7 +279,7 @@ def test_competing_profile_saves_accept_only_one_observed_revision(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_definition_read_retires_a_malformed_persisted_assignment():
+def test_definition_read_preserves_a_malformed_saved_choice_as_unknown():
     from vonk_control.models import FleetProfile
 
     sessions = _sessions()
@@ -288,8 +289,14 @@ def test_definition_read_retires_a_malformed_persisted_assignment():
         row = session.get(FleetProfile, created.id)
         assert row is not None
         row.assignments = [{"recipe_selector": "vonk-forge/missing-fields"}]
-    # The damaged choice is retired (skipped): the profile stays readable.
-    assert service.definition_number(created.number).definition.assignments == []
+    # Observability retains the identity without inventing an empty intent.
+    observed = service.definition_number(created.number)
+    assert observed.id == created.id and observed.revision == created.revision
+    assert observed.definition is None and observed.projection_issue is not None
+    with sessions() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        assert row.assignments == [{"recipe_selector": "vonk-forge/missing-fields"}]
 
 
 def test_profile_accepts_the_library_publisher_slug_selector() -> None:

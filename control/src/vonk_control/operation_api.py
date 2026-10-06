@@ -344,9 +344,10 @@ class OperationDetailResponse(StrictModel):
 
 
 class OperationsResponse(StrictModel):
-    operations: list[OperationDetailResponse] = Field(max_length=100)
+    operations: list[OperationDetailResponse] | None = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=512)
-    total: int = Field(ge=0)
+    total: int | None = Field(ge=0)
+    projection_issue: str | None = Field(default=None, max_length=256)
 
 
 class JobProgress(StrictModel):
@@ -392,10 +393,11 @@ class JobDetailResponse(StrictModel):
     target_total: int = Field(ge=0)
     current_attempt: int = Field(ge=0)
     status_reason: str | None = Field(default=None, max_length=1024)
-    operations: list[JobOperationResponse] = Field(max_length=100)
+    operations: list[JobOperationResponse] | None = Field(max_length=100)
     operation_next_cursor: str | None = Field(default=None, max_length=512)
-    operation_total: int = Field(ge=0)
-    progress: JobProgress
+    operation_total: int | None = Field(ge=0)
+    progress: JobProgress | None
+    projection_issue: str | None = Field(default=None, max_length=256)
     agent_upgrade_diagnostics: AgentUpgradeDiagnosticsResponse | None = None
     recovery: OperationRecovery | None = None
 
@@ -929,7 +931,7 @@ def _job_operation_response(item: Mapping[str, object]) -> JobOperationResponse:
 
 def job_response(
     job: Any,
-    operation_page: OperationPage,
+    operation_page: OperationPage | None,
     *,
     target_cursor: int,
     limit: int,
@@ -937,12 +939,18 @@ def job_response(
     evidence_decorator: Callable[[Mapping[str, object]], Mapping[str, object]]
     | None = None,
 ) -> JobDetailResponse:
-    items = (
-        [evidence_decorator(item) for item in operation_page.items]
-        if evidence_decorator is not None
-        else operation_page.items
-    )
-    projected = [_job_operation_response(item) for item in items]
+    projected = None
+    if operation_page is not None:
+        try:
+            items = (
+                [evidence_decorator(item) for item in operation_page.items]
+                if evidence_decorator is not None
+                else operation_page.items
+            )
+            projected = [_job_operation_response(item) for item in items]
+        except (OSError, RuntimeError, TypeError, ValueError):
+            warn_unreadable_once("job operations", job.id)
+            operation_page = None
     targets = list(job.targets)
     visible_targets = targets[target_cursor : target_cursor + limit]
     target_next_cursor = (
@@ -954,7 +962,9 @@ def job_response(
         if target_cursor + limit < len(targets)
         else None
     )
-    diagnostics = operation_page.agent_upgrade_diagnostics
+    diagnostics = (
+        None if operation_page is None else operation_page.agent_upgrade_diagnostics
+    )
     operator_summary = (
         None if diagnostics is None else diagnostics.get("operator_summary")
     )
@@ -971,9 +981,18 @@ def job_response(
             operator_summary if isinstance(operator_summary, str) else job.status_reason
         ),
         operations=projected,
-        operation_next_cursor=operation_page.next_cursor,
-        operation_total=operation_page.progress.total,
-        progress=operation_page.progress,
+        operation_next_cursor=None
+        if operation_page is None
+        else operation_page.next_cursor,
+        operation_total=None
+        if operation_page is None
+        else operation_page.progress.total,
+        progress=None if operation_page is None else operation_page.progress,
+        projection_issue=(
+            "Operation observations are unavailable; progress and step membership are unknown."
+            if operation_page is None
+            else None
+        ),
         agent_upgrade_diagnostics=(
             None
             if diagnostics is None
@@ -981,7 +1000,9 @@ def job_response(
         ),
         recovery=recovery_for_operation(
             job.state,
-            supported_actions=operation_page.recovery_actions,
+            supported_actions=()
+            if operation_page is None
+            else operation_page.recovery_actions,
             available_actions=(OperationRecoveryAction.RESUME,),
         ),
     )
@@ -1601,18 +1622,25 @@ class _DurableOperationProjection:
                 # A new application or route generation between membership
                 # lookup and bundle verification must never authorize a stale
                 # endpoint. Fence the projection with a fresh SQL read.
-                with self._sessions() as session:
-                    current = self._profile_endpoint_intent(session, number)
-                    current_snapshot = self._publication_snapshot(session)
-                    if (
-                        current.profile_id != intent.profile_id
-                        or current.application_id != intent.application_id
-                        or current.assignments != intent.assignments
-                        or current_snapshot != snapshot
-                    ):
-                        raise RuntimeError(
-                            "profile endpoint ownership changed during projection"
+                try:
+                    with self._sessions() as session:
+                        current = self._profile_endpoint_intent(session, number)
+                        current_snapshot = self._publication_snapshot(session)
+                        unchanged = (
+                            current.profile_id == intent.profile_id
+                            and current.application_id == intent.application_id
+                            and current.assignments == intent.assignments
+                            and current_snapshot == snapshot
                         )
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    unchanged = False
+                if not unchanged:
+                    # Retain the readable membership, but never present a
+                    # stale endpoint as current after its ownership fence moved.
+                    endpoints.clear()
+                    for item in assignments:
+                        if item.expected_run_id is not None:
+                            states[item.assignment_id] = EndpointState.UNAVAILABLE
 
         return FleetProfileEndpointsView(
             number=intent.number,

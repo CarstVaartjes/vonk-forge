@@ -38,7 +38,7 @@ class RunPresence:
             alias (str):
             expected_rank_count (int):
             group_state (RunPresenceGroupState):
-            healthy (bool):
+            healthy (bool | None):
             installation_id (str):
             member_node_ids (list[str]):
             present_ranks (list[int]):
@@ -55,6 +55,7 @@ class RunPresence:
             title (str):
             degraded_reason (None | RunDegradedReason | Unset):
             option_choices (RunPresenceOptionChoices | Unset):
+            projection_issue (None | str | Unset):
             recipe_update (None | RecipeUpdateNotice | Unset):
             route_reason (None | str | Unset):
      """
@@ -62,7 +63,7 @@ class RunPresence:
     alias: str
     expected_rank_count: int
     group_state: RunPresenceGroupState
-    healthy: bool
+    healthy: bool | None
     installation_id: str
     member_node_ids: list[str]
     present_ranks: list[int]
@@ -79,6 +80,7 @@ class RunPresence:
     title: str
     degraded_reason: None | RunDegradedReason | Unset = UNSET
     option_choices: RunPresenceOptionChoices | Unset = UNSET
+    projection_issue: None | str | Unset = UNSET
     recipe_update: None | RecipeUpdateNotice | Unset = UNSET
     route_reason: None | str | Unset = UNSET
 
@@ -95,6 +97,7 @@ class RunPresence:
 
         group_state: str = self.group_state
 
+        healthy: bool | None
         healthy = self.healthy
 
         installation_id = self.installation_id
@@ -141,6 +144,12 @@ class RunPresence:
         if not isinstance(self.option_choices, Unset):
             option_choices = self.option_choices.to_dict()
 
+        projection_issue: None | str | Unset
+        if isinstance(self.projection_issue, Unset):
+            projection_issue = UNSET
+        else:
+            projection_issue = self.projection_issue
+
         recipe_update: dict[str, Any] | None | Unset
         if isinstance(self.recipe_update, Unset):
             recipe_update = UNSET
@@ -182,6 +191,8 @@ class RunPresence:
             field_dict["degraded_reason"] = degraded_reason
         if option_choices is not UNSET:
             field_dict["option_choices"] = option_choices
+        if projection_issue is not UNSET:
+            field_dict["projection_issue"] = projection_issue
         if recipe_update is not UNSET:
             field_dict["recipe_update"] = recipe_update
         if route_reason is not UNSET:
@@ -205,7 +216,13 @@ class RunPresence:
 
 
 
-        healthy = d.pop("healthy")
+        def _parse_healthy(data: object) -> bool | None:
+            if data is None:
+                return data
+            return cast(bool | None, data)
+
+        healthy = _parse_healthy(d.pop("healthy"))
+
 
         installation_id = d.pop("installation_id")
 
@@ -276,6 +293,16 @@ class RunPresence:
 
 
 
+        def _parse_projection_issue(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        projection_issue = _parse_projection_issue(d.pop("projection_issue", UNSET))
+
+
         def _parse_recipe_update(data: object) -> None | RecipeUpdateNotice | Unset:
             if data is None:
                 return data
@@ -327,6 +354,7 @@ class RunPresence:
             title=title,
             degraded_reason=degraded_reason,
             option_choices=option_choices,
+            projection_issue=projection_issue,
             recipe_update=recipe_update,
             route_reason=route_reason,
         )

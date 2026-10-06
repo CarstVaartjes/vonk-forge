@@ -191,7 +191,7 @@ from .fleet_log_entry_source import FleetLogEntrySource
 from .fleet_log_response import FleetLogResponse
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
-from .fleet_node_labels import FleetNodeLabels
+from .fleet_node_labels_type_0 import FleetNodeLabelsType0
 from .fleet_node_view import FleetNodeView
 from .fleet_open_transaction import FleetOpenTransaction
 from .fleet_profile_admission_decision import FleetProfileAdmissionDecision
@@ -597,6 +597,8 @@ from .recipe_reconcile_parent_owner_kind import RecipeReconcileParentOwnerKind
 from .recipe_reconcile_payload import RecipeReconcilePayload
 from .recipe_reconcile_result import RecipeReconcileResult
 from .recipe_release import RecipeRelease
+from .recipe_removal_projection_issue import RecipeRemovalProjectionIssue
+from .recipe_removal_unavailable_view import RecipeRemovalUnavailableView
 from .recipe_retry_intent import RecipeRetryIntent
 from .recipe_revision_intent import RecipeRevisionIntent
 from .recipe_revision_projection import RecipeRevisionProjection
@@ -777,6 +779,7 @@ from .runtime_preflight_request import RuntimePreflightRequest
 from .runtime_preflight_request_fabric_connectivity import RuntimePreflightRequestFabricConnectivity
 from .runtime_preflight_result import RuntimePreflightResult
 from .runtime_telemetry_projection import RuntimeTelemetryProjection
+from .saved_profile_projection_issue import SavedProfileProjectionIssue
 from .security_refusal import SecurityRefusal
 from .security_refusal_reason import SecurityRefusalReason
 from .source_bundle_code import SourceBundleCode
@@ -818,6 +821,9 @@ from .telemetry_point import TelemetryPoint
 from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
 from .topology_code import TopologyCode
+from .unavailable_fleet_profile_view import UnavailableFleetProfileView
+from .unavailable_recipe_presence import UnavailableRecipePresence
+from .unavailable_run_presence import UnavailableRunPresence
 from .uninstall_phase_operation import UninstallPhaseOperation
 from .uninstall_plan_code import UninstallPlanCode
 from .unknown_error import UnknownError
@@ -1018,7 +1024,7 @@ __all__ = (
     "FleetLogResponse",
     "FleetNode",
     "FleetNodeIdentity",
-    "FleetNodeLabels",
+    "FleetNodeLabelsType0",
     "FleetNodeView",
     "FleetOpenTransaction",
     "FleetProfileAdmissionDecision",
@@ -1424,6 +1430,8 @@ __all__ = (
     "RecipeReconcilePayload",
     "RecipeReconcileResult",
     "RecipeRelease",
+    "RecipeRemovalProjectionIssue",
+    "RecipeRemovalUnavailableView",
     "RecipeRetryIntent",
     "RecipeRevisionIntent",
     "RecipeRevisionProjection",
@@ -1604,6 +1612,7 @@ __all__ = (
     "RuntimePreflightRequestFabricConnectivity",
     "RuntimePreflightResult",
     "RuntimeTelemetryProjection",
+    "SavedProfileProjectionIssue",
     "SecurityRefusal",
     "SecurityRefusalReason",
     "SourceBundleCode",
@@ -1645,6 +1654,9 @@ __all__ = (
     "TelemetryState",
     "TelemetryStateFreshness",
     "TopologyCode",
+    "UnavailableFleetProfileView",
+    "UnavailableRecipePresence",
+    "UnavailableRunPresence",
     "UninstallPhaseOperation",
     "UninstallPlanCode",
     "UnknownError",
