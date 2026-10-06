@@ -1295,6 +1295,14 @@
       "count": 1,
       "reason": "input-validation",
       "justification": "Walks an already materialized finite Python exception cause chain to classify SQLSTATE before retry; object identities are recorded in seen and repeated identities or None terminate traversal. It performs no external wait or sleep."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "RunSwitchFleetProfileAdapter._advance_in_session",
+      "kind": "loop-without-deadline",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Finite traversal skips unissued effects outside the currently authorized adopted scope. Position increments each iteration and is bounded by the immutable queue length; it retains exact issued child identities and performs no external wait."
     }
   ]
 }
