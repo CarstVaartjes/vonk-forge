@@ -18,8 +18,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import DistributionAssignmentState, RunState
 
-from .attempt_residues import Residue
 from .catalog_revision_collection import GRACE, INTERVAL, live_tokens, tokens
+from .lifecycle.evidence import Residue
 from .logging import log_event
 from .models import (
     AgentOperation,
