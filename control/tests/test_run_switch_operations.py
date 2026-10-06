@@ -508,8 +508,8 @@ class RecordingArtifactExecutor:
             plan, phase, result=_target_copy_evidence(plan, phase)
         )
 
-    def get(self, operation_id: str):
-        return self.children.get(operation_id)
+    def get(self, operation_id: str) -> _ChildView:
+        return self.children[operation_id]
 
     def abandon(self, _session, operation_id: str, _now, *, reason: str) -> bool:
         """Mirror the durable executor: only a parked child is closed."""
@@ -689,8 +689,8 @@ class BuildThenCopyExecutor:
             )
         return _fixture_execution(plan, phase, result={"phase": phase.kind})
 
-    def get(self, operation_id: str):
-        return self.children.get(operation_id)
+    def get(self, operation_id: str) -> _ChildView:
+        return self.children[operation_id]
 
 
 class ColdStartPhaseExecutor:
