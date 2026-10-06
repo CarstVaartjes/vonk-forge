@@ -372,7 +372,8 @@ class AtomicRecipeRoutePublisher:
         found = [
             (alias, raw)
             for alias, raw in routes.items()
-            if isinstance(raw, Mapping) and recipe_route_run_id(raw) == run_id
+            if isinstance(raw, Mapping)
+            and recipe_route_run_id(raw.get("operation_id")) == run_id
         ]
         if not found:
             return None

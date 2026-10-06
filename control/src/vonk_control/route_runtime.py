@@ -73,9 +73,8 @@ class VerifiedRouteBundle:
     litellm: Mapping[str, object]
 
 
-def recipe_route_run_id(raw: Mapping[str, object]) -> str | None:
+def recipe_route_run_id(operation_id: object) -> str | None:
     """Identify a recipe route only from its accepted exact operation identity."""
-    operation_id = raw.get("operation_id")
     if not isinstance(operation_id, str):
         return None
     match = re.fullmatch(

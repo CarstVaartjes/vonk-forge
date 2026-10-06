@@ -1519,7 +1519,7 @@ class _DurableOperationProjection:
 
     @staticmethod
     def _route_run_id(raw: Mapping[str, object]) -> str | None:
-        return recipe_route_run_id(raw)
+        return recipe_route_run_id(raw.get("operation_id"))
 
     def profile_endpoint(
         self, number: int, alias: str | None, gateway_api_base: str
