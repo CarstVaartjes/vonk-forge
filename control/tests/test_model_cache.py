@@ -1493,14 +1493,10 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         model_content_sha256=model,
         request_key="ea2c5c20-038a-4a0d-bdaa-40d756fb01bb",
     )
-    spec = ArtifactSpec.from_manifest(
-        service.resolve_artifact_set(
-            model_content_sha256=model,
-            artifacts=[artifact],
-        )
-        .artifacts[0]
-        .identity()
-    )
+    spec = service.resolve_artifact_set(
+        model_content_sha256=model,
+        artifacts=[artifact],
+    ).artifacts[0]
     path = service._object_path(spec.sha256)
     if stored_state == "receipt_missing":
         # Bytes are present but the managed-storage receipt is gone: this is
@@ -3412,11 +3408,11 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
         assert partials[0].read_bytes() == payload
         service._finish_succeeded(
             operation.id,
-            {
-                "schema_version": 2,
-                "artifact_set_sha256": str(operation.artifact_set_sha256),
-                "coverage": "complete",
-            },
+            ModelCacheDownloadResult(
+                schema_version=2,
+                artifact_set_sha256=str(operation.artifact_set_sha256),
+                coverage="complete",
+            ),
         )
         assert service.get_operation(operation.id).state == "cancelled"
     finally:

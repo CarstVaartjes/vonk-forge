@@ -54,7 +54,7 @@ written; ``apply`` strips them on the row's next transition and
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -64,6 +64,10 @@ from sqlalchemy.orm import Session
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware
+from ..model_cache_contract import (
+    ModelCacheOperationPayload,
+    StoredCacheClocks,
+)
 from ..models import ModelCacheOperation
 from .adapter import Dispatch
 from .agent_operation import same_order
@@ -103,7 +107,7 @@ class CacheEffects(Protocol):
         """Operations this process is transferring right now."""
         ...
 
-    def objects_present(self, payload: Mapping[str, object]) -> bool | None:
+    def objects_present(self, payload: ModelCacheOperationPayload) -> bool | None:
         """Whether every object of the operation's set has a receipt in storage,
         or ``None`` when storage could not be read."""
         ...
@@ -112,56 +116,45 @@ class CacheEffects(Protocol):
         """Whether the set's row already records the published, cached set."""
         ...
 
-    def effects_settled(self, operation_id: str, payload: Mapping[str, object]) -> bool:
+    def effects_settled(
+        self, operation_id: str, payload: ModelCacheOperationPayload | None
+    ) -> bool:
         """Signal the operation's transfers to stop; whether no writer of one of
-        its objects is still active (non-blocking)."""
+        its objects is still active (non-blocking).  ``None``: the envelope does
+        not read, so a writer may still be active."""
         ...
 
-    def cooldown_until(self, payload: Mapping[str, object]) -> datetime | None:
+    def cooldown_until(self, payload: ModelCacheOperationPayload) -> datetime | None:
         """A provider-wide cooldown the operation's sources are under."""
         ...
 
 
-def _parse(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
-
-
-def legacy_retry_due(payload: Mapping[str, object]) -> datetime | None:
+def legacy_retry_due(document: object) -> datetime | None:
     """The retry instant of a row written before the core, else ``None``."""
 
-    retry = payload.get("retry")
-    return _parse(retry.get("next_retry_at")) if isinstance(retry, Mapping) else None
+    retry = StoredCacheClocks.read(document).retry
+    return None if retry is None else retry.next_retry_at
 
 
-def legacy_claim(payload: Mapping[str, object]) -> tuple[str, datetime] | None:
+def legacy_claim(document: object) -> tuple[str, datetime] | None:
     """The claim (owner, expiry) of a row written before the core, else ``None``."""
 
-    claim = payload.get("claim")
-    if not isinstance(claim, Mapping):
-        return None
-    owner, expires = claim.get("owner"), _parse(claim.get("expires_at"))
-    if isinstance(owner, str) and owner and expires is not None:
-        return owner, expires
+    claim = StoredCacheClocks.read(document).claim
+    if claim is not None and claim.owner and claim.expires_at is not None:
+        return claim.owner, claim.expires_at
     return None
 
 
 def cancellation_of(
-    payload: Mapping[str, object], now: datetime
+    document: object, now: datetime
 ) -> tuple[datetime | None, str | None]:
     """The monotonic cancel request recorded in the payload: instant and key."""
 
-    raw = payload.get("cancellation")
-    if not isinstance(raw, Mapping):
+    cancellation = StoredCacheClocks.read(document).cancellation
+    if cancellation is None:
         return None, None
-    requested = _parse(raw.get("requested_at")) or now
-    key = raw.get("request_key")
-    return aware(requested), key if isinstance(key, str) else None
+    requested = cancellation.requested_at or now
+    return aware(requested), cancellation.request_key
 
 
 class ModelCacheAdapter:
@@ -183,8 +176,12 @@ class ModelCacheAdapter:
         *,
         clock: Callable[[], datetime] | None = None,
         effects: CacheEffects,
-        read_payload: Callable[[ModelCacheOperation], dict[str, object] | Damaged],
-        store_payload: Callable[[ModelCacheOperation, Mapping[str, object]], None],
+        read_payload: Callable[
+            [ModelCacheOperation], ModelCacheOperationPayload | Damaged
+        ],
+        store_payload: Callable[
+            [ModelCacheOperation, ModelCacheOperationPayload], None
+        ],
         on_end: Callable[[ModelCacheOperation, Lifecycle, Lifecycle], None]
         | None = None,
     ) -> None:
@@ -200,21 +197,21 @@ class ModelCacheAdapter:
     def now(self) -> datetime:
         return aware(self._clock())
 
-    def _payload(self, operation: ModelCacheOperation) -> Mapping[str, object]:
-        """The operation's payload; a corrupt one is read as far as it goes.
+    def _payload(
+        self, operation: ModelCacheOperation
+    ) -> ModelCacheOperationPayload | None:
+        """The operation's payload; ``None`` when its envelope does not read.
 
-        Bookkeeping never raises here (rule 5): an unreadable envelope only means
-        the row has no cancel request and no legacy retry or claim to adopt.
+        Bookkeeping never raises here (rule 5).  The clocks the core needs (retry,
+        legacy claim, cancel request) are read from the stored document by
+        :class:`StoredCacheClocks`, which keeps them when the rest is damaged.
         """
 
         try:
             payload = self._read_payload(operation)
         except Exception:  # noqa: BLE001 - corrupt bookkeeping is unknown, not fatal
-            payload = Damaged("the operation envelope does not read")
-        if isinstance(payload, Damaged):
-            raw = operation.payload
-            return raw if isinstance(raw, Mapping) else {}
-        return payload
+            return None
+        return None if isinstance(payload, Damaged) else payload
 
     # ---------------------------------------------------------------- adopt
 
@@ -225,27 +222,24 @@ class ModelCacheAdapter:
         """The lifecycle row of a stored operation, defaulting what a legacy row lacks."""
 
         now = aware(now)
-        payload = self._payload(operation)
-        retry = payload.get("retry")
-        attempts = (
-            retry.get("automatic_attempts") if isinstance(retry, Mapping) else None
-        )
-        if type(attempts) is not int or attempts < 1:
+        clocks = StoredCacheClocks.read(operation.payload)
+        attempts = clocks.retry.automatic_attempts if clocks.retry is not None else None
+        if attempts is None:
             attempts = max(int(operation.attempt or 1), 1)
-        requested_at, request_key = cancellation_of(payload, now)
+        requested_at, request_key = cancellation_of(operation.payload, now)
         fence = operation.fence
         lease = (
             None
             if operation.lease_deadline is None
             else aware(operation.lease_deadline)
         )
-        claim = legacy_claim(payload) if lease is None else None
+        claim = legacy_claim(operation.payload) if lease is None else None
         if claim is not None:
             fence, lease = claim[0], aware(claim[1])
         next_action = (
             aware(operation.next_action_at)
             if operation.next_action_at is not None
-            else legacy_retry_due(payload)
+            else legacy_retry_due(operation.payload)
         )
         observe = operation.observe_count or 0
         stored = operation.state
@@ -319,7 +313,10 @@ class ModelCacheAdapter:
             operation = session.get(ModelCacheOperation, row.id)
             if operation is None:
                 return None
-            cooldown = self._effects.cooldown_until(self._payload(operation))
+            payload = self._payload(operation)
+            if payload is None:
+                return None
+            cooldown = self._effects.cooldown_until(payload)
         return None if cooldown is None else aware(cooldown)
 
     def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
@@ -345,6 +342,8 @@ class ModelCacheAdapter:
                 return Observed(Effect.UNKNOWN, "a removal resumes its checkpoint")
             payload = self._payload(operation)
             set_digest = operation.artifact_set_sha256
+        if payload is None:
+            return Observed(Effect.UNKNOWN, "storage receipts could not be read")
         present = self._effects.objects_present(payload)
         if present is None:
             return Observed(Effect.UNKNOWN, "storage receipts could not be read")
@@ -488,23 +487,17 @@ class ModelCacheAdapter:
     ) -> bool:
         """Retire the legacy claim and retry clock; count a consumed attempt."""
 
-        try:
-            read = self._read_payload(operation)
-        except Exception:  # noqa: BLE001 - leave a corrupt envelope for inspection
-            return False
-        if isinstance(read, Damaged):
+        payload = self._payload(operation)
+        if payload is None:
             return False  # a corrupt envelope is left for inspection
-        payload = dict(read)
-        updated = dict(payload)
-        retry = payload.get("retry")
-        retry_document = dict(retry) if isinstance(retry, Mapping) else None
-        if retry_document is not None:
-            retry_document["next_retry_at"] = None
-            retry_document["retry_after_seconds"] = None
-            if after.state is State.BACKOFF and consume_retry:
-                retry_document["automatic_attempts"] = after.retry_count + 1
-            updated["retry"] = retry_document
-        updated.pop("claim", None)
+        retry = payload.retry.model_copy(
+            update={"next_retry_at": None, "retry_after_seconds": None}
+        )
+        if after.state is State.BACKOFF and consume_retry:
+            retry = retry.model_copy(
+                update={"automatic_attempts": after.retry_count + 1}
+            )
+        updated = payload.model_copy(update={"retry": retry, "claim": None})
         if updated == payload:
             return False
         self._store_payload(operation, updated)
@@ -799,8 +792,6 @@ def adopt_legacy_operations(connection: Any) -> int:
     now = datetime.now(UTC)
     adopted = 0
     for row_id, state, payload in rows:
-        if not isinstance(payload, Mapping):
-            continue
         values: dict[str, Any] = {}
         claim = legacy_claim(payload)
         if claim is not None:
