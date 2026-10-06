@@ -1499,7 +1499,7 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
         assert run.route_state == "withdrawn"
         assert run.route_error is not None
         assert run.route_error.startswith("recipe rank health requires recovery: ")
-        assert "every recipe rank must be running" in run.route_error
+        assert "recipe rank reports a stopped or failed workload" in run.route_error
 
     clock.now += timedelta(seconds=1)
     with service.sessions.begin() as session:
@@ -1866,7 +1866,7 @@ def test_last_route_withdrawn_outside_publication_empties_litellm(
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is False
 
 
-def test_one_run_with_an_invalid_endpoint_does_not_expire_the_other_routes(
+def test_invalid_current_endpoint_retains_the_accepted_route_bundle(
     tmp_path: Path,
 ) -> None:
     clock = MutableClock(NOW)
@@ -1880,13 +1880,22 @@ def test_one_run_with_an_invalid_endpoint_does_not_expire_the_other_routes(
     assert sorted(_live_models(tmp_path / "live")) == ["broken", "qwen"]
     with service.sessions.begin() as session:
         node = session.query(RunNode).filter_by(run_id=broken_run).one()
+        accepted_endpoint = node.endpoint
         node.endpoint = {"url": "http://192.0.2.9:8000"}
 
-    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
-    assert _live_models(tmp_path / "live") == ["qwen"]
+    # Current bookkeeping cannot replace the accepted immutable endpoint with
+    # an unproven address or withdraw a serving route while it is unknown.
+    worker = RecipeOperationWorker(service.sessions, service, clock=clock)
+    assert worker.tick() is False
+    assert sorted(_live_models(tmp_path / "live")) == ["broken", "qwen"]
     with service.sessions() as session:
         assert _recipe_run(session, healthy_run).route_state == "published"
-        assert _recipe_run(session, broken_run).route_state == "withdrawn"
+        assert _recipe_run(session, broken_run).route_state == "published"
+    with service.sessions.begin() as session:
+        node = session.query(RunNode).filter_by(run_id=broken_run).one()
+        node.endpoint = accepted_endpoint
+    worker.tick()
+    assert sorted(_live_models(tmp_path / "live")) == ["broken", "qwen"]
 
 
 @pytest.mark.parametrize("damage", ["plan", "alias", "ranks", "mapping", "endpoint"])

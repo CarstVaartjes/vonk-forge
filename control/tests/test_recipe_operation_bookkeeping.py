@@ -495,6 +495,7 @@ def test_build_evidence_that_does_not_hold_is_reported_not_raised(tmp_path) -> N
 # ------------------------------------------------------- reconcile and recovery
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_recovery_with_damaged_authority_is_retired_not_raised(tmp_path) -> None:
     sessions, service, _queue, _installation, run, _nodes = _running_recipe(tmp_path)
     with sessions.begin() as session:
@@ -590,7 +591,12 @@ def test_a_profile_stop_whose_parent_is_damaged_retires_nothing_and_ends_failed(
     # does not parse: no JobRun identity is retired, the Stop ends failed and the
     # profile's own retry answers it; nothing is raised into the agent's result.
     assert view.state == "failed"
-    assert _required(view.result)["failed_nodes"] == [nodes[0]]
+    # The exact child receipt succeeded; the damaged parent cannot establish
+    # completion of the operation as a whole, rather than a child failure.
+    result = _required(view.result)
+    assert result["failed_nodes"] == []
+    assert result["successful_nodes"] == [nodes[0]]
+    assert "damaged" in str(result["recovery_error"])
     with sessions() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
         assert stored.state == "failed"
@@ -1010,6 +1016,8 @@ _STORED_READS = {
 _OWNERS = {
     "_recorded_result",
     "_validated_result",
+    "_node_result",  # Canonical parse is caught locally and returns unknown.
+    "_parse_recipe_parent",  # Central parser, called through _recorded_parent.
     "_evidence_is_acceptable",
     "_plan_ranks",
     "_run_accepted_ranks",
