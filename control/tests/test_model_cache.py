@@ -4179,7 +4179,7 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
 def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
     threaded_cache, tmp_path, monkeypatch
 ):
-    from concurrent.futures import wait
+    from concurrent.futures import Future, wait
 
     _existing, sessions = threaded_cache
     handler, payload, served = _gone_handler([404] * 5)
@@ -4213,7 +4213,10 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
         monkeypatch.setattr(service, "_finish_failed", finish)
         service.tick(limit=1)
         futures = service._background_operations[operation.id]["futures"]
-        assert not wait(futures, timeout=1).not_done
+        assert isinstance(futures, list)
+        running = [future for future in futures if isinstance(future, Future)]
+        assert len(running) == len(futures) == 1
+        assert not wait(running, timeout=1).not_done
         with pytest.raises(ConnectionError, match="reply was lost"):
             service.tick(limit=1)
         waiting = service.get_operation(operation.id)
@@ -4239,10 +4242,9 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
             assert service.get_operation(operation.id).state == "queued"
         service.run_pending()
         assert served["count"] == 5
-        assert (
-            service.get_operation(operation.id).failure["code"]
-            == "model_cache.source_gone"
-        )
+        gone = service.get_operation(operation.id)
+        assert gone.failure is not None
+        assert gone.failure["code"] == "model_cache.source_gone"
     finally:
         service.close()
         client.close()
