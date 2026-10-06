@@ -67,6 +67,7 @@ from .catalog_problem import CatalogProblem
 from .catalog_sync_code import CatalogSyncCode
 from .catalog_sync_state import CatalogSyncState
 from .certificate_state import CertificateState
+from .cli_token_download import CliTokenDownload
 from .cluster_mapping_code import ClusterMappingCode
 from .compatibility_identity import CompatibilityIdentity
 from .compatibility_preparation import CompatibilityPreparation
@@ -358,8 +359,8 @@ from .operator_action_name import OperatorActionName
 from .operator_surface import OperatorSurface
 from .outcome_kind import OutcomeKind
 from .output_limits import OutputLimits
+from .package_activation_phase import PackageActivationPhase
 from .package_activation_receipt import PackageActivationReceipt
-from .package_activation_receipt_phase import PackageActivationReceiptPhase
 from .placement_install_state import PlacementInstallState
 from .placement_load_state import PlacementLoadState
 from .prebuilt_image_code import PrebuiltImageCode
@@ -685,6 +686,7 @@ __all__ = (
     "CatalogSyncCode",
     "CatalogSyncState",
     "CertificateState",
+    "CliTokenDownload",
     "ClusterMappingCode",
     "CompatibilityIdentity",
     "CompatibilityPreparation",
@@ -976,8 +978,8 @@ __all__ = (
     "OperatorSurface",
     "OutcomeKind",
     "OutputLimits",
+    "PackageActivationPhase",
     "PackageActivationReceipt",
-    "PackageActivationReceiptPhase",
     "PlacementInstallState",
     "PlacementLoadState",
     "PrebuiltImageCode",

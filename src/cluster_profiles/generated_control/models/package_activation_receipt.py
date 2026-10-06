@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.package_activation_receipt_phase import check_package_activation_receipt_phase
-from ..models.package_activation_receipt_phase import PackageActivationReceiptPhase
+from ..models.package_activation_phase import check_package_activation_phase
+from ..models.package_activation_phase import PackageActivationPhase
 from typing import cast
 from typing import Literal, cast
 
@@ -33,7 +33,7 @@ class PackageActivationReceipt:
             created_at (int):
             node_id (str):
             outcome (str):
-            phase (PackageActivationReceiptPhase):
+            phase (PackageActivationPhase): Where a package activation transaction stands.
             schema_version (Literal[2]):
             source_binary_sha256 (str):
             source_package_sha256 (str):
@@ -48,7 +48,7 @@ class PackageActivationReceipt:
     created_at: int
     node_id: str
     outcome: str
-    phase: PackageActivationReceiptPhase
+    phase: PackageActivationPhase
     schema_version: Literal[2]
     source_binary_sha256: str
     source_package_sha256: str
@@ -126,7 +126,7 @@ class PackageActivationReceipt:
 
         outcome = d.pop("outcome")
 
-        phase = check_package_activation_receipt_phase(d.pop("phase"))
+        phase = check_package_activation_phase(d.pop("phase"))
 
 
 

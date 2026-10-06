@@ -1801,6 +1801,17 @@ export interface components {
          */
         CertificateState: "valid" | "missing" | "not-yet-valid" | "expired" | "revoked" | "inactive";
         /**
+         * CliTokenDownload
+         * @description What the browser learns from a token download: when the token stops working.
+         *
+         *     The token itself is the response body, exact bytes; the expiry travels in the
+         *     ``X-Vonk-Token-Expires-At`` header, which the web client reads into this shape.
+         */
+        CliTokenDownload: {
+            /** Expires At */
+            expires_at: string;
+        };
+        /**
          * ClusterMappingCode
          * @description Refusals of a cluster mapping (recipe-to-Spark assignment) request.
          * @enum {string}
@@ -3026,7 +3037,10 @@ export interface components {
             /** Reviewed Effects Digest */
             reviewed_effects_digest?: string | null;
         };
-        /** FleetProfileNode */
+        /**
+         * FleetProfileNode
+         * @description One rank of a profile assignment, the same shape a Spark group names it.
+         */
         FleetProfileNode: {
             /**
              * Endpoint Owner
@@ -5251,6 +5265,12 @@ export interface components {
             /** Max Total Bytes */
             max_total_bytes: number;
         };
+        /**
+         * PackageActivationPhase
+         * @description Where a package activation transaction stands.
+         * @enum {string}
+         */
+        PackageActivationPhase: "armed" | "activation_failed" | "acknowledged" | "rolling_back" | "rolled_back" | "rollback_failed";
         /** PackageActivationReceipt */
         PackageActivationReceipt: {
             /** Attempt Nonce */
@@ -5270,11 +5290,7 @@ export interface components {
             node_id: string;
             /** Outcome */
             outcome: string;
-            /**
-             * Phase
-             * @enum {string}
-             */
-            phase: "armed" | "activation_failed" | "acknowledged" | "rolling_back" | "rolled_back" | "rollback_failed";
+            phase: components["schemas"]["PackageActivationPhase"];
             /**
              * Schema Version
              * @constant

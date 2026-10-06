@@ -2388,6 +2388,21 @@
         "title": "CertificateState",
         "type": "string"
       },
+      "CliTokenDownload": {
+        "additionalProperties": false,
+        "description": "What the browser learns from a token download: when the token stops working.\n\nThe token itself is the response body, exact bytes; the expiry travels in the\n``X-Vonk-Token-Expires-At`` header, which the web client reads into this shape.",
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at"
+        ],
+        "title": "CliTokenDownload",
+        "type": "object"
+      },
       "ClusterMappingCode": {
         "description": "Refusals of a cluster mapping (recipe-to-Spark assignment) request.",
         "enum": [
@@ -6255,6 +6270,7 @@
       },
       "FleetProfileNode": {
         "additionalProperties": false,
+        "description": "One rank of a profile assignment, the same shape a Spark group names it.",
         "properties": {
           "endpoint_owner": {
             "default": false,
@@ -13310,6 +13326,19 @@
         "title": "OutputLimits",
         "type": "object"
       },
+      "PackageActivationPhase": {
+        "description": "Where a package activation transaction stands.",
+        "enum": [
+          "armed",
+          "activation_failed",
+          "acknowledged",
+          "rolling_back",
+          "rolled_back",
+          "rollback_failed"
+        ],
+        "title": "PackageActivationPhase",
+        "type": "string"
+      },
       "PackageActivationReceipt": {
         "additionalProperties": false,
         "properties": {
@@ -13351,16 +13380,7 @@
             "type": "string"
           },
           "phase": {
-            "enum": [
-              "armed",
-              "activation_failed",
-              "acknowledged",
-              "rolling_back",
-              "rolled_back",
-              "rollback_failed"
-            ],
-            "title": "Phase",
-            "type": "string"
+            "$ref": "#/components/schemas/PackageActivationPhase"
           },
           "schema_version": {
             "const": 2,
@@ -24369,7 +24389,15 @@
                 }
               }
             },
-            "description": "A short-lived administrator bearer token download"
+            "description": "A short-lived administrator bearer token download",
+            "headers": {
+              "X-Vonk-Token-Expires-At": {
+                "description": "When the token stops working (CliTokenDownload.expires_at)",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "content": {
