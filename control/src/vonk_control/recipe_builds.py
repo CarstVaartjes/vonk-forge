@@ -41,6 +41,7 @@ from .catalog_revision_contract import (
 from .content_identity import reusable_build
 from .disk_reservations import outstanding_disk_reservation_bytes
 from .inventory_repository import InventoryRepository, InventorySnapshotView
+from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .memory_reservations import memory_reservations, memory_reserve_floor
 from .models import (
     AgentNode,
@@ -803,9 +804,16 @@ class RecipeBuildService:
             or not isinstance(image_bytes, int)
             or isinstance(image_bytes, bool)
         ):
-            raise RecipeBuildError(
-                "build.plan_invalid", "cached source build receipt is incomplete"
+            # Incomplete receipt evidence is no cache: it is retired as unknown and
+            # the resolution reports a stale receipt, so a fresh build replaces it
+            # instead of the damaged record blocking the revision.
+            retire_as_unknown(
+                "recipe-build.receipt",
+                str(cached.build_id),
+                BookkeepingReason.ROW_INCOMPLETE,
+                "cached source build receipt is incomplete",
             )
+            return replace(resolution, stale_receipt=True)
         return replace(
             resolution,
             build_input_sha256=build_input_sha256,
