@@ -288,6 +288,7 @@ def test_ring_buffer_preserves_last_lines_and_reports_loss():
     assert len(tail.text.splitlines()) <= 32
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_collector_failure_preserves_original_result_and_is_separate(
     service, monkeypatch
 ):
@@ -306,6 +307,7 @@ def test_collector_failure_preserves_original_result_and_is_separate(
     assert "secret diagnostic error" not in bundle.model_dump_json()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_offline_node_uses_durable_evidence_without_probe(service):
     value = item("recipe.start")
     store_failed_job(service, value)
@@ -330,6 +332,7 @@ def test_typed_agent_diagnostics_retained_and_resanitized():
     assert bundle.diagnostics.storage[0].value == "1024"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
     value = item()
     store_failed_job(service, value)
@@ -369,6 +372,7 @@ def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
     assert client.get(url, headers={"Authorization": "Bearer test"}).status_code == 404
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_composed_controller_exposes_exact_download_on_operation_projection(service):
     from vonk_control.api import create_app
     from vonk_control.auth import Actor, TokenCodec
@@ -660,6 +664,7 @@ def test_a_parked_lease_lapse_is_retained_from_the_controllers_own_reason(tmp_pa
     assert bundle.error_code == "operation_failed"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_download_is_named_only_for_a_stored_failed_attempt(service):
     value = {**item(), "state": "failed"}
     assert "evidence_download" not in service.decorate(value)

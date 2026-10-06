@@ -53,6 +53,7 @@ def test_worker_handler_receives_pinned_job_metadata(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("kind", ["recipe.image.availability.v2", "future-coordinator"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_generic_worker_leaves_unregistered_jobs_for_their_owner(
     tmp_path, kind
 ) -> None:

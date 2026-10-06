@@ -4,21 +4,17 @@ The registry (``vonk_control.stored_columns``) binds each ``JSON`` column of
 ``models.py`` to the Pydantic contract of the document it stores.  This guard
 fails when
 
-* a JSON column has no binding (``tools/json-column-baseline.json`` lists the
-  columns still unbound; the list only falls and a stale entry fails),
+* a JSON column has no binding,
 * a binding names a column that does not exist,
 * a bound contract contains an untyped level (``Any``, ``object``, ``JsonValue``,
   a bare ``dict``/``list`` or a mapping of those) that is not a declared
-  ``ExternalPassthrough`` (the baseline's ``untyped`` list is likewise a
-  ratchet), or
+  ``ExternalPassthrough`` with a written reason, or
 * the mechanism itself stops reading damaged documents as typed unknowns or
   stops refusing a write its contract does not describe.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Annotated
 
 import pytest
@@ -40,14 +36,6 @@ from vonk_control.stored_json import (
     write_guard_mode,
 )
 
-BASELINE = Path(__file__).resolve().parents[2] / "tools/json-column-baseline.json"
-
-
-def _baseline() -> dict[str, list[str]]:
-    document = json.loads(BASELINE.read_text(encoding="utf-8"))
-    assert document["schema_version"] == 1
-    return {"unbound": document["unbound"], "untyped": document["untyped"]}
-
 
 def test_every_json_column_is_bound_to_a_contract() -> None:
     columns = {f"{table}.{column}" for table, column in json_columns(Base)}
@@ -55,13 +43,8 @@ def test_every_json_column_is_bound_to_a_contract() -> None:
     assert not bound - columns, (
         f"bound but not a JSON column: {sorted(bound - columns)}"
     )
-    unbound = columns - bound
-    listed = set(_baseline()["unbound"])
-    assert unbound <= listed, (
-        f"JSON column without a contract: {sorted(unbound - listed)}"
-    )
-    assert listed <= unbound, (
-        f"stale entries in tools/json-column-baseline.json: {sorted(listed - unbound)}"
+    assert not columns - bound, (
+        f"JSON column without a contract: {sorted(columns - bound)}"
     )
 
 
@@ -71,19 +54,14 @@ def test_no_contract_contains_an_untyped_level() -> None:
         for binding in bindings().values()
         for path, why in column_violations(binding)
     )
-    listed = set(_baseline()["untyped"])
-    assert set(found) <= listed, (
-        f"untyped contract levels: {sorted(set(found) - listed)}"
-    )
-    assert listed <= set(found), (
-        f"stale untyped entries in tools/json-column-baseline.json: "
-        f"{sorted(listed - set(found))}"
-    )
+    assert found == [], f"untyped contract levels: {found}"
 
 
 def test_every_passthrough_states_its_reason() -> None:
-    for declared in ExternalPassthrough.declared():
-        assert declared.reason.strip()
+    declared = ExternalPassthrough.declared()
+    assert declared
+    for passthrough in declared:
+        assert passthrough.reason.strip()
 
 
 Reasoned = Annotated[JsonValue, ExternalPassthrough("owned by the upstream registry")]

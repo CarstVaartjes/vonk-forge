@@ -546,6 +546,7 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
     _validate_artifact_execution(plan, _phase(kind="verify"), cached.result)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> None:  # noqa: F811
     _client, services, _tokens, clock = agent_system
     source = MemoryObjectSource()
@@ -618,6 +619,7 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
 
 
 @pytest.mark.parametrize("running", [False, True])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_abandon_closes_only_a_parked_distribution_child(
     agent_system,  # noqa: F811
     running: bool,
@@ -690,6 +692,7 @@ def test_abandon_closes_only_a_parked_distribution_child(
     ("failure_kind", "retried"),
     [("temporary-dependency", True), ("integrity-failure", False)],
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_member_failure_kind_and_diagnostic_survive_aggregation(
     agent_system,  # noqa: F811
     failure_kind: str,

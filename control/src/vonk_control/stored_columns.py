@@ -12,11 +12,18 @@ from __future__ import annotations
 from typing import Annotated
 
 from pydantic import Field
-from vonk_agent_protocol import CacheReferenceReason, RecipeBuildRequest
+from vonk_agent_protocol import CacheReferenceReason, OperationProgress
+from vonk_agent_protocol.contracts import (
+    PAYLOAD_MODELS,
+    AgentResultPayload,
+    RecipeBuildRequest,
+)
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.inventory import Capability, NetworkInterface
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.route_activation import ActivationMarker
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
@@ -50,6 +57,25 @@ from .fleet_profile_contract import (
     LabelName,
     LabelValue,
 )
+from .job_documents import (
+    AgentUpgradeRolloutPayload,
+    AgentUpgradeRolloutResult,
+    AvailabilityJobPayload,
+    AvailabilityJobResult,
+    DistributionJobPayload,
+    EmptyJobResult,
+    GenericJobDocument,
+    RecipeBuildCleanupParent,
+    RecipeBuildParent,
+    RecipeInstallParent,
+    RecipeJobActivateParent,
+    RecipeJobRunParent,
+    RecipeReconcileParent,
+    RecipeStartParent,
+    RecipeStopParent,
+    RecipeUninstallParent,
+    RunSwitchJobPayload,
+)
 from .mapping_parameters import MappingParameters
 from .model_cache_contract import (
     CacheManifest,
@@ -58,11 +84,28 @@ from .model_cache_contract import (
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
 )
+from .profile_stop_authority import ProfileJobRunStopJob
 from .recipe_execution_contract import (
     StoredBuildPolicyReport,
     StoredInstallationPlan,
     StoredRunEndpoint,
     StoredRunPlan,
+)
+from .recipe_image_removal_contract import (
+    RecipeCacheRemovalOwner,
+    RecipeCacheRemovalResult,
+)
+from .recipe_lifecycle_contract import (
+    RecipeOperationActivatedResult,
+    RecipeOperationCancellationResult,
+    RecipeOperationProgressResult,
+    RecipeOperationResult,
+    RecipeOperationStoppedResult,
+)
+from .recipe_update_contract import RecipeUpdateDocument, RecipeUpdateFailure
+from .run_switch_contract import (
+    RunSwitchDistributionChildResult,
+    RunSwitchOperationResult,
 )
 from .stored_documents import RouteClaimMarker
 from .stored_json import bind
@@ -160,3 +203,72 @@ bind(
     },
     discriminator="entity_kind",
 )
+
+bind(
+    "jobs",
+    "payload",
+    {
+        "recipe.install": RecipeInstallParent,
+        "recipe.start": RecipeStartParent,
+        "recipe.stop": RecipeStopParent | ProfileJobRunStopJob,
+        "recipe.uninstall": RecipeUninstallParent,
+        "recipe.reconcile": RecipeReconcileParent,
+        "recipe.job.run.v1": RecipeJobRunParent,
+        "recipe.job.activate.v1": RecipeJobActivateParent,
+        "recipe.build.v1": RecipeBuildParent,
+        "recipe.build.cleanup.v1": RecipeBuildCleanupParent,
+        "recipe.run-switch.v2": RunSwitchJobPayload,
+        "recipe.stop.v2": RunSwitchJobPayload,
+        "recipe.cleanup.v2": RunSwitchJobPayload,
+        "recipe.image.availability.v2": AvailabilityJobPayload,
+        "agent-upgrade": AgentUpgradeRolloutPayload,
+        "artifact-distribution": DistributionJobPayload,
+        "recipe.cache.update.v2": RecipeUpdateDocument,
+        "recipe.cache.remove.v2": RecipeCacheRemovalOwner,
+        "runtime.preflight.v1": RuntimePreflightRequest,
+        None: GenericJobDocument,
+    },
+    discriminator="kind",
+)
+
+_LIFECYCLE_RESULT = (
+    RecipeOperationResult
+    | RecipeOperationProgressResult
+    | RecipeOperationCancellationResult
+)
+bind(
+    "jobs",
+    "result",
+    {
+        "recipe.install": _LIFECYCLE_RESULT,
+        "recipe.start": _LIFECYCLE_RESULT,
+        "recipe.stop": RecipeOperationStoppedResult | _LIFECYCLE_RESULT,
+        "recipe.uninstall": _LIFECYCLE_RESULT,
+        "recipe.reconcile": _LIFECYCLE_RESULT,
+        "recipe.build.v1": _LIFECYCLE_RESULT,
+        "recipe.build.cleanup.v1": _LIFECYCLE_RESULT,
+        "recipe.job.run.v1": RecipeJobRunResult | RecipeOperationCancellationResult,
+        "recipe.job.activate.v1": RecipeOperationActivatedResult,
+        "recipe.run-switch.v2": RunSwitchOperationResult,
+        "recipe.stop.v2": RunSwitchOperationResult,
+        "recipe.cleanup.v2": RunSwitchOperationResult,
+        "recipe.cache.update.v2": RecipeUpdateFailure,
+        "recipe.cache.remove.v2": RecipeCacheRemovalResult,
+        "recipe.image.availability.v2": AvailabilityJobResult,
+        "agent-upgrade": AgentUpgradeRolloutResult,
+        "artifact-distribution": RunSwitchDistributionChildResult,
+        "runtime.preflight.v1": EmptyJobResult,
+        None: GenericJobDocument,
+    },
+    nullable=True,
+    discriminator="kind",
+)
+
+bind(
+    "agent_operations",
+    "payload",
+    {kind.value: model for kind, model in PAYLOAD_MODELS.items()},
+    discriminator="kind",
+)
+bind("agent_operation_attempts", "progress", OperationProgress, nullable=True)
+bind("agent_operation_attempts", "result", AgentResultPayload, nullable=True)

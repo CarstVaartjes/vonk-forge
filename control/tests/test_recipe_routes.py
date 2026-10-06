@@ -1113,6 +1113,7 @@ def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
     assert routes.maintained == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
     tmp_path: Path,
 ) -> None:

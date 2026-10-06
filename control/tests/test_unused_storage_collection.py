@@ -856,6 +856,7 @@ def test_a_load_that_issued_something_still_keeps_the_installations_it_uses(
     assert _kept(result, "live operation") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_a_live_operation_names_is_kept(world: Catalog) -> None:
     """Catches ignoring a parked load that plans to reuse the installation."""
 
@@ -1401,6 +1402,7 @@ def test_receipt_of_a_superseded_revision_goes_but_a_shared_one_stays(
     assert shared.exists()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_receipt_a_live_operation_names_is_kept_and_a_recent_transfer_only_goes_last(
     world: Catalog, tmp_path: Path
 ) -> None:
@@ -1466,6 +1468,7 @@ def test_receipt_an_installation_still_uses_is_kept(
     assert path.exists()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_receipt_a_load_references_after_the_sweep_looked_is_kept(
     world: Catalog, tmp_path: Path
 ) -> None:
@@ -1714,6 +1717,7 @@ def test_model_a_recent_transfer_to_a_spark_only_makes_it_the_last_to_go(
     assert result.models == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_model_a_load_reaches_after_the_sweep_looked_is_not_fenced(
     world: Catalog, cached
 ) -> None:
@@ -1972,6 +1976,7 @@ def test_removals_that_free_what_they_promised_do_not_pause_eviction(
 # -- what keeps an installation when disk is short -------------------------------
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_an_operation_that_just_finished_makes_an_installation_recent_not_kept(
     world: Catalog,
 ) -> None:

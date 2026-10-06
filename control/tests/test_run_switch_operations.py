@@ -1043,6 +1043,7 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
 
 
 @pytest.mark.parametrize("damage", ["plan", "result"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_malformed_operation_is_rejected_without_aborting_the_batch(
     tmp_path: Path,
     damage: str,
@@ -4007,6 +4008,7 @@ def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     tmp_path: Path,
 ) -> None:
@@ -5951,6 +5953,7 @@ def test_shared_admission_contention_preserves_operation_for_retry(
         pytest.fail("shared admission contention did not schedule a durable retry")
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_stored_run_switch_with_retired_fields_stays_readable_and_new_work_proceeds(
     tmp_path: Path,
 ) -> None:

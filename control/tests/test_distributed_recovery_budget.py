@@ -335,6 +335,7 @@ def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
 @pytest.mark.parametrize(
     "invalid", ["missing", "missing-job", "malformed", "unbounded", "wrong-plan"]
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_recovery_refuses_missing_or_invalid_original_start_authority(
     tmp_path, invalid
 ):

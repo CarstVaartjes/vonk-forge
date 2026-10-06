@@ -214,6 +214,7 @@ def test_a_stored_package_or_source_that_cannot_be_used_skips_the_spark(
     assert outcome == reason
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_rollout_with_a_damaged_source_skips_that_spark_and_finishes(
     tmp_path,
 ) -> None:

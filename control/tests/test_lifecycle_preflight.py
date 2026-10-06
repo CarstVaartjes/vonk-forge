@@ -186,6 +186,7 @@ def _fail_child(sessions, pending, now, *, reason, result):
         "local.identity_expired",
     ],
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_security_probe_failures_are_returned_without_reprobe(tmp_path, code: str):
     sessions, _queue, clock, _node, service, arguments = _setup(tmp_path)
     pending, error = service.ensure(**arguments, previous=None)

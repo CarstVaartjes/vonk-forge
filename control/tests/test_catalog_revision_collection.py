@@ -472,6 +472,7 @@ def test_an_unreadable_old_contract_revision_is_removed_without_being_read(
     assert not catalog.exists(bad_projection)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_payload_naming_the_revision_keeps_it_whatever_contract_wrote_it(
     catalog: Catalog,
 ) -> None:

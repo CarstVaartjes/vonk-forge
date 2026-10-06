@@ -1015,6 +1015,7 @@ def test_durable_retire_refuses_live_current_attempt_without_transition(
         assert current_attempt is not None and current_attempt.state == "running"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue(
     tmp_path,
 ) -> None:
@@ -1270,6 +1271,7 @@ def test_activity_sql_pages_equal_timestamps_and_binds_request_filter(tmp_path) 
     assert any(item_id.startswith("job:") for item_id in all_ids)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     tmp_path,
 ) -> None:
@@ -1746,6 +1748,7 @@ def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None
     assert listed.json()["operations"][0].get("failure") is None
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_agent_upgrade_diagnostics_distinguish_absent_from_corrupt() -> None:
     """A package document that is present but unreadable must not read as absent."""
 

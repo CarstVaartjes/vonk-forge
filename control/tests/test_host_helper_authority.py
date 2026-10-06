@@ -1008,6 +1008,7 @@ def test_superseded_attempt_needs_recorded_cancellation_even_for_stop() -> None:
             )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
     service = runtime_service(
         operation_payload={"phase": "collective-readiness"},
@@ -1038,6 +1039,7 @@ def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_long_attempt_lease_does_not_extend_the_cancellation_deadline() -> None:
     service = runtime_service(lease_seconds=1200, cancel_requested=True, node_intent=2)
     with service._sessions.begin() as session:
@@ -1068,6 +1070,7 @@ def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> Non
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation() -> None:
     arguments: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
@@ -1233,6 +1236,7 @@ def cleanup_grant_arguments(installation_id: str) -> _CleanupGrantArguments:
     }
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cleanup_grants_bind_only_installations_in_canonical_operation_payload() -> (
     None
 ):
@@ -1277,6 +1281,7 @@ def test_runtime_authority_rejects_installation_binding_on_noncleanup_action() -
         runtime_service().issue_grant(**arguments)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cleanup_authority_rejects_malformed_persisted_payload() -> None:
     payload = {
         "installation_id": INSTALLATION_ID,
@@ -1387,6 +1392,7 @@ def reconciliation_grant_arguments(
     }
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconciliation_grant_signs_the_exact_leased_cleanup_identity() -> None:
     identity = reconciliation_identity()
     arguments = reconciliation_grant_arguments(identity)
@@ -1408,12 +1414,14 @@ def test_reconciliation_grant_signs_the_exact_leased_cleanup_identity() -> None:
         {"plan_digest": "e" * 64},
     ],
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconciliation_grant_refuses_substituted_source_identity(changed) -> None:
     identity = reconciliation_identity().model_copy(update=changed)
     with pytest.raises(HostHelperAuthorityError):
         reconciliation_service().issue_grant(**reconciliation_grant_arguments(identity))
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconciliation_grant_refuses_missing_identity_or_unbound_request() -> None:
     service = reconciliation_service()
     with pytest.raises(HostHelperAuthorityError):
@@ -1426,12 +1434,14 @@ def test_reconciliation_grant_refuses_missing_identity_or_unbound_request() -> N
 
 
 @pytest.mark.parametrize("changes", [{"fence": OUTSIDE_INSTALLATION_ID}])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconciliation_grant_refuses_stale_attempt(changes) -> None:
     arguments = reconciliation_grant_arguments(reconciliation_identity())
     with pytest.raises(HostHelperAuthorityError):
         reconciliation_service().issue_grant(**(arguments | changes))
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconciliation_grant_refuses_cancelled_or_expired_authority() -> None:
     arguments = reconciliation_grant_arguments(reconciliation_identity())
     for service in (
@@ -1442,6 +1452,7 @@ def test_reconciliation_grant_refuses_cancelled_or_expired_authority() -> None:
             service.issue_grant(**arguments)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_ordinary_uninstall_cannot_supply_reconciliation_authority() -> None:
     payload = RecipeUninstallPayload(
         installation_id=INSTALLATION_ID,
@@ -1457,6 +1468,7 @@ def test_ordinary_uninstall_cannot_supply_reconciliation_authority() -> None:
         service.issue_grant(**reconciliation_grant_arguments(reconciliation_identity()))
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconciliation_grant_refuses_superseded_node_intent() -> None:
     service = reconciliation_service(node_intent=2)
     with pytest.raises(HostHelperAuthorityError, match="stale"):

@@ -746,6 +746,7 @@ def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog)
     assert clock.now.isoformat() not in lines[0]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_system):
     client, services, _, clock = agent_system
     identity = RecipeReconciliationIdentity(

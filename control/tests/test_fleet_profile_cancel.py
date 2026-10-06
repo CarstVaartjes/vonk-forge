@@ -1486,6 +1486,7 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
 
 
 @pytest.mark.parametrize("child_job_state", ["failed", "waiting-for-operator"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
     tmp_path, child_job_state: str
 ) -> None:

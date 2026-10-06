@@ -267,6 +267,7 @@ def test_matching_fence_can_heartbeat_and_fail(service) -> None:
         "recipe.stop.v2",
     ],
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> None:
     jobs, _ = service
     upgrade = jobs.enqueue(

@@ -233,6 +233,7 @@ def test_start_installation_rebuilds_its_damaged_plan_or_asks_to_retry(
 # ------------------------------------------------------------ job state damage
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_damaged_result_is_shown_without_it_and_never_refuses(tmp_path) -> None:
     sessions, service, _queue, _installation, run, _nodes = _running_recipe(tmp_path)
     with sessions.begin() as session:
@@ -245,6 +246,7 @@ def test_a_damaged_result_is_shown_without_it_and_never_refuses(tmp_path) -> Non
     assert _recorded_result("recipe.start", "not a mapping", subject="x") is None
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_damaged_phases_end_a_start_through_its_recovery_error(tmp_path) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, distributed_lifecycle=True
@@ -310,6 +312,7 @@ def test_a_job_that_lost_its_intent_recovers_it_from_its_orders(tmp_path) -> Non
             recipe_operations._bound_workload_intent(parent)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_cleanup_without_exact_start_authority_fails_the_run_instead_of_raising(
     tmp_path,
 ) -> None:
@@ -543,6 +546,7 @@ def test_the_superseded_assessment_uses_the_jobs_own_sparks_when_scope_differs(
 # ------------------------------------------------- stop authority, build cleanup
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_profile_stop_whose_parent_is_damaged_retires_nothing_and_ends_failed(
     tmp_path,
 ) -> None:
@@ -730,6 +734,7 @@ def _build_operations(tmp_path):
     return sessions, operations, plan, node_id
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_succeeded_build_whose_receipt_is_gone_is_built_again(tmp_path) -> None:
     sessions, operations, plan, node_id = _build_operations(tmp_path)
     first = operations.build(
@@ -871,6 +876,7 @@ def test_request_refusals_are_typed_invalid_requests(tmp_path) -> None:
     assert isinstance(unknown_installation.value, RecipeOperationConflict)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_stop_without_its_exact_start_authority_is_a_security_refusal(
     tmp_path,
 ) -> None:

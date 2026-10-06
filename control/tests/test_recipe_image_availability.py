@@ -1273,6 +1273,7 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     engine.dispose()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_oversized_removal_owner_does_not_hold_up_later_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1717,6 +1718,7 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
     assert recovered["state"] == "succeeded"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_recipe_removal_replay_rejects_malformed_stored_intent(
     tmp_path: Path,
 ) -> None:
@@ -3086,6 +3088,7 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
     engine.dispose()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cancelling_image_reference_intent_is_counted_until_claim_release(
     tmp_path: Path,
 ) -> None:
@@ -3206,6 +3209,7 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
 
 
 @pytest.mark.parametrize("mutation", ["stale-owner", "removal-fence"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
     tmp_path: Path, mutation: str
 ) -> None:
@@ -3263,6 +3267,7 @@ def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
     engine.dispose()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     tmp_path: Path,
 ) -> None:
@@ -3390,6 +3395,7 @@ def test_forced_rebuild_is_a_distinct_operation_for_same_revision(
 
 
 @pytest.mark.parametrize("model_state", ["running", "failed"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_parent_progress_retains_ready_image_while_model_is_incomplete(
     tmp_path: Path, model_state: str
 ) -> None:
@@ -3663,6 +3669,7 @@ def _parked_operation(
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_operations_waiting_only_on_a_model_download_take_no_worker_slot(
     tmp_path: Path,
 ) -> None:

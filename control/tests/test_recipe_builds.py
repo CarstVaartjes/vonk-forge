@@ -1772,6 +1772,7 @@ def test_successful_build_retry_converges_original_and_new_request_keys(
 
 
 @pytest.mark.parametrize("completed_before_restart", [False, True])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_forced_image_build_resumes_after_worker_restart(
     tmp_path: Path,
     completed_before_restart: bool,

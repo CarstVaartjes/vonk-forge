@@ -2139,6 +2139,7 @@ def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
     assert publisher.aliases[-1] == ("slow-launch",)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_distributed_start_with_missing_run_generation_records_the_rank_unproven(
     tmp_path: Path,
 ) -> None:
@@ -2183,6 +2184,7 @@ def test_distributed_start_with_missing_run_generation_records_the_rank_unproven
     assert marker["code"] == "recipe.evidence_unproven"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_tensor_parallel_start_with_missing_run_generation_records_the_rank_unproven(
     tmp_path: Path,
 ) -> None:
@@ -3004,6 +3006,7 @@ def test_stop_preview_blocks_nonexact_reservation_authority(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("changed_identity", ("run_id", "plan_digest"))
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_stop_refuses_durable_start_with_changed_target_or_plan(
     tmp_path: Path, changed_identity: str
 ) -> None:

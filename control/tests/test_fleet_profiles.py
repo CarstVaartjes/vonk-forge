@@ -2039,6 +2039,7 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
     }
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_all_idle_profile_supersedes_a_queued_load_without_a_run() -> None:
     sessions = _database()
     _seed(sessions)

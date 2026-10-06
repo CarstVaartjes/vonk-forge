@@ -514,6 +514,7 @@ def test_authority_resolves_builds_without_an_open_transaction(
 
 
 @pytest.mark.parametrize("capacity_busy", [False, True])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     tmp_path,
     capacity_busy,
@@ -657,6 +658,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     production.close()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
     recipe = RecipeDefinition.model_validate(
         json.loads(
@@ -835,6 +837,7 @@ def _prebuilt_policy(*, used: bool) -> dict[str, object]:
 
 
 @pytest.mark.parametrize("prebuilt", [True, False])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
     tmp_path, prebuilt: bool
 ) -> None:
@@ -991,6 +994,7 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
     production.close()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
     tmp_path,
 ) -> None:
@@ -1434,6 +1438,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     production.close()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> None:
     recipe = RecipeDefinition.model_validate(
         json.loads(
@@ -1943,6 +1948,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     production.close()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> None:
     from vonk_control.models import AgentOperation, AgentOperationAttempt
 

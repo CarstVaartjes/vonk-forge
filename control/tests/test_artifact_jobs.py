@@ -890,6 +890,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         "null-request-id",
     ),
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_artifact_submission_receipt_degrades_on_corrupt_owner(
     tmp_path, corruption: str
 ) -> None:
