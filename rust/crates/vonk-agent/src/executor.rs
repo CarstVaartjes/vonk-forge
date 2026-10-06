@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
 use futures_util::{StreamExt, stream};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
@@ -71,8 +70,9 @@ struct HeartbeatSchedule {
 const JOB_CANCEL_EXIT_CODE: u32 = 130;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
 
-pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionPlan, OciError> {
-    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone())?;
+/// Parse and validate one compiled execution plan document.
+pub fn parse_compiled_execution_plan(document: &[u8]) -> Result<CompiledExecutionPlan, OciError> {
+    let plan: CompiledExecutionPlan = serde_json::from_slice(document)?;
     plan.validate()?;
     Ok(plan)
 }
@@ -3710,12 +3710,12 @@ mod tests {
             "../../../../control/tests/fixtures/compiled_workload_v2.json"
         ))
         .unwrap();
-        assert!(parse_compiled_execution_plan(&value).is_ok());
+        assert!(parse_compiled_execution_plan(value.to_string().as_bytes()).is_ok());
         value["security"]["mounts"][0]["target"] = json!("/etc");
-        assert!(parse_compiled_execution_plan(&value).is_err());
+        assert!(parse_compiled_execution_plan(value.to_string().as_bytes()).is_err());
         value["security"]["mounts"][0]["target"] = json!("/models");
         value["runtime"].as_object_mut().unwrap().remove("argv");
-        assert!(parse_compiled_execution_plan(&value).is_err());
+        assert!(parse_compiled_execution_plan(value.to_string().as_bytes()).is_err());
     }
 
     struct NoProcess;

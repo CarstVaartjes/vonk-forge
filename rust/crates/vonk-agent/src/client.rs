@@ -13,10 +13,11 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
-    ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, ControllerErrorCode,
-    HostHelperGrantResponse, HostRuntimeGrantRequest, HostRuntimeGrantRequestAction,
-    IssuedCertificateResponse, PackageActivationGrantRequest, ProgressPhase, RenewRequest,
-    SecurityRefusalReason, TelemetryRequest,
+    ActivateRequest, AgentUpgradeGrantRequest, BoundedErrorResponse, ClaimRequest,
+    ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse, HostRuntimeGrantRequest,
+    HostRuntimeGrantRequestAction, IssuedCertificateResponse, PackageActivationGrantRequest,
+    ProgressPhase, RenewRequest, RequestValidationIssueLocItem, RequestValidationProblem, SecurityRefusalReason,
+    TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
@@ -1977,47 +1978,39 @@ fn response_controller_error(response: &reqwest::Response) -> ControllerError {
 /// bounded number of issues is kept, and the rest are counted.  Anything that
 /// does not match the declared shape yields `None` rather than a guess.
 fn controller_rejection_digest(body: &[u8]) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
-    let object = value.as_object()?;
-    let detail = object
-        .get("detail")
-        .and_then(serde_json::Value::as_str)
+    // A request-validation problem carries issues; any other bounded refusal
+    // carries only its detail line.
+    let (detail, issues) = match parse_strict::<RequestValidationProblem>(body) {
+        Ok(problem) => (problem.detail, problem.issues),
+        Err(_) => (
+            parse_strict::<BoundedErrorResponse>(body).ok()?.detail,
+            Vec::new(),
+        ),
+    };
+    let detail = Some(detail)
         .filter(|detail| !detail.is_empty() && detail.len() <= MAX_REJECTION_CONTEXT_CHARS)
-        .map(sanitize_text);
+        .map(|detail| sanitize_text(&detail));
     let mut specific = Vec::new();
     let mut structural = Vec::new();
-    let mut reported = 0_usize;
-    if let Some(issues) = object.get("issues").and_then(serde_json::Value::as_array) {
-        reported = issues.len();
-        for issue in issues {
-            let Some(issue) = issue.as_object() else {
-                continue;
-            };
-            let Some(location) = issue
-                .get("loc")
-                .and_then(serde_json::Value::as_array)
-                .map(|segments| {
-                    segments
-                        .iter()
-                        .map(render_rejection_location)
-                        .collect::<Vec<_>>()
-                        .join(".")
-                })
-                .filter(|location| !location.is_empty())
-            else {
-                continue;
-            };
-            let kind = issue
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .filter(|kind| valid_error_token(kind))
-                .unwrap_or("invalid");
-            let rendered = format!("{location} ({kind})");
-            if STRUCTURAL_ERROR_TYPES.contains(&kind) {
-                structural.push(rendered);
-            } else {
-                specific.push(rendered);
-            }
+    let reported = issues.len();
+    for issue in &issues {
+        let location = issue
+            .loc
+            .iter()
+            .map(render_rejection_location)
+            .collect::<Vec<_>>()
+            .join(".");
+        if location.is_empty() {
+            continue;
+        }
+        let kind = Some(issue.type_.as_str())
+            .filter(|kind| valid_error_token(kind))
+            .unwrap_or("invalid");
+        let rendered = format!("{location} ({kind})");
+        if STRUCTURAL_ERROR_TYPES.contains(&kind) {
+            structural.push(rendered);
+        } else {
+            specific.push(rendered);
         }
     }
     // A union payload fails every branch at once, so a shape mismatch against
@@ -2050,12 +2043,8 @@ fn controller_rejection_digest(body: &[u8]) -> Option<String> {
 }
 
 /// Render one reported location segment as bounded, sanitized text.
-fn render_rejection_location(segment: &serde_json::Value) -> String {
-    let text = match segment {
-        serde_json::Value::String(text) => text.clone(),
-        serde_json::Value::Number(number) => number.to_string(),
-        _ => return "?".to_owned(),
-    };
+fn render_rejection_location(segment: &RequestValidationIssueLocItem) -> String {
+    let text = segment.to_string();
     sanitize_text(&text)
         .chars()
         .take(MAX_REJECTION_LOCATION_CHARS)
@@ -2168,20 +2157,26 @@ fn valid_error_code(value: &str) -> bool {
 }
 
 fn is_rotation_conflict(body: &[u8]) -> bool {
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return false;
-    };
-    let code = value.get("code").and_then(serde_json::Value::as_str);
-    let detail = value.get("detail").and_then(serde_json::Value::as_str);
-    code.is_some_and(|code| {
-        vocabulary::is(
-            code,
-            SecurityRefusalReason::AgentCertificateRotationConflict,
-        ) || code == "agent_certificate_rotation_conflict"
-    }) || matches!(
-        detail,
-        Some("a different certificate rotation is already staged")
-    )
+    const STAGED: &str = "a different certificate rotation is already staged";
+    if let Ok(refusal) = parse_strict::<BoundedErrorResponse>(body) {
+        return refusal.detail == STAGED
+            || refusal.context.is_some_and(|context| {
+                vocabulary::is(
+                    &context.code,
+                    SecurityRefusalReason::AgentCertificateRotationConflict,
+                )
+            });
+    }
+    // An older Controller answered with a bare code and/or detail.
+    parse_strict::<ControllerRefusalBody>(body).is_ok_and(|refusal| {
+        refusal.detail.as_deref() == Some(STAGED)
+            || refusal.code.as_deref().is_some_and(|code| {
+                vocabulary::is(
+                    code,
+                    SecurityRefusalReason::AgentCertificateRotationConflict,
+                ) || code == "agent_certificate_rotation_conflict"
+            })
+    })
 }
 
 async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {

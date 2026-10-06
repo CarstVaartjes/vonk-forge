@@ -16,16 +16,12 @@
 //!   new free-string finding code does not compile and a second struct literal
 //!   of the finding fails the ceiling below;
 //! * the helper and protocol crates spell no vocabulary word either (their code
-<<<<<<< HEAD
-//!   builds from the same generated enums).
-=======
 //!   builds from the same generated enums);
 //! * the words of the agent's progress phase and helper response status
 //!   (`ProgressPhase`, `HostHelperResponseStatus`) are guarded in every spelling,
 //!   plain words included, because a phase is a plain English word:
 //!   `"downloading"` is a member, not prose. A failure stage (`FailureStage`) is
 //!   guarded by its type: every stage parameter takes the enum.
->>>>>>> b7fe4f3fd
 //!
 //! The vocabulary is read from the exported wire schema, so a word added to the
 //! contract is guarded without editing this test: besides the lifecycle enums
@@ -285,13 +281,7 @@ const PROTOCOL_CRATES: [&str; 2] = ["vonk-agent-helper", "vonk-agent-protocol"];
 
 /// `json!` that remains in a protocol crate's non-test code, with a ceiling that
 /// only falls. Each entry builds a document that is not a protocol message.
-const JSON_RESIDUE: [(&str, usize); 2] = [
-    // The exported JSON Schema document itself, assembled once at build time.
-    ("vonk-agent-protocol/src/wire_schema.rs", 1),
-    // The canonical manifest a digest is recomputed from when a job result and a
-    // job request are validated: hashed, never sent.
-    ("vonk-agent-protocol/src/lib.rs", 2),
-];
+const JSON_RESIDUE: [(&str, usize); 0] = [];
 
 fn protocol_crate_sources() -> Vec<(String, String)> {
     fn walk(directory: &Path, found: &mut Vec<PathBuf>) {
@@ -344,19 +334,11 @@ fn the_protocol_crates_build_no_message_from_loose_json_beyond_the_listed_residu
 }
 
 /// Vocabulary-equal literals that remain in the agent, per file, with a ceiling
-<<<<<<< HEAD
-/// that only falls. The source-policy recheck keeps its own finding codes: its
-/// report never reaches a protocol message (a rejected build reports a reason,
-/// not the findings), and some of its words differ from the contract's
-/// `SourcePolicyCode`, so it is a separate drift to close, not a message to guard.
-const VOCABULARY_RESIDUE: [(&str, usize); 1] = [("src/source_policy.rs", 21)];
-=======
 /// that only falls. It is empty: the source-policy recheck builds its findings from
 /// the contract's `SourcePolicyCode` like the Controller's, and no other file
 /// spells a word. A word that is a tool's own output goes to `FOREIGN_MEANINGS`
 /// with the reason, never here.
 const VOCABULARY_RESIDUE: [(&str, usize); 0] = [];
->>>>>>> b7fe4f3fd
 
 fn offenders_by_file(
     files: Vec<(String, String)>,
@@ -364,15 +346,11 @@ fn offenders_by_file(
 ) -> std::collections::BTreeMap<String, usize> {
     let mut observed = std::collections::BTreeMap::new();
     for (name, code) in files {
-<<<<<<< HEAD
-        let words = vocabulary_literals(&code, vocabulary).len();
-=======
         let crate_path = format!("vonk-agent/{name}");
         let words = vocabulary_literals(&code, vocabulary)
             .into_iter()
             .filter(|word| !FOREIGN_MEANINGS.contains(&(crate_path.as_str(), word.as_str())))
             .count();
->>>>>>> b7fe4f3fd
         if words > 0 {
             observed.insert(name, words);
         }
@@ -403,12 +381,6 @@ fn handwritten_protocol_sources() -> Vec<(String, String)> {
         .collect()
 }
 
-<<<<<<< HEAD
-/// A tool's own output that happens to equal a word of the vocabulary:
-/// systemd's `LoadState` is `not-found` for a unit that is not installed.
-const TOOL_OUTPUT_WORDS: [(&str, &str); 1] =
-    [("vonk-agent-helper/src/package_rollback.rs", "not-found")];
-=======
 /// A word that is not the contract's but happens to equal one, with the file it
 /// is in and why: a tool's own output (systemd's `LoadState` is `not-found` for a
 /// unit that is not installed, its `ActiveState` is `failed`) or a file's own
@@ -419,7 +391,6 @@ const FOREIGN_MEANINGS: [(&str, &str); 3] = [
     ("vonk-agent-helper/src/main.rs", "pending"),
     ("vonk-agent/src/recipe_builder.rs", "failed"),
 ];
->>>>>>> b7fe4f3fd
 
 #[test]
 fn the_protocol_crates_spell_no_vocabulary_word_by_hand() {
@@ -427,11 +398,7 @@ fn the_protocol_crates_spell_no_vocabulary_word_by_hand() {
     let mut offenders = Vec::new();
     for (name, code) in handwritten_protocol_sources() {
         for word in vocabulary_literals(&code, &vocabulary) {
-<<<<<<< HEAD
-            if !TOOL_OUTPUT_WORDS.contains(&(name.as_str(), word.as_str())) {
-=======
             if !FOREIGN_MEANINGS.contains(&(name.as_str(), word.as_str())) {
->>>>>>> b7fe4f3fd
                 offenders.push(format!("{name}: {word:?}"));
             }
         }

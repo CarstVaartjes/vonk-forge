@@ -19,7 +19,7 @@ use uuid::Uuid;
 use vonk_agent_protocol::generated::{FailureStage, RuntimePreflightFindingCode};
 use vonk_agent_protocol::{
     RecipeBuildAdapter, RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence,
-    RecipeBuildRequest, canonical_json, hex_sha256,
+    RecipeBuildRequest, canonical_json, generated::RecipeBuildEnvironmentArgumentValue, hex_sha256,
 };
 
 use crate::{
@@ -1590,12 +1590,14 @@ pub(crate) fn podman_storage_arguments_with_cgroup_manager(
     ]
 }
 
-fn scalar(value: &serde_json::Value) -> Result<String, RecipeBuildError> {
+fn scalar(value: &RecipeBuildEnvironmentArgumentValue) -> Result<String, RecipeBuildError> {
     match value {
-        serde_json::Value::Bool(value) => Ok(value.to_string()),
-        serde_json::Value::Number(value) if value.as_i64().is_some() => Ok(value.to_string()),
-        serde_json::Value::String(value) if !value.contains('\0') => Ok(value.clone()),
-        _ => Err(RecipeBuildError::Evidence),
+        RecipeBuildEnvironmentArgumentValue::Boolean(value) => Ok(value.to_string()),
+        RecipeBuildEnvironmentArgumentValue::Int64(value) => Ok(value.to_string()),
+        RecipeBuildEnvironmentArgumentValue::String(value) if !value.contains('\0') => {
+            Ok(value.clone())
+        }
+        RecipeBuildEnvironmentArgumentValue::String(_) => Err(RecipeBuildError::Evidence),
     }
 }
 

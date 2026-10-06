@@ -734,11 +734,45 @@ struct DetectedAddresses {
 /// one; the peer is the other end of that point-to-point subnet or its only
 /// known neighbour. Anything missing or ambiguous is left for the operator.
 fn detect_spark_addresses(runner: &mut dyn CommandRunner, nas: Ipv4Addr) -> DetectedAddresses {
-    fn json(
+    /// The fields read from iproute2's `ip -j route get`.
+    #[derive(Deserialize)]
+    struct RouteEntry {
+        dev: Option<String>,
+        prefsrc: Option<String>,
+    }
+    /// The fields read from `rdma -j link show`.
+    #[derive(Deserialize)]
+    struct RdmaLink {
+        state: Option<String>,
+        netdev: Option<String>,
+    }
+    /// The fields read from `ip -j -4 addr show`.
+    #[derive(Deserialize)]
+    struct InterfaceEntry {
+        ifname: Option<String>,
+        #[serde(default)]
+        flags: Vec<String>,
+        #[serde(default)]
+        addr_info: Vec<AddressInfo>,
+    }
+    #[derive(Deserialize)]
+    struct AddressInfo {
+        scope: Option<String>,
+        local: Option<String>,
+        prefixlen: Option<u64>,
+    }
+    /// The fields read from `ip -j -4 neigh show`.
+    #[derive(Deserialize)]
+    struct NeighbourEntry {
+        dst: Option<String>,
+        #[serde(default)]
+        state: Vec<String>,
+    }
+    fn json<T: serde::de::DeserializeOwned>(
         runner: &mut dyn CommandRunner,
         program: &str,
         args: &[&str],
-    ) -> Vec<serde_json::Value> {
+    ) -> Vec<T> {
         runner
             .run(Command::new(program, args.iter().copied()).suppress_stderr())
             .ok()
@@ -746,9 +780,8 @@ fn detect_spark_addresses(runner: &mut dyn CommandRunner, nas: Ipv4Addr) -> Dete
             .and_then(|output| serde_json::from_slice(&output.stdout).ok())
             .unwrap_or_default()
     }
-    fn site_ipv4(value: Option<&serde_json::Value>) -> Option<Ipv4Addr> {
+    fn site_ipv4(value: Option<&str>) -> Option<Ipv4Addr> {
         value?
-            .as_str()?
             .parse::<Ipv4Addr>()
             .ok()
             .filter(|address| valid_site_ipv4(*address))
@@ -756,47 +789,34 @@ fn detect_spark_addresses(runner: &mut dyn CommandRunner, nas: Ipv4Addr) -> Dete
 
     let mut detected = DetectedAddresses::default();
     let nas = nas.to_string();
-    let route = json(runner, IP_PATH, &["-j", "-4", "route", "get", &nas]);
+    let route: Vec<RouteEntry> = json(runner, IP_PATH, &["-j", "-4", "route", "get", &nas]);
     let Some(route) = route.first() else {
         return detected;
     };
-    let Some(management_device) = route.get("dev").and_then(serde_json::Value::as_str) else {
+    let Some(management_device) = route.dev.clone() else {
         return detected;
     };
-    let management_device = management_device.to_owned();
-    detected.node_management_ip = site_ipv4(route.get("prefsrc"));
+    detected.node_management_ip = site_ipv4(route.prefsrc.as_deref());
 
-    let rdma_devices = json(runner, RDMA_PATH, &["-j", "link", "show"])
+    let rdma_devices = json::<RdmaLink>(runner, RDMA_PATH, &["-j", "link", "show"])
         .into_iter()
-        .filter(|link| link.get("state").and_then(serde_json::Value::as_str) == Some("ACTIVE"))
-        .filter_map(|link| {
-            link.get("netdev")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-        })
+        .filter(|link| link.state.as_deref() == Some("ACTIVE"))
+        .filter_map(|link| link.netdev)
         .collect::<Vec<_>>();
     let mut fabric = Vec::new();
-    for interface in json(runner, IP_PATH, &["-j", "-4", "addr", "show"]) {
-        let Some(name) = interface.get("ifname").and_then(serde_json::Value::as_str) else {
+    for interface in json::<InterfaceEntry>(runner, IP_PATH, &["-j", "-4", "addr", "show"]) {
+        let Some(name) = interface.ifname.as_deref() else {
             continue;
         };
-        let up = interface
-            .get("flags")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|flags| flags.iter().any(|flag| flag == "LOWER_UP"));
+        let up = interface.flags.iter().any(|flag| flag == "LOWER_UP");
         if name == management_device || !up || !rdma_devices.iter().any(|device| device == name) {
             continue;
         }
-        for address in interface
-            .get("addr_info")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let global = address.get("scope").and_then(serde_json::Value::as_str) == Some("global");
-            let prefix = address.get("prefixlen").and_then(serde_json::Value::as_u64);
+        for address in &interface.addr_info {
+            let global = address.scope.as_deref() == Some("global");
+            let prefix = address.prefixlen;
             if let (true, Some(local), Some(prefix)) =
-                (global, site_ipv4(address.get("local")), prefix)
+                (global, site_ipv4(address.local.as_deref()), prefix)
                 && !fabric.iter().any(|(existing, _, _)| *existing == local)
             {
                 fabric.push((local, name.to_owned(), prefix));
@@ -813,7 +833,7 @@ fn detect_spark_addresses(runner: &mut dyn CommandRunner, nas: Ipv4Addr) -> Dete
         31 => Some(Ipv4Addr::from(bits ^ 1)),
         30 if bits & 3 == 1 || bits & 3 == 2 => Some(Ipv4Addr::from(bits ^ 3)),
         _ => {
-            let neighbours = json(
+            let neighbours = json::<NeighbourEntry>(
                 runner,
                 IP_PATH,
                 &["-j", "-4", "neigh", "show", "dev", device],
@@ -821,15 +841,11 @@ fn detect_spark_addresses(runner: &mut dyn CommandRunner, nas: Ipv4Addr) -> Dete
             .into_iter()
             .filter(|neighbour| {
                 !neighbour
-                    .get("state")
-                    .and_then(serde_json::Value::as_array)
-                    .is_some_and(|states| {
-                        states
-                            .iter()
-                            .any(|state| state == "FAILED" || state == "INCOMPLETE")
-                    })
+                    .state
+                    .iter()
+                    .any(|state| state == "FAILED" || state == "INCOMPLETE")
             })
-            .filter_map(|neighbour| site_ipv4(neighbour.get("dst")))
+            .filter_map(|neighbour| site_ipv4(neighbour.dst.as_deref()))
             .filter(|address| address != local)
             .collect::<Vec<_>>();
             match neighbours.as_slice() {
