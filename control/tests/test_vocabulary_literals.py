@@ -19,6 +19,9 @@ from vonk_agent_protocol import (
 
 from . import vocabulary_literals as scan
 
+#: The repository parse is shared setup, not the first test's own time.
+pytestmark = pytest.mark.usefixtures("parsed_repository")
+
 REL = "control/src/vonk_control/example.py"
 
 

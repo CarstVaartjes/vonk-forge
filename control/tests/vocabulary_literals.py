@@ -80,6 +80,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import MACHINES, ModelCacheOperatorStatus
 
+from .parsed_sources import memoized_scan, parse_file
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = REPO_ROOT / "tools" / "vocabulary-literals-baseline.json"
 
@@ -363,15 +365,26 @@ def _is_reason_code_text(text: str) -> bool:
 def scan_python(
     files: Iterable[Path] | None = None, root: Path = REPO_ROOT
 ) -> Counter[tuple[str, str]]:
-    """Literal counts per ``(tier, repository-relative path)``."""
+    """Literal counts per ``(tier, repository-relative path)``.
 
+    The whole-repository scan (no ``files``) runs once while the tree is unchanged."""
+
+    if files is not None:
+        return _scan_python(files, root)
+    return memoized_scan(
+        ("vocabulary", root),
+        [root / path for path in PYTHON_ROOTS],
+        lambda: _scan_python(None, root),
+    )
+
+
+def _scan_python(files: Iterable[Path] | None, root: Path) -> Counter[tuple[str, str]]:
     counts: Counter[tuple[str, str]] = Counter()
     for path in files if files is not None else _python_files():
         relative = path.relative_to(root).as_posix()
         if relative in ALLOWED_FILES or relative.startswith(PYTHON_EXCLUDED_PREFIXES):
             continue
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=relative)
+        source, tree = parse_file(path)
         docstrings = _docstring_ids(tree)
         for node in ast.walk(tree):
             if (
@@ -474,17 +487,26 @@ def _code_parameter_index(
 def scan_code_positions(
     files: Iterable[Path] | None = None, root: Path = REPO_ROOT
 ) -> list[str]:
-    """Every string constant in a position that names a code, as ``path:line: why``."""
+    """Every string constant in a position that names a code, as ``path:line: why``.
 
+    The whole-tree scan (no ``files``) runs once while the tree is unchanged."""
+
+    if files is not None:
+        return _scan_code_positions(files, root)
+    return memoized_scan(
+        ("code-positions", root),
+        [REPO_ROOT / CODE_POSITION_ROOT],
+        lambda: _scan_code_positions(None, root),
+    )
+
+
+def _scan_code_positions(files: Iterable[Path] | None, root: Path) -> list[str]:
     paths = (
         list(files)
         if files is not None
         else sorted((REPO_ROOT / CODE_POSITION_ROOT).rglob("*.py"))
     )
-    trees = {
-        path: ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for path in paths
-    }
+    trees = {path: parse_file(path).tree for path in paths}
     class_index: dict[str, int] = {}
     class_bases: dict[str, list[str]] = {}
     own_init: set[str] = set()

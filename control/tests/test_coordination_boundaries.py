@@ -31,6 +31,9 @@ from .coordination_boundaries import (
     scan_source,
 )
 
+#: The repository parse is shared setup, not the first test's own time.
+pytestmark = pytest.mark.usefixtures("parsed_repository")
+
 
 def _scanned(source: str) -> list[tuple[str, int, str]]:
     return [

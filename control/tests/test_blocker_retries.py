@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 import copy
 
+import pytest
+
 from .blocker_boundaries import RaiseSite, load_allowlist
 from .blocker_classifier import DEBT, RETRIED, classify
 from .blocker_retries import (
@@ -15,6 +17,9 @@ from .blocker_retries import (
     unknown_classes,
     unproven_sites,
 )
+
+#: The repository parse is shared setup, not the first test's own time.
+pytestmark = pytest.mark.usefixtures("parsed_repository")
 
 PATH = "control/src/vonk_control/fleet_profiles.py"
 

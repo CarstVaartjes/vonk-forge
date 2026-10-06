@@ -46,6 +46,8 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .parsed_sources import memoized_scan, parsed_tree
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
 BASELINE_PATH = REPO_ROOT / "tools" / "coordination-baseline.json"
@@ -699,10 +701,14 @@ def _function_sites(
     )
 
 
-def scan_source(source: str, *, path: str) -> list[Site]:
-    """Return every provable coordination violation in one module's source."""
+def scan_source(
+    source: str, *, path: str, tree: ast.Module | None = None
+) -> list[Site]:
+    """Return every provable coordination violation in one module's source.
 
-    tree = ast.parse(source)
+    ``tree`` is the already parsed ``source`` (read-only) when the caller has it."""
+
+    tree = tree if tree is not None else ast.parse(source)
     route_chains = _route_effect_chains(tree)
 
     def walk(node: ast.AST) -> Iterator[Site]:
@@ -724,13 +730,16 @@ def scan_source(source: str, *, path: str) -> list[Site]:
 def scan_coordination_sites(root: Path = CONTROL_SOURCE_ROOT) -> list[Site]:
     """Return every provable coordination violation under ``root``."""
 
-    sites: list[Site] = []
-    for module in sorted(root.rglob("*.py")):
-        relative = module.relative_to(REPO_ROOT).as_posix()
-        sites.extend(scan_source(module.read_text(encoding="utf-8"), path=relative))
-    return sorted(
-        sites, key=lambda site: (site.path, site.line, site.kind, site.detail)
-    )
+    def compute() -> list[Site]:
+        sites: list[Site] = []
+        for module, parsed in parsed_tree(root):
+            relative = module.relative_to(REPO_ROOT).as_posix()
+            sites.extend(scan_source(parsed.source, path=relative, tree=parsed.tree))
+        return sorted(
+            sites, key=lambda site: (site.path, site.line, site.kind, site.detail)
+        )
+
+    return memoized_scan(("coordination", root), [root], compute)
 
 
 def _baseline_identity(entry: object, where: str) -> dict[str, object]:
