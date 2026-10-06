@@ -72,6 +72,7 @@ from vonk_agent_protocol import (
     BlockerCategory,
     FailureCode,
     InvalidRequestReason,
+    LifecycleState,
     OperatorSurface,
     SecurityRefusalReason,
     WaitReason,
@@ -177,6 +178,8 @@ class RaiseSite:
 #: ``LEGACY_WAIT_STATE`` and ``AgentResultState.WAITING_FOR_OPERATOR[.value]``.
 _WAIT_CONTRACT_NAME = "LEGACY_WAIT_STATE"
 _WAIT_CONTRACT_MEMBER = AgentResultState.WAITING_FOR_OPERATOR.name
+#: The stored wait word of a kind on the core vocabulary (``LifecycleState.NEEDS_OPERATOR``).
+_STORED_WAIT_MEMBER = LifecycleState.NEEDS_OPERATOR.name
 
 
 def _is_wait_literal(node: ast.AST) -> bool:
@@ -185,10 +188,16 @@ def _is_wait_literal(node: ast.AST) -> bool:
     if isinstance(node, ast.Constant):
         return node.value == WAIT_STATE
     if isinstance(node, ast.Name):
-        return node.id == _WAIT_CONTRACT_NAME
+        return node.id in {_WAIT_CONTRACT_NAME, _STORED_WAIT_MEMBER}
     if isinstance(node, ast.Attribute):
         if node.attr == "value":
             return _is_wait_literal(node.value)
+        if node.attr == _STORED_WAIT_MEMBER:
+            # ``aos.NEEDS_OPERATOR``: the stored word of a kind that has moved onto
+            # the core vocabulary, spelled through its ``*_states`` module.
+            return isinstance(node.value, ast.Name) and (
+                node.value.id == "aos" or node.value.id.endswith("_states")
+            )
         return node.attr == _WAIT_CONTRACT_MEMBER
     return False
 

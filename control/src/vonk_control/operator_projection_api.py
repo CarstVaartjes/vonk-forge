@@ -20,8 +20,9 @@ from pydantic import ConfigDict, Field, model_serializer
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import SecurityRefusalReason
+from vonk_agent_protocol import ObservationCause, SecurityRefusalReason
 
+from . import agent_operation_states
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
 from .auth import MUTATION_ROLES, Actor, CursorError
@@ -335,8 +336,8 @@ _AGENT_LOG_ENTRY_LIMIT = 4_096
 #: things an operator must act on, not errors that claim the start died.
 _ATTEMPT_OUTCOME: Mapping[str, tuple[str, LogLevel]] = {
     "failed": ("failed", "error"),
-    "expired": ("lease expired", "warning"),
-    "waiting-for-operator": ("waiting for operator", "warning"),
+    ObservationCause.LEASE_LAPSED.value: ("lease expired", "warning"),
+    ObservationCause.REPORTED_UNKNOWN.value: ("waiting for operator", "warning"),
 }
 
 
@@ -379,7 +380,7 @@ def _attempt_is_parked(
     """
 
     return (
-        operation.state == "waiting-for-operator"
+        agent_operation_states.order_is_parked(operation.state)
         and attempt.attempt == operation.current_attempt
     )
 
@@ -401,7 +402,7 @@ def _lease_clock(
     acceptable here; an invented one is not.
     """
 
-    if attempt.state != "expired":
+    if not agent_operation_states.attempt_lapsed(attempt):
         return None
     parts = [
         "clock=operation-lease",
@@ -595,7 +596,8 @@ class AgentFailureLogProvider:
                 bundle = collect_failure(item, now=now)
             except Exception:  # noqa: BLE001 - one malformed row must not hide the rest
                 headline, level = _ATTEMPT_OUTCOME.get(
-                    attempt.state, _ATTEMPT_OUTCOME["failed"]
+                    agent_operation_states.attempt_outcome_key(attempt),
+                    _ATTEMPT_OUTCOME["failed"],
                 )
                 fallback = redact_text(
                     f"{operation.kind} {headline}: "
@@ -619,7 +621,7 @@ class AgentFailureLogProvider:
                     source=source_name,
                     bundle=bundle,
                     observed_at=observed_at,
-                    state=attempt.state,
+                    state=agent_operation_states.attempt_outcome_key(attempt),
                     clock=clock,
                     controller_reason=(operation.status_reason if parked else None),
                     has_receipt=receipt is not None,

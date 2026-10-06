@@ -219,3 +219,16 @@ def test_only_the_alias_table_may_spell_the_retired_words(tmp_path: Path) -> Non
 @pytest.mark.slow(30)
 def test_the_non_lifecycle_floors_match_the_repository() -> None:
     assert scan.floor_problems(scan.scan_python()) == []
+
+
+def test_the_cli_copy_of_the_wait_words_equals_the_contract() -> None:
+    from vonk_agent_protocol import LifecycleState, StateAlias
+
+    from cluster_profiles import cli_states
+
+    assert cli_states.NEEDS_OPERATOR == LifecycleState.NEEDS_OPERATOR.value
+    assert cli_states.LEGACY_NEEDS_OPERATOR == StateAlias.WAITING_FOR_OPERATOR.value
+    assert cli_states.OPERATOR_WAIT_STATES == {
+        cli_states.NEEDS_OPERATOR,
+        cli_states.LEGACY_NEEDS_OPERATOR,
+    }

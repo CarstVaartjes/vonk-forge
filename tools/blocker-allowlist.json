@@ -50,7 +50,7 @@
       "control/src/vonk_control/runtime_image_preparation.py"
     ]
   },
-  "max_debt": 10,
+  "max_debt": 9,
   "debt_ceiling": {
     "total": 198,
     "unaudited": 606,
@@ -216,7 +216,7 @@
       "irreversible_effect": "none: only a restart-safe or fenced order is ever scheduled (core rule 1)",
       "verdict": "DERIVED",
       "reason": "Projection of a core decision. The stored label is kept for compatibility; no operator is involved and the order is claimable when next_action_at is due.",
-      "sites": 4
+      "sites": 1
     },
     {
       "path": "control/src/vonk_control/lifecycle/agent_operation.py",
@@ -232,7 +232,7 @@
       "irreversible_effect": "a user job may have run or still be running; a build may have produced output",
       "verdict": "KEEP",
       "reason": "Core rule 3: needs-operator only for an irreversible order with an advertised action. Without one the order keeps being re-evaluated and a cancel ends it with its effect recorded as unknown.",
-      "sites": 4
+      "sites": 1
     },
     {
       "path": "control/src/vonk_control/lifecycle/agent_operation.py",
@@ -246,20 +246,6 @@
       "irreversible_effect": "none: the claim refuses to install over any binary but the exact rollback source",
       "verdict": "SELF-HEAL",
       "reason": "The order is reopened and immediately decided by the core, which retries it behind the dpkg safety fence; it never stays waiting.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
-      "function": "AgentOperationAdapter._fence_upgrade_attempt",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "agent.upgrade.v1"
-      ],
-      "trigger": "an upgrade attempt record that cannot report is kept until its dpkg fence elapses",
-      "advertised_action": "inherits the order: automatic fenced retry",
-      "irreversible_effect": "inherits",
-      "verdict": "DERIVED",
-      "reason": "A fact about the attempt record, not a decision about the order: agent_upgrade_in_flight reads its lease as the end of the fence.",
       "sites": 1
     },
     {

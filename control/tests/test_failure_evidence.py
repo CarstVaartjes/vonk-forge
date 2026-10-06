@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import AgentResult
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.failure_evidence import (
     FailureEvidenceBundle,
@@ -536,7 +537,7 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
     )
     assert jobs.record_late_result(late) is True
     with sessions() as session:
-        assert session.get(AgentOperation, operation.id).state == "waiting-for-operator"
+        assert session.get(AgentOperation, operation.id).state in aos.PARKED
     # A later attempt supersedes the lapsed one and succeeds.
     with sessions.begin() as session:
         stored = session.get(AgentOperation, operation.id)

@@ -3619,6 +3619,9 @@
         "migration_step": {
           "$ref": "#/$defs/MigrationStep"
         },
+        "observation_cause": {
+          "$ref": "#/$defs/ObservationCause"
+        },
         "operator_action": {
           "$ref": "#/$defs/OperatorActionName"
         },
@@ -3663,6 +3666,7 @@
         "wait_verdict",
         "lifecycle_subject",
         "state_alias",
+        "observation_cause",
         "state_write_kind",
         "migration_step",
         "error_category",
@@ -3731,6 +3735,15 @@
       ],
       "title": "NetworkInterface",
       "type": "object"
+    },
+    "ObservationCause": {
+      "description": "Why an attempt is being observed rather than settled.\n\nAn attempt that ended without a definite answer is ``observing``; this says\nwhat left it unanswered.  ``reported-unknown``: the executor said it could not\nconfirm the effect.  ``lease-lapsed``: the executor stopped reporting.  The old\nspellings carried this in the state word itself (``waiting-for-operator`` and\n``expired``), which is why an adopted attempt also yields its cause.",
+      "enum": [
+        "reported-unknown",
+        "lease-lapsed"
+      ],
+      "title": "ObservationCause",
+      "type": "string"
     },
     "OperationCheckpoint": {
       "additionalProperties": false,

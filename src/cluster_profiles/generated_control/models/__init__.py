@@ -324,6 +324,7 @@ from .node_connection_online_state import NodeConnectionOnlineState
 from .node_distribution_assignment import NodeDistributionAssignment
 from .node_profile_change import NodeProfileChange
 from .node_profile_payload import NodeProfilePayload
+from .observation_cause import ObservationCause
 from .operation_blocker import OperationBlocker
 from .operation_blocker_severity import OperationBlockerSeverity
 from .operation_checkpoint import OperationCheckpoint
@@ -902,6 +903,7 @@ __all__ = (
     "NodeDistributionAssignment",
     "NodeProfileChange",
     "NodeProfilePayload",
+    "ObservationCause",
     "OperationBlocker",
     "OperationBlockerSeverity",
     "OperationCheckpoint",
