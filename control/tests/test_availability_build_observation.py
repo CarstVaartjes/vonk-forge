@@ -61,7 +61,7 @@ def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
         assert composition.service._builder is not None
         return composition.service._builder(
             recipe,
-            runtime,
+            runtime.model_dump(mode="json"),
             claim=claim,
             build_input_sha256=plan.build_input_sha256,
             force=False,
