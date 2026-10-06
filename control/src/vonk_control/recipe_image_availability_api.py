@@ -38,7 +38,6 @@ from .recipe_image_availability import (
     SOURCE_POLICY_REFUSED_CODE,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
-    RecipeImageAvailabilityUnknown,
     RecipeImageAvailabilityView,
 )
 from .recipe_image_availability_contract import (
@@ -47,6 +46,7 @@ from .recipe_image_availability_contract import (
 )
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
+from .stored_json import Residue
 from .strict_json import StrictJSONModel, read_stored_model
 
 # One named type per closed set, shared by the contract field and every
@@ -121,13 +121,13 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
 
     id: str = Field(min_length=1, max_length=128)
     request_id: str = Field(min_length=1, max_length=128)
-    request: RecipeAvailabilityIntent
+    request: RecipeAvailabilityIntent | None
     kind: RecipeImageAvailabilityKind
     state: RecipeImageAvailabilityState
     attempt: int = Field(ge=0)
-    recipe_revision_id: str
-    recipe_content_sha256: str
-    progress: OperationProgress
+    recipe_revision_id: str | None
+    recipe_content_sha256: str | None
+    progress: OperationProgress | None
     children: list[RecipeImageAvailabilityChild] = Field(default_factory=list)
     result: RecipeImageAvailabilityResult | None = None
     failure: AvailabilityOperationFailure | None = None
@@ -138,16 +138,19 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
     next_attempt_at: str | None = None
     created_at: str
     updated_at: str
+    residue: Residue | None = None
 
     @model_validator(mode="after")
     def terminal_evidence_is_consistent(self) -> RecipeImageAvailabilityResponse:
-        if self.state == "succeeded" and (
-            self.result is None or self.failure is not None
+        if (
+            self.state == "succeeded"
+            and self.residue is None
+            and (self.result is None or self.failure is not None)
         ):
             raise ValueError(
                 "successful image availability requires a result and no failure"
             )
-        if self.state == "failed" and self.failure is None:
+        if self.state == "failed" and self.failure is None and self.residue is None:
             raise ValueError("failed image availability requires failure evidence")
         if self.state != "succeeded" and self.result is not None:
             raise ValueError("image availability result requires success")
@@ -256,14 +259,6 @@ def _child(
 def _view_document(
     view: RecipeImageAvailabilityView,
 ) -> RecipeImageAvailabilityResponse:
-    if view.residue is not None:
-        raise _recipe_error(
-            RecipeImageAvailabilityUnknown(
-                RecipeImageCode.METADATA_REFRESH_UNAVAILABLE,
-                "availability bookkeeping is unknown",
-                retryable=True,
-            )
-        )
     document = view.document()
     result = document.get("result")
     result_model = None
@@ -310,9 +305,9 @@ def _view_document(
             "kind": document["kind"],
             "state": document["state"],
             "attempt": require_integer(document["attempt"], "attempt"),
-            "recipe_revision_id": str(document["recipe_revision_id"]),
-            "recipe_content_sha256": str(document["recipe_content_sha256"]),
-            "progress": _progress(document.get("progress")),
+            "recipe_revision_id": view.recipe_revision_id,
+            "recipe_content_sha256": view.recipe_content_sha256,
+            "progress": view.measurement,
             "children": children,
             "result": result_model,
             "failure": (
@@ -331,6 +326,7 @@ def _view_document(
             "next_attempt_at": document.get("next_attempt_at"),
             "created_at": str(document["created_at"]),
             "updated_at": str(document["updated_at"]),
+            "residue": view.residue,
         }
     )
 

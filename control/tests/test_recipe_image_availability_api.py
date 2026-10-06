@@ -272,10 +272,31 @@ def test_recipe_operation_observation_is_readable_by_any_authenticated_actor() -
         }
     )
     unknown = TestClient(app).get(f"/api/recipe/operations/{view.id}")
-    assert unknown.status_code == 503, unknown.text
-    assert unknown.json()["detail"] == (
-        "recipe_image.metadata_refresh_unavailable: availability bookkeeping is unknown"
-    )
+    assert unknown.status_code == 200, unknown.text
+    observation = unknown.json()
+    assert observation["id"] == view.id
+    assert observation["state"] == "queued"
+    assert observation["progress"] == response.json()["progress"]
+    assert observation["request"] is None
+    assert observation["recipe_revision_id"] is None
+    assert observation["recipe_content_sha256"] is None
+    assert observation["residue"]["reason"] == "row-incomplete"
+    for terminal_state in ("succeeded", "failed"):
+        service.get_operator_operation.return_value = (
+            service.get_operator_operation.return_value.model_copy(
+                update={"state": terminal_state, "measurement": None}
+            )
+        )
+        terminal = TestClient(app).get(f"/api/recipe/operations/{view.id}")
+        assert terminal.status_code == 200, terminal.text
+        assert terminal.json()["state"] == terminal_state
+        assert terminal.json()["progress"] is None
+        assert terminal.json()["result"] is None
+        assert terminal.json()["failure"] is None
+    service.get_operator_operation.return_value = view
+    repaired = TestClient(app).get(f"/api/recipe/operations/{view.id}")
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json() == response.json()
 
 
 _REQUEST_KEY = "00000000-0000-4000-8000-000000000001"

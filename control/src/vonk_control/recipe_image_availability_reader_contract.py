@@ -13,6 +13,7 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
+from vonk_agent_protocol import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
 from .job_documents import AvailabilityJobPayload
@@ -30,16 +31,20 @@ class StoredAvailabilityIdentity(BaseModel):
     """Readable immutable identity, independent of damaged optional bookkeeping."""
 
     model_config = ConfigDict(extra="ignore", strict=True)
-    recipe_revision_id: str | None = None
-    recipe_content_sha256: Annotated[str | None, Field(pattern=r"^[0-9a-f]{64}$")] = (
-        None
-    )
+    recipe_revision_id: Annotated[str | None, readable_or_none(TypeAdapter(str))] = None
+    recipe_content_sha256: Annotated[
+        str | None,
+        readable_or_none(TypeAdapter(Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")])),
+    ] = None
     recipe: Annotated[
         RecipeDefinition | None, readable_or_none(TypeAdapter(RecipeDefinition))
     ] = None
     request: Annotated[
         RecipeAvailabilityIntent | None,
         readable_or_none(TypeAdapter(RecipeAvailabilityIntent)),
+    ] = None
+    progress: Annotated[
+        OperationProgress | None, readable_or_none(TypeAdapter(OperationProgress))
     ] = None
 
     cancellation: Annotated[
