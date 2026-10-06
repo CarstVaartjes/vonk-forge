@@ -815,24 +815,19 @@ class FleetProfileAdmissionStorageError(FleetProfileConflict):
 
 
 class FleetProfileAdmissionEffectBusy(FleetProfileConflict):
-    """A live effect owner must finish before a superseding plan can bind."""
+    """A live effect owner must finish before a superseding plan can bind.
+
+    ``shortfalls`` holds ``(node_id, free_bytes_needed)`` when the wait is for
+    disk on named Sparks that eviction may free: the parked load then asks the
+    storage collector for exactly that, so the wait ends by itself, or in a
+    typed refusal when nothing more can be freed.
+    """
 
     code = "profile.admission_effect_busy"
     retry_disposition = RETRY_WAIT
 
-
-class FleetProfileAdmissionStorageWait(FleetProfileAdmissionEffectBusy):
-    """Admission is short of disk on named Sparks that eviction may free.
-
-    ``shortfalls`` holds ``(node_id, free_bytes_needed)`` per refused Spark: the
-    parked load asks the storage collector for exactly that, so the wait ends
-    by itself, or in a typed refusal when nothing more can be freed.
-    """
-
-    code = "profile.storage_wait"
-
     def __init__(
-        self, message: str, *, shortfalls: tuple[tuple[str, int], ...]
+        self, message: str, *, shortfalls: tuple[tuple[str, int], ...] = ()
     ) -> None:
         super().__init__(message)
         self.shortfalls = shortfalls
@@ -1083,8 +1078,10 @@ def _disk_shortfalls(assessment: Any) -> tuple[tuple[str, int], ...]:
     )
 
 
-def _storage_wait_of(error: BaseException) -> FleetProfileAdmissionStorageWait | None:
-    return error if isinstance(error, FleetProfileAdmissionStorageWait) else None
+def _storage_wait_of(error: BaseException) -> FleetProfileAdmissionEffectBusy | None:
+    if isinstance(error, FleetProfileAdmissionEffectBusy) and error.shortfalls:
+        return error
+    return None
 
 
 def _relief_blocker(node_id: str, found: StorageRelief) -> OperationBlocker:
@@ -1694,15 +1691,11 @@ class RunSwitchFleetProfileAdapter:
             )
             if not current.allowed:
                 reasons = ", ".join(reason.code for reason in current.blockers[:4])
-                message = "Profile resource admission is waiting for capacity" + (
-                    f": {reasons}" if reasons else ""
+                raise FleetProfileAdmissionEffectBusy(
+                    "Profile resource admission is waiting for capacity"
+                    + (f": {reasons}" if reasons else ""),
+                    shortfalls=_disk_shortfalls(fresh),
                 )
-                shortfalls = _disk_shortfalls(fresh)
-                if shortfalls:
-                    raise FleetProfileAdmissionStorageWait(
-                        message, shortfalls=shortfalls
-                    )
-                raise FleetProfileAdmissionEffectBusy(message)
 
     def _advance(
         self,
@@ -5452,7 +5445,7 @@ class FleetProfileService:
         retry_delay: timedelta | None = None,
         blockers: Sequence[OperationBlocker] | None = None,
         code: str = "profile.admission_busy",
-        storage: FleetProfileAdmissionStorageWait | None = None,
+        storage: FleetProfileAdmissionEffectBusy | None = None,
     ) -> FleetProfileApplicationView:
         """Record bounded retry state after a nonblocking admission refusal.
 
