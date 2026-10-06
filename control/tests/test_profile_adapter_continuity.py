@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
     FleetProfileSwitchAdapterResult,
@@ -10,7 +11,6 @@ from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     _persisted_profile_progress,
 )
-from vonk_control.lifecycle_contract import LifecycleState
 from vonk_control.models import FleetProfileApplication, FleetProfileSelection
 from vonk_control.run_switch_contract import (
     RunSwitchMemberProgress,
