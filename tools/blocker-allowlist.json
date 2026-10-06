@@ -53,12 +53,12 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 198,
-    "unaudited": 603,
+    "unaudited": 521,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
     "note": "Raises in a lifecycle or operation path that predate the rule that they use SecurityRefusalError, InvalidRequestError or UnknownOutcomeError. A module's count and the ceiling only fall: convert a raise to a categorized type, then lower the count.",
-    "ceiling": 1723,
+    "ceiling": 1641,
     "grandfathered": {
       "control/src/vonk_control/agent_jobs.py": 69,
       "control/src/vonk_control/agent_upgrades.py": 41,
@@ -68,7 +68,7 @@
       "control/src/vonk_control/artifact_reference_scan.py": 28,
       "control/src/vonk_control/availability_production.py": 46,
       "control/src/vonk_control/distributed_lifecycle.py": 3,
-      "control/src/vonk_control/distributed_recovery.py": 92,
+      "control/src/vonk_control/distributed_recovery.py": 10,
       "control/src/vonk_control/fleet_profiles.py": 149,
       "control/src/vonk_control/host_runtime_plan_authority.py": 43,
       "control/src/vonk_control/install_admission.py": 30,
@@ -1440,92 +1440,13 @@
       ]
     },
     {
-      "family": "distributed_recovery.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: message says the work is busy, waiting or superseded.",
-      "sites": [
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_enqueue_recovery_stop", "distributed-recovery-start-authority-was-superseded", 1]
-      ]
-    },
-    {
       "family": "distributed_recovery.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "DistributedRecoveryCoordinator.tick", "accepted-run-has-no-automatic-recovery-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "DistributedRecoveryCoordinator.tick", "singleton-recovery-authority-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "DistributedRecoveryCoordinator.tick", "singleton-recovery-stop-owner-is-unavailable", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority", "multi-node-recovery-observation-time-is-unavailable", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority", "singleton-recovery-lacks-current-generation-start-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority", "singleton-recovery-lacks-exact-accepted-start-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority", "singleton-recovery-lacks-exact-current-start-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-child-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-deadline-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-operation-identity-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-payload-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-payload-is-not-singleton", 2],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-phase-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-phase-item-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-rank-phase-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-readiness-differs-from-its-rank-launch", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-readiness-phase-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-target-set-is-incomplete", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_authority_payload", "accepted-start-target-set-is-invalid", 2],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_child", "accepted-start-child-identity-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_accepted_start_child", "accepted-start-payload-binding-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_aware", "distributed-recovery-clock-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_decode_phases", "distributed-recovery-phases-are-invalid", 4],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_enqueue_recovery_stop", "distributed-recovery-authority-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_enqueue_recovery_stop", "distributed-recovery-is-already-queued", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_original_start_authority", "distributed-recovery-lacks-its-start-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_original_start_authority", "distributed-recovery-start-authority-is-invalid", 2],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-authority-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-endpoint-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-lacks-exact-prior-start-stop-authority", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-order-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-plan-is-invalid", 4],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-prior-start-generation-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-rank-set-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-rendezvous-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-run-authority-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_recovery_authority", "distributed-recovery-start-payload-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "accepted-start-image-authority-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "accepted-start-payload-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "accepted-start-plan-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-installation-authority-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-mapping-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-placement-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-plan-authority-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-plan-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-rank-set-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-requires-exact-stop-and-observation-suppo", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-resources-are-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-start-authority-was-cancelled", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_singleton_recovery_authority", "singleton-recovery-start-payload-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-start-differs-from-its-exact-stop-conti", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-start-marker-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-stop-continuation-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-stop-continuation-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_distributed_recovery_start_origin", "distributed-recovery-stop-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-child-differs-from-stored-execution-plan", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-deadline-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-fabric-address-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-owner-endpoint-is-invalid", 3],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-owner-endpoint-is-missing", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-plan-cannot-be-rebound", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-plan-identity-is-stale", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-plan-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_multi_start_payload", "accepted-start-rendezvous-plan-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-start-differs-from-its-exact-stop-continu", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-start-lacks-its-exact-completed-stop", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-start-marker-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-stop-continuation-differs-from-its-start", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-stop-did-not-complete-under-its-recovery", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_validate_singleton_recovery_start_origin", "singleton-recovery-stop-has-stale-exact-run-authority", 1],
         ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "enforce_recovery_deadline", "distributed-recovery-authority-is-invalid", 4],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "enforce_recovery_deadline", "distributed-recovery-deadline-elapsed", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "recovery_start_plan", "distributed-recovery-authority-is-invalid", 1]
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "recovery_start_plan", "distributed-recovery-authority-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "recovery_start_plan", "distributed-recovery-phases-are-invalid", 1]
       ]
     },
     {
@@ -3078,6 +2999,22 @@
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionStorageError", "FleetProfileService._admission_session", "profile-admission-database-constraint", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._queue_application", "message", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._reserve_preview_assets", "message", 1]
+      ]
+    },
+    {
+      "family": "distributed_recovery.deadline",
+      "category": "already-retried",
+      "reason": "The accepted operator startup deadline is a bounded budget, not stored state: its expiry ends this recovery Start and the callers fail the unfinished child operations. It never bans a fresh request: the next recovery pass derives a new deadline from the live run. Raised only at the trust boundary that enforces the retained marker.",
+      "sites": [
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "enforce_recovery_deadline", "distributed-recovery-deadline-elapsed", 1]
+      ]
+    },
+    {
+      "family": "distributed_recovery.input-validation",
+      "category": "input-validation",
+      "reason": "The injected clock must be timezone-aware: a naive instant is a caller contract violation at the boundary that owns the clock, not stored bookkeeping (a stored timestamp without a zone is retired as residue before it reaches this check).",
+      "sites": [
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedLifecycleError", "_aware", "distributed-recovery-clock-is-invalid", 1]
       ]
     }
   ]
