@@ -58,7 +58,7 @@
   },
   "categorized_raises": {
     "note": "Raises in a lifecycle or operation path that predate the rule that they use SecurityRefusalError, InvalidRequestError or UnknownOutcomeError. A module's count and the ceiling only fall: convert a raise to a categorized type, then lower the count.",
-    "ceiling": 1188,
+    "ceiling": 1176,
     "grandfathered": {
       "control/src/vonk_control/agent_jobs.py": 69,
       "control/src/vonk_control/agent_upgrades.py": 30,
@@ -76,14 +76,10 @@
       "control/src/vonk_control/lifecycle/agent_operation.py": 2,
       "control/src/vonk_control/lifecycle/artifact_job.py": 1,
       "control/src/vonk_control/lifecycle/recipe_operation.py": 1,
-      "control/src/vonk_control/profile_stop_authority.py": 3,
       "control/src/vonk_control/recipe_build_cancellation.py": 23,
       "control/src/vonk_control/recipe_builds.py": 67,
       "control/src/vonk_control/recipe_image_availability.py": 109,
-      "control/src/vonk_control/recipe_operation_phases.py": 5,
-      "control/src/vonk_control/recipe_operation_worker.py": 1,
       "control/src/vonk_control/recipe_operations.py": 88,
-      "control/src/vonk_control/recipe_start_payloads.py": 3,
       "control/src/vonk_control/recipe_stop_payloads.py": 23,
       "control/src/vonk_control/recipe_update_batches.py": 19,
       "control/src/vonk_control/run_admission.py": 21,
@@ -3094,6 +3090,33 @@
         ["control/src/vonk_control/model_cache.py", "RequestTypeFault", "ModelCacheService._collect_model_definitions", "catalog-revision-is-not-a-model", 1],
         ["control/src/vonk_control/model_cache.py", "RequestTypeFault", "ModelCacheService._recipe_document", "catalog-revision-is-not-a-recipe", 1],
         ["control/src/vonk_control/model_cache.py", "RequestTypeFault", "_canonical_model_artifacts", "catalog-revision-is-not-a-model", 1]
+      ]
+    },
+    {
+      "family": "profile_stop_authority.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end.",
+      "sites": [
+        ["control/src/vonk_control/profile_stop_authority.py", "StoredStateDamaged", "ProfileJobRunStopAuthorization.identities_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "StoredStateDamaged", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-child-set-is-inconsistent", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "StoredStateDamaged", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-parent-identity-is-inconsistent", 1]
+      ]
+    },
+    {
+      "family": "recipe_operation_phases.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operation_phases.py", "StoredStateDamaged", "decode_stored_phases", "stored-operation-phases-are-invalid", 4],
+        ["control/src/vonk_control/recipe_operation_phases.py", "StoredStateTypeDamaged", "decode_stored_phases", "stored-operation-phases-are-invalid", 1]
+      ]
+    },
+    {
+      "family": "recipe_operation_worker.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operation_worker.py", "RequestFault", "RecipeOperationWorker._expire_initial_observation_deadline", "recipe-operation-worker-clock-must-be-timezone-aware", 1]
       ]
     }
   ]
