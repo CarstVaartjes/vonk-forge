@@ -25,6 +25,23 @@ def test_notice_names_the_route_and_the_wired_port_state() -> None:
     notice = nas_route_notice([port, wifi], "wlP9s9")
     assert notice is not None
     assert notice.code == "network.nas-route-wifi-wired-port-down"
-    assert "unknown speed" in notice.detail
+    assert "unknown" not in notice.detail
+    assert "Wi-Fi (wlP9s9, shared airtime)" in notice.detail
     assert nas_route_notice([port, wifi], "enP7s7") is None
     assert nas_route_notice(None, "wlP9s9") is None
+
+
+def test_fabric_ports_are_never_the_recommended_nas_port() -> None:
+    wifi = NetworkInterface(name="wlP9s9", kind="wifi", carrier=True)
+    fabric = NetworkInterface(
+        name="enP2p1s0f1np1", kind="fabric", link_speed_mbps=200_000, carrier=True
+    )
+    rj45 = NetworkInterface(name="enP7s7", kind="wired", carrier=False)
+    notice = nas_route_notice([fabric, rj45, wifi], "wlP9s9")
+    assert notice is not None
+    assert notice.code == "network.nas-route-wifi-wired-port-down"
+    assert "RJ45 port enP7s7" in notice.recommendation
+    assert "enP2p1s0f1np1" not in notice.recommendation
+    notice = nas_route_notice([fabric, wifi], "wlP9s9")
+    assert notice is not None
+    assert notice.code == "network.nas-route-wifi-no-wired-port"

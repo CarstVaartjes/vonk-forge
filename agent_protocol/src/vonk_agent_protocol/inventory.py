@@ -12,7 +12,9 @@ from .wire_model import WireModel
 
 Capability = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")]
 MemoryPool = Literal["shared", "separate"]
-NetworkInterfaceKind = Literal["wired", "wifi", "other"]
+# "fabric" is an RDMA/ConnectX port (the QSFP cable between Sparks); it never
+# carries the NAS route, unlike the general-purpose "wired" RJ45 port.
+NetworkInterfaceKind = Literal["wired", "wifi", "fabric", "other"]
 InterfaceName = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$")]
 RuntimeVersion = Annotated[
     str, Field(min_length=1, max_length=256, pattern=r"^[\x00-\x7f]+$")

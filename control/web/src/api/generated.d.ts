@@ -4738,7 +4738,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "wired" | "wifi" | "other";
+            kind: "wired" | "wifi" | "fabric" | "other";
             /** Link Speed Mbps */
             link_speed_mbps?: number | null;
             /** Name */

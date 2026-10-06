@@ -11646,6 +11646,7 @@
             "enum": [
               "wired",
               "wifi",
+              "fabric",
               "other"
             ],
             "title": "Kind",
