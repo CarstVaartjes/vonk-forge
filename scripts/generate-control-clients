@@ -164,6 +164,7 @@ def _run(command: list[str]) -> None:
             "SOURCE_DATE_EPOCH": "0",
         },
         check=True,
+        timeout=1200,
     )
 
 

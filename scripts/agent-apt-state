@@ -36,9 +36,7 @@ CHANNELS = {
 # former top-level ``versions/`` prefix remain immutable and are not read.
 STATE_PREFIX = "arm64"
 COMMIT_RE = re.compile(rf"^{STATE_PREFIX}/versions/([^/]+)/commit\.json$")
-LATEST_COMMIT_RE = re.compile(
-    rf"^(?:{STATE_PREFIX}/)?versions/([^/]+)/commit\.json$"
-)
+LATEST_COMMIT_RE = re.compile(rf"^(?:{STATE_PREFIX}/)?versions/([^/]+)/commit\.json$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SEMVER_RE = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
@@ -49,9 +47,7 @@ DEVELOPMENT_VERSION_RE = re.compile(
 BY_HASH_DIGEST_LENGTHS = {"MD5Sum": 32, "SHA1": 40, "SHA256": 64, "SHA512": 128}
 MAX_BUNDLE_BYTES = 1024 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
-APTLY_PACKAGE_FORMAT = (
-    "{{.Package}}\t{{.Version}}\t{{.Architecture}}\t{{.SHA256}}"
-)
+APTLY_PACKAGE_FORMAT = "{{.Package}}\t{{.Version}}\t{{.Architecture}}\t{{.SHA256}}"
 REPOSITORIES = {"dev": "vonk-forge-dev", "stable": "vonk-forge"}
 RETAINED_PREDECESSORS = {"dev": 0, "stable": 2}
 RCLONE_SECRET_ENVIRONMENT = (
@@ -147,6 +143,7 @@ def _validate_receipt(value: object) -> dict[str, Any]:
         check=False,
         capture_output=True,
         text=True,
+        timeout=30,
     )
     if metadata.returncode != 0:
         raise StateError("publication receipt is invalid")
@@ -214,9 +211,7 @@ def validate_bundle(
         raise StateError("bundle is invalid") from error
     if root not in directories or "publication-receipt.json" not in files:
         raise StateError("bundle is incomplete")
-    receipt = _validate_receipt(
-        parse_canonical_json(files["publication-receipt.json"])
-    )
+    receipt = _validate_receipt(parse_canonical_json(files["publication-receipt.json"]))
     if expected_receipt is not None and receipt != _validate_receipt(expected_receipt):
         raise StateError("publication receipt does not match request")
     if kind == "public":
@@ -265,9 +260,7 @@ def _tar_info(name: str, *, directory: bool, size: int = 0) -> tarfile.TarInfo:
     return member
 
 
-def _is_aptly_by_hash_alias(
-    path: Path, root: Path, receipt: dict[str, Any]
-) -> bool:
+def _is_aptly_by_hash_alias(path: Path, root: Path, receipt: dict[str, Any]) -> bool:
     try:
         relative = path.relative_to(root)
     except ValueError:
@@ -479,9 +472,7 @@ def _read_objects(store: ObjectStore, keys: list[str]) -> dict[str, bytes]:
 
 
 def _write_objects(store: ObjectStore, objects: dict[str, bytes]) -> None:
-    _bounded_object_operations(
-        objects, lambda key, raw: store.write(key, raw)
-    )
+    _bounded_object_operations(objects, lambda key, raw: store.write(key, raw))
 
 
 def _write_immutable_objects(
@@ -491,9 +482,7 @@ def _write_immutable_objects(
     description: str = "immutable object",
 ) -> None:
     """Preflight, persist, and verify an immutable object phase."""
-    existing = _bounded_object_operations(
-        objects, lambda key, _raw: store.list(key)
-    )
+    existing = _bounded_object_operations(objects, lambda key, _raw: store.list(key))
     present: set[str] = set()
     for key in sorted(objects):
         keys = existing[key]
@@ -514,9 +503,7 @@ def _write_immutable_objects(
 
     missing = {key: raw for key, raw in objects.items() if key not in present}
     _write_objects(store, missing)
-    persisted = _bounded_object_operations(
-        missing, lambda key, _raw: store.read(key)
-    )
+    persisted = _bounded_object_operations(missing, lambda key, _raw: store.read(key))
     for key in sorted(missing):
         if persisted[key] != missing[key]:
             raise StateError(f"persisted object hash mismatch: {key}")
@@ -587,15 +574,14 @@ def _compare_versions(left: str, right: str) -> int:
         compared = subprocess.run(
             ["/usr/bin/dpkg", "--compare-versions", left, relation, right],
             check=False,
+            timeout=30,
         )
         if compared.returncode == 0:
             return result
     return 0
 
 
-def prepare_candidate(
-    store: ObjectStore, publication: dict[str, Any]
-) -> Preparation:
+def prepare_candidate(store: ObjectStore, publication: dict[str, Any]) -> Preparation:
     requested = _validate_receipt(publication)
     committed: list[tuple[dict[str, Any], str, bytes]] = []
     commit_keys: list[str] = []
@@ -630,9 +616,8 @@ def prepare_candidate(
         )
         if published_comparison < 0:
             raise StateError("refusing to roll back publication epoch")
-        if (
-            published_comparison == 0
-            and (high is None or high_version != requested["version"])
+        if published_comparison == 0 and (
+            high is None or high_version != requested["version"]
         ):
             raise StateError("publication epoch conflicts with latest pointer")
     if high_version is not None:
@@ -642,9 +627,7 @@ def prepare_candidate(
         if comparison == 0:
             if high[0]["publication"] != requested:
                 raise StateError("committed publication conflicts with request")
-            _, state_bundle, public_bundle = _read_committed(
-                store, high[1], high[2]
-            )
+            _, state_bundle, public_bundle = _read_committed(store, high[1], high[2])
             return Preparation(
                 mode="committed",
                 state_bundle=state_bundle,
@@ -727,9 +710,7 @@ def publish_committed(
         description="immutable public object",
     )
     ordinary = set(public_files) - commit_objects - immutable_objects
-    _write_objects(
-        public_store, {name: public_files[name] for name in ordinary}
-    )
+    _write_objects(public_store, {name: public_files[name] for name in ordinary})
     _write_objects(
         public_store,
         {
@@ -769,11 +750,11 @@ class RcloneStore:
             input=input_raw,
             check=False,
             capture_output=True,
+            timeout=30 + MAX_BUNDLE_BYTES / (1024 * 1024),
         )
         if completed.returncode != 0:
             message = (
-                f"object store {operation} failed with exit code "
-                f"{completed.returncode}"
+                f"object store {operation} failed with exit code {completed.returncode}"
             )
             detail = _sanitize_rclone_error(completed.stderr)
             if detail:
@@ -789,8 +770,7 @@ class RcloneStore:
             parent = clean.rsplit("/", 1)[0] if "/" in clean else ""
         remote = self.remote if not parent else f"{self.remote}/{parent}"
         output = self._run(
-            "list",
-            ["lsf", remote, "--recursive", "--files-only", "--order-by", "name"]
+            "list", ["lsf", remote, "--recursive", "--files-only", "--order-by", "name"]
         )
         names = output.decode("utf-8").splitlines()
         keys = [f"{parent}/{name}" if parent else name for name in names]
@@ -870,14 +850,13 @@ def _validated_regular_file(path: Path, description: str) -> Path:
     return resolved
 
 
-def _run_aptly(
-    config: Path, *arguments: str, allow_no_results: bool = False
-) -> str:
+def _run_aptly(config: Path, *arguments: str, allow_no_results: bool = False) -> str:
     completed = subprocess.run(
         ["aptly", f"-config={config}", *arguments],
         check=False,
         capture_output=True,
         text=True,
+        timeout=600,
     )
     if completed.returncode != 0:
         if (
@@ -889,9 +868,7 @@ def _run_aptly(
             return ""
         operation = " ".join(arguments[:2])
         details = [
-            line.strip()
-            for line in completed.stderr.splitlines()
-            if line.strip()
+            line.strip() for line in completed.stderr.splitlines() if line.strip()
         ]
         detail = f": {details[-1][:512]}" if details else ""
         raise StateError(
@@ -939,7 +916,9 @@ def _aptly_package_records(
     )
 
 
-def _repository_records(config: Path, repository: str) -> set[tuple[str, str, str, str]]:
+def _repository_records(
+    config: Path, repository: str
+) -> set[tuple[str, str, str, str]]:
     records = _aptly_package_records(config, "repo", repository)
     if records != _aptly_package_records(config, "repo", repository, None):
         raise StateError("aptly repository contains unexpected packages")
@@ -961,9 +940,9 @@ def _group_complete_versions(
             raise StateError("aptly repository package identity is invalid")
         versions.setdefault(version, set()).add(record)
     for version_records in versions.values():
-        if len(version_records) != 1 or {
-            record[2] for record in version_records
-        } != {"arm64"}:
+        if len(version_records) != 1 or {record[2] for record in version_records} != {
+            "arm64"
+        }:
             raise StateError("aptly repository has an incomplete package version")
     return versions
 
@@ -973,7 +952,7 @@ def _sorted_versions(versions: set[str]) -> list[str]:
 
 
 def _expected_current_records(
-    publication: dict[str, Any]
+    publication: dict[str, Any],
 ) -> set[tuple[str, str, str, str]]:
     return {
         (
@@ -1131,7 +1110,9 @@ def compact_aptly_state(
         versions = _group_complete_versions(before, channel)
         current = publication["version"]
         if current in versions and versions[current] != expected_current:
-            raise StateError("current aptly package set conflicts with publication receipt")
+            raise StateError(
+                "current aptly package set conflicts with publication receipt"
+            )
         historical = _sorted_versions(set(versions) - {current})
         if historical and _compare_versions(current, historical[-1]) <= 0:
             raise StateError("refusing to roll back aptly repository")
@@ -1148,9 +1129,7 @@ def compact_aptly_state(
                     f"Name (= vonk-forge-agent), $Version (= '{version}')",
                 )
         remaining = _repository_records(config, repository)
-        expected = set().union(
-            *(versions[version] for version in retained_versions)
-        )
+        expected = set().union(*(versions[version] for version in retained_versions))
         if current in versions:
             expected |= expected_current
         if remaining != expected:
@@ -1199,9 +1178,7 @@ def compact_aptly_state(
     cleaned = _repository_records(config, repository)
     _validate_bounded_records(cleaned, publication)
     if (
-        _aptly_package_records(
-            config, "snapshot", publication["snapshot"], None
-        )
+        _aptly_package_records(config, "snapshot", publication["snapshot"], None)
         != cleaned
     ):
         raise StateError("cleaned aptly snapshot does not match compacted repository")
@@ -1246,9 +1223,12 @@ def _prepare(work: Path, receipt: dict[str, Any]) -> None:
             _write_private(work / "aptly-state.tar.gz", prepared.state_bundle)
         else:
             _write_private(work / "base-aptly-state.tar.gz", prepared.state_bundle)
-        extract_bundle(prepared.state_bundle, "state", work, _validate_receipt(
-            validate_bundle(prepared.state_bundle, "state").receipt
-        ))
+        extract_bundle(
+            prepared.state_bundle,
+            "state",
+            work,
+            _validate_receipt(validate_bundle(prepared.state_bundle, "state").receipt),
+        )
     if prepared.public_bundle is not None:
         _write_private(work / "public-tree.tar.gz", prepared.public_bundle)
     needs_generation = not (prepared.has_state and prepared.has_public)
@@ -1333,7 +1313,7 @@ def main(argv: list[str] | None = None) -> int:
             _commit(work, receipt)
         else:
             _publish(receipt)
-    except (OSError, StateError, KeyError) as error:
+    except (OSError, StateError, KeyError, subprocess.TimeoutExpired) as error:
         print(f"agent apt state failed: {error}", file=sys.stderr)
         return 1
     return 0
