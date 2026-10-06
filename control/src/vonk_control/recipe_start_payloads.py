@@ -6,12 +6,16 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from vonk_agent_protocol import RecipeStartPayload, canonical_message
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    RecipeStartPayload,
+    canonical_message,
+)
 
 from .run_switch_contract import MemoryKind
 
 
-class RecipeStartPayloadError(ValueError):
+class RecipeStartPayloadError(InvalidRequestError, ValueError):
     """A Controller start payload cannot cross the agent wire boundary."""
 
 
