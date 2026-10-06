@@ -13,6 +13,7 @@ code enqueues into) keeps its document opaque: see :class:`GenericJobDocument`.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -21,6 +22,7 @@ from pydantic import (
     Field,
     JsonValue,
     StringConstraints,
+    field_validator,
 )
 from vonk_agent_protocol import (
     OperationProgress,
@@ -139,8 +141,17 @@ class DistributedRecoveryMarker(_Document):
 
     schema_version: Literal[1]
     failed_rank: int = Field(ge=0)
-    deadline: AwareDatetime
+    # Request identities bind the timestamp spelling as well as its instant.
+    # JSON's date-time format does not authorize rewriting a persisted string.
+    deadline: Annotated[str, Field(json_schema_extra={"format": "date-time"})]
     start_phases: list[list[RecoveryStartItem]] | None = None
+
+    @field_validator("deadline")
+    @classmethod
+    def aware_deadline(cls, value: str) -> str:
+        if datetime.fromisoformat(value).utcoffset() is None:
+            raise ValueError("recovery deadline must include a timezone")
+        return value
 
 
 class _RecipeParent(_Document):

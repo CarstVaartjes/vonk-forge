@@ -36,6 +36,10 @@ from .distributed_lifecycle import (
     DistributedRecoveryInvalid,
     canonical_distributed_readiness,
 )
+from .job_documents import (
+    RecipeStartParent,
+    RecipeStopParent,
+)
 from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from .lifecycle.job import JobAdapter
 from .litellm import LiteLlmGeneration
@@ -55,7 +59,8 @@ from .models import (
 )
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
-    installation_plan_document,
+    parse_stored_installation_plan,
+    parse_stored_run_plan,
     run_plan_document,
 )
 from .recipe_start_payloads import (
@@ -69,6 +74,7 @@ from .recipe_stop_payloads import (
     durable_run_stop_payloads,
 )
 from .reservation_owners import run_has_live_operation
+from .stored_json import read_row_column
 from .strict_json import read_stored_model
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -100,6 +106,13 @@ def _unproven(
 
     note = message if cause is None else f"{message} ({type(cause).__name__})"
     return retire_as_unknown("distributed-recovery.authority", subject, reason, note)
+
+
+def _parent(job: Job) -> RecipeStartParent | RecipeStopParent | Residue:
+    value = read_row_column(job, "payload")
+    if isinstance(value, RecipeStartParent | RecipeStopParent | Residue):
+        return value
+    return _unproven(job.id, _DAMAGED, "stored recipe parent is invalid")
 
 
 def _active_recipe_revision(
@@ -249,11 +262,11 @@ class DistributedRecoveryCoordinator:
                     worked = True
                     continue
                 try:
-                    run_plan = run_plan_document(run.plan)
+                    run_plan = parse_stored_run_plan(run.plan)
                 except RecipeExecutionContractError:
                     _advance_recovery_check(run, now)
                     continue
-                if run_plan.get("execution_mode") == "one-shot-jobs":
+                if run_plan.execution_mode == "one-shot-jobs":
                     _settle_unrecoverable(
                         run,
                         "automatic recovery stopped because a one-shot job may "
@@ -322,7 +335,9 @@ class DistributedRecoveryCoordinator:
                             for node in run_nodes
                         )
                         run.run_generation += 1
-                        run_plan["run_generation"] = run.run_generation
+                        run_plan = run_plan.model_copy(
+                            update={"run_generation": run.run_generation}
+                        )
                         run.plan = run_plan_document(run_plan)
                         for node in run_nodes:
                             node.observed_run_generation = None
@@ -342,7 +357,9 @@ class DistributedRecoveryCoordinator:
                             # bump: the next attempt still has to stop the
                             # exact Start payloads of the running generation.
                             run.run_generation = previous_run_generation
-                            run_plan["run_generation"] = previous_run_generation
+                            run_plan = run_plan.model_copy(
+                                update={"run_generation": previous_run_generation}
+                            )
                             run.plan = run_plan_document(run_plan)
                             for node, observation in zip(
                                 run_nodes, previous_observations
@@ -373,7 +390,9 @@ class DistributedRecoveryCoordinator:
                             run_nodes[0].observation_endpoint_ready,
                         )
                         run.run_generation += 1
-                        run_plan["run_generation"] = run.run_generation
+                        run_plan = run_plan.model_copy(
+                            update={"run_generation": run.run_generation}
+                        )
                         run.plan = run_plan_document(run_plan)
                         run_nodes[0].observed_run_generation = None
                         run_nodes[0].observation_process_running = None
@@ -428,7 +447,9 @@ class DistributedRecoveryCoordinator:
                             if job.reason is BookkeepingReason.EVIDENCE_UNAVAILABLE:
                                 # Nothing was queued: the generation bump waits too.
                                 run.run_generation = singleton_generation
-                                run_plan["run_generation"] = singleton_generation
+                                run_plan = run_plan.model_copy(
+                                    update={"run_generation": singleton_generation}
+                                )
                                 run.plan = run_plan_document(run_plan)
                                 (
                                     run_nodes[0].observed_run_generation,
@@ -536,11 +557,15 @@ class DistributedRecoveryCoordinator:
                 Job.state.in_({"queued", "running"}),
             )
         )
-        return any(
-            job.payload.get("owner_id") == run_id
-            and isinstance(job.payload.get("recovery"), Mapping)
-            for job in jobs
-        )
+        for job in jobs:
+            payload = _parent(job)
+            if (
+                not isinstance(payload, Residue)
+                and payload.owner_id == run_id
+                and payload.recovery is not None
+            ):
+                return True
+        return False
 
 
 def _unreadable_run_ids(session: Session) -> list[str]:
@@ -549,7 +574,7 @@ def _unreadable_run_ids(session: Session) -> list[str]:
         select(RecipeRun).where(RecipeRun.state.in_(STOPPABLE_RUN_STATES))
     ):
         try:
-            run_plan_document(run.plan)
+            parse_stored_run_plan(run.plan)
         except RecipeExecutionContractError:
             unreadable.append(run.id)
     return unreadable
@@ -658,21 +683,19 @@ def _proves_fresh_absence(run: RecipeRun, node: RunNode, now: datetime) -> bool:
     ):
         return False
     try:
-        run_plan = run_plan_document(run.plan)
+        run_plan = parse_stored_run_plan(run.plan)
     except RecipeExecutionContractError:
         return False
-    run_nodes = run_plan.get("nodes")
+    run_nodes = run_plan.nodes
     if (
-        run_plan.get("observation_schema_version") != 2
-        or run_plan.get("run_generation") != run.run_generation
-        or run_plan.get("execution_mode") == "one-shot-jobs"
-        or not isinstance(run_nodes, list)
+        run_plan.observation_schema_version != 2
+        or run_plan.run_generation != run.run_generation
+        or run_plan.execution_mode == "one-shot-jobs"
         or len(run_nodes) != 1
-        or not isinstance(run_nodes[0], Mapping)
-        or run_nodes[0].get("node_id") != node.node_id
-        or run_nodes[0].get("rank") != 0
-        or run_nodes[0].get("role") != "entrypoint"
-        or run_nodes[0].get("endpoint_owner") is not True
+        or run_nodes[0].node_id != node.node_id
+        or run_nodes[0].rank != 0
+        or run_nodes[0].role != "entrypoint"
+        or run_nodes[0].endpoint_owner is not True
     ):
         return False
     if node.observation_endpoint_ready is not False or not isinstance(
@@ -910,34 +933,30 @@ def _singleton_recovery_authority(
     ):
         return _unproven(run.id, _DAMAGED, "singleton recovery rank set is invalid")
     try:
-        run_plan = run_plan_document(run.plan)
-        installation_plan = installation_plan_document(installation.plan)
+        run_plan = parse_stored_run_plan(run.plan)
+        installation_plan = parse_stored_installation_plan(installation.plan)
     except RecipeExecutionContractError as error:
         return _unproven(run.id, _DAMAGED, "singleton recovery plan is invalid", error)
-    run_nodes = run_plan.get("nodes")
-    compiled_plans = installation_plan.get("compiled_execution_plans")
+    run_nodes = run_plan.nodes
+    compiled_plans = installation_plan.compiled_execution_plans
     if (
         run.installation_id != installation.id
         or run.mapping_id != installation.mapping_id
         or run.mapping_generation != installation.mapping_generation
-        or run_plan.get("installation_id") != installation.id
-        or run_plan.get("mapping_id") != run.mapping_id
-        or run_plan.get("mapping_generation") != run.mapping_generation
-        or run_plan.get("recipe_revision_id") != revision.id
-        or run_plan.get("plan_digest") != run.plan_digest
-        or run_plan.get("alias") != run.alias
-        or run_plan.get("run_generation") != run.run_generation
-        or run_plan.get("execution_mode") == "one-shot-jobs"
-        or installation_plan.get("mapping_id") != installation.mapping_id
-        or installation_plan.get("mapping_generation")
-        != installation.mapping_generation
-        or installation_plan.get("recipe_revision_id") != revision.id
+        or run_plan.installation_id != installation.id
+        or run_plan.mapping_id != run.mapping_id
+        or run_plan.mapping_generation != run.mapping_generation
+        or run_plan.recipe_revision_id != revision.id
+        or run_plan.plan_digest != run.plan_digest
+        or run_plan.alias != run.alias
+        or run_plan.run_generation != run.run_generation
+        or run_plan.execution_mode == "one-shot-jobs"
+        or installation_plan.mapping_id != installation.mapping_id
+        or installation_plan.mapping_generation != installation.mapping_generation
+        or installation_plan.recipe_revision_id != revision.id
         or installation_plan.get("recipe_content_sha256") != revision.content_digest
-        or installation_plan.get("image_digest") != installation.image_digest
-        or not isinstance(run_nodes, list)
+        or installation_plan.image_digest != installation.image_digest
         or len(run_nodes) != 1
-        or not isinstance(run_nodes[0], Mapping)
-        or not isinstance(compiled_plans, Mapping)
         or set(compiled_plans) != {run_node.node_id}
     ):
         return _unproven(
@@ -946,18 +965,18 @@ def _singleton_recovery_authority(
     plan_node = run_nodes[0]
     install_compiled_plan = compiled_plans.get(run_node.node_id)
     if (
-        plan_node.get("node_id") != run_node.node_id
-        or plan_node.get("rank") != run_node.rank
-        or plan_node.get("role") != run_node.role
-        or plan_node.get("port") != run_node.port
-        or plan_node.get("required_memory_bytes") != run_node.reserved_memory_bytes
-        or plan_node.get("endpoint_owner") is not True
-        or plan_node.get("fabric_address") is not None
-        or not isinstance(install_compiled_plan, Mapping)
+        plan_node.node_id != run_node.node_id
+        or plan_node.rank != run_node.rank
+        or plan_node.role != run_node.role
+        or plan_node.port != run_node.port
+        or plan_node.required_memory_bytes != run_node.reserved_memory_bytes
+        or plan_node.endpoint_owner is not True
+        or plan_node.fabric_address is not None
+        or install_compiled_plan is None
     ):
         return _unproven(run.id, _DAMAGED, "singleton recovery placement is invalid")
-    memory_floor = plan_node.get("memory_floor_bytes")
-    memory_kind = plan_node.get("memory_kind")
+    memory_floor = plan_node.memory_floor_bytes
+    memory_kind = plan_node.memory_kind
     if (
         type(memory_floor) is not int
         or memory_floor < 0
@@ -1018,28 +1037,19 @@ def _singleton_recovery_authority(
         )
     except (TypeError, ValueError) as error:
         return _unproven(run.id, _DAMAGED, "accepted Start payload is invalid", error)
-    compiled_plan = accepted_start_payload.get("compiled_execution_plan")
-    if not isinstance(compiled_plan, Mapping):
-        return _unproven(run.id, _DAMAGED, "accepted Start plan is invalid")
-    expected_lifecycle = {"stop_timeout_seconds": stop_timeout}
+    compiled_plan = accepted_start.compiled_execution_plan
     for label, plan in (
         ("installed", install_compiled_plan),
         ("accepted Start", compiled_plan),
     ):
-        compiled_lifecycle = plan.get("lifecycle")
-        if (
-            not isinstance(compiled_lifecycle, Mapping)
-            or set(compiled_lifecycle) != set(expected_lifecycle)
-            or canonical_message(dict(compiled_lifecycle))
-            != canonical_message(expected_lifecycle)
-        ):
+        if plan.lifecycle.stop_timeout_seconds != stop_timeout:
             return _unproven(
                 run.id,
                 _MISMATCH,
                 f"singleton recovery {label} lifecycle differs from accepted recipe",
             )
-    accepted_compiled_identity = compiled_plan.get("identity")
-    install_compiled_identity = install_compiled_plan.get("identity")
+    accepted_compiled_identity = compiled_plan.identity
+    install_compiled_identity = install_compiled_plan.identity
     accepted_placement = accepted_start.compiled_execution_plan.runtime.placement
     if (
         str(accepted_start.run_id) != run.id
@@ -1067,8 +1077,6 @@ def _singleton_recovery_authority(
             1,
         )
         or accepted_start.phase is not None
-        or not isinstance(accepted_compiled_identity, Mapping)
-        or not isinstance(install_compiled_identity, Mapping)
         or canonical_message(accepted_compiled_identity)
         != canonical_message(install_compiled_identity)
     ):
@@ -1321,7 +1329,7 @@ def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) 
     """Only completed Start receipts for the run's current exact plan can seed recovery."""
 
     try:
-        plan = run_plan_document(run.plan)
+        plan = parse_stored_run_plan(run.plan)
     except RecipeExecutionContractError:
         return False
     installation = session.get(RecipeInstallation, run.installation_id)
@@ -1335,7 +1343,7 @@ def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) 
         and revision is not None
         and start.authority_revision == revision.content_digest
         and start.payload.get("plan_digest") == run.plan_digest
-        and plan.get("plan_digest") == run.plan_digest
+        and plan.plan_digest == run.plan_digest
         and start.payload_digest
         == hashlib.sha256(canonical_message(start.payload)).hexdigest()
     )
@@ -1460,8 +1468,8 @@ def _recovery_authority(
     ):
         return _unproven(run.id, _DAMAGED, "distributed recovery rank set is invalid")
     try:
-        run_plan = run_plan_document(run.plan)
-        installation_plan = installation_plan_document(installation.plan)
+        run_plan = parse_stored_run_plan(run.plan)
+        installation_plan = parse_stored_installation_plan(installation.plan)
     except RecipeExecutionContractError as error:
         return _unproven(
             run.id, _DAMAGED, "distributed recovery plan is invalid", error
@@ -1471,31 +1479,23 @@ def _recovery_authority(
         or run.mapping_id != installation.mapping_id
         or run.mapping_generation != installation.mapping_generation
         or run_plan is None
-        or run_plan.get("installation_id") != run.installation_id
-        or run_plan.get("mapping_id") != run.mapping_id
-        or run_plan.get("mapping_generation") != run.mapping_generation
-        or run_plan.get("recipe_revision_id") != installation.recipe_revision_id
-        or run_plan.get("plan_digest") != run.plan_digest
-        or run_plan.get("alias") != run.alias
-        or run_plan.get("run_generation") != run.run_generation
+        or run_plan.installation_id != run.installation_id
+        or run_plan.mapping_id != run.mapping_id
+        or run_plan.mapping_generation != run.mapping_generation
+        or run_plan.recipe_revision_id != installation.recipe_revision_id
+        or run_plan.plan_digest != run.plan_digest
+        or run_plan.alias != run.alias
+        or run_plan.run_generation != run.run_generation
     ):
         return _unproven(
             run.id, _MISMATCH, "distributed recovery run authority is stale"
         )
-    plans = run_plan.get("nodes")
-    compiled_plans = installation_plan.get("compiled_execution_plans")
-    if (
-        not isinstance(plans, list)
-        or len(plans) != len(nodes)
-        or not isinstance(compiled_plans, Mapping)
-    ):
+    plans = run_plan.nodes
+    compiled_plans = installation_plan.compiled_execution_plans
+    if len(plans) != len(nodes):
         return _unproven(run.id, _DAMAGED, "distributed recovery plan is invalid")
-    by_rank = {item.get("rank"): item for item in plans if isinstance(item, Mapping)}
-    owners = tuple(
-        item
-        for item in plans
-        if isinstance(item, Mapping) and item.get("endpoint_owner") is True
-    )
+    by_rank = {item.rank: item for item in plans}
+    owners = tuple(item for item in plans if item.endpoint_owner is True)
     if (
         len(by_rank) != len(nodes)
         or len(owners) != 1
@@ -1503,8 +1503,8 @@ def _recovery_authority(
     ):
         return _unproven(run.id, _DAMAGED, "distributed recovery plan is invalid")
     owner = owners[0]
-    master_address = owner.get("fabric_address")
-    master_port = owner.get("rendezvous_port")
+    master_address = owner.fabric_address
+    master_port = owner.rendezvous_port
     if not isinstance(master_address, str) or type(master_port) is not int:
         return _unproven(run.id, _DAMAGED, "distributed recovery rendezvous is invalid")
     presences: dict[str, str] = {}
@@ -1550,22 +1550,22 @@ def _recovery_authority(
     for node in nodes:
         plan = by_rank[node.rank]
         compiled_plan = compiled_plans.get(node.node_id)
-        local_address = plan.get("fabric_address")
-        endpoint_owner = plan.get("endpoint_owner")
-        memory_floor = plan.get("memory_floor_bytes")
-        memory_kind = plan.get("memory_kind")
+        local_address = plan.fabric_address
+        endpoint_owner = plan.endpoint_owner
+        memory_floor = plan.memory_floor_bytes
+        memory_kind = plan.memory_kind
         if (
-            plan.get("node_id") != node.node_id
-            or plan.get("rank") != node.rank
-            or plan.get("role") != node.role
-            or plan.get("port") != node.port
-            or plan.get("required_memory_bytes") != node.reserved_memory_bytes
+            plan.node_id != node.node_id
+            or plan.rank != node.rank
+            or plan.role != node.role
+            or plan.port != node.port
+            or plan.required_memory_bytes != node.reserved_memory_bytes
             or type(memory_floor) is not int
             or memory_floor < 0
             or memory_kind not in {"unified", "host", "accelerator"}
             or not isinstance(local_address, str)
             or type(endpoint_owner) is not bool
-            or not isinstance(compiled_plan, Mapping)
+            or compiled_plan is None
         ):
             return _unproven(run.id, _DAMAGED, "distributed recovery plan is invalid")
         try:
@@ -1590,7 +1590,7 @@ def _recovery_authority(
                     presences[node.node_id] if endpoint_owner else None
                 ),
                 world_size=len(nodes),
-                compiled_execution_plan=WireCompiledExecutionPlan.parse(compiled_plan),
+                compiled_execution_plan=compiled_plan,
                 master_address=master_address,
                 master_port=master_port,
                 phase="rank-launch",
