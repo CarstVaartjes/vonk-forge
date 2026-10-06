@@ -32,6 +32,10 @@ def _scanned(source: str) -> list[str]:
         "dict[str, Any]",
         "MutableMapping[str, object]",
         "typing.Dict[str, typing.Any]",
+        "dict[str, object | None]",
+        "dict[str, JsonValue]",
+        "Mapping[str, list[Any]]",
+        "Mapping[str, Optional[object]]",
     ],
 )
 def test_an_untyped_mapping_is_a_site(annotation: str) -> None:
@@ -49,9 +53,10 @@ def test_nested_and_assigned_annotations_are_sites() -> None:
             local: Mapping[str, Any] = {}
         """
     )
+    # A nested untyped mapping is reported once, by its outermost annotation.
     assert sorted(sites) == [
         "Mapping[str, Any]",
-        "dict[str, object]",
+        "dict[str, dict[str, object]]",
         "dict[str, object]",
     ]
 

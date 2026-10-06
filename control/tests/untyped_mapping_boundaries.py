@@ -20,6 +20,10 @@ Two kinds of annotation are allowed, both in ``tools/untyped-mapping-allowlist.j
 
 ``python control/tests/untyped_mapping_boundaries.py --update`` rewrites the
 ``debt`` counts from the source (and never adds a ``permanent`` entry).
+
+``object``, ``Any`` and pydantic's ``JsonValue`` anywhere in the value type count,
+so ``dict[str, object | None]`` and ``dict[str, JsonValue]`` are the same debt as
+``dict[str, object]``; this agrees with the stored-JSON contract walker.
 """
 
 from __future__ import annotations
@@ -41,7 +45,7 @@ SOURCE_ROOTS = (
 ALLOWLIST_PATH = REPO_ROOT / "tools" / "untyped-mapping-allowlist.json"
 
 _MAPPING_NAMES = frozenset({"Mapping", "MutableMapping", "dict", "Dict"})
-_UNTYPED_VALUES = frozenset({"object", "Any"})
+_UNTYPED_VALUES = frozenset({"object", "Any", "JsonValue"})
 
 
 @dataclass(frozen=True)
@@ -76,7 +80,21 @@ def is_untyped_mapping(node: ast.AST) -> bool:
     if not isinstance(slice_, ast.Tuple) or len(slice_.elts) != 2:
         return False
     key, value = slice_.elts
-    return _name(key) == "str" and _name(value) in _UNTYPED_VALUES
+    return _name(key) == "str" and _has_untyped_leaf(value)
+
+
+def _has_untyped_leaf(node: ast.AST) -> bool:
+    """True when ``object``, ``Any`` or ``JsonValue`` occurs anywhere in the value type.
+
+    ``dict[str, object | None]`` and ``dict[str, list[object]]`` are as untyped as
+    ``dict[str, object]``; adding a ``| None`` or a container does not type the data.
+    """
+
+    return any(
+        _name(child) in _UNTYPED_VALUES
+        for child in ast.walk(node)
+        if isinstance(child, ast.Name | ast.Attribute)
+    )
 
 
 class _Collector(ast.NodeVisitor):
@@ -109,10 +127,11 @@ class _Collector(ast.NodeVisitor):
                     line=node.lineno,
                 )
             )
+            return
         self.generic_visit(node)
 
 
-_CANDIDATE = re.compile(r"\[\s*str\s*,\s*(?:\w+\.)?(?:object|Any)\s*\]")
+_CANDIDATE = re.compile(r"\[\s*str\s*,.*(?:object|Any|JsonValue)")
 
 
 def scan_source(source: str, *, path: str) -> list[Site]:
