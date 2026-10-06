@@ -8679,10 +8679,15 @@ class FleetProfileService:
                             "Cancellation is reconciling the profile child: "
                             + (str(error)[:360] or "child start was interrupted")
                         )[:512]
-                    elif isinstance(error, FleetProfileReviewStale):
+                    elif isinstance(
+                        error, FleetProfileReviewStale | UnknownOutcomeError
+                    ):
                         # The reviewed plan no longer matches what the child
-                        # would do: retrying can never succeed. End it so the
-                        # client reviews and submits again.
+                        # would do, or an admission owner is busy or evidence is
+                        # unavailable: end the load (superseded) so it never
+                        # blocks other work, and the client loads again. The
+                        # oldest row is otherwise picked again at once, so a
+                        # retry here would starve the rest of the queue.
                         self._lifecycle.supersede(
                             failed,
                             str(error),

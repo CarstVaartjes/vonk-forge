@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import UnknownOutcomeError
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -264,6 +265,10 @@ class ControllerExecutionPlanService:
                         artifact_set_sha256, manifest
                     )
                 )
+        except UnknownOutcomeError:
+            # Unconfirmed storage or bookkeeping keeps its type: the admitting
+            # owner observes it again instead of reading a verdict on the plan.
+            raise
         except Exception as error:
             raise ExecutionPlanCompilationError(
                 "verified model artifact-set receipt is unavailable"
@@ -301,6 +306,8 @@ class ControllerExecutionPlanService:
                     runtime_spec,
                     placement=placement,
                 )
+            except UnknownOutcomeError:
+                raise
             except (
                 CompiledExecutionPlanError,
                 RecipeRuntimeSpecError,

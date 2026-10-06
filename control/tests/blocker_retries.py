@@ -12,6 +12,11 @@ The proof has two reviewed parts and one mechanical part:
   exceptions whose handler there retries or observes): the lifecycle tick, the
   observe pass or the claim loop that re-runs the work.  A loop is declared by a
   person, with the reason it retries.
+* ``route_guards`` lists the functions that stand between the framework and
+  *every* route (``ControllerAPIRoute``'s endpoint wrapper), each with the
+  exceptions it answers with a typed retryable response without re-raising: a
+  route entry reached by such a class is looped there.  A guard is checked to
+  hold a handler for each name it lists.
 * ``call_edges`` declares where a call the code cannot name goes (a ``getattr``
   with a computed name), ``{"path", "function", "calls", "reason"}``; the edge
   keeps the ``try`` context of the dynamic call, so it can be looped.
@@ -73,6 +78,7 @@ __all__ = [
     "promote_proven",
     "proof_of",
     "proven",
+    "registered_guards",
     "registered_loops",
     "unknown_classes",
     "unproven_sites",
@@ -100,6 +106,15 @@ def _name(node: ast.AST) -> str | None:
     if isinstance(node, ast.Attribute):
         return node.attr
     return None
+
+
+def _answers(node: ast.AST, name: str) -> bool:
+    """The function has a handler for ``name`` that goes on without raising."""
+
+    return any(
+        isinstance(item, ast.Try) and _handlers_catching(item, frozenset({name}))
+        for item in ast.walk(node)
+    )
 
 
 def _handlers_catching(try_node: ast.Try, names: frozenset[str]) -> bool:
@@ -145,8 +160,16 @@ class Prover:
         self,
         graph: CallGraph,
         loops: Mapping[tuple[str, str], frozenset[str]],
+        guards: Mapping[tuple[str, str], frozenset[str]] | None = None,
     ) -> None:
         self.graph = graph
+        #: Functions that stand between the framework and every route: what they
+        #: catch is answered (a typed retryable response), never left unhandled.
+        self.guards: dict[Function, frozenset[str]] = {}
+        for key, caught in (guards or {}).items():
+            guard = graph.by_key.get(key)
+            if guard is not None:
+                self.guards[guard] = caught
         self.loops: dict[Function, frozenset[str]] = {}
         for key, caught in loops.items():
             function = graph.by_key.get(key)
@@ -162,6 +185,23 @@ class Prover:
         if key not in self._memo:
             self._memo[key] = self._trace(target, exception_class)
         return self._memo[key]
+
+    def _route_guard(
+        self, entry: Function, kind: str, exception_class: str
+    ) -> Function | None:
+        """The guard that answers ``exception_class`` for a route, if any."""
+
+        if kind != "route" and entry not in self.graph.route_functions:
+            return None
+        exact = {
+            name
+            for name in self.graph.ancestors(exception_class)
+            if name not in TOO_BROAD
+        }
+        for guard, caught in self.guards.items():
+            if caught & exact:
+                return guard
+        return None
 
     def _trace(self, target: Function, exception_class: str) -> Proof:
         graph = self.graph
@@ -194,7 +234,11 @@ class Prover:
             current, guessed = queue.popleft()
             kind = graph.entries.get(current)
             if kind is not None:
-                unlooped.append((kind, current))
+                guard = self._route_guard(current, kind, exception_class)
+                if guard is None:
+                    unlooped.append((kind, current))
+                elif not guessed:
+                    loop = loop or guard
             for edge in graph.callers.get(current, ()):
                 settle(edge.caller, edge.tries, guessed or edge.kind == "fallback")
         return Proof(loop, tuple(unlooped))
@@ -210,6 +254,17 @@ def _declared_edges(document: Mapping[str, object]) -> tuple[DeclaredEdge, ...]:
         )
         for entry in document.get("call_edges", [])  # type: ignore[attr-defined]
     )
+
+
+def registered_guards(
+    document: Mapping[str, object],
+) -> dict[tuple[str, str], frozenset[str]]:
+    """Route guard -> the exception names it answers for every route."""
+
+    return {
+        (entry["path"], entry["function"]): frozenset(entry["catches"])
+        for entry in document.get("route_guards", [])  # type: ignore[attr-defined]
+    }
 
 
 def registered_loops(
@@ -246,13 +301,15 @@ def build_graph_for(document: Mapping[str, object]) -> CallGraph:
 def _prover(
     declared: tuple[DeclaredEdge, ...],
     loops: tuple[tuple[tuple[str, str], frozenset[str]], ...],
+    guards: tuple[tuple[tuple[str, str], frozenset[str]], ...] = (),
 ) -> Prover:
-    return Prover(_graph(declared), dict(loops))
+    return Prover(_graph(declared), dict(loops), dict(guards))
 
 
 def _prover_for(document: Mapping[str, object]) -> Prover:
     loops = tuple(sorted(registered_loops(document).items(), key=lambda i: i[0]))
-    return _prover(_declared_edges(document), loops)
+    guards = tuple(sorted(registered_guards(document).items(), key=lambda i: i[0]))
+    return _prover(_declared_edges(document), loops, guards)
 
 
 @cache
@@ -310,6 +367,21 @@ def loop_problems(document: Mapping[str, object]) -> list[str]:
             problems.append(f"retry loop must name the exceptions it retries: {key}")
         if len(str(entry.get("reason", "")).split()) < 5:
             problems.append(f"retry loop needs a written reason: {key}")
+    for entry in document.get("route_guards", []):  # type: ignore[attr-defined]
+        key = (entry["path"], entry["function"])
+        guard = graph.by_key.get(key)
+        if guard is None:
+            problems.append(f"route guard does not exist; delete or rename it: {key}")
+            continue
+        if len(str(entry.get("reason", "")).split()) < 5:
+            problems.append(f"route guard needs a written reason: {key}")
+        if not entry.get("catches"):
+            problems.append(f"route guard must name the exceptions it answers: {key}")
+        problems.extend(
+            f"route guard does not answer {name} without re-raising: {key}"
+            for name in entry.get("catches", [])
+            if not _answers(guard.node, name)
+        )
     problems.extend(graph.declared_problems())
     declared = {function for function in graph.dynamic_calls}
     for edge in graph.declared:

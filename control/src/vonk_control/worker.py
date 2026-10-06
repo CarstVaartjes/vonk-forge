@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy.exc import DBAPIError, OperationalError
+from vonk_agent_protocol import UnknownOutcomeError
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -275,7 +276,7 @@ class Worker:
             name, source = sources[index]
             try:
                 progressed = source()
-            except _SOURCE_FAILURES as error:
+            except (UnknownOutcomeError, *_SOURCE_FAILURES) as error:
                 # A source that keeps failing must not starve the others: the
                 # failure stays visible, the turn moves on, and the failed
                 # source is retried on a later pass.
@@ -303,7 +304,7 @@ class Worker:
             return
         try:
             task()
-        except _SOURCE_FAILURES as error:
+        except (UnknownOutcomeError, *_SOURCE_FAILURES) as error:
             log_event(
                 _LOGGER,
                 "worker.housekeeping_failed",

@@ -3849,7 +3849,14 @@ class RunSwitchOperationService:
             try:
                 advanced = self._advance(str(job_id)) or advanced
                 self._record_wait(str(job_id))
-            except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
+            except (
+                UnknownOutcomeError,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                KeyError,
+            ) as error:
                 # One persisted operation must never deny unrelated operations
                 # their turn.  A malformed contract is rejected and retained by
                 # ``_advance`` itself; this contains an unexpected per-job
@@ -7934,6 +7941,26 @@ class RunSwitchOperationService:
                     failure_code=code,
                     replan=phase.kind != "final_verify",
                     definite=error.definite,
+                )
+                return True
+            except UnknownOutcomeError as error:
+                # An unknown outcome is observed again, never ended: it is not
+                # a definite failure even where the preparation owner left its
+                # ``retryable`` flag unset, and the core backs the retry off.
+                code = getattr(error, "code", None)
+                if isinstance(code, str) and (
+                    code == _RUNTIME_IMAGE_OWNER_CHANGED or code.startswith("artifact.")
+                ):
+                    return self._hold_capacity_writer(
+                        operation_id,
+                        phase_index,
+                        item_index,
+                        reason=code,
+                        detail=str(getattr(error, "detail", None) or error),
+                    )
+                fail(
+                    f"{type(error).__name__}: {error}",
+                    failure_code=_failure_code_of(error),
                 )
                 return True
             except RuntimeImagePreparationError as error:

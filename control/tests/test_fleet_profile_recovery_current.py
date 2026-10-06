@@ -1337,6 +1337,64 @@ def test_a_child_start_with_a_stale_review_ends_superseded_not_failed(
     assert ended.blockers == [] and ended.next_attempt_at is None
 
 
+def test_a_child_start_that_hits_a_busy_admission_ends_superseded_never_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vonk_control.fleet_profiles import FleetProfileAdmissionEffectBusy
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=run_switch
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Busy admission",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "stale-chat",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    application = service.apply(profile.id, request_key=_uuid(831), actor="admin")
+
+    def stale(*_args, **_kwargs):
+        raise FleetProfileAdmissionEffectBusy("a live effect owner is busy")
+
+    monkeypatch.setattr(service, "_start_step", stale)
+    for _ in range(4):
+        service.tick()
+
+    ended = service.application(application.id)
+    assert ended.state == "superseded", ended.status_reason
+    assert ended.reason_code == "effects-changed-during-admission"
+    assert ended.blockers == [] and ended.next_attempt_at is None
+
+
 def _expire_backoff(service, lifecycle) -> None:
     later = lifecycle._clock() + timedelta(hours=2)
     service._clock = lambda: later

@@ -175,3 +175,28 @@ def test_job_invocation_binds_the_accepted_reservation_instead_of_recipe_peak(
         reserved_memory_bytes=reservation,
     )
     assert compiled.runtime.placement.reserved_memory_bytes == reservation
+
+
+def test_unconfirmed_model_cache_evidence_keeps_its_type(installation):
+    """A model receipt that cannot be read now is an unknown outcome the
+    admitting owner observes again, not a compilation verdict."""
+
+    from vonk_control.execution_plan_service import ControllerExecutionPlanService
+    from vonk_control.model_cache import ModelCacheStorageUnknown
+
+    sessions, revision, _installed, _plan = installation
+
+    class Cache:
+        def resolve_artifact_set(self, **_unused):
+            raise ModelCacheStorageUnknown(
+                "model_cache.source_unavailable", "the cache is unavailable"
+            )
+
+    with sessions() as session, pytest.raises(ModelCacheStorageUnknown):
+        ControllerExecutionPlanService(Cache()).compile_installation(
+            session,
+            revision=revision,
+            build=None,
+            mapping_nodes=[],
+            parameters={},
+        )

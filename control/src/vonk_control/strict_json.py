@@ -15,6 +15,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
+from vonk_agent_protocol import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
 
 
@@ -123,6 +124,39 @@ def serialize_json_value(value: object, *, by_alias: bool = True) -> object:
 
 
 _CONTROLLER_RESPONSE = "_controller_response"
+_DEFAULT_RETRY_AFTER_SECONDS = 5
+_MAX_RETRY_AFTER_SECONDS = 300
+
+
+def _retry_later_response(error: UnknownOutcomeError) -> Response:
+    """The typed retryable answer: 503 with ``Retry-After`` and a bounded detail.
+
+    The request is not refused and nothing is ended; the caller (a client, an
+    agent, a worker) asks again.  The delay is the error's own hint when it
+    carries one, bounded.
+    """
+
+    from .logging import redact_text
+
+    hint = getattr(error, "retry_after_seconds", None)
+    delay = (
+        min(hint, _MAX_RETRY_AFTER_SECONDS)
+        if type(hint) is int and hint >= 1
+        else _DEFAULT_RETRY_AFTER_SECONDS
+    )
+    detail = redact_text(str(error) or type(error).__name__)[:230]
+    _LOGGER.info(
+        "route answered retry-later: %s (retry after %ss)", type(error).__name__, delay
+    )
+    return Response(
+        content=json.dumps(
+            {"detail": f"Temporarily unavailable, retry: {detail}"},
+            separators=(",", ":"),
+        ).encode(),
+        status_code=503,
+        headers={"Retry-After": str(delay)},
+        media_type="application/json",
+    )
 
 
 def _presence_policy_endpoint(
@@ -164,10 +198,15 @@ def _presence_policy_endpoint(
         injected_response = values.get(response_param_name or _CONTROLLER_RESPONSE)
         if response_param_name is None:
             values.pop(_CONTROLLER_RESPONSE, None)
-        if inspect.iscoroutinefunction(endpoint):
-            result = await endpoint(**values)
-        else:
-            result = await run_in_threadpool(endpoint, **values)
+        try:
+            if inspect.iscoroutinefunction(endpoint):
+                result = await endpoint(**values)
+            else:
+                result = await run_in_threadpool(endpoint, **values)
+        except UnknownOutcomeError as error:
+            # An unknown outcome that no route handled is not a server fault and
+            # not a refusal: the caller is told to ask again.
+            return _retry_later_response(error)
         current = route()
         response_field = current.response_field
         if isinstance(result, Response) or response_field is None:

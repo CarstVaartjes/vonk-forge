@@ -8560,20 +8560,38 @@ class ModelCacheService:
             future_specs = record.get("future_specs")
             future_specs = future_specs if isinstance(future_specs, dict) else {}
             first_error = record.get("failure")
+
             for future in done:
                 if future in futures:
                     futures.remove(future)
                 failed_artifact_key = future_specs.pop(future, None)
                 try:
                     future.result()
+                except UnknownOutcomeError as error:
+                    # An unknown outcome (a busy writer, unconfirmed storage or
+                    # bookkeeping, a stopped transfer) is observed and retried,
+                    # never ended: the operation keeps its durable row, settles
+                    # below through the core's bounded backoff and the claim
+                    # loop resumes the same transfer on a later tick.
+                    if first_error is None:
+                        first_error = error
+                        record["failure"] = error
+                        record["failure_artifact_key"] = failed_artifact_key
+                    siblings: list[Future[object]] = [
+                        other for other in futures if isinstance(other, Future)
+                    ]
+                    for sibling in siblings:
+                        sibling.cancel()
                 except Exception as error:  # noqa: BLE001 - settle failed background transfers durably
                     if first_error is None:
                         first_error = error
                         record["failure"] = error
                         record["failure_artifact_key"] = failed_artifact_key
-                    for other in futures:
-                        if isinstance(other, Future):
-                            other.cancel()
+                    siblings: list[Future[object]] = [
+                        other for other in futures if isinstance(other, Future)
+                    ]
+                    for sibling in siblings:
+                        sibling.cancel()
             if isinstance(first_error, BaseException):
                 # A cancelled Future may still be running. Keep the durable
                 # claim and record until every sibling has settled, so a

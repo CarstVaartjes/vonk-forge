@@ -60,6 +60,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from .. import model_cache_states
@@ -773,7 +774,7 @@ class ModelCacheStore:
                 operation.last_error = reason[:_MAX_REASON]
 
 
-def adopt_legacy_operations(connection: Any) -> int:
+def adopt_legacy_operations(connection: Connection) -> int:
     """Startup adoption: move the legacy retry clock and claim onto the columns.
 
     Idempotent and bounded to active operations whose columns are still empty.

@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Literal
 from urllib.parse import quote
 
 from pydantic import ConfigDict, Field, TypeAdapter
 from sqlalchemy import String, and_, cast, or_, select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import FailureCode, LifecycleState, StateAlias
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
@@ -443,7 +444,12 @@ def evidence_href(operation_id: str, attempt: int) -> str:
 class FailureEvidenceService:
     """Render one failed attempt's diagnostics from its durable row on request."""
 
-    def __init__(self, sessions, *, clock=None):
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        clock: Callable[[], datetime] | None = None,
+    ):
         self.sessions = sessions
         self.clock = clock or (lambda: datetime.now(UTC))
 

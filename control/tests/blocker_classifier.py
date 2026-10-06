@@ -142,6 +142,14 @@ _CLASS_VERDICTS = {
         RETRIED,
         "subclass of the admission-effect busy handoff",
     ),
+    "FleetProfileUnavailable": (
+        INPUT,
+        (
+            "owner decision: a load whose fleet profile becomes unavailable ends "
+            "superseded (RETRY_SUPERSEDE) so it never blocks other work; the "
+            "client loads again"
+        ),
+    ),
     "FleetProfileReviewStale": (INPUT, "the accepted review no longer matches"),
     "RecipeReconciliationBlocked": (
         RETRIED,
