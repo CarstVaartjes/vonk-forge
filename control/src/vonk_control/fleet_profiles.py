@@ -121,6 +121,7 @@ from .fleet_profile_contract import (
     FleetProfileView,
     profile_switch_child_request_key,
 )
+from .lifecycle.core import RECOVERY
 from .lifecycle.evidence import (
     BookkeepingReason,
     Residue,
@@ -275,6 +276,14 @@ _PROFILE_RECOVERY_REFUSED_CODES = frozenset(
         RuntimeImageCode.RECEIPT_IDENTITY_INVALID,
         RuntimeImageCode.RECEIPT_INVALID,
     }
+)
+#: The typed blocker a load ends with when the same failure repeated: waiting or
+#: retrying cannot change a deterministic outcome (a start that crashes the same
+#: way every time), so the Controller stops after ``RECOVERY.max_failures``.
+PROFILE_REPEATED_FAILURE_CODE = "profile.failure_repeated"
+_VARIABLE_TEXT = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"|\b[0-9a-f]{12,}\b|\d+"
 )
 # A profile request may race a short heartbeat, telemetry write, or worker
 # transaction while taking the reviewed admission snapshot.  Retry the whole
@@ -769,6 +778,12 @@ def _newer_profile_intent_overlaps(
         if candidate_nodes & effect_nodes:
             return True
     return False
+
+
+def _normalized_failure_text(value: object) -> str:
+    """A failure reason with its changing parts (ids, counts, times) removed."""
+
+    return " ".join(_VARIABLE_TEXT.sub("#", str(value or "")).split())[:240]
 
 
 def _stored_retry_lineage(value: object) -> str | None:
@@ -1364,6 +1379,51 @@ class RunSwitchFleetProfileAdapter:
             if is_security_failure(code) or code in _PROFILE_RECOVERY_REFUSED_CODES:
                 return True
         return False
+
+    def failure_signature(self, application_id: str, *, session: Session) -> str | None:
+        """What this application's children failed with, without identities.
+
+        The failed child's typed code, phase and normalized reason (operation ids,
+        counts and timings stripped) identify a deterministic failure: the same
+        signature on consecutive attempts is the same fault.  None when the cause
+        is unknown or can change by waiting (a Controller cache loss, a child that
+        retries itself), which never counts toward the repeat budget.
+        """
+
+        found = self._failed_children(application_id, session=session)
+        if found is None or self.recoverable_cache_loss(
+            application_id, session=session
+        ):
+            return None
+        state, children = found
+        parts: set[str] = set()
+        for child in children:
+            if child.state != "failed":
+                continue
+            result = child.result
+            if result is not None and result.retryable:
+                return None
+            parts.add(
+                "|".join(
+                    (
+                        (result.failure_code if result is not None else None) or "-",
+                        str(
+                            (result.failed_phase or result.phase)
+                            if result is not None
+                            else child.current_phase
+                        ),
+                        str(result.subphase if result is not None else None),
+                        _normalized_failure_text(child.status_reason),
+                    )
+                )
+            )
+        if not parts:
+            for failure in sequence(state.get("assignment_failures")) or ():
+                if isinstance(failure, Mapping):
+                    parts.add(
+                        "recorded|" + _normalized_failure_text(failure.get("reason"))
+                    )
+        return "\n".join(sorted(parts)) or None
 
     def recoverable_cache_loss(self, application_id: str, *, session: Session) -> bool:
         """Recognize only a typed, pre-effect Controller cache loss."""
@@ -9257,6 +9317,19 @@ class FleetProfileService:
         view: an application that will be retried is waiting, not failed.
         """
 
+        return (
+            self._recovery_possible(session, row, progress)
+            and self._repeated_failure(session, row, progress) is None
+        )
+
+    def _recovery_possible(
+        self,
+        session: Session,
+        row: FleetProfileApplication,
+        progress: FleetProfileApplicationProgress,
+    ) -> bool:
+        """Whether this failed application is the current, replayable intent."""
+
         adapter = self._switch_adapter
         if (
             adapter is None
@@ -9274,6 +9347,94 @@ class FleetProfileService:
         return tuple(
             progress.intended_profile.scope.node_ids
         ) == current_scope and self._retry_eligible(session, row)
+
+    def _repeated_failure(
+        self,
+        session: Session,
+        row: FleetProfileApplication,
+        progress: FleetProfileApplicationProgress,
+    ) -> OperationBlocker | None:
+        """The evidence that this load keeps failing the same way, if it does.
+
+        Retries are for causes that change.  A start that fails with the same
+        typed cause ``RECOVERY.max_failures`` times in a row (this attempt and the
+        ones its retry lineage already recorded) is deterministic: another attempt
+        repeats it and re-launches the workload each time.  Read-only (views call
+        it); the recovery scan records the ending once.
+        """
+
+        if row.state != "failed":
+            return None
+        recorded = next(
+            (
+                blocker
+                for blocker in progress.blockers
+                if blocker.code == PROFILE_REPEATED_FAILURE_CODE
+            ),
+            None,
+        )
+        if recorded is not None:
+            return recorded
+        adapter = self._switch_adapter
+        if adapter is None:
+            return None
+        signature = adapter.failure_signature(row.id, session=session)
+        if signature is None:
+            return None
+        count = 1
+        cursor = progress.retry_of_application_id
+        while count < RECOVERY.max_failures and cursor is not None:
+            ancestor = session.get(FleetProfileApplication, cursor)
+            if (
+                ancestor is None
+                or adapter.failure_signature(ancestor.id, session=session) != signature
+            ):
+                break
+            count += 1
+            try:
+                cursor = _persisted_profile_progress(ancestor).retry_of_application_id
+            except FleetProfileConflict:
+                break
+        if count < RECOVERY.max_failures:
+            return None
+        cause = signature.partition("\n")[0].rpartition("|")[2] or signature
+        return make_blocker(
+            PROFILE_REPEATED_FAILURE_CODE,
+            f"Failed the same way {count} times in a row; not retrying: {cause}",
+            severity="error",
+            node_ids=progress.intended_profile.scope.node_ids
+            if progress.intended_profile is not None
+            else (),
+        )
+
+    def _end_repeated_failures(
+        self, ended: Sequence[tuple[str, OperationBlocker]], now: datetime
+    ) -> None:
+        """Record, once, that these loads stop retrying (they stay ``failed``)."""
+
+        for application_id, blocker in ended:
+            with self._sessions.begin() as session:
+                row = session.get(
+                    FleetProfileApplication, application_id, with_for_update=True
+                )
+                if row is None or row.state != "failed":
+                    continue
+                progress = _persisted_profile_progress(row)
+                if any(
+                    item.code == PROFILE_REPEATED_FAILURE_CODE
+                    for item in progress.blockers
+                ):
+                    continue
+                if self._lifecycle.end_retry(
+                    row,
+                    blocker.detail,
+                    now,
+                    progress=_progress_with_blockers(progress, [blocker]),
+                    session=session,
+                ):
+                    _LOGGER.warning(
+                        "profile application %s: %s", application_id, blocker.detail
+                    )
 
     def _presented_state(
         self, row: FleetProfileApplication, progress: FleetProfileApplicationProgress
@@ -9313,69 +9474,86 @@ class FleetProfileService:
     def _automatic_profile_recovery(self, now: datetime) -> tuple[str, str] | None:
         """Find one current profile intent that can safely be reconciled again."""
 
-        with self._sessions() as session:
-            adapter = self._switch_adapter
-            if adapter is None:
-                return None
-            # Only due rows are scanned (the typed timestamp below remains the
-            # authority), and the bounded batch walks all due rows round-robin
-            # so a refused or ineligible row cannot starve an eligible one.
-            retry_at = func.replace(
-                FleetProfileApplication.progress["retry_due_at"].as_string(),
-                "Z",
-                "+00:00",
-            )
-            retry_cutoff = TypeAdapter(datetime).dump_python(_aware(now), mode="json")
-            statement = (
-                select(FleetProfileApplication)
-                .where(
-                    FleetProfileApplication.state.in_(
-                        job_states.words(
-                            LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
-                        )
-                    ),
-                    or_(
-                        retry_at.is_(None),
-                        retry_at <= str(retry_cutoff).replace("Z", "+00:00"),
-                    ),
+        ended: list[tuple[str, OperationBlocker]] = []
+        try:
+            with self._sessions() as session:
+                adapter = self._switch_adapter
+                if adapter is None:
+                    return None
+                # Only due rows are scanned (the typed timestamp below remains the
+                # authority), and the bounded batch walks all due rows round-robin
+                # so a refused or ineligible row cannot starve an eligible one.
+                retry_at = func.replace(
+                    FleetProfileApplication.progress["retry_due_at"].as_string(),
+                    "Z",
+                    "+00:00",
                 )
-                .order_by(FleetProfileApplication.id)
-                .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
-            )
-            cursor = self._recovery_cursor
-            rows = list(
-                session.scalars(
-                    statement
-                    if cursor is None
-                    else statement.where(FleetProfileApplication.id > cursor)
+                retry_cutoff = TypeAdapter(datetime).dump_python(
+                    _aware(now), mode="json"
                 )
-            )
-            if cursor is not None and len(rows) < _MAX_PARKED_APPLICATION_OBSERVATIONS:
-                rows.extend(
+                statement = (
+                    select(FleetProfileApplication)
+                    .where(
+                        FleetProfileApplication.state.in_(
+                            job_states.words(
+                                LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+                            )
+                        ),
+                        or_(
+                            retry_at.is_(None),
+                            retry_at <= str(retry_cutoff).replace("Z", "+00:00"),
+                        ),
+                    )
+                    .order_by(FleetProfileApplication.id)
+                    .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
+                )
+                cursor = self._recovery_cursor
+                rows = list(
                     session.scalars(
-                        statement.where(FleetProfileApplication.id <= cursor).limit(
-                            _MAX_PARKED_APPLICATION_OBSERVATIONS - len(rows)
-                        )
+                        statement
+                        if cursor is None
+                        else statement.where(FleetProfileApplication.id > cursor)
                     )
                 )
-            self._recovery_cursor = rows[-1].id if rows else None
-            for row in rows:
-                try:
-                    progress = _persisted_profile_progress(row)
-                except FleetProfileConflict:
-                    continue
-                if not self._recovery_wanted(session, row, progress):
-                    continue
-                if progress.retry_due_at is not None and _aware(
-                    progress.retry_due_at
-                ) > _aware(now):
-                    continue
-                if now < FleetProfileAdapter.next_retry(
-                    row.id, progress.attempt, _aware(row.updated_at)
+                if (
+                    cursor is not None
+                    and len(rows) < _MAX_PARKED_APPLICATION_OBSERVATIONS
                 ):
-                    continue
-                self._recovery_cursor = row.id
-                return row.id, row.actor
+                    rows.extend(
+                        session.scalars(
+                            statement.where(FleetProfileApplication.id <= cursor).limit(
+                                _MAX_PARKED_APPLICATION_OBSERVATIONS - len(rows)
+                            )
+                        )
+                    )
+                self._recovery_cursor = rows[-1].id if rows else None
+                for row in rows:
+                    try:
+                        progress = _persisted_profile_progress(row)
+                    except FleetProfileConflict:
+                        continue
+                    if not self._recovery_possible(session, row, progress):
+                        continue
+                    repeated = self._repeated_failure(session, row, progress)
+                    if repeated is not None:
+                        if not any(
+                            item.code == PROFILE_REPEATED_FAILURE_CODE
+                            for item in progress.blockers
+                        ):
+                            ended.append((row.id, repeated))
+                        continue
+                    if progress.retry_due_at is not None and _aware(
+                        progress.retry_due_at
+                    ) > _aware(now):
+                        continue
+                    if now < FleetProfileAdapter.next_retry(
+                        row.id, progress.attempt, _aware(row.updated_at)
+                    ):
+                        continue
+                    self._recovery_cursor = row.id
+                    return row.id, row.actor
+        finally:
+            self._end_repeated_failures(ended, now)
         return None
 
     @staticmethod

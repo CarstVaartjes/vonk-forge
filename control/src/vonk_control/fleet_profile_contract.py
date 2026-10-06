@@ -1030,6 +1030,11 @@ class FleetProfileSwitchAdapter(Protocol):
 
         ...
 
+    def failure_signature(self, application_id: str, *, session: Session) -> str | None:
+        """The failure's identity without ids, counts or times; None if not stable."""
+
+        ...
+
     def request_cancellation(
         self,
         application_id: str,
