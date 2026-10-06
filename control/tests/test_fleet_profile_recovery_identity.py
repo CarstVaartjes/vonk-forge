@@ -13,7 +13,6 @@ import pytest
 from sqlalchemy import select
 from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
 from vonk_control.fleet_profiles import (
-    FleetProfileConflict,
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
     build_production_fleet_profile_service,
@@ -294,8 +293,12 @@ def test_retry_requires_preparation_only_when_an_assignment_needs_work(
             for item in current.assignments
             if item.assignment_id == kept.assignment_id
         ).actions == ["switch"]
-        with pytest.raises(FleetProfileConflict, match="recovery_identity_unavailable"):
-            service.retry(first.id, request_key=_uuid(922), actor="admin")
+        # The accepted plan never bound an identity for the kept assignment, so
+        # there is none to replace: the verified preparation observed now is bound
+        # (and Run/Switch verifies its digest again when the child starts).
+        retried = service.retry(first.id, request_key=_uuid(922), actor="admin")
+        assert retried.retry_of_application_id == first.id
+        assert retried.state == "queued"
     else:
         # The service clock may move backward across reconstruction/retry.
         # Receipt chronology remains monotonic, while updated_at reflects the

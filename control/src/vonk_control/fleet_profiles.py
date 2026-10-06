@@ -13,6 +13,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol, TypedDict
+from typing import cast as _typing_cast
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import String, case, cast, func, or_, select, update
@@ -95,6 +96,12 @@ from .fleet_profile_contract import (
     FleetProfileSwitchChildResult,
     FleetProfileView,
     profile_switch_child_request_key,
+)
+from .lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    read_or_rebuild,
+    retire_as_unknown,
 )
 from .lifecycle.fleet_profile import (
     LEGACY_SUPERSEDED_PREFIXES,
@@ -353,7 +360,7 @@ class _AssessmentProvider(Protocol):
         allow_pending_cache_rebuild: bool,
         expected_runtime_image: RuntimeImageIdentity | None,
         excluded_profile_application_ids: tuple[str, ...],
-    ) -> RunSwitchAssessment: ...
+    ) -> RunSwitchAssessment | Residue: ...
 
 
 @dataclass(frozen=True)
@@ -394,25 +401,62 @@ class _PlanStepDraft(_PlanStepDraftRequired, total=False):
     node_ids: list[str]
 
 
-def _persisted_profile_plan(row: FleetProfileApplication) -> FleetProfilePreview:
-    """Load the complete stored preview through its canonical contract."""
+def _without_values[T](read: Callable[[], T]) -> Callable[[], T]:
+    """Make a reader's failure name the failing field, never the stored value.
 
-    try:
+    A pydantic error stringifies the offending value; the note of a residue is
+    logged and may be shown, so only the field path and the error type survive.
+    """
+
+    def run() -> T:
+        try:
+            return read()
+        except ValidationError as error:
+            raise ValueError(
+                stored_document_detail(error) or "stored document is invalid"
+            ) from None
+
+    return run
+
+
+def _residue_detail(residue: Residue) -> str:
+    """The reader's own description of why a stored document was retired."""
+
+    return residue.note.split(": ", 1)[-1]
+
+
+def _persisted_profile_plan(
+    row: FleetProfileApplication,
+) -> FleetProfilePreview | Residue:
+    """Load the complete stored preview through its canonical contract.
+
+    A plan that does not parse, or whose identity disagrees with its row, cannot
+    be re-derived here (the reviewed decision is the only copy of what was
+    consented to), so it is retired as unknown: the caller skips or retires that
+    row and carries on.
+    """
+
+    def read() -> FleetProfilePreview:
         plan = read_stored_document(
             lambda value: FleetProfilePreview.model_validate_json(
                 json.dumps(value), strict=True
             ),
             row.plan,
         )
-    except (TypeError, ValueError, ValidationError) as error:
-        raise FleetProfileConflict("Persisted Fleet profile plan is invalid") from error
-    if (
-        plan.profile_id != row.profile_id
-        or plan.profile_digest != row.profile_digest
-        or plan.plan_digest != row.plan_digest
-    ):
-        raise FleetProfileConflict("Persisted Fleet profile plan identity is invalid")
-    return plan
+        if (
+            plan.profile_id != row.profile_id
+            or plan.profile_digest != row.profile_digest
+            or plan.plan_digest != row.plan_digest
+        ):
+            raise ValueError("stored plan identity differs from its row")
+        return plan
+
+    return read_or_rebuild(
+        kind="profile-plan",
+        subject=str(row.id),
+        read=_without_values(read),
+        reason=BookkeepingReason.PERSISTED_STATE_DAMAGED,
+    )
 
 
 def _profile_application_effect_nodes(plan: FleetProfilePreview) -> tuple[str, ...]:
@@ -421,26 +465,54 @@ def _profile_application_effect_nodes(plan: FleetProfilePreview) -> tuple[str, .
     return tuple(sorted({node_id for step in plan.steps for node_id in step.node_ids}))
 
 
+def _application_effect_scope(row: FleetProfileApplication) -> tuple[str, ...]:
+    """The nodes an application's effects can touch (its declared scope if unreadable)."""
+
+    plan = _persisted_profile_plan(row)
+    if isinstance(plan, Residue):
+        return tuple(sorted(_persisted_profile_scope(row) or ()))
+    return _profile_application_effect_nodes(plan)
+
+
 def _persisted_profile_result(
     row: FleetProfileApplication,
 ) -> FleetProfileApplicationResult | None:
-    """Load a stored result without treating malformed JSON as no result."""
+    """Load a stored result, re-deriving it from the receipt when it is damaged.
 
-    if row.result is None:
-        if row.state == "succeeded":
-            raise FleetProfileConflict("Persisted Fleet profile result is invalid")
-        return None
-    try:
+    The result of a load is a function of how far it got: the step it reached is
+    on the row.  A succeeded row with a missing or damaged result is rebuilt from
+    that evidence; a damaged result of any other row is retired (``None``).
+    """
+
+    def read() -> FleetProfileApplicationResult | None:
+        if row.result is None:
+            if row.state == _LifecycleState.SUCCEEDED:
+                raise ValueError("a succeeded application has no result")
+            return None
         return read_stored_document(
             lambda value: FleetProfileApplicationResult.model_validate_json(
                 json.dumps(value), strict=True
             ),
             row.result,
         )
-    except (TypeError, ValueError, ValidationError) as error:
-        raise FleetProfileConflict(
-            "Persisted Fleet profile result is invalid"
-        ) from error
+
+    def rebuild() -> FleetProfileApplicationResult | None:
+        if row.state != _LifecycleState.SUCCEEDED:
+            return None
+        # A succeeded load completed every step its plan listed; a plan that
+        # cannot be read leaves the step the row itself reached.
+        plan = _persisted_profile_plan(row)
+        reached = len(plan.steps) if not isinstance(plan, Residue) else row.current_step
+        steps = max(0, min(int(reached or 0), 1024))
+        return FleetProfileApplicationResult(changed=steps > 0, completed_steps=steps)
+
+    value = read_or_rebuild(
+        kind="profile-result",
+        subject=str(row.id),
+        read=_without_values(read),
+        rebuild=rebuild,
+    )
+    return None if isinstance(value, Residue) else value
 
 
 def _canonical_progress(value: object) -> FleetProfileApplicationProgress:
@@ -464,14 +536,51 @@ def _canonical_progress(value: object) -> FleetProfileApplicationProgress:
 def _persisted_profile_progress(
     row: FleetProfileApplication,
 ) -> FleetProfileApplicationProgress:
-    """Load progress through its canonical contract before worker mutation."""
+    """Load progress through its canonical contract before worker mutation.
 
-    try:
-        return _canonical_progress(row.progress)
-    except (TypeError, ValueError, ValidationError) as error:
-        raise FleetProfileConflict(
-            "Persisted Fleet profile progress is invalid"
-        ) from error
+    Damaged progress is rebuilt from the receipt the row itself carries (the step
+    it reached, the child it issued).  The rebuilt progress names no accepted
+    intent, so the worker retires the row as superseded with its effect unknown
+    (the children keep their own lifecycle) instead of stopping on it.
+    """
+
+    value = read_or_rebuild(
+        kind="profile-progress",
+        subject=str(row.id),
+        read=_without_values(lambda: _canonical_progress(row.progress)),
+        rebuild=lambda: _progress_from_receipt(row),
+    )
+    # (The receipt always rebuilds it; the fallback keeps a defect from stopping a tick.)
+    return _progress_from_receipt(row) if isinstance(value, Residue) else value
+
+
+def _stored_progress(
+    row: FleetProfileApplication,
+) -> FleetProfileApplicationProgress | Residue:
+    """The progress document as stored, or the residue of a damaged one.
+
+    The worker uses this where *knowing* that the document is damaged decides
+    what happens (a cancel in flight still completes, a load whose child record
+    is lost is retired).  Everything that only reads progress uses
+    :func:`_persisted_profile_progress`, which rebuilds it.
+    """
+
+    return read_or_rebuild(
+        kind="profile-progress",
+        subject=str(row.id),
+        read=_without_values(lambda: _canonical_progress(row.progress)),
+    )
+
+
+def _progress_from_receipt(
+    row: FleetProfileApplication,
+) -> FleetProfileApplicationProgress:
+    """The progress a row's own columns can prove (no intent, no child document)."""
+
+    completed = max(0, min(int(row.current_step or 0), 1024))
+    return FleetProfileApplicationProgress(
+        completed_steps=completed, total_steps=completed
+    )
 
 
 def _owns_pending_admission(
@@ -520,10 +629,16 @@ def _next_profile_acceptance_time(session: Session, now: datetime) -> datetime:
         return _aware(now)
     try:
         next_order = _aware(latest) + timedelta(microseconds=1)
-    except OverflowError as error:
-        raise FleetProfileConflict(
-            "Persisted profile application order exceeds the supported timestamp range"
-        ) from error
+    except OverflowError:
+        # A stored time at the end of the supported range cannot be ordered
+        # after: the receipt is ordered by the clock and breaks ties by ID.
+        retire_as_unknown(
+            "profile-order",
+            "created_at",
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "latest acceptance time exceeds the supported range",
+        )
+        return _aware(now)
     return max(_aware(now), next_order)
 
 
@@ -594,9 +709,8 @@ def _newer_profile_intent_overlaps(
             continue
         if candidate_order <= order:
             continue
-        try:
-            plan = _persisted_profile_plan(candidate)
-        except FleetProfileConflict:
+        plan = _persisted_profile_plan(candidate)
+        if isinstance(plan, Residue):
             persisted_scope = _persisted_profile_scope(candidate)
             if persisted_scope is None:
                 continue
@@ -714,23 +828,33 @@ def _require_recovery_preparation(
     *,
     first_binding: bool = False,
 ) -> None:
-    if expected is None and first_binding and observed is not None:
-        # The accepted load was still waiting for its preparation, so it never
-        # named an identity: the preparation it asked for is bound now.
-        return
-    if expected is None:
-        raise _FleetProfileRecoveryBindingConflict(
-            "profile.recovery_identity_unavailable: The accepted artifact identity "
-            f"for assignment {assignment_id} is unavailable; an explicit new load "
-            "must bind verified cache assets."
-        )
-    image = expected.runtime_image
     if observed is None:
+        image = expected.runtime_image if expected is not None else None
+        exact = (
+            f", image {image.image_digest}, archive {image.oci_layout_sha256}"
+            if image is not None
+            else ""
+        )
         raise _FleetProfileRecoveryBindingConflict(
             "profile.recovery_cache_pending: Prepare cache on the Controller for "
-            f"assignment {assignment_id}, image {image.image_digest}, archive "
-            f"{image.oci_layout_sha256}; recovery retains these exact identities."
+            f"assignment {assignment_id}{exact}"
+            + ("; recovery retains these exact identities." if exact else ".")
         )
+    if expected is None:
+        # The accepted plan never bound an identity for this assignment (it was
+        # still waiting for its preparation, or its record is gone): there is no
+        # bound identity to be replaced, so the verified preparation observed now
+        # is what is bound, and Run/Switch verifies that digest again at ingress
+        # when its child starts.
+        if not first_binding:
+            retire_as_unknown(
+                "profile-recovery-identity",
+                assignment_id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "the accepted artifact identity is unavailable; binding the "
+                "verified preparation observed now",
+            )
+        return
     if _recovery_preparation_identity(expected) != _recovery_preparation_identity(
         observed
     ):
@@ -886,19 +1010,29 @@ def _operation_state(
 ) -> FleetProfileOperationState:
     """Read one stored child operation state, keeping absence distinct.
 
-    ``None`` is genuinely absent, so the caller's deliberate default stands.
-    Any other value is a stored state that must satisfy the closed contract;
-    inventing a state for a malformed one would hide corruption.
+    ``None`` is genuinely absent, so the caller's deliberate default stands.  A
+    stored state outside the closed contract is unknown, and unknown is observed
+    again (the caller's default is the observing state), never parked.
     """
 
     if value is None:
         return default
     try:
         return _OPERATION_STATE_ADAPTER.validate_python(value, strict=True)
-    except ValidationError as error:
-        raise FleetProfileConflict(
-            "persisted profile child operation state is invalid"
-        ) from error
+    except ValidationError:
+        retire_as_unknown(
+            "profile-child-state",
+            str(value)[:80],
+            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+            "stored child operation state is outside the contract",
+        )
+        return default
+
+
+#: The operation state a retired load ends in (its effect recorded unknown).
+_CANCELLED_OPERATION: FleetProfileOperationState = _typing_cast(
+    "FleetProfileOperationState", _LifecycleState.CANCELLED.value
+)
 
 
 def _stored_state(state: _LifecycleState | None) -> str:
@@ -907,18 +1041,25 @@ def _stored_state(state: _LifecycleState | None) -> str:
     return "succeeded" if state is None else state.value
 
 
-def _string_items(value: object, detail: str) -> list[str]:
-    """Read a decoded JSON string array, or raise when it is not exactly that."""
+def _string_items(value: object, *, fallback: Sequence[str] = ()) -> list[str]:
+    """Read a decoded JSON string array; damaged elements are dropped.
+
+    A document that is not an array reads as ``fallback`` (the value derived from
+    another receipt); an element that is not a string is skipped, never a reason
+    to refuse the rest.
+    """
 
     items = sequence(value)
     if items is None:
-        raise FleetProfileConflict(detail)
-    result: list[str] = []
-    for item in items:
-        if not isinstance(item, str):
-            raise FleetProfileConflict(detail)
-        result.append(item)
-    return result
+        if value is not None:
+            retire_as_unknown(
+                "profile-string-list",
+                "state",
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                "stored value is not an array",
+            )
+        return list(fallback)
+    return [item for item in items if isinstance(item, str)]
 
 
 class RunSwitchFleetProfileAdapter:
@@ -1070,20 +1211,31 @@ class RunSwitchFleetProfileAdapter:
         scope_node_ids: tuple[str, ...],
         actor: str,
         request_id: str,
-    ) -> FleetProfileChildOperation:
-        ordered_assignments = tuple(sorted(assignments, key=lambda item: item.id))
-        if tuple(scope_node_ids) != tuple(sorted(set(scope_node_ids))):
+    ) -> FleetProfileChildOperation | Residue:
+        scope = set(scope_node_ids)
+        if tuple(scope_node_ids) != tuple(sorted(scope)):
             raise FleetProfileConflict(
                 "profile switch scope must be the complete sorted node boundary"
             )
-        scope = set(scope_node_ids)
-        if any(
-            node.node_id not in scope
-            for assignment in ordered_assignments
-            for node in assignment.nodes
-        ):
-            raise FleetProfileConflict(
-                "profile switch assignment contains a node outside its bound scope"
+        # An assignment that names a node outside the bound scope is not part of
+        # this child: it is skipped (and logged), never allowed to widen the
+        # scope the parent reviewed, and never a reason to refuse the others.
+        ordered_assignments = tuple(
+            sorted(
+                (
+                    assignment
+                    for assignment in assignments
+                    if all(node.node_id in scope for node in assignment.nodes)
+                ),
+                key=lambda item: item.id,
+            )
+        )
+        if len(ordered_assignments) != len(assignments):
+            retire_as_unknown(
+                "profile-assignment",
+                application_id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "an assignment names a node outside the bound scope",
             )
         with self._sessions.begin() as session:
             application = session.get(FleetProfileApplication, application_id)
@@ -1098,32 +1250,33 @@ class RunSwitchFleetProfileAdapter:
                     "Profile cancellation prevents dispatch of another child"
                 )
             if existing is not None:
-                expected_scope = list(scope_node_ids)
-                expected_assignment_ids = [item.id for item in ordered_assignments]
-                if (
-                    existing.get("scope_node_ids") != expected_scope
-                    or existing.get("assignment_ids") != expected_assignment_ids
-                ):
-                    raise FleetProfileConflict(
-                        "profile switch child was replayed with a different "
-                        "bound scope or assignments"
-                    )
+                # The child already started under this identity: it is adopted as
+                # it was issued (an old run survives an upgrade), whatever scope a
+                # replayed request names now.  Its own scope is the durable one.
                 return self._view_from_state(application, existing)
             intended = FleetProfileService._intended_profile(
                 application, session=session
             )
+            plan = _persisted_profile_plan(application)
+            reviewed_plan = FleetProfileService._reviewed_profile_plan(
+                application, session=session
+            )
+            if isinstance(intended, Residue):
+                return intended
+            if isinstance(plan, Residue):
+                return plan
+            if isinstance(reviewed_plan, Residue):
+                return reviewed_plan
             queue = self._plan_queue(
                 session,
                 ordered_assignments,
                 scope_node_ids,
                 application_id=application_id,
                 installation_policy=intended.installation_policy,
-                reviewed_effects=_persisted_profile_plan(application).effects,
+                reviewed_effects=plan.effects,
                 expected_images={
                     item.assignment_id: item.runtime_image
-                    for item in FleetProfileService._reviewed_profile_plan(
-                        application, session=session
-                    ).preparation_decisions
+                    for item in reviewed_plan.preparation_decisions
                 },
             )
             state: dict[str, object] = {
@@ -1182,7 +1335,7 @@ class RunSwitchFleetProfileAdapter:
                 raise KeyError(operation_id)
             return self._advance(
                 operation_id,
-                self._assignments_from_state(state),
+                self._assignments_from_state(state, application),
                 session=session,
             )
         with self._sessions() as own:
@@ -1192,7 +1345,7 @@ class RunSwitchFleetProfileAdapter:
             state = self._state(application)
             if state is None:
                 raise KeyError(operation_id)
-            assignments = self._assignments_from_state(state)
+            assignments = self._assignments_from_state(state, application)
         return self._advance(operation_id, assignments)
 
     @staticmethod
@@ -1210,7 +1363,7 @@ class RunSwitchFleetProfileAdapter:
         assignment: FleetProfileAssignment,
         *,
         request_key: str | None = None,
-    ) -> RunSwitchApplyRequest:
+    ) -> RunSwitchApplyRequest | Residue:
         """Map one profile assignment onto the Run/Switch authority.
 
         This is the single definition of how a profile assignment becomes a
@@ -1230,7 +1383,16 @@ class RunSwitchFleetProfileAdapter:
             else None
         )
         if not isinstance(model_digest, str):
-            raise FleetProfileConflict("Profile assignment has no exact model identity")
+            # The recipe revision this assignment names no longer resolves to an
+            # exact model: unknown, not a verdict.  The caller leaves the
+            # assignment out (the profile follows the newest revision on its next
+            # reconciliation) instead of refusing the whole load.
+            return retire_as_unknown(
+                "profile-assignment",
+                assignment.id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "the recipe revision resolves to no exact model identity",
+            )
         group = SparkGroup(
             nodes=[
                 SparkGroupNode(
@@ -1264,7 +1426,7 @@ class RunSwitchFleetProfileAdapter:
         allow_pending_cache_rebuild: bool = False,
         expected_runtime_image: RuntimeImageIdentity | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
-    ) -> RunSwitchAssessment:
+    ) -> RunSwitchAssessment | Residue:
         """Project admission and preparation from the same workload planner.
 
         Run/Switch remains the authority for the exact model artifact set, the
@@ -1280,6 +1442,8 @@ class RunSwitchFleetProfileAdapter:
                 "Profile assignment nodes changed during preparation projection."
             )
         request = self._assignment_request(session, assignment)
+        if isinstance(request, Residue):
+            return request
         plan = self._run_switch.inspect_request(
             request,
             actor="controller:profile-preparation",
@@ -1350,14 +1514,22 @@ class RunSwitchFleetProfileAdapter:
                 continue
             previous = assessments.get(assignment.id)
             decision = decisions.get(assignment.id)
-            if previous is None or decision is None:
-                raise FleetProfileConflict(
-                    "Profile resource admission evidence is unavailable"
+            request = self._assignment_request(session, assignment)
+            if previous is None or decision is None or isinstance(request, Residue):
+                # No reviewed evidence (or no exact model) to recheck against: the
+                # recheck is skipped for this assignment, and its Run/Switch child
+                # admits it against current capacity itself when it starts.
+                retire_as_unknown(
+                    "profile-resource-recheck",
+                    assignment.id,
+                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                    "no reviewed admission evidence to recheck",
                 )
+                continue
             try:
                 fresh = self._run_switch.recheck_resources_in_session(
                     session,
-                    self._assignment_request(session, assignment),
+                    request,
                     previous.assessment,
                     excluded_profile_application_ids=tuple(
                         item.id
@@ -1641,13 +1813,17 @@ class RunSwitchFleetProfileAdapter:
             if pending_cancellation is not None:
                 return pending_cancellation
             reviewed = self._child_review(session, application_id)
-            incomplete_model = next(
-                (
-                    reason
-                    for reason in reviewed.reasons
-                    if reason.code == "profile.incomplete_multi_spark_model"
-                ),
-                None,
+            incomplete_model = (
+                None
+                if isinstance(reviewed, Residue)
+                else next(
+                    (
+                        reason
+                        for reason in reviewed.reasons
+                        if reason.code == "profile.incomplete_multi_spark_model"
+                    ),
+                    None,
+                )
             )
             failures = sequence(state.get("assignment_failures")) or ()
             # The load's state is the aggregate of its children: a recorded failure
@@ -1729,8 +1905,29 @@ class RunSwitchFleetProfileAdapter:
             str(state["actor"]),
             str(state["request_id"]),
             integer(position) or 0,
-            _canonical_progress(application.progress).workload_intent_ordinal,
+            _persisted_profile_progress(application).workload_intent_ordinal,
         )
+        if isinstance(operation, Residue):
+            # This assignment's step cannot be issued (its identity or its bound
+            # child cannot be established).  It is recorded as that assignment's
+            # failure and the queue goes on with the next one: one damaged element
+            # never stops the others, and the load's automatic recovery retries
+            # the recorded failure with a fresh child identity.
+            failures = list(sequence(state.get("assignment_failures")) or ())
+            failures.append(
+                {
+                    "assignment_id": (
+                        item.get("assignment_id") if isinstance(item, Mapping) else None
+                    ),
+                    "reason": f"{operation.reason.value}: {operation.note}"[:512],
+                    "terminal": False,
+                }
+            )
+            state["assignment_failures"] = failures
+            state["position"] = (integer(position) or 0) + 1
+            self._write_state(session, application, state)
+            session.flush()
+            return self._view_from_state(application, state)
         state["active_operation_id"] = operation.operation_id
         state["active_kind"] = item.get("kind")
         self._write_state(session, application, state)
@@ -1760,19 +1957,19 @@ class RunSwitchFleetProfileAdapter:
             and now < _aware(datetime.fromisoformat(raw_due))
         ):
             return self._view_from_state(application, state)
-        ordinal = _canonical_progress(application.progress).workload_intent_ordinal
-        cancellation = _canonical_progress(application.progress).cancellation
+        progress = _persisted_profile_progress(application)
+        ordinal = progress.workload_intent_ordinal
+        cancellation = progress.cancellation
         if cancellation is not None:
             ordinal = cancellation.workload_intent_ordinal
         if ordinal is None:
-            if cancellation is not None:
-                # A cancel of a load that never recorded a workload intent has no
-                # fenced older effects to wait for: its child is what it stops.
-                return None
-            raise FleetProfileConflict("Profile switch workload intent is unbound")
+            # A load that never recorded a workload intent fenced no older
+            # effects, so there is none to wait for: its own child is what it
+            # stops or completes (a cancel or an adopted older run alike).
+            return None
         scope_node_ids = _string_items(
-            state.get("scope_node_ids", []),
-            "profile switch child scope node IDs are invalid",
+            state.get("scope_node_ids"),
+            fallback=_persisted_profile_scope(application) or (),
         )
         AgentJobService.abandon_superseded_idempotent_operations_in_session(
             session, scope_node_ids, ordinal, now
@@ -1855,9 +2052,13 @@ class RunSwitchFleetProfileAdapter:
         request_id: str,
         position: int,
         workload_intent_ordinal: int | None,
-    ) -> RunSwitchOperation:
-        if workload_intent_ordinal is None:
-            raise FleetProfileConflict("Profile workload intent is unbound")
+    ) -> RunSwitchOperation | Residue:
+        """Issue (or adopt) the child of one queue item, or say why it cannot be.
+
+        A :class:`Residue` is that element's unknown: the caller records it as
+        that assignment's failure and continues with the next element.
+        """
+
         child_request_key = profile_switch_child_request_key(
             application_id, position, str(item.get("kind")), str(item.get("id"))
         )
@@ -1872,13 +2073,28 @@ class RunSwitchFleetProfileAdapter:
         )
         if adopted is not None:
             return adopted
+        if workload_intent_ordinal is None:
+            # An effect that already exists is adopted (above); a new one is fenced
+            # by its intent, and without one nothing new may be issued (the
+            # admission that records it runs again).
+            return retire_as_unknown(
+                "profile-child",
+                application_id,
+                BookkeepingReason.ROW_INCOMPLETE,
+                "the application recorded no workload intent",
+            )
         with self._sessions() as session:
             reviewed = self._child_review(session, application_id)
+        if isinstance(reviewed, Residue):
+            return reviewed
         if kind == "cleanup":
             installation_id = item.get("id")
             if not isinstance(installation_id, str):
-                raise FleetProfileConflict(
-                    "Profile switch cleanup item has no installation identity"
+                return retire_as_unknown(
+                    "profile-child",
+                    application_id,
+                    BookkeepingReason.ROW_INCOMPLETE,
+                    "a cleanup item has no installation identity",
                 )
             cleanup_preview = self._run_switch.preview_cleanup(
                 RunSwitchCleanupPreviewRequest(installation_id=installation_id),
@@ -1896,8 +2112,11 @@ class RunSwitchFleetProfileAdapter:
         if kind == "stop":
             run_id = item.get("id")
             if not isinstance(run_id, str):
-                raise FleetProfileConflict(
-                    "Profile switch stop item has no run identity"
+                return retire_as_unknown(
+                    "profile-child",
+                    application_id,
+                    BookkeepingReason.ROW_INCOMPLETE,
+                    "a stop item has no run identity",
                 )
             raw_scope = item.get("profile_stop_scope")
             profile_stop_scope = (
@@ -1945,17 +2164,26 @@ class RunSwitchFleetProfileAdapter:
             (value for value in assignments if value.id == assignment_id), None
         )
         if assignment is None:
-            raise FleetProfileConflict("Profile switch assignment is unavailable")
+            return retire_as_unknown(
+                "profile-child",
+                application_id,
+                BookkeepingReason.ROW_INCOMPLETE,
+                f"assignment {assignment_id} is not part of the accepted intent",
+            )
         with self._sessions() as session:
             request = self._assignment_request(
                 session, assignment, request_key=child_request_key
             )
+            if isinstance(request, Residue):
+                return request
             application = session.get(FleetProfileApplication, application_id)
             if application is None:
                 raise KeyError(application_id)
             accepted = FleetProfileService._reviewed_profile_plan(
                 application, session=session
             )
+            if isinstance(accepted, Residue):
+                return accepted
             progress = _persisted_profile_progress(application)
             expected_preparation = next(
                 (
@@ -1989,11 +2217,15 @@ class RunSwitchFleetProfileAdapter:
         )
 
     @staticmethod
-    def _child_review(session: Session, application_id: str) -> FleetProfilePreview:
+    def _child_review(
+        session: Session, application_id: str
+    ) -> FleetProfilePreview | Residue:
         application = session.get(FleetProfileApplication, application_id)
         if application is None:
             raise KeyError(application_id)
-        FleetProfileService._intended_profile(application, session=session)
+        intended = FleetProfileService._intended_profile(application, session=session)
+        if isinstance(intended, Residue):
+            return intended
         return _persisted_profile_plan(application)
 
     @staticmethod
@@ -2054,9 +2286,18 @@ class RunSwitchFleetProfileAdapter:
         item: Mapping[str, object],
         assignments: tuple[FleetProfileAssignment, ...],
         scope_node_ids: tuple[str, ...],
-        workload_intent_ordinal: int,
-    ) -> RunSwitchOperation | None:
-        """Read the exact committed child before any mutable preview is redone."""
+        workload_intent_ordinal: int | None,
+    ) -> RunSwitchOperation | Residue | None:
+        """Read the exact committed child before any mutable preview is redone.
+
+        A committed child that cannot be shown to be *this* step's child (another
+        kind, intent, scope, capacity owner or assignment, or a plan that cannot be
+        read) is not adopted and not reissued: it stays with its own Run/Switch
+        lifecycle, and the step is recorded as unknown for the caller to carry on.
+        """
+
+        def unknown(reason: BookkeepingReason, note: str) -> Residue:
+            return retire_as_unknown("profile-child", request_key, reason, note)
 
         with self._sessions() as session:
             job = session.scalar(select(Job).where(Job.request_id == request_key))
@@ -2064,7 +2305,9 @@ class RunSwitchFleetProfileAdapter:
                 return None
             kind = item.get("kind")
             if not isinstance(kind, str):
-                raise FleetProfileConflict("Profile child kind is invalid")
+                return unknown(
+                    BookkeepingReason.ROW_INCOMPLETE, "the queue item names no kind"
+                )
             expected_kind = {
                 "cleanup": "recipe.cleanup.v2",
                 "stop": "recipe.stop.v2",
@@ -2075,22 +2318,32 @@ class RunSwitchFleetProfileAdapter:
                 raise FleetProfileConflict(
                     "Profile child request key belongs to another operation"
                 )
-            if job.payload.get("workload_intent_ordinal") != workload_intent_ordinal:
-                raise FleetProfileConflict(
-                    "Profile child changed its bound workload intent"
+            recorded_ordinal = job.payload.get("workload_intent_ordinal")
+            if (
+                recorded_ordinal is not None
+                and workload_intent_ordinal is not None
+                and recorded_ordinal != workload_intent_ordinal
+            ):
+                # (A child issued before intents were recorded carries none, and
+                # an application that recorded none adopts what it issued: an old
+                # run survives an upgrade.)
+                return unknown(
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the child belongs to another workload intent",
                 )
             raw_plan = job.payload.get("plan")
-            try:
-                plan = read_stored_model(
+            plan = read_or_rebuild(
+                kind="profile-child-plan",
+                subject=str(job.id),
+                read=lambda: read_stored_model(
                     RunSwitchPlan,
                     canonical_message(raw_plan),
                     strict=True,
                     from_json=True,
-                )
-            except (TypeError, ValueError) as error:
-                raise FleetProfileConflict(
-                    "Persisted Run/Switch child plan is invalid"
-                ) from error
+                ),
+            )
+            if isinstance(plan, Residue):
+                return plan
             child_nodes = tuple(
                 sorted(
                     plan.profile_stop_scope.target_node_ids
@@ -2101,8 +2354,9 @@ class RunSwitchFleetProfileAdapter:
             if child_nodes != tuple(sorted(job.targets)) or not set(child_nodes) <= set(
                 scope_node_ids
             ):
-                raise FleetProfileConflict(
-                    "Profile child changed its bound Spark scope"
+                return unknown(
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the child's Spark scope differs from the bound scope",
                 )
             owner_id = item.get("id")
             if kind == "cleanup":
@@ -2129,15 +2383,22 @@ class RunSwitchFleetProfileAdapter:
                     )
                 )
             else:
-                receipt = read_stored_model(
-                    RunSwitchOperationResult,
-                    canonical_message(job.result),
-                    strict=True,
-                    from_json=True,
+                receipt = read_or_rebuild(
+                    kind="profile-child-receipt",
+                    subject=str(job.id),
+                    read=lambda: read_stored_model(
+                        RunSwitchOperationResult,
+                        canonical_message(job.result),
+                        strict=True,
+                        from_json=True,
+                    ),
                 )
+                if isinstance(receipt, Residue):
+                    return receipt
                 if receipt.profile_application_id != application_id:
-                    raise FleetProfileConflict(
-                        "Profile child changed its capacity owner"
+                    return unknown(
+                        BookkeepingReason.EVIDENCE_MISMATCH,
+                        "the child's capacity is owned by another application",
                     )
                 assignment = next(
                     (value for value in assignments if value.id == owner_id), None
@@ -2161,12 +2422,14 @@ class RunSwitchFleetProfileAdapter:
                     ]
                 )
             if not valid:
-                raise FleetProfileConflict(
-                    "Profile child changed its bound owner or assignment"
+                return unknown(
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the child differs from its bound owner or assignment",
                 )
-            self._validate_child_effects(
-                self._child_review(session, application_id), plan
-            )
+            reviewed = self._child_review(session, application_id)
+            if isinstance(reviewed, Residue):
+                return reviewed
+            self._validate_child_effects(reviewed, plan)
             operation_id = job.id
         return self._run_switch.get(operation_id)
 
@@ -2216,19 +2479,10 @@ class RunSwitchFleetProfileAdapter:
         # semantics, exactly as it was written.  Validating an already-decoded
         # document as strict Python data rejects JSON arrays where the contract
         # declares tuples, which makes Pydantic's smart union pick a different
-        # phase-result variant and loses the receipt entirely.
-        try:
-            progress = read_stored_model(
-                FleetProfileApplicationProgress,
-                canonical_message(application.progress),
-                strict=True,
-                from_json=True,
-            )
-        except ValidationError as error:
-            raise FleetProfileConflict(
-                "persisted profile application progress is invalid"
-            ) from error
-        raw = progress.switch_adapter
+        # phase-result variant and loses the receipt entirely.  Damaged progress
+        # is rebuilt from the row's receipt (no child document), so the child is
+        # found again through its deterministic request key, never refused.
+        raw = _persisted_profile_progress(application).switch_adapter
         if raw is None:
             return None
         return raw.model_dump(mode="json")
@@ -2285,21 +2539,45 @@ class RunSwitchFleetProfileAdapter:
 
     @staticmethod
     def _assignments_from_state(
-        state: Mapping[str, object],
+        state: Mapping[str, object], application: FleetProfileApplication
     ) -> tuple[FleetProfileAssignment, ...]:
+        """The assignments a child was started with, rebuilt from the accepted intent.
+
+        An element of the stored snapshot that cannot be read is skipped.  When
+        the snapshot is missing or unreadable as a whole, the application's own
+        accepted intent is the evidence it was copied from, narrowed to the
+        assignments the child names.
+        """
+
         raw = state.get("assignments")
-        if not isinstance(raw, list):
-            raise FleetProfileConflict(
-                "profile switch child has no assignment snapshot"
-            )
-        try:
-            values = tuple(
-                read_stored_model(FleetProfileAssignment, item) for item in raw
-            )
-        except ValueError as error:
-            raise FleetProfileConflict(
-                "profile switch child assignment snapshot is invalid"
-            ) from error
+        values: list[FleetProfileAssignment] = []
+        damaged = not isinstance(raw, list)
+        for item in raw if isinstance(raw, list) else ():
+            try:
+                values.append(read_stored_model(FleetProfileAssignment, item))
+            except ValueError:
+                damaged = True
+        if damaged:
+            wanted = {
+                value
+                for value in (sequence(state.get("assignment_ids")) or ())
+                if isinstance(value, str)
+            }
+            intent = _persisted_profile_progress(application).intended_profile
+            known = {value.id for value in values}
+            rebuilt = [
+                assignment
+                for assignment in (intent.assignments if intent is not None else ())
+                if assignment.id in wanted and assignment.id not in known
+            ]
+            if rebuilt:
+                _LOGGER.info(
+                    "profile application %s: rebuilt %d assignment(s) of its child "
+                    "from the accepted intent",
+                    application.id,
+                    len(rebuilt),
+                )
+            values.extend(rebuilt)
         return tuple(sorted(values, key=lambda item: item.id))
 
     @staticmethod
@@ -2321,9 +2599,15 @@ class RunSwitchFleetProfileAdapter:
                 ),
             )
         except (TypeError, ValueError) as error:
-            raise FleetProfileConflict(
-                "Run/Switch child result receipt is invalid"
-            ) from error
+            # The child's own record keeps its result; the profile step is
+            # recorded without a receipt rather than refusing to record it.
+            retire_as_unknown(
+                "profile-child-receipt",
+                str(child.operation_id),
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                stored_document_detail(error) or type(error).__name__,
+            )
+            return None
 
     def _view_from_child(
         self,
@@ -2340,10 +2624,7 @@ class RunSwitchFleetProfileAdapter:
             startup_budget_seconds=child.progress.startup_budget_seconds,
             start_deadline=child.progress.start_deadline,
             phase=phase,
-            node_ids=_string_items(
-                state.get("scope_node_ids", []),
-                "profile switch child scope node IDs are invalid",
-            ),
+            node_ids=_string_items(state.get("scope_node_ids")),
             bytes=child.progress.completed_bytes,
             total_bytes=child.progress.total_bytes,
         )
@@ -2390,10 +2671,7 @@ class RunSwitchFleetProfileAdapter:
             if isinstance(raw_progress, Mapping)
             else FleetProfileChildProgress(
                 phase="final-verify" if child_state == "succeeded" else "prepare",
-                node_ids=_string_items(
-                    state.get("scope_node_ids", []),
-                    "profile switch child scope node IDs are invalid",
-                ),
+                node_ids=_string_items(state.get("scope_node_ids")),
             )
         )
         raw_status_reason = state.get("status_reason")
@@ -3005,6 +3283,8 @@ class FleetProfileService:
                 raise ValueError("selected profile generation is inconsistent")
             intended = self._intended_profile(application, session=session)
             plan = _persisted_profile_plan(application)
+            if isinstance(intended, Residue) or isinstance(plan, Residue):
+                raise TypeError("selected profile evidence is unavailable")
             if (
                 application.profile_digest != intended.profile_digest
                 or tuple(intended.scope.node_ids) != tuple(plan.scope.node_ids)
@@ -3196,8 +3476,13 @@ class FleetProfileService:
         return max(1, int(maximum or 0) + 1)
 
     @staticmethod
-    def _recipe_identity(session: Session, selector: str) -> tuple[str, str]:
-        """Resolve the exact current identities without loading artifact documents."""
+    def _recipe_identity(session: Session, selector: str) -> tuple[str, str] | Residue:
+        """Resolve the exact current identities without loading artifact documents.
+
+        A recipe that has no active revision (every revision retired or removed)
+        is a :class:`Residue`: a saved profile that names it shows the choice as
+        needing attention and the catalog sync replaces the recipe in place.
+        """
 
         normalized_selector = selector.strip().casefold()
         if normalized_selector.count("/") != 1:
@@ -3240,7 +3525,12 @@ class FleetProfileService:
             )
         )
         if not revisions:
-            raise FleetProfileConflict("recipe has no active catalog revision")
+            return retire_as_unknown(
+                "recipe",
+                selector,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "the recipe has no active catalog revision",
+            )
         # The newest revision this Controller can read; when none is readable
         # the newest one is kept so the choice can report what needs attention.
         for revision in revisions:
@@ -3254,13 +3544,23 @@ class FleetProfileService:
     @classmethod
     def _recipe_document(
         cls, session: Session, selector: str
-    ) -> tuple[CatalogDocument, CatalogDocumentRevision]:
-        document_id, revision_id = cls._recipe_identity(session, selector)
-        document = session.get(CatalogDocument, document_id)
-        revision = session.get(CatalogDocumentRevision, revision_id)
-        if document is None or revision is None:
-            raise FleetProfileConflict("recipe catalog changed during resolution")
-        return document, revision
+    ) -> tuple[CatalogDocument, CatalogDocumentRevision] | Residue:
+        for _ in range(2):
+            identity = cls._recipe_identity(session, selector)
+            if isinstance(identity, Residue):
+                return identity
+            document_id, revision_id = identity
+            document = session.get(CatalogDocument, document_id)
+            revision = session.get(CatalogDocumentRevision, revision_id)
+            if document is not None and revision is not None:
+                return document, revision
+            # The catalog changed between the two reads: resolve it again.
+        return retire_as_unknown(
+            "recipe",
+            selector,
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "the recipe catalog changed during resolution",
+        )
 
     @staticmethod
     def _recipe_selector(document: CatalogDocument) -> str:
@@ -3268,10 +3568,22 @@ class FleetProfileService:
 
     def _resolve_choice(
         self, session: Session, choice: FleetProfileAssignmentInput
-    ) -> tuple[CatalogDocument, CatalogDocumentRevision, Mapping[str, object] | None]:
-        """Resolve one choice once for both presentation and execution."""
+    ) -> (
+        tuple[CatalogDocument, CatalogDocumentRevision, Mapping[str, object] | None]
+        | Residue
+    ):
+        """Resolve one choice once for both presentation and execution.
 
-        document, revision = self._recipe_document(session, choice.recipe_selector)
+        The cache is evidence about what is already prepared, never a gate: when
+        the resolver fails, answers with an invalid contract, or answers for a
+        revision other than the one selected, the choice resolves without cache
+        evidence (shown as unknown) and is prepared when it is loaded.
+        """
+
+        resolved = self._recipe_document(session, choice.recipe_selector)
+        if isinstance(resolved, Residue):
+            return resolved
+        document, revision = resolved
         cache: Mapping[str, object] | None = None
         if self._cache_resolver is not None:
             try:
@@ -3281,13 +3593,21 @@ class FleetProfileService:
                     exact_revision_id=revision.id,
                 )
             except (OSError, RuntimeError, TypeError, ValueError) as error:
-                raise FleetProfileConflict(
-                    "latest cached profile resolution failed"
-                ) from error
-            if not isinstance(candidate, Mapping):
-                raise FleetProfileConflict(
-                    "latest cached profile resolution returned an invalid contract"
+                retire_as_unknown(
+                    "profile-cache-resolution",
+                    document.id,
+                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                    f"{type(error).__name__}: {error}",
                 )
+                return document, revision, None
+            if not isinstance(candidate, Mapping):
+                retire_as_unknown(
+                    "profile-cache-resolution",
+                    document.id,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    "the cache resolver returned an invalid contract",
+                )
+                return document, revision, None
             cache = candidate
             recipe_part = candidate.get("recipe")
             chosen_id = (
@@ -3297,22 +3617,17 @@ class FleetProfileService:
             )
             # The resolver is asked for the current head revision, so a
             # different revision back is a resolution defect, not an older
-            # cached substitute.  Keep that fail-closed rather than silently
-            # binding the profile to bytes the operator did not select.
+            # cached substitute.  Its evidence is not used (the profile is never
+            # bound to bytes the operator did not select) and the choice
+            # resolves without cache evidence.
             if isinstance(chosen_id, str) and chosen_id != revision.id:
-                chosen = session.get(CatalogDocumentRevision, chosen_id)
-                if (
-                    chosen is None
-                    or chosen.kind != "recipe"
-                    or chosen.state != "active"
-                    or chosen.document_id != document.id
-                ):
-                    raise FleetProfileConflict(
-                        "cache resolver returned an incompatible recipe revision"
-                    )
-                raise FleetProfileConflict(
-                    "cache resolver replaced the selected recipe revision"
+                retire_as_unknown(
+                    "profile-cache-resolution",
+                    document.id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the cache resolver answered for another recipe revision",
                 )
+                return document, revision, None
         return document, revision, cache
 
     @staticmethod
@@ -3328,15 +3643,53 @@ class FleetProfileService:
         return value[:63].rstrip("-_.") or "assignment"
 
     @staticmethod
+    def _unreadable_choice_count(row: FleetProfile) -> int:
+        """How many saved choices of a profile cannot be read (and are left out)."""
+
+        raw = row.assignments
+        readable = len(FleetProfileService._choices(row))
+        return max(0, len(raw) - readable) if isinstance(raw, list) else 1
+
+    @staticmethod
     def _choices(row: FleetProfile) -> tuple[FleetProfileAssignmentInput, ...]:
-        try:
+        """The saved choices of a profile; an unreadable choice is retired.
+
+        The profile is read as a whole first.  When that fails the choices are read
+        one by one: a damaged choice is skipped (and logged), so one broken
+        element never makes the rest of the draft unreadable.
+        """
+
+        def read_all() -> tuple[FleetProfileAssignmentInput, ...]:
             return tuple(
                 _STORED_ASSIGNMENTS.validate_json(canonical_message(row.assignments))
             )
-        except (TypeError, ValueError, ValidationError) as error:
-            raise FleetProfileConflict(
-                "persisted Fleet profile choices are invalid"
-            ) from error
+
+        def read_each() -> tuple[FleetProfileAssignmentInput, ...] | None:
+            raw = row.assignments
+            if not isinstance(raw, list):
+                return None
+            readable: list[FleetProfileAssignmentInput] = []
+            for index, item in enumerate(raw):
+                try:
+                    readable.extend(
+                        _STORED_ASSIGNMENTS.validate_json(canonical_message([item]))
+                    )
+                except (TypeError, ValueError):
+                    retire_as_unknown(
+                        "profile-choice",
+                        f"{row.id}#{index}",
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        "a saved choice does not parse",
+                    )
+            return tuple(readable)
+
+        value = read_or_rebuild(
+            kind="profile-choices",
+            subject=str(row.id),
+            read=read_all,
+            rebuild=read_each,
+        )
+        return () if isinstance(value, Residue) else value
 
     def _validate_draft_review_identity(
         self,
@@ -3359,14 +3712,12 @@ class FleetProfileService:
                 "Profile assignment set changed during admission; review again"
             )
         for choice in choices:
-            document_id, revision_id = self._recipe_identity(
-                session, choice.recipe_selector
-            )
+            identity = self._recipe_identity(session, choice.recipe_selector)
             assignment = assignment_by_id[_choice_id(choice)]
-            if (
-                assignment.recipe_id != document_id
-                or assignment.recipe_revision_id != revision_id
-            ):
+            if isinstance(identity, Residue) or (
+                assignment.recipe_id,
+                assignment.recipe_revision_id,
+            ) != tuple(identity):
                 raise FleetProfileStalePlanConflict(
                     "Profile recipe head changed during admission; review again"
                 )
@@ -3384,7 +3735,13 @@ class FleetProfileService:
 
         result: list[FleetProfileAssignment] = []
         for choice in self._choices(row):
-            document, revision, _cache = self._resolve_choice(session, choice)
+            resolved = self._resolve_choice(session, choice)
+            if isinstance(resolved, Residue):
+                # The recipe resolves to no active revision: it is not part of the
+                # resolved set, and the preview names it as a reason that waits for
+                # the catalog sync (it never loads a profile without it silently).
+                continue
+            document, revision, _cache = resolved
             topology = recipe_topology(revision.document)
             option_choices, _notes = _effective_option_choices(
                 revision.document, choice.option_choices
@@ -3518,16 +3875,31 @@ class FleetProfileService:
 
     @staticmethod
     def _definition(row: FleetProfile) -> FleetProfileDefinition:
-        return read_stored_model(
-            FleetProfileDefinition,
-            canonical_message(
-                {
-                    name: getattr(row, name)
-                    for name in FleetProfileDefinition.model_fields
-                }
-            ),
-            from_json=True,
+        """The saved authoring intent; damaged choices are retired, never refused."""
+
+        document = {
+            name: getattr(row, name) for name in FleetProfileDefinition.model_fields
+        }
+
+        def read(value: Mapping[str, object] = document) -> FleetProfileDefinition:
+            return read_stored_model(
+                FleetProfileDefinition, canonical_message(value), from_json=True
+            )
+
+        def rebuild() -> FleetProfileDefinition:
+            retained = [
+                json.loads(canonical_message(choice))
+                for choice in FleetProfileService._choices(row)
+            ]
+            return read({**document, "assignments": retained})
+
+        value = read_or_rebuild(
+            kind="profile-definition",
+            subject=str(row.id),
+            read=_without_values(read),
+            rebuild=_without_values(rebuild),
         )
+        return FleetProfileDefinition() if isinstance(value, Residue) else value
 
     def definition_number(self, number: int) -> FleetProfileDefinitionView:
         """Read authoring intent without consulting catalog, cache, or runtime."""
@@ -3720,17 +4092,25 @@ class FleetProfileService:
         application_state = _OPERATION_STATE_ADAPTER.validate_python(
             application.state, strict=True
         )
+        issue_detail: str | None = None
         try:
             intended = self._intended_profile(application, session=session)
         except (FleetProfileConflict, ValidationError) as error:
+            cause = error.__cause__
+            issue_detail = stored_document_detail(error)
+            if issue_detail is None and isinstance(cause, Exception):
+                issue_detail = stored_document_detail(cause)
+            intended = None
+        if isinstance(intended, Residue) or intended is None:
             # Broken historical plan or progress blocks execution, but it
             # should not hide the rest of this read-only endpoint projection.
             # The exact reviewed assignments remain unknown; never reconstruct
             # them from today's mutable saved profile.
-            cause = error.__cause__
-            detail = stored_document_detail(error)
-            if detail is None and isinstance(cause, Exception):
-                detail = stored_document_detail(cause)
+            detail = (
+                _residue_detail(intended)
+                if isinstance(intended, Residue)
+                else issue_detail
+            )
             return FleetProfileEndpointIntent(
                 number=number,
                 profile_id=profile.id,
@@ -3826,30 +4206,40 @@ class FleetProfileService:
                 if recovery is None or recovery.profile_id != profile_id:
                     raise FleetProfileConflict("Recovery review owner is unavailable")
                 reviewed = self._reviewed_profile_plan(recovery, session=session)
-                recovery_images = {
-                    item.assignment_id: item.runtime_image
-                    for item in reviewed.preparation_decisions
-                }
+                # An accepted plan that cannot be read names no exact images to
+                # hold the review to: it is planned against what is observed now.
+                recovery_images = (
+                    {}
+                    if isinstance(reviewed, Residue)
+                    else {
+                        item.assignment_id: item.runtime_image
+                        for item in reviewed.preparation_decisions
+                    }
+                )
             row = session.get(FleetProfile, profile_id)
             resolved_assignments: tuple[FleetProfileAssignment, ...]
             if accepted_intent is not None:
-                if (
-                    row is None
-                    or execution_assignments is None
-                    or accepted_profile_revision is None
-                    or (
-                        profile_digest is not None
-                        and profile_digest != accepted_intent.profile_digest
-                    )
-                ):
-                    raise FleetProfileConflict(
-                        "Accepted profile snapshot is incomplete"
-                    )
-                resolved_assignments = execution_assignments
-                resolved_name = profile_name or row.name
+                # The accepted intent is the evidence of its own snapshot: whatever
+                # the caller could not name (the assignments, the revision, the
+                # name of a profile that was since deleted) is read from it, and
+                # its own digest is the identity (never the caller's).
+                resolved_assignments = (
+                    execution_assignments
+                    if execution_assignments is not None
+                    else tuple(accepted_intent.assignments)
+                )
+                resolved_name = profile_name or (
+                    row.name if row is not None else "Direct placement"
+                )
                 resolved_digest = accepted_intent.profile_digest
                 installation_policy = accepted_intent.installation_policy
-                resolved_revision = accepted_profile_revision
+                resolved_revision = (
+                    accepted_profile_revision
+                    if accepted_profile_revision is not None
+                    else row.revision
+                    if row is not None
+                    else None
+                )
                 resolved_definition = accepted_profile_definition
             elif row is None:
                 if execution_assignments is None:
@@ -3880,6 +4270,36 @@ class FleetProfileService:
             assignment_preparations: list[FleetProfileAssignmentPreparation] = []
             assignment_assessments: list[FleetProfileAssignmentAssessment] = []
             reasons: list[FleetProfileReason] = []
+            if accepted_intent is None and row is not None:
+                unreadable = self._unreadable_choice_count(row)
+                if unreadable:
+                    # The readable choices are planned; the reviewer sees what
+                    # was left out (and the effects that follow from it).
+                    reasons.append(
+                        FleetProfileReason(
+                            code="profile.choices_unreadable",
+                            detail=(
+                                f"{unreadable} saved choice(s) cannot be read and "
+                                "are left out of this plan; save the profile again."
+                            ),
+                            severity="warning",
+                        )
+                    )
+                resolved_ids = {item.id for item in resolved_assignments}
+                for choice in self._choices(row):
+                    if _choice_id(choice) in resolved_ids:
+                        continue
+                    reasons.append(
+                        FleetProfileReason(
+                            code="profile.recipe_unavailable",
+                            detail=(
+                                f"Recipe {choice.recipe_selector} has no active "
+                                "catalog revision; the plan waits for the catalog "
+                                "sync to replace it."
+                            ),
+                            severity="error",
+                        )
+                    )
             roster = tuple(
                 session.scalars(
                     select(AgentNode)
@@ -4018,7 +4438,9 @@ class FleetProfileService:
                         )
                         if not isinstance(assessment, RunSwitchAssessment):
                             raise TypeError(
-                                "The planner returned an invalid assessment."
+                                assessment.note
+                                if isinstance(assessment, Residue)
+                                else "The planner returned an invalid assessment."
                             )
                         observed_fit_nodes = tuple(
                             sorted(
@@ -4153,8 +4575,18 @@ class FleetProfileService:
             if adapter_switch_needed:
                 if not changed_nodes or not changed_nodes <= target_nodes:
                     if not any(reason.severity == "error" for reason in reasons):
-                        raise FleetProfileConflict(
-                            "Profile switch effect scope cannot be represented exactly"
+                        # The effect scope observed now cannot be pinned to the
+                        # roster (it changed while planning): the plan is not
+                        # admissible yet, and it is planned again.
+                        reasons.append(
+                            FleetProfileReason(
+                                code="profile.switch_scope_unresolved",
+                                detail=(
+                                    "The Spark scope of the profile switch changed "
+                                    "while it was planned; it is planned again."
+                                ),
+                                severity="error",
+                            )
                         )
                 else:
                     switch_steps.append(
@@ -4409,11 +4841,10 @@ class FleetProfileService:
             ):
                 if pending.id == excluded_application_id:
                     continue
-                try:
-                    if _persisted_profile_progress(pending).admission_pending:
-                        continue
-                    _pending_plan = _persisted_profile_plan(pending)
-                except FleetProfileConflict:
+                if _persisted_profile_progress(pending).admission_pending:
+                    continue
+                _pending_plan = _persisted_profile_plan(pending)
+                if isinstance(_pending_plan, Residue):
                     # The step list is unreadable, so the declared frozen
                     # scope is the only durable authority left for which
                     # nodes this order can still affect.  Never infer a
@@ -4638,16 +5069,16 @@ class FleetProfileService:
         ):
             if pending.id == excluded_application_id:
                 continue
-            try:
-                # A parked receipt is not accepted selection authority, but a
-                # fresh reviewed load still needs to show that accepting it
-                # will retire the older overlapping receipt.
-                plan = _persisted_profile_plan(pending)
-                members = {node_id for step in plan.steps for node_id in step.node_ids}
-            except FleetProfileConflict:
+            # A parked receipt is not accepted selection authority, but a
+            # fresh reviewed load still needs to show that accepting it
+            # will retire the older overlapping receipt.
+            plan = _persisted_profile_plan(pending)
+            if isinstance(plan, Residue):
                 # A damaged order retains only its readable frozen authority.
                 # Preview's existing blocker handles an unreadable scope.
                 members = set(_persisted_profile_scope(pending) or ())
+            else:
+                members = {node_id for step in plan.steps for node_id in step.node_ids}
             if members & changed_nodes:
                 effects.append(
                     FleetProfilePendingEffect(
@@ -4668,7 +5099,7 @@ class FleetProfileService:
         actor: str,
         retry_of_application_id: str | None = None,
     ) -> FleetProfileApplicationView:
-        progress = _canonical_progress(row.progress)
+        progress = _persisted_profile_progress(row)
         intended = self._intended_profile(row, session=session)
         if (
             row.profile_id != profile_id
@@ -4676,6 +5107,7 @@ class FleetProfileService:
             or progress.retry_of_application_id != retry_of_application_id
             or (
                 reviewed_digest is not None
+                and not isinstance(intended, Residue)
                 and intended.reviewed_plan_digest != reviewed_digest
             )
         ):
@@ -5019,10 +5451,9 @@ class FleetProfileService:
                     .order_by(FleetProfileApplication.id)
                     .with_for_update(nowait=True)
                 ):
-                    try:
-                        prior_progress = _persisted_profile_progress(prior)
-                        prior_plan = _persisted_profile_plan(prior)
-                    except FleetProfileConflict:
+                    prior_progress = _persisted_profile_progress(prior)
+                    prior_plan = _persisted_profile_plan(prior)
+                    if isinstance(prior_plan, Residue):
                         continue
                     prior_scope = {
                         node_id
@@ -5238,10 +5669,8 @@ class FleetProfileService:
         now = _aware(self._clock())
         reviewed_plan_digest = preview.plan_digest
         application_id = pending_application_id or str(uuid.uuid4())
-        if preview.steps and self._switch_adapter is None:
-            raise FleetProfileConflict(
-                "Fleet profile Run/Switch authority is unavailable"
-            )
+        # (An executor that is not bound yet is not a reason to refuse: the load is
+        # accepted and queued, and its worker issues the steps once it is bound.)
         # The preview identifies the work; the request identifies its execution.
         # The same reconciliation can be needed again after a failure or drift.
         preview = preview.model_copy(
@@ -5492,14 +5921,10 @@ class FleetProfileService:
                 parent = retry_parent
                 if parent is None:
                     raise KeyError(retry_of_application_id)
-                prior = retry_parent_progress or _canonical_progress(parent.progress)
+                prior = retry_parent_progress or _persisted_profile_progress(parent)
                 if parent.state not in {"failed", "waiting-for-operator"}:
                     raise FleetProfileConflict(
                         "Only failed or waiting applications can be retried"
-                    )
-                if parent.profile_digest != intended.profile_digest:
-                    raise FleetProfileConflict(
-                        "Application intent is obsolete because the saved profile changed"
                     )
                 profile_filter = (
                     FleetProfileApplication.profile_id.is_(None)
@@ -5517,8 +5942,11 @@ class FleetProfileService:
                         other_progress = _canonical_progress(other.progress)
                     except (TypeError, ValueError):
                         # Unreadable history never blocks a new application.
-                        _LOGGER.warning(
-                            "skipping unreadable profile application %s", other.id
+                        retire_as_unknown(
+                            "profile-progress",
+                            str(other.id),
+                            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                            "skipped while checking for a superseding application",
                         )
                         continue
                     if (
@@ -5531,14 +5959,21 @@ class FleetProfileService:
                             "Application has been superseded by another application"
                         )
                 if prior.intended_profile is None:
-                    raise FleetProfileConflict(
-                        "Persisted application intent is unavailable"
+                    return self._decline_retry(
+                        parent,
+                        "profile.retry_intent_unavailable",
+                        "the receipt carries no accepted intent to recover",
                     )
                 if self._superseding_intent(session, parent, prior):
                     raise FleetProfileConflict(
                         "Application has been superseded by another workload intent"
                     )
-                intended = self._intended_profile(parent, session=session)
+                parent_intent = self._intended_profile(parent, session=session)
+                if isinstance(parent_intent, Residue):
+                    return self._decline_retry(
+                        parent, "profile.retry_intent_unavailable", parent_intent.note
+                    )
+                intended = parent_intent
                 reviewed_application = session.get(
                     FleetProfileApplication, intended.reviewed_application_id
                 )
@@ -5546,28 +5981,24 @@ class FleetProfileService:
                     raise FleetProfileConflict(
                         "Persisted application review source is unavailable"
                     )
-                _validate_remaining_effects(
-                    _persisted_profile_plan(reviewed_application).effects,
-                    preview.effects,
-                )
+                reviewed_plan = _persisted_profile_plan(reviewed_application)
+                if isinstance(reviewed_plan, Residue):
+                    return self._decline_retry(
+                        parent,
+                        "profile.retry_review_unavailable",
+                        "the reviewed plan of the receipt cannot be read",
+                    )
+                _validate_remaining_effects(reviewed_plan.effects, preview.effects)
                 attempt = prior.attempt + 1
-                _require_recovery_preparations(
-                    _persisted_profile_plan(reviewed_application), preview
-                )
+                _require_recovery_preparations(reviewed_plan, preview)
                 accepted_images = {
                     item.assignment_id: item.runtime_image
-                    for item in _persisted_profile_plan(
-                        reviewed_application
-                    ).preparation_decisions
+                    for item in reviewed_plan.preparation_decisions
                 }
                 if automatic_cache_recovery:
+                    # A receipt that recorded no workload intent takes a fresh one
+                    # from the node fence below, like any other admission.
                     recovery_ordinal = prior.workload_intent_ordinal
-                    if recovery_ordinal is None:
-                        raise FleetProfileConflict(
-                            "Automatic recovery has no bound workload intent"
-                        )
-            elif automatic_cache_recovery:
-                raise FleetProfileConflict("Automatic recovery has no parent receipt")
             control = self._control_effects(
                 session,
                 frozen_assignments,
@@ -5647,7 +6078,21 @@ class FleetProfileService:
             try:
                 lock_profile_build_dependencies(session, preview)
             except BuildConsumerError as error:
-                raise FleetProfileConflict(f"{error.code}: {error}") from error
+                if error.retryable:
+                    # The build is being cancelled or is busy: admission waits
+                    # and is retried by its owner (it is parked, not refused).
+                    raise FleetProfileAdmissionEffectBusy(
+                        f"{error.code}: {error}"
+                    ) from error
+                # The reviewed build record is gone or unreadable: there is no
+                # running build to protect, and the exact image identity is held
+                # by the plan itself and verified again when its child starts.
+                retire_as_unknown(
+                    "profile-build-dependency",
+                    application_id,
+                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                    f"{error.code}: {error}",
+                )
             workload_intent_ordinal = (
                 recovery_ordinal
                 if recovery_ordinal is not None
@@ -5667,11 +6112,11 @@ class FleetProfileService:
             if workload_intent_ordinal is not None:
                 for node in affected_nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal
-                if self._switch_adapter is None:
-                    raise FleetProfileConflict(
-                        "Profile switch cancellation authority is unavailable"
-                    )
-                if pending_ordinal is None:
+                # (With no executor bound yet the older workloads' cancellation is
+                # requested by the load's own worker when its executor is bound:
+                # it requests it again for the same node fence and intent before
+                # it completes.)
+                if pending_ordinal is None and self._switch_adapter is not None:
                     self._switch_adapter.request_superseded_workload_cancellation_in_session(
                         session,
                         tuple(sorted(fenced_nodes)),
@@ -5688,8 +6133,21 @@ class FleetProfileService:
                     .order_by(FleetProfileApplication.id)
                     .with_for_update(nowait=True)
                 ):
+                    prior_plan = _persisted_profile_plan(prior_application)
+                    if isinstance(prior_plan, Residue):
+                        # Its plan cannot be read, so what it owns is unknown: it is
+                        # retired by the newer authority (its agent effects were
+                        # independently fenced above, and keep their own receipts).
+                        self._lifecycle.cancelled(
+                            prior_application,
+                            "Profile order retired by a later scoped intent; its "
+                            "stored plan could not be read, so its effect is unknown",
+                            now,
+                            effect=_LifecycleEffect.UNKNOWN,
+                            session=session,
+                        )
+                        continue
                     try:
-                        prior_plan = _persisted_profile_plan(prior_application)
                         prior_scope = {
                             node_id
                             for step in prior_plan.steps
@@ -6026,6 +6484,8 @@ class FleetProfileService:
             return False
         try:
             plan = _persisted_profile_plan(row)
+            if isinstance(plan, Residue):
+                return False
             effect_nodes = {node_id for step in plan.steps for node_id in step.node_ids}
             if _newer_profile_intent_overlaps(
                 session, _application_order_key(session, row), effect_nodes
@@ -6101,9 +6561,8 @@ class FleetProfileService:
                 )
                 shared = False
                 for other in others:
-                    try:
-                        other_plan = _persisted_profile_plan(other)
-                    except FleetProfileConflict:
+                    other_plan = _persisted_profile_plan(other)
+                    if isinstance(other_plan, Residue):
                         continue
                     if any(
                         item.recipe_revision_id == revision_id
@@ -6270,6 +6729,54 @@ class FleetProfileService:
                 due.isoformat(),
             )
 
+    def _decline_retry(
+        self,
+        parent: FleetProfileApplication,
+        code: str,
+        detail: str,
+        blockers: Sequence[OperationBlocker] = (),
+    ) -> FleetProfileApplicationView:
+        """A recovery that cannot be started now is an unknown, never a refusal.
+
+        The receipt keeps its accepted intent.  While it is still the current
+        recoverable intent it is parked: its reason and next attempt are visible
+        and the Controller looks again with bounded backoff.  Once it is not (a
+        newer intent or another fleet owns the scope) it is left as it ended, with
+        the reason noted; the selected profile's own reconciliation, or a new load,
+        issues the replacement.  The caller gets the receipt either way.
+        """
+
+        retire_as_unknown(
+            "profile-retry", str(parent.id), BookkeepingReason.EVIDENCE_MISMATCH, detail
+        )
+        session = object_session(parent)
+        if session is not None and self._retry_eligible(session, parent):
+            self._park_for_retry(
+                parent,
+                _persisted_profile_progress(parent),
+                list(blockers) or [make_blocker(code, detail)],
+            )
+        else:
+            prior = (parent.status_reason or "").split(" | retry not started")[0]
+            parent.status_reason = f"{prior} | retry not started: {detail}"[:512]
+            parent.updated_at = _aware(self._clock())
+        return self._application_view(parent)
+
+    def _decline_retry_application(
+        self,
+        application_id: str,
+        code: str,
+        detail: str,
+        blockers: Sequence[OperationBlocker] = (),
+    ) -> FleetProfileApplicationView:
+        with self._sessions.begin() as session:
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if row is None:
+                raise KeyError(application_id)
+            return self._decline_retry(row, code, detail, blockers)
+
     def retry(
         self,
         application_id: str,
@@ -6278,7 +6785,14 @@ class FleetProfileService:
         actor: str,
         automatic_cache_recovery: bool = False,
     ) -> FleetProfileApplicationView:
-        """Persist a new reconciliation attempt, retaining the original receipt."""
+        """Persist a new reconciliation attempt, retaining the original receipt.
+
+        What cannot be reconciled now (a child the executor cannot show, a scope or
+        assignment set that changed, a plan that is not admissible yet) leaves the
+        receipt parked or noted and returns it; only a request for something that
+        cannot be retried at all is refused.
+        """
+        decline: tuple[str, str] | None = None
         with self._sessions() as session:
             self._authorize(session, actor)
             replay = session.scalar(
@@ -6287,7 +6801,7 @@ class FleetProfileService:
                 )
             )
             if replay is not None:
-                progress = _canonical_progress(replay.progress)
+                progress = _persisted_profile_progress(replay)
                 if (
                     progress.retry_of_application_id != application_id
                     or replay.actor != actor
@@ -6306,55 +6820,69 @@ class FleetProfileService:
             parent = session.get(FleetProfileApplication, application_id)
             if parent is None:
                 raise KeyError(application_id)
-            progress = _canonical_progress(parent.progress)
+            progress = _persisted_profile_progress(parent)
             if parent.state not in {"failed", "waiting-for-operator"}:
                 raise FleetProfileConflict(
                     "Only failed or waiting applications can be retried"
                 )
-            if progress.intended_profile is None:
-                raise FleetProfileConflict(
-                    "Persisted application intent is unavailable"
-                )
-            adapter = self._switch_adapter
-            if parent.current_operation_id is not None:
-                if adapter is None:
-                    raise FleetProfileConflict(
-                        "Current child operation authority is unavailable"
-                    )
-                try:
-                    child = adapter.get(parent.current_operation_id, session=session)
-                except (KeyError, RuntimeError, ValueError) as error:
-                    raise FleetProfileConflict(
-                        "Current child operation state must be reconciled before retry"
-                    ) from error
-                if child.state in _CHILD_PENDING_STATES:
-                    # End this read before the resume takes its row lock.
-                    parent_id = parent.id
-                    session.close()
-                    resumed = self._resume_live_child(parent_id)
-                    if resumed is not None:
-                        return resumed
-                if child.state not in {
-                    "succeeded",
-                    "failed",
-                    "cancelled",
-                    "expired",
-                    "waiting-for-operator",
-                }:
-                    raise FleetProfileConflict(
-                        "Current child operation is still active"
-                    )
             operation_kind = progress.operation_kind or "fleet-profile.apply"
             if operation_kind != "fleet-profile.apply":
                 raise FleetProfileConflict(
                     "Only current profile loads can be recovered"
                 )
-            persisted_plan = self._reviewed_profile_plan(parent, session=session)
+            if progress.intended_profile is None:
+                decline = (
+                    "profile.retry_intent_unavailable",
+                    "the receipt carries no accepted intent to recover",
+                )
+            adapter = self._switch_adapter
+            if decline is None and parent.current_operation_id is not None:
+                if adapter is None:
+                    decline = (
+                        "profile.retry_executor_unavailable",
+                        "the Run/Switch executor is not bound yet",
+                    )
+                else:
+                    try:
+                        child = adapter.get(
+                            parent.current_operation_id, session=session
+                        )
+                    except (KeyError, RuntimeError, ValueError):
+                        # The child's record is gone: the step is issued again under
+                        # its deterministic identity, and its owner reconciles what
+                        # it already did (it is adopted, not repeated).
+                        child = None
+                    if child is not None and child.state in _CHILD_PENDING_STATES:
+                        # End this read before the resume takes its row lock.
+                        parent_id = parent.id
+                        session.close()
+                        resumed = self._resume_live_child(parent_id)
+                        if resumed is not None:
+                            return resumed
+            persisted_plan = (
+                None
+                if decline is not None
+                else self._reviewed_profile_plan(parent, session=session)
+            )
+            if isinstance(persisted_plan, Residue):
+                decline = ("profile.retry_review_unavailable", persisted_plan.note)
             intended = progress.intended_profile
             cache_loss_recovery = (
                 adapter is not None
+                and decline is None
                 and adapter.recoverable_cache_loss(parent.id, session=session)
             )
+        if (
+            decline is not None
+            or persisted_plan is None
+            or isinstance(persisted_plan, Residue)
+            or intended is None
+        ):
+            code, detail = decline or (
+                "profile.retry_intent_unavailable",
+                "the receipt carries no accepted intent to recover",
+            )
+            return self._decline_retry_application(application_id, code, detail)
         preview = self.preview(
             persisted_plan.profile_id,
             execution_assignments=tuple(intended.assignments),
@@ -6366,32 +6894,25 @@ class FleetProfileService:
             allow_pending_cache_rebuild=cache_loss_recovery,
             profile_application_id=application_id,
         )
-        if preview.profile_digest != intended.profile_digest:
-            raise FleetProfileConflict(
-                "Application intent differs from its accepted profile snapshot"
-            )
         if not preview.allowed:
-            if automatic_cache_recovery and _profile_preview_is_waitable(preview):
-                with self._sessions.begin() as session:
-                    row = session.get(
-                        FleetProfileApplication, application_id, with_for_update=True
-                    )
-                    if row is not None and self._retry_eligible(session, row):
-                        self._park_for_retry(
-                            row,
-                            _persisted_profile_progress(row),
-                            _preview_blockers(preview)
-                            + self._request_preparations(preview, actor=actor),
-                        )
-                        return self._application_view(row)
-            raise FleetProfileConflict(
-                "Current Fleet state blocks application recovery"
+            if not _profile_preview_is_waitable(preview):
+                raise FleetProfileConflict(
+                    "Current Fleet state blocks application recovery"
+                )
+            blockers = _preview_blockers(preview) + self._request_preparations(
+                preview, actor=actor
             )
-        if tuple(preview.scope.node_ids) != tuple(
-            progress.intended_profile.scope.node_ids
-        ):
-            raise FleetProfileConflict(
-                "Fleet scope changed during application recovery"
+            return self._decline_retry_application(
+                application_id,
+                "profile.recovery_waiting",
+                "current Fleet conditions do not admit the accepted plan yet",
+                blockers,
+            )
+        if tuple(preview.scope.node_ids) != tuple(intended.scope.node_ids):
+            return self._decline_retry_application(
+                application_id,
+                "profile.recovery_scope_changed",
+                "the fleet scope changed since the application was accepted",
             )
         expected_assignments = {
             assignment.id: (
@@ -6399,7 +6920,7 @@ class FleetProfileService:
                 assignment.desired_state,
                 tuple(node.node_id for node in assignment.nodes),
             )
-            for assignment in progress.intended_profile.assignments
+            for assignment in intended.assignments
         }
         observed_assignments = {
             assignment.assignment_id: (
@@ -6410,8 +6931,10 @@ class FleetProfileService:
             for assignment in preview.assignments
         }
         if observed_assignments != expected_assignments:
-            raise FleetProfileConflict(
-                "Profile assignment scope changed during application recovery"
+            return self._decline_retry_application(
+                application_id,
+                "profile.recovery_assignments_changed",
+                "the assignments changed since the application was accepted",
             )
         _require_recovery_preparations(persisted_plan, preview)
         return self._queue_application(
@@ -6565,9 +7088,12 @@ class FleetProfileService:
 
         try:
             typed_progress = _canonical_progress(row.progress)
-            plan = _persisted_profile_plan(row)
-            result = _persisted_profile_result(row)
         except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+            warn_unreadable_once("profile application", row.id)
+            return cls._unreadable_operation_item(row)
+        plan = _persisted_profile_plan(row)
+        result = _persisted_profile_result(row)
+        if isinstance(plan, Residue):
             warn_unreadable_once("profile application", row.id)
             return cls._unreadable_operation_item(row)
         cancellation = _application_cancellation_view(row, plan, typed_progress)
@@ -6586,10 +7112,12 @@ class FleetProfileService:
             )
         failure = None
         if state in {"failed", "waiting-for-operator"}:
-            if not row.status_reason or not row.status_reason.strip():
-                raise FleetProfileConflict(
-                    "Profile application failure reason is missing"
-                )
+            # A failed row that recorded no reason still shows what is known of it.
+            reason = (
+                row.status_reason
+                if row.status_reason and row.status_reason.strip()
+                else f"The profile application ended {state} without a recorded reason"
+            )
             failure = OperationFailureEvidence(
                 error_code="fleet_profile_application_failed",
                 summary=(
@@ -6597,7 +7125,7 @@ class FleetProfileService:
                     if state == "waiting-for-operator"
                     else "Profile application failed"
                 ),
-                detail=redact_text(row.status_reason),
+                detail=redact_text(reason),
                 retryable=retry_available,
                 uncertain=state == "waiting-for-operator",
             ).model_dump(mode="json")
@@ -6777,9 +7305,7 @@ class FleetProfileService:
             )
             if snapshot_number != profile_number:
                 raise KeyError(application_id)
-            snapshot_scope = _profile_application_effect_nodes(
-                _persisted_profile_plan(snapshot)
-            )
+            snapshot_scope = _application_effect_scope(snapshot)
 
         now = _aware(self._clock())
         cancellation: FleetProfileApplicationCancellationIntent | None = None
@@ -6802,7 +7328,7 @@ class FleetProfileService:
 
             progress = _persisted_profile_progress(row)
             plan = _persisted_profile_plan(row)
-            scope = _profile_application_effect_nodes(plan)
+            scope = _application_effect_scope(row)
             if scope != snapshot_scope:
                 raise FleetProfileConflict(
                     "Profile application scope changed during cancellation"
@@ -6857,10 +7383,9 @@ class FleetProfileService:
                         if scope
                         else ()
                     )
-                    if any(node.workload_intent_ordinal < ordinal for node in nodes):
-                        raise FleetProfileConflict(
-                            "Profile workload intent is no longer current"
-                        )
+                    # A node whose fence is not this application's is owned by a
+                    # newer (or an unrecorded) intent: it is left alone, and the
+                    # cancel completes for the nodes this application still owns.
                     cancellable_nodes = tuple(
                         node.node_id
                         for node in nodes
@@ -6923,7 +7448,8 @@ class FleetProfileService:
                 )
 
         if waiting_only:
-            self._cancel_owned_preparations(application_id, plan, actor=actor)
+            if not isinstance(plan, Residue):
+                self._cancel_owned_preparations(application_id, plan, actor=actor)
             return self.application(application_id)
         adapter = self._switch_adapter
         if adapter is not None and cancellation is not None:
@@ -6987,17 +7513,17 @@ class FleetProfileService:
             )
             if row is None:
                 return False
-            try:
-                plan = _persisted_profile_plan(row)
-                current = _persisted_profile_progress(row)
-            except FleetProfileConflict as error:
+            plan = _persisted_profile_plan(row)
+            current = _stored_progress(row)
+            if isinstance(current, Residue):
                 # A cancel always completes: evidence that cannot be read is an
                 # unknown effect, recorded as such (the document is retained
-                # untouched), not a reason to park the load for a person.
+                # untouched), not a reason to park the load for a person.  (An
+                # unreadable *plan* is not needed to drive the cancel.)
                 self._lifecycle.cancelled(
                     row,
                     "Profile application cancelled; its persisted effect evidence "
-                    f"could not be read, so its effect is unknown: {str(error)[:300]}",
+                    f"could not be read, so its effect is unknown: {current.note[:300]}",
                     now,
                     effect=_LifecycleEffect.UNKNOWN,
                     session=session,
@@ -7251,32 +7777,25 @@ class FleetProfileService:
                     or parked_observed
                     or recovery_deferred
                 )
-            try:
-                plan = _persisted_profile_plan(row)
-                progress = _persisted_profile_progress(row)
-            except FleetProfileConflict as error:
-                raw_cancellation = (
-                    row.progress.get("cancellation")
-                    if isinstance(row.progress, Mapping)
-                    else None
+            plan = _persisted_profile_plan(row)
+            stored = _stored_progress(row)
+            if isinstance(plan, Residue) or isinstance(stored, Residue):
+                # Damaged evidence is retired as unknown, never parked and never
+                # failed for a person: the load ends cancelled with its effect
+                # unknown (what it issued keeps its own lifecycle and receipts),
+                # and the selected profile's reconciliation issues a fresh one.
+                damaged = plan if isinstance(plan, Residue) else stored
+                assert isinstance(damaged, Residue)
+                self._lifecycle.cancelled(
+                    row,
+                    "Profile application retired; its persisted evidence could "
+                    f"not be read ({damaged.kind}), so its effect is unknown",
+                    now,
+                    effect=_LifecycleEffect.UNKNOWN,
+                    session=session,
                 )
-                if (
-                    isinstance(raw_cancellation, Mapping)
-                    and raw_cancellation.get("state") == "cancelling"
-                ):
-                    # A cancel always completes: evidence that cannot be read is
-                    # an unknown effect, recorded as such, not a reason to park.
-                    self._lifecycle.cancelled(
-                        row,
-                        "Profile application cancelled; its persisted effect "
-                        "evidence could not be read, so its effect is unknown",
-                        now,
-                        effect=_LifecycleEffect.UNKNOWN,
-                        session=session,
-                    )
-                else:
-                    self._lifecycle.fail(row, str(error), now, session=session)
                 return True
+            progress = stored
             if (
                 progress.cancellation is not None
                 and progress.cancellation.state == "cancelling"
@@ -7473,7 +7992,7 @@ class FleetProfileService:
             actor = row.actor
 
         try:
-            operation_id, synchronous, child = self._start_step(
+            started = self._start_step(
                 application_id,
                 step_index,
                 step,
@@ -7525,6 +8044,9 @@ class FleetProfileService:
                         )
                     failed.updated_at = _aware(self._clock())
             return True
+        if isinstance(started, Residue):
+            return self._step_unissued(application_id, started)
+        operation_id, synchronous, child = started
         with self._sessions.begin() as session:
             current = session.get(
                 FleetProfileApplication, application_id, with_for_update=True
@@ -7560,6 +8082,48 @@ class FleetProfileService:
             current.updated_at = _aware(self._clock())
         return True
 
+    def _step_unissued(self, application_id: str, residue: Residue) -> bool:
+        """A step could not be issued: wait for the evidence, or retire the load.
+
+        Evidence that is only *not there yet* (an executor not bound) leaves the
+        load where it is and is looked at again on the next pass.  Evidence that is
+        damaged or no longer matches retires the load as superseded with its effect
+        unknown (what it already issued keeps its own lifecycle), so the selected
+        profile's reconciliation can issue a fresh one.
+        """
+
+        if residue.reason is BookkeepingReason.EVIDENCE_UNAVAILABLE:
+            with self._sessions.begin() as session:
+                row = session.get(
+                    FleetProfileApplication, application_id, with_for_update=True
+                )
+                if row is not None and row.state in {
+                    _LifecycleState.QUEUED,
+                    _LifecycleState.RUNNING,
+                }:
+                    row.status_reason = (
+                        f"Waiting to issue the next step ({residue.note})"
+                    )[:512]
+                    row.updated_at = _aware(self._clock())
+            return False
+        with self._sessions.begin() as session:
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if row is not None and row.state in {
+                _LifecycleState.QUEUED,
+                _LifecycleState.RUNNING,
+            }:
+                self._lifecycle.cancelled(
+                    row,
+                    "Profile order retired: its stored evidence could not be "
+                    f"read ({residue.note}); its effect is unknown",
+                    _aware(self._clock()),
+                    effect=_LifecycleEffect.UNKNOWN,
+                    session=session,
+                )
+        return True
+
     def _replan_blocked_application(
         self, application_id: str, blocked: FleetProfilePreview, actor: str
     ) -> FleetProfilePreview | None:
@@ -7576,6 +8140,14 @@ class FleetProfileService:
                 if row is None:
                     return None
                 intended = self._intended_profile(row, session=session)
+            if isinstance(intended, Residue):
+                self._finish_pending_admission(
+                    application_id,
+                    state=_CANCELLED_OPERATION,
+                    reason="Profile admission retired: its accepted intent could "
+                    "not be read; load the profile again",
+                )
+                return None
             fresh = self.preview(
                 blocked.profile_id,
                 execution_assignments=tuple(intended.assignments),
@@ -7673,6 +8245,8 @@ class FleetProfileService:
                 ):
                     return False
                 intended = self._intended_profile(row, session=session)
+                if isinstance(intended, Residue):
+                    return False
                 profile = session.get(FleetProfile, row.profile_id)
                 if (
                     profile is None
@@ -7708,6 +8282,8 @@ class FleetProfileService:
                     update={"assignments": sorted(newest, key=lambda item: item.id)}
                 )
                 plan = _persisted_profile_plan(row)
+                if isinstance(plan, Residue):
+                    return False
                 fresh = self.preview(
                     row.profile_id,
                     execution_assignments=tuple(followed.assignments),
@@ -7835,10 +8411,9 @@ class FleetProfileService:
                 .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
             )
             for row in rows:
-                try:
-                    progress = _persisted_profile_progress(row)
-                    plan = _persisted_profile_plan(row)
-                except FleetProfileConflict:
+                progress = _persisted_profile_progress(row)
+                plan = _persisted_profile_plan(row)
+                if isinstance(plan, Residue):
                     continue
                 if not _owns_pending_admission(row, progress):
                     continue
@@ -7871,6 +8446,14 @@ class FleetProfileService:
                 if row is None:
                     return False
                 intended = self._intended_profile(row, session=session)
+            if isinstance(intended, Residue):
+                self._finish_pending_admission(
+                    application_id,
+                    state=_CANCELLED_OPERATION,
+                    reason="Profile admission retired: its accepted intent could "
+                    "not be read; load the profile again",
+                )
+                return True
             plan = plan.model_copy(
                 update={"plan_digest": intended.reviewed_plan_digest}
             )
@@ -8030,7 +8613,7 @@ class FleetProfileService:
         self,
         session: Session,
         row: FleetProfileApplication,
-        plan: FleetProfilePreview,
+        plan: FleetProfilePreview | Residue,
         progress: FleetProfileApplicationProgress,
         now: datetime,
     ) -> bool:
@@ -8066,10 +8649,8 @@ class FleetProfileService:
 
         adapter = self._switch_adapter
         now = _aware(self._clock())
-        try:
-            plan = _persisted_profile_plan(row)
-            progress = _persisted_profile_progress(row)
-        except FleetProfileConflict:
+        progress = _stored_progress(row)
+        if isinstance(progress, Residue):
             # Unreadable evidence is an unknown, not a verdict: it is observed
             # again, and the cancel's budget ends it.
             return False
@@ -8140,9 +8721,8 @@ class FleetProfileService:
             row.updated_at = now
             return False
 
-        scope = tuple(
-            sorted({node_id for step in plan.steps for node_id in step.node_ids})
-        )
+        # (An unreadable plan falls back to the scope the row declared.)
+        scope = _application_effect_scope(row)
         if scope and intent.workload_intent_ordinal is not None:
             try:
                 effects = AgentJobService.assess_superseded_agent_effects_in_session(
@@ -8415,6 +8995,11 @@ class FleetProfileService:
             ):
                 return True
         plan = _persisted_profile_plan(row)
+        if isinstance(plan, Residue):
+            # Without its reviewed plan the order cannot show what it still owns:
+            # it is retired as superseded (its issued effects keep their own
+            # cancellation receipts).
+            return True
         scope = {node_id for step in plan.steps for node_id in step.node_ids}
         if not scope:
             return False
@@ -8435,7 +9020,14 @@ class FleetProfileService:
         step: Mapping[str, object],
         *,
         actor: str,
-    ) -> tuple[str | None, bool, FleetProfileChildOperation | None]:
+    ) -> tuple[str | None, bool, FleetProfileChildOperation | None] | Residue:
+        """Issue one plan step.  A :class:`Residue` means it cannot be issued now.
+
+        The caller leaves the step where it is and looks again on its next pass:
+        an executor that is not bound yet, or a child the executor cannot show,
+        is unknown, not a failure of the load.
+        """
+
         kind = step.get("kind")
         request_id = str(
             uuid.uuid5(
@@ -8444,14 +9036,19 @@ class FleetProfileService:
         )
         if kind == "switch":
             if self._switch_adapter is None:
-                raise FleetProfileConflict(
-                    "Fleet profile switch adapter is unavailable"
+                return retire_as_unknown(
+                    "profile-step",
+                    application_id,
+                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                    "the Run/Switch executor is not bound yet",
                 )
             execution_scope = tuple(
                 read_stored_model(FleetProfilePlanStep, step).node_ids
             )
             if not execution_scope:
-                raise FleetProfileConflict("Profile switch effect scope is empty")
+                # A switch that affects no Spark has no effect to issue: the step
+                # is complete (a synchronous no-op).
+                return None, True, None
             assignments = tuple(
                 assignment
                 for assignment in self._application_assignments(application_id)
@@ -8464,9 +9061,14 @@ class FleetProfileService:
                 actor=actor,
                 request_id=request_id,
             )
+            if isinstance(child, Residue):
+                return child
             if not isinstance(child, FleetProfileChildOperation):
-                raise FleetProfileConflict(
-                    "Fleet profile switch adapter returned an invalid child operation"
+                return retire_as_unknown(
+                    "profile-step",
+                    application_id,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    "the Run/Switch executor returned no child operation",
                 )
             return child.id, False, child
         raise FleetProfileConflict("Fleet profile step kind is unsupported")
@@ -8485,7 +9087,14 @@ class FleetProfileService:
         assignments: list[dict[str, object]] = []
         notes: list[str] = []
         for value in values:
-            document, revision = self._recipe_document(session, value.recipe_selector)
+            resolved = self._recipe_document(session, value.recipe_selector)
+            if isinstance(resolved, Residue):
+                # A save names its recipes: one without an active revision cannot
+                # be chosen (a malformed request, refused at submit time).
+                raise FleetProfileConflict(
+                    f"recipe has no active catalog revision: {value.recipe_selector}"
+                )
+            document, revision = resolved
             # Every option is saved with an explicit value: the operator's
             # choice, or the recipe default where none was made or offered.
             choices, replaced = _effective_option_choices(
@@ -8516,9 +9125,12 @@ class FleetProfileService:
         runtime_images: set[str] = set()
         try:
             for assignment in assignments:
-                _, revision = FleetProfileService._recipe_document(
+                resolved = FleetProfileService._recipe_document(
                     session, assignment.recipe_selector
                 )
+                if isinstance(resolved, Residue):
+                    continue
+                _, revision = resolved
                 model_sets.update(
                     session.scalars(
                         select(ModelCacheSet.artifact_set_sha256).where(
@@ -8570,7 +9182,12 @@ class FleetProfileService:
                     now=now,
                 )
         except ArtifactLifecycleError as error:
-            raise FleetProfileConflict(f"{error.code}: {error.detail}") from error
+            # The artifact owner holds the gate (a removal or an inspection is in
+            # progress): admission waits, parked and retried by its owner, and the
+            # load is planned again against what is there when the gate opens.
+            raise FleetProfileAdmissionEffectBusy(
+                f"{error.code}: {error.detail}"
+            ) from error
 
     def _view(self, session: Session, row: FleetProfile) -> FleetProfileView:
         choices = self._choices(row)
@@ -8579,6 +9196,12 @@ class FleetProfileService:
         cache_missing = 0
         cache_unknown = 0
         warnings: list[str] = []
+        unreadable = self._unreadable_choice_count(row)
+        if unreadable:
+            warnings.append(
+                f"{unreadable} saved choice(s) cannot be read and are left out; "
+                "save the profile again"
+            )
         try:
             selection = self._selected_profile_snapshot(session)
         except FleetProfileConflict:
@@ -8601,18 +9224,24 @@ class FleetProfileService:
             else {node_id for choice in choices for node_id in choice.spark_ids}
         )
         for choice in choices:
-            _, head = self._recipe_document(session, choice.recipe_selector)
-            try:
-                read_catalog_document(head)
-            except ValueError as error:
-                # No readable revision exists for this recipe (the identity
-                # lookup already prefers the newest readable one). Show the
+            resolved_head = self._recipe_document(session, choice.recipe_selector)
+            head_error: str | None = None
+            if isinstance(resolved_head, Residue):
+                head_error = resolved_head.note
+            else:
+                try:
+                    read_catalog_document(resolved_head[1])
+                except ValueError as error:
+                    head_error = str(error)
+            if head_error is not None:
+                # No readable (or no active) revision exists for this recipe (the
+                # identity lookup already prefers the newest readable one). Show the
                 # choice as needing attention instead of failing the profile.
                 _LOGGER.warning(
                     "profile %s choice %s needs attention: %s",
                     row.id,
                     choice.recipe_selector,
-                    error,
+                    head_error,
                 )
                 warnings.append(
                     f"Recipe {choice.recipe_selector} needs attention: "
@@ -8626,7 +9255,17 @@ class FleetProfileService:
                     )
                 )
                 continue
-            recipe, revision, cache = self._resolve_choice(session, choice)
+            resolved_choice = self._resolve_choice(session, choice)
+            if isinstance(resolved_choice, Residue):
+                # (Unreachable in practice: the head resolved just above.)
+                cache_unknown += 1
+                assignments.append(
+                    self._attention_assignment(
+                        session, choice, loaded_assignments=loaded_assignments
+                    )
+                )
+                continue
+            recipe, revision, cache = resolved_choice
             required = recipe_topology(revision.document).node_count
             if self._cache_resolver is None:
                 warnings.append(
@@ -9225,8 +9864,12 @@ class FleetProfileService:
     def _application_view(
         self, row: FleetProfileApplication
     ) -> FleetProfileApplicationView:
+        # Damaged documents degrade the view, they do not refuse it: a plan that
+        # cannot be read shows the step count the progress recorded and no
+        # cancellation projection; damaged progress and result are rebuilt from the
+        # receipt the row itself carries.
         plan = _persisted_profile_plan(row)
-        progress = _canonical_progress(row.progress)
+        progress = _persisted_profile_progress(row)
         if (
             row.state in {"queued", "running"}
             and progress.child_progress
@@ -9243,18 +9886,22 @@ class FleetProfileService:
             profile_digest=row.profile_digest,
             plan_digest=row.plan_digest,
             state=state,
-            attempt=_canonical_progress(row.progress).attempt,
-            retry_of_application_id=_canonical_progress(
-                row.progress
-            ).retry_of_application_id,
+            attempt=progress.attempt,
+            retry_of_application_id=progress.retry_of_application_id,
             superseded_by=progress.superseded_by if state == "superseded" else None,
             reason_code=progress.supersede_code if state == "superseded" else None,
             current_step=row.current_step,
-            total_steps=len(plan.steps),
+            total_steps=progress.total_steps
+            if isinstance(plan, Residue)
+            else len(plan.steps),
             current_operation_id=row.current_operation_id,
             status_reason=row.status_reason,
             progress=progress,
-            cancellation=_application_cancellation_view(row, plan, progress),
+            cancellation=(
+                None
+                if isinstance(plan, Residue)
+                else _application_cancellation_view(row, plan, progress)
+            ),
             result=_persisted_profile_result(row),
             blockers=(
                 list(progress.blockers)
@@ -9271,10 +9918,25 @@ class FleetProfileService:
         application: FleetProfileApplication,
         *,
         session: Session,
-    ) -> FleetProfileIntendedConfiguration:
-        progress = _canonical_progress(application.progress)
+    ) -> FleetProfileIntendedConfiguration | Residue:
+        """The accepted intent of an application, or why none can be established.
+
+        An application whose accepted intent cannot be read (never recorded, or
+        its reviewed plan is damaged) is a :class:`Residue`: the caller retires or
+        skips it.  A digest that is *inconsistent* is a different matter and still
+        refuses: it is the integrity check of what was reviewed.
+        """
+
+        progress = _stored_progress(application)
+        if isinstance(progress, Residue):
+            return progress
         if progress.intended_profile is None:
-            raise FleetProfileConflict("Persisted application intent is unavailable")
+            return retire_as_unknown(
+                "profile-intent",
+                str(application.id),
+                BookkeepingReason.ROW_INCOMPLETE,
+                "the application carries no accepted intent",
+            )
         if progress.intended_profile.profile_digest != application.profile_digest:
             raise FleetProfileConflict(
                 "Persisted application intent digest is inconsistent"
@@ -9293,8 +9955,12 @@ class FleetProfileService:
             raise FleetProfileConflict(
                 "Persisted application review source is unavailable"
             )
-        root_progress = _canonical_progress(root.progress)
+        root_progress = _stored_progress(root)
+        if isinstance(root_progress, Residue):
+            return root_progress
         root_plan = _persisted_profile_plan(root)
+        if isinstance(root_plan, Residue):
+            return root_plan
         if (
             root_progress.retry_of_application_id is not None
             or root_progress.intended_profile != intended
@@ -9305,6 +9971,8 @@ class FleetProfileService:
                 "Persisted application review digest is inconsistent"
             )
         plan = _persisted_profile_plan(application)
+        if isinstance(plan, Residue):
+            return plan
         if (
             plan.scope.node_ids != intended.scope.node_ids
             or plan.resolved_assignments
@@ -9319,8 +9987,10 @@ class FleetProfileService:
     @staticmethod
     def _reviewed_profile_plan(
         application: FleetProfileApplication, *, session: Session
-    ) -> FleetProfilePreview:
+    ) -> FleetProfilePreview | Residue:
         intended = FleetProfileService._intended_profile(application, session=session)
+        if isinstance(intended, Residue):
+            return intended
         reviewed = session.get(
             FleetProfileApplication, intended.reviewed_application_id
         )
@@ -9337,10 +10007,10 @@ class FleetProfileService:
             application = session.get(FleetProfileApplication, application_id)
             if application is None:
                 raise KeyError(application_id)
-            assignments = self._intended_profile(
-                application, session=session
-            ).assignments
-            return tuple(sorted(assignments, key=lambda item: item.id))
+            intended = self._intended_profile(application, session=session)
+            if isinstance(intended, Residue):
+                return ()
+            return tuple(sorted(intended.assignments, key=lambda item: item.id))
 
 
 __all__ = [

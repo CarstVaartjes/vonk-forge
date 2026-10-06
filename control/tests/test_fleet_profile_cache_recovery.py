@@ -16,6 +16,7 @@ from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     build_production_fleet_profile_service,
 )
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -172,6 +173,7 @@ def test_selected_profile_reconciles_a_newly_enrolled_spark(tmp_path: Path) -> N
         selected = session.get(FleetProfileApplication, selection.application_id)
         assert selected is not None
         intended = service._intended_profile(selected, session=session)
+        assert not isinstance(intended, Residue)
         assert _node_id(99) in intended.scope.node_ids
 
 

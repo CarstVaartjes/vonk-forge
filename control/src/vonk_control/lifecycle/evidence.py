@@ -29,6 +29,8 @@ from enum import StrEnum
 from .types import Effect, Observed
 
 _LOG = logging.getLogger(__name__)
+_REPORTED: set[tuple[str, str, str]] = set()
+_REPORTED_LIMIT = 4096
 
 
 class BookkeepingReason(StrEnum):
@@ -80,7 +82,14 @@ def retire_as_unknown(
     """Record the residue of state nothing can re-derive and return it."""
 
     residue = Residue(kind=kind, subject=subject, reason=reason, note=note)
-    _LOG.warning(
+    # A damaged row is read again on every pass of its worker: it is reported once
+    # per process (at WARNING) and then only at DEBUG, so it cannot flood the log.
+    key = (kind, subject, reason.value)
+    first = key not in _REPORTED
+    if first and len(_REPORTED) < _REPORTED_LIMIT:
+        _REPORTED.add(key)
+    _LOG.log(
+        logging.WARNING if first else logging.DEBUG,
         "bookkeeping retired as unknown",
         extra={
             "residue_kind": kind,

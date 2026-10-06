@@ -12,6 +12,7 @@ from vonk_control.fleet_profile_contract import (
 )
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_projection import FleetProjection
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -270,19 +271,21 @@ def test_profile_load_resolves_the_newest_active_revision() -> None:
     sessions = _sessions()
     _seed(sessions, running=REVISION_1)
     with sessions() as session:
-        document_id, revision_id = FleetProfileService._recipe_identity(
+        identity = FleetProfileService._recipe_identity(
             session, "vonk-forge/update-recipe"
         )
-    assert (document_id, revision_id) == (RECIPE_ID, REVISION_2)
+    assert identity == (RECIPE_ID, REVISION_2)
 
 
 def test_profile_load_ignores_a_candidate_and_keeps_the_newest_active() -> None:
     sessions = _sessions()
     _seed(sessions, running=REVISION_1, second_state="candidate")
     with sessions() as session:
-        _, revision_id = FleetProfileService._recipe_identity(
+        identity = FleetProfileService._recipe_identity(
             session, "vonk-forge/update-recipe"
         )
+        assert not isinstance(identity, Residue)
+        _, revision_id = identity
     assert revision_id == REVISION_1
 
 
