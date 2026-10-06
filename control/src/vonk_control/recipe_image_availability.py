@@ -1100,67 +1100,22 @@ class RecipeImageAvailabilityService:
     def _read_removal_result(
         self, operation: Job, intent: RecipeCacheRemovalIntent
     ) -> dict[str, object]:
+        """The removal's projection, rebuilt from its owner when the stored result
+        does not read: the owner's plan and checkpoint are the evidence, the
+        stored result only a copy of what they say."""
+
         owner = self._read_removal_owner(operation)
-        if owner.plan.intent != intent:
-            raise RecipeImageAvailabilityUnknown(
-                RecipeImageCode.OPERATION_INVALID,
-                "stored removal projection intent changed",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+        intent = owner.plan.intent
         if operation.state == "succeeded":
-            if not isinstance(operation.result, Mapping):
-                raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.OPERATION_INVALID,
-                    "successful removal has no stored result",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            try:
-                result = read_stored_model(
-                    RecipeCacheRemovalResult,
-                    json.dumps(
-                        serialize_json_value(operation.result),
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ),
-                    from_json=True,
-                )
-            except (TypeError, ValidationError) as error:
-                raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.OPERATION_INVALID,
-                    "stored recipe removal result is malformed",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                ) from error
-            if (
-                result.action != intent.action
-                or result.selector != intent.selector
-                or result.request_key != intent.request_key
-                or result.operation_id != operation.id
-                or result.recipe_revision_id != intent.recipe_revision_id
-                or result.review_digest != intent.review_digest
-                or result.with_model is not intent.with_model
-                or result.reclaimed_bytes
-                != owner.checkpoint.image_reclaimed_bytes
-                + owner.checkpoint.model_reclaimed_bytes
-                or result.model_removals
-                != [item.operation_id for item in owner.plan.model_children]
-                or owner.checkpoint.image_index != len(owner.plan.image_archives)
-                or owner.checkpoint.model_index != len(owner.plan.model_children)
-                or owner.checkpoint.failure is not None
-            ):
-                raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.OPERATION_INVALID,
-                    "stored removal result does not match its accepted intent",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            document: dict[str, object] = result.model_dump(mode="json")
-            document["progress"] = self._removal_progress_document(operation, owner)
-            return document
-        if operation.result is not None:
-            raise RecipeImageAvailabilityUnknown(
-                RecipeImageCode.OPERATION_INVALID,
-                "unfinished recipe removal has a terminal result",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            stored = self._stored_removal_result(operation, intent, owner)
+            if stored is not None:
+                document: dict[str, object] = stored.model_dump(mode="json")
+                document["progress"] = self._removal_progress_document(operation, owner)
+                return document
+            _LOGGER.warning(
+                "recipe removal %s has no readable stored result; it is projected "
+                "from its checkpoint",
+                operation.id,
             )
         return {
             "schema_version": SCHEMA_VERSION,
@@ -1197,6 +1152,50 @@ class RecipeImageAvailabilityService:
                 child.operation_id for child in owner.plan.model_children
             ],
         }
+
+    @staticmethod
+    def _stored_removal_result(
+        operation: Job,
+        intent: RecipeCacheRemovalIntent,
+        owner: RecipeCacheRemovalOwner,
+    ) -> RecipeCacheRemovalResult | None:
+        """The stored result of a finished removal, or ``None`` when it is
+        missing, malformed or disagrees with the accepted intent."""
+
+        if not isinstance(operation.result, Mapping):
+            return None
+        try:
+            result = read_stored_model(
+                RecipeCacheRemovalResult,
+                json.dumps(
+                    serialize_json_value(operation.result),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                from_json=True,
+            )
+        except (TypeError, ValidationError):
+            return None
+        if (
+            result.action != intent.action
+            or result.selector != intent.selector
+            or result.request_key != intent.request_key
+            or result.operation_id != operation.id
+            or result.recipe_revision_id != intent.recipe_revision_id
+            or result.review_digest != intent.review_digest
+            or result.with_model is not intent.with_model
+            or result.reclaimed_bytes
+            != owner.checkpoint.image_reclaimed_bytes
+            + owner.checkpoint.model_reclaimed_bytes
+            or result.model_removals
+            != [item.operation_id for item in owner.plan.model_children]
+            or owner.checkpoint.image_index != len(owner.plan.image_archives)
+            or owner.checkpoint.model_index != len(owner.plan.model_children)
+            or owner.checkpoint.failure is not None
+        ):
+            return None
+        return result
 
     def _replay_removal(
         self,
