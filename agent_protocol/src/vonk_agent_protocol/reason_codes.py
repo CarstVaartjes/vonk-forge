@@ -643,6 +643,7 @@ class RecipeOperationCode(WireEnum):
     """Recipe operation conflicts."""
 
     RECIPE_OPERATION_CONFLICT = "recipe.operation_conflict"
+    EVIDENCE_UNPROVEN = "recipe.evidence_unproven"
 
 
 class RecipePackageCode(WireEnum):

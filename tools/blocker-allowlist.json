@@ -959,7 +959,7 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_container_build_result", "run-switch.container-build-evidence-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_required_string", "run-switch-persisted-identity-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_started_operation_id", "run-switch-child-operation-identity-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.receipt_invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.artifact-verification-result-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reclaim-evidence-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reclaimed-bytes-exceed-plan", 1],

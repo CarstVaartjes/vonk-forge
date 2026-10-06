@@ -32,6 +32,7 @@ from vonk_agent_protocol import (
     RecipeBuildRequest,
     RecipeInstallPayload,
     RecipeJobRunRequest,
+    RecipeOperationCode,
     RecipeReconcilePayload,
     RecipeStartPayload,
     RecipeStartResult,
@@ -435,7 +436,7 @@ def _unproven_evidence(detail: str) -> LifecycleCodeFailureResult:
     """The typed marker recorded for a node whose evidence cannot be accepted."""
 
     return LifecycleCodeFailureResult(
-        code="recipe.evidence_unproven", detail=detail[:512]
+        code=RecipeOperationCode.EVIDENCE_UNPROVEN, detail=detail[:512]
     )
 
 
@@ -5247,7 +5248,8 @@ class RecipeOperationService:
             unproven[node_id] = "recipe node evidence is invalid"
         if node_id in unproven:
             observed_evidence = LifecycleCodeFailureResult(
-                code="recipe.evidence_unproven", detail=unproven[node_id][:512]
+                code=RecipeOperationCode.EVIDENCE_UNPROVEN,
+                detail=unproven[node_id][:512],
             )
         assert observed_evidence is not None
         if node_id in node_evidence and node_evidence[node_id] != observed_evidence:
@@ -5296,7 +5298,7 @@ class RecipeOperationService:
                     recorded_node
                     for recorded_node, recorded_item in (recorded_field or {}).items()
                     if isinstance(recorded_item, LifecycleCodeFailureResult)
-                    and recorded_item.code == "recipe.evidence_unproven"
+                    and recorded_item.code == RecipeOperationCode.EVIDENCE_UNPROVEN
                 }
         loaded_phases = _stored_phases(job)
         recovery_error: DistributedLifecycleError | None = None

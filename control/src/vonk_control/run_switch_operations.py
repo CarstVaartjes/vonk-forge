@@ -9472,7 +9472,7 @@ def _build_receipt_in_session(
         image_digest=build.image_digest,
         oci_layout_sha256=build.oci_layout_sha256,
         image_bytes=build.image_bytes,
-        state="succeeded",
+        state=LifecycleState.SUCCEEDED.value,
     )
 
 
@@ -10361,16 +10361,23 @@ def _validate_artifact_execution(
     raw_result = (
         result.model_dump(mode="json") if isinstance(result, BaseModel) else result
     )
-    if not isinstance(raw_result, Mapping):
-        raise RunSwitchRetryLater(f"run-switch.{phase.kind}-returned-invalid-evidence")
+    invalid_cause: Exception | None = None
     try:
-        evidence = RunSwitchArtifactGuardEvidence.model_validate_json(
-            canonical_message(raw_result), strict=True
+        evidence = (
+            RunSwitchArtifactGuardEvidence.model_validate_json(
+                canonical_message(raw_result), strict=True
+            )
+            if isinstance(raw_result, Mapping)
+            else None
         )
     except (TypeError, ValueError) as error:
+        invalid_cause = error
+        evidence = None
+    if evidence is None:
         raise RunSwitchRetryLater(
-            f"run-switch.{phase.kind}-returned-invalid-evidence"
-        ) from error
+            RunSwitchCode.RECEIPT_INVALID,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from invalid_cause
     if phase.kind == "prepare" and phase.subphase == "runtime-image":
         receipt = evidence.runtime_image
         if receipt is None:
