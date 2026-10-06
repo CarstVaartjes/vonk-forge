@@ -11,7 +11,11 @@ import hashlib
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    ModelCacheCode,
+    RecipeImageCode,
+    canonical_message,
+)
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -220,7 +224,7 @@ __all__ = [
 # would wait for it indefinitely while fencing the profile's own launches;
 # that reference still refuses the request.
 IN_USE_REMOVAL_CODES = frozenset(
-    {"recipe_image.removal_referenced", "model_cache.removal_referenced"}
+    {RecipeImageCode.REMOVAL_REFERENCED, ModelCacheCode.REMOVAL_REFERENCED}
 )
 
 

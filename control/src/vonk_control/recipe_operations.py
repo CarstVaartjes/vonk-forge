@@ -17,10 +17,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    InstallAdmissionCode,
     InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
+    RecipeBuildCode,
     RecipeInstallPayload,
     RecipeJobRunRequest,
     RecipeReconcilePayload,
@@ -28,8 +31,10 @@ from vonk_agent_protocol import (
     RecipeStartResult,
     RecipeStopPayload,
     RecipeUninstallPayload,
+    ReconcileCode,
     SecurityRefusalError,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
     parse_recipe_operation_result,
     validate_result_for_operation,
@@ -55,6 +60,12 @@ from .agent_jobs import (
     release_owned_reservations_in_session,
     superseded_cancellation_deadline,
 )
+from .categorized_errors import (
+    BookkeepingUnknown,
+    InvalidValue,
+    MissingRecord,
+)
+from .categorized_faults import StoredStateTypeDamaged
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -63,6 +74,7 @@ from .compiled_execution_plan import (
 )
 from .distributed_lifecycle import (
     DistributedLifecycleError,
+    DistributedRecoveryInvalid,
     canonical_distributed_readiness,
 )
 from .distributed_recovery import (
@@ -275,11 +287,11 @@ class RecipeRetryLater(UnknownOutcomeError, RecipeOperationConflict):
     not reported); nothing was persisted and the caller retries it."""
 
 
-class _RouteNotWithdrawn(Exception):
+class _RouteNotWithdrawn(UnknownOutcomeError):
     """The run's route is listed again; withdraw it again before dispatching."""
 
 
-class RecipeReconciliationBlocked(RecipeOperationConflict):
+class RecipeReconciliationBlocked(UnknownOutcomeError, RecipeOperationConflict):
     """A corrupt installation lacks exact, current cleanup authority."""
 
     def __init__(self, code: str, detail: str) -> None:
@@ -393,7 +405,9 @@ def _recorded_result(
 
     def read() -> dict[str, object]:
         if not isinstance(value, Mapping):
-            raise TypeError("stored recipe operation result is not an object")
+            raise StoredStateTypeDamaged(
+                "stored recipe operation result is not an object"
+            )
         parse_recipe_lifecycle_result(kind, value)
         return dict(value)
 
@@ -461,7 +475,7 @@ def _plan_ranks(
     if not isinstance(nodes, list) or not all(
         isinstance(item, Mapping) for item in nodes
     ):
-        raise TypeError("stored plan has no node list")
+        raise StoredStateTypeDamaged("stored plan has no node list")
     ranks = frozenset(
         (item["node_id"], item["rank"], item["role"])
         for item in nodes
@@ -753,7 +767,7 @@ def _job_workload_intent(session: Session, job: Job) -> int | None:
     def read() -> int:
         ordinal = job.payload.get("workload_intent_ordinal")
         if type(ordinal) is not int or ordinal < 1:
-            raise ValueError("job payload carries no workload intent")
+            raise BookkeepingUnknown("job payload carries no workload intent")
         return ordinal
 
     def rebuild() -> int | None:
@@ -812,6 +826,30 @@ def _intent_is_current(session: Session, ordinal: int, targets: Sequence[str]) -
     return tuple(node.node_id for node in nodes) == tuple(sorted(set(targets))) and all(
         node.workload_intent_ordinal == ordinal for node in nodes
     )
+
+
+def _shared_workload_intent(session: Session, targets: Sequence[str]) -> int | None:
+    """The one workload intent every target Spark currently shares, if there is one.
+
+    A cleanup of what an older, superseded order may have launched is admitted as
+    a child of the intent that owns the Sparks now: it takes no new intent and so
+    never cancels the newer work, and the stale ordinal of the failed order (which
+    would be refused) is not needed.
+    """
+
+    nodes = tuple(
+        session.scalars(
+            select(AgentNode)
+            .where(AgentNode.node_id.in_(targets))
+            .order_by(AgentNode.node_id)
+            .with_for_update(of=AgentNode)
+        )
+    )
+    ordinals = {node.workload_intent_ordinal for node in nodes}
+    if len(nodes) != len(set(targets)) or len(ordinals) != 1:
+        return None
+    ordinal = ordinals.pop()
+    return ordinal if ordinal >= 1 else None
 
 
 def _workload_owner_scope(
@@ -943,7 +981,9 @@ def _unissued_workload_children(
 def _cancel_reason(value: object) -> str:
     reason = " ".join(str(value).split())
     if not reason:
-        raise RecipeOperationConflict("cancellation reason is required")
+        raise RecipeRequestInvalid(
+            "cancellation reason is required", reason=InvalidRequestReason.INCOMPLETE
+        )
     return reason[:512]
 
 
@@ -966,7 +1006,7 @@ class RecipeOperationService:
         distributed_start_timeout_seconds: int = 3600,
     ) -> None:
         if not 1 <= run_health_maximum_age_seconds <= 300:
-            raise ValueError("recipe run health age is invalid")
+            raise InvalidValue("recipe run health age is invalid")
         self._distributed_start_timeout_seconds = (
             validate_distributed_start_timeout_seconds(
                 distributed_start_timeout_seconds
@@ -1002,7 +1042,7 @@ class RecipeOperationService:
                 node.free_bytes is None
                 or node.free_after_bytes is None
                 or not any(
-                    reason.code == "install.insufficient_disk"
+                    reason.code == InstallAdmissionCode.INSUFFICIENT_DISK
                     for reason in node.blockers
                 )
             ):
@@ -1012,7 +1052,7 @@ class RecipeOperationService:
                 node.free_bytes - node.free_after_bytes + node.disk_floor_bytes,
                 source="install",
                 subject=plan.recipe_revision_id,
-                reason="install.insufficient_disk",
+                reason=InstallAdmissionCode.INSUFFICIENT_DISK,
             )
 
     def preview_mapping(
@@ -1222,15 +1262,19 @@ class RecipeOperationService:
             )
             if cancelling is not None:
                 build_cancellation(cancelling)
-                raise RecipeOperationConflict(
-                    "recipe build cancellation is awaiting cleanup"
+                raise RecipeRequestInvalid(
+                    "recipe build cancellation is awaiting cleanup",
+                    reason=InvalidRequestReason.NOT_READY,
                 )
             if (
                 build is None
                 or build.build_input_sha256 != plan.build_input_sha256
                 or build.builder_node_id != plan.builder_node_id
             ):
-                raise RecipeOperationConflict("recipe build preview is stale")
+                raise RecipeRequestInvalid(
+                    "recipe build preview is stale",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
             if force and build.state == "succeeded":
                 active = session.scalar(
                     select(Job)
@@ -1304,8 +1348,9 @@ class RecipeOperationService:
                 elif previous.state == "cancelled":
                     cancellation = build_cancellation(previous)
                     if cancellation is None or cancellation.cancelled is not True:
-                        raise RecipeOperationConflict(
-                            "recipe build cancellation is awaiting cleanup"
+                        raise RecipeRequestInvalid(
+                            "recipe build cancellation is awaiting cleanup",
+                            reason=InvalidRequestReason.NOT_READY,
                         )
                     job = self._start_build_in_session(
                         session,
@@ -1336,7 +1381,10 @@ class RecipeOperationService:
                     intent=intent,
                 )
             else:
-                raise RecipeOperationConflict("recipe build preview is stale")
+                raise RecipeRequestInvalid(
+                    "recipe build preview is stale",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
@@ -1506,7 +1554,7 @@ class RecipeOperationService:
 
         if not plan.allowed and {
             reason.code for node in plan.nodes for reason in node.blockers
-        } <= {"install.insufficient_disk"}:
+        } <= {InstallAdmissionCode.INSUFFICIENT_DISK}:
             # The exact plan an earlier attempt already persisted holds its own
             # disk claim; counting that claim against itself must not stop
             # this attempt adopting it.
@@ -1530,7 +1578,7 @@ class RecipeOperationService:
                         for reason in node.blockers
                     )
                 )
-                raise RecipeOperationConflict(
+                raise RecipeRequestInvalid(
                     "install plan is blocked: " + "; ".join(reasons[:3])
                 ) from error
         now = self._clock()
@@ -1608,7 +1656,7 @@ class RecipeOperationService:
             def read(candidate: RecipeInstallation = existing) -> bool:
                 stored = parse_stored_installation_plan(candidate.plan)
                 if not stored.compiled_execution_plans:
-                    raise ValueError("stored installation has no compiled plan")
+                    raise BookkeepingUnknown("stored installation has no compiled plan")
                 return True
 
             if (
@@ -1644,7 +1692,9 @@ class RecipeOperationService:
                 installation.plan
             ).compiled_execution_plans
             if not plans or not wanted <= set(plans):
-                raise ValueError("stored installation plan lacks compiled documents")
+                raise BookkeepingUnknown(
+                    "stored installation plan lacks compiled documents"
+                )
             return {
                 node_id: value.model_dump(mode="json")
                 for node_id, value in plans.items()
@@ -1956,7 +2006,7 @@ class RecipeOperationService:
         with self._sessions() as session:
             run = session.get(RecipeRun, run_id)
             if run is None:
-                raise KeyError(run_id)
+                raise MissingRecord(run_id)
             nodes = tuple(
                 session.scalars(
                     select(RunNode)
@@ -2103,7 +2153,10 @@ class RecipeOperationService:
                     holder="recipe-operation",
                 )
             except AdmissionLockBusy as error:
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise InstallAdmissionBusy(
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
             replay = self._idempotent_in_session(
                 session,
                 request_id,
@@ -2306,7 +2359,9 @@ class RecipeOperationService:
                         presences[node_id] if endpoint_owner else node.fabric_address
                     )
                     if not isinstance(endpoint_address, str):
-                        raise KeyError("recipe start endpoint address is unavailable")
+                        raise MissingRecord(
+                            "recipe start endpoint address is unavailable"
+                        )
                     payload = build_recipe_start_payload(
                         run_id=run_id,
                         installation_id=plan.installation_id,
@@ -2403,7 +2458,7 @@ class RecipeOperationService:
         """Enqueue one fenced job without changing the service run lifecycle."""
         run = session.get(RecipeRun, run_id, with_for_update=True)
         if run is None or run.state != "running":
-            raise RecipeOperationConflict("recipe run is not accepting jobs")
+            raise RecipeRequestInvalid("recipe run is not accepting jobs")
         node = session.scalar(
             select(RunNode).where(
                 RunNode.run_id == run_id,
@@ -2839,7 +2894,10 @@ class RecipeOperationService:
                 profile_target_node_ids=profile_target_node_ids,
             )
             if not admitted.allowed:
-                raise RecipeOperationConflict("stop plan is stale or blocked")
+                raise RecipeRequestInvalid(
+                    "stop plan is stale or blocked",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
             run = session.get(RecipeRun, run_id)
             assert run is not None
             if self._absent_stop_nodes(session, run, admitted, now, lock=False) is None:
@@ -2849,8 +2907,9 @@ class RecipeOperationService:
                 try:
                     self._route_publications.withdraw_run(run_id, pending="stop")
                 except RecipeRouteNotReady as error:
-                    raise RecipeOperationConflict(
-                        "the run's route withdrawal was superseded; retry the stop"
+                    raise RecipeRequestInvalid(
+                        "the run's route withdrawal was superseded; retry the stop",
+                        reason=InvalidRequestReason.SUPERSEDED,
                     ) from error
             else:
                 self._route_withdrawer(run_id)
@@ -2909,7 +2968,10 @@ class RecipeOperationService:
                     profile_target_node_ids=profile_target_node_ids,
                 )
                 if not admitted.allowed:
-                    raise RecipeOperationConflict("stop plan is stale or blocked")
+                    raise RecipeRequestInvalid(
+                        "stop plan is stale or blocked",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
                 plan_digest = admitted.plan_digest
                 if self._route_publications is not None and (
                     not self._route_publications.withdrawal_complete_in_session(
@@ -2953,8 +3015,9 @@ class RecipeOperationService:
             )
             if raced is not None:
                 return raced
-            raise RecipeOperationConflict(
-                "request key was already used differently"
+            raise RecipeRequestInvalid(
+                "request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
             ) from error
         return self.get(job.id)
 
@@ -3188,8 +3251,9 @@ class RecipeOperationService:
             )
         except RecipeOperationConflict as error:
             if str(error) == "workload intent was superseded":
-                raise DistributedLifecycleError(
-                    "singleton recovery was superseded by a newer workload intent"
+                raise DistributedRecoveryInvalid(
+                    "singleton recovery was superseded by a newer workload intent",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 ) from error
             raise
 
@@ -3521,7 +3585,9 @@ class RecipeOperationService:
         try:
             locked = lock_admission_rows(session, requests)
         except AdmissionLockBusy as error:
-            raise InstallAdmissionBusy("reconcile.capacity_busy") from error
+            raise InstallAdmissionBusy(
+                ReconcileCode.CAPACITY_BUSY, reason=WaitReason.OBSERVATION_UNAVAILABLE
+            ) from error
         locked_nodes = locked["reconcile-installation-nodes"]
         locked_mapping_nodes = locked["reconcile-mapping-nodes"]
         if tuple(
@@ -3535,7 +3601,10 @@ class RecipeOperationService:
         ) != tuple(
             sorted((node.node_id, node.rank, node.role) for node in mapping_nodes)
         ):
-            raise InstallAdmissionBusy("reconcile.membership_changed")
+            raise InstallAdmissionBusy(
+                ReconcileCode.MEMBERSHIP_CHANGED,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
 
     def _reconciliation_authority_in_session(
         self,
@@ -3550,7 +3619,7 @@ class RecipeOperationService:
         )
         installation = session.scalar(installation_statement)
         if installation is None:
-            raise KeyError(installation_id)
+            raise MissingRecord(installation_id)
 
         if lock:
             self._lock_reconciliation_rows_in_session(session, installation)
@@ -3566,7 +3635,7 @@ class RecipeOperationService:
         stored_plan = installation.plan
         if not isinstance(stored_plan, Mapping):
             blocked(
-                "reconcile.installation_identity_unavailable",
+                ReconcileCode.INSTALLATION_IDENTITY_UNAVAILABLE,
                 "The original installation identity is not a JSON object.",
             )
 
@@ -3586,7 +3655,7 @@ class RecipeOperationService:
             or revision.content_digest != stored_plan.get("recipe_content_sha256")
         ):
             blocked(
-                "reconcile.recipe_revision_unavailable",
+                ReconcileCode.RECIPE_REVISION_UNAVAILABLE,
                 "The installation's exact accepted recipe revision is unavailable.",
             )
 
@@ -3599,7 +3668,7 @@ class RecipeOperationService:
             )
         except (KeyError, TypeError, ValueError) as error:
             blocked(
-                "reconcile.installation_identity_unavailable",
+                ReconcileCode.INSTALLATION_IDENTITY_UNAVAILABLE,
                 f"The original installation identity cannot be fingerprinted: {error}",
             )
         expected_top_level = {
@@ -3619,13 +3688,13 @@ class RecipeOperationService:
             or stored_plan_digest != installation.plan_digest
         ):
             blocked(
-                "reconcile.installation_identity_mismatch",
+                ReconcileCode.INSTALLATION_IDENTITY_MISMATCH,
                 "The relational installation identity differs from its original admitted plan.",
             )
         model_identity = _primary_model_identity(revision.document)
         if model_identity is None:
             blocked(
-                "reconcile.recipe_revision_unavailable",
+                ReconcileCode.RECIPE_REVISION_UNAVAILABLE,
                 "The exact accepted recipe revision has no model identity.",
             )
         recipe_model_content_sha256, _ = model_identity
@@ -3634,12 +3703,12 @@ class RecipeOperationService:
             recipe_model_content_sha256,
         }:
             blocked(
-                "reconcile.installation_identity_mismatch",
+                ReconcileCode.INSTALLATION_IDENTITY_MISMATCH,
                 "The relational model identity differs from the exact accepted recipe revision.",
             )
         if installation.state not in {"installed", "partial"}:
             blocked(
-                "reconcile.installation_effect_unknown",
+                ReconcileCode.INSTALLATION_EFFECT_UNKNOWN,
                 f"Installation state {installation.state} does not prove a complete installed effect.",
             )
 
@@ -3654,7 +3723,7 @@ class RecipeOperationService:
         all_nodes = tuple(session.scalars(node_statement))
         if not all_nodes or len(all_nodes) > _MAX_ACTION_NODES:
             blocked(
-                "reconcile.rank_membership_changed",
+                ReconcileCode.RANK_MEMBERSHIP_CHANGED,
                 "The installation has no bounded exact node membership.",
             )
         mapping_statement = select(ClusterMapping).where(
@@ -3702,7 +3771,7 @@ class RecipeOperationService:
             not in {node.node_id for node in mapping_nodes}
         ):
             blocked(
-                "reconcile.rank_membership_changed",
+                ReconcileCode.RANK_MEMBERSHIP_CHANGED,
                 "The stored installation, relational membership, and saved mapping no longer identify the same exact ranks.",
             )
 
@@ -3717,7 +3786,7 @@ class RecipeOperationService:
             for run in installation_runs
         ):
             blocked(
-                "reconcile.active_effect_unknown",
+                ReconcileCode.ACTIVE_EFFECT_UNKNOWN,
                 "An installation run or route is active or has an unconfirmed effect.",
             )
 
@@ -3764,7 +3833,7 @@ class RecipeOperationService:
         )
         if blocking_active_jobs or active_run_jobs:
             blocked(
-                "reconcile.operation_active",
+                ReconcileCode.OPERATION_ACTIVE,
                 "An install, start, stop, uninstall, or reconciliation operation is still active or uncertain.",
             )
 
@@ -3784,7 +3853,7 @@ class RecipeOperationService:
         )
         if len(install_jobs) != 1:
             blocked(
-                "reconcile.install_provenance_unavailable",
+                ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                 "Exactly one successful original install operation is required to identify the local specs.",
             )
         install_job = install_jobs[0]
@@ -3800,7 +3869,7 @@ class RecipeOperationService:
             != install_job.payload_digest
         ):
             blocked(
-                "reconcile.install_provenance_mismatch",
+                ReconcileCode.INSTALL_PROVENANCE_MISMATCH,
                 "The successful original install job no longer matches the admitted installation identity.",
             )
         try:
@@ -3809,7 +3878,7 @@ class RecipeOperationService:
             )
         except (TypeError, ValueError) as error:
             blocked(
-                "reconcile.install_provenance_unavailable",
+                ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                 f"The original successful install receipt cannot be validated: {error}",
             )
         if (
@@ -3821,7 +3890,7 @@ class RecipeOperationService:
             or set(install_result.node_evidence) != {node.node_id for node in all_nodes}
         ):
             blocked(
-                "reconcile.install_provenance_unavailable",
+                ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                 "The original install receipt does not prove success on every exact node.",
             )
 
@@ -3836,7 +3905,7 @@ class RecipeOperationService:
             operation.node_id for operation in operations
         } != {node.node_id for node in all_nodes}:
             blocked(
-                "reconcile.install_provenance_unavailable",
+                ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                 "The original install child operations do not match exact node membership.",
             )
 
@@ -3844,7 +3913,7 @@ class RecipeOperationService:
         stored_compiled = stored_plan.get("compiled_execution_plans")
         if not isinstance(stored_compiled, Mapping):
             blocked(
-                "reconcile.installation_identity_unavailable",
+                ReconcileCode.INSTALLATION_IDENTITY_UNAVAILABLE,
                 "The opaque admitted plan has no exact per-node specification map.",
             )
         agent_nodes_statement = (
@@ -3870,7 +3939,7 @@ class RecipeOperationService:
                 != operation.payload_digest
             ):
                 blocked(
-                    "reconcile.install_provenance_mismatch",
+                    ReconcileCode.INSTALL_PROVENANCE_MISMATCH,
                     f"The original install operation for {node.node_id} is not an exact successful source.",
                 )
             payload = operation.payload
@@ -3880,7 +3949,7 @@ class RecipeOperationService:
                 or payload.get("expected_bytes") != node.required_bytes
             ):
                 blocked(
-                    "reconcile.install_provenance_mismatch",
+                    ReconcileCode.INSTALL_PROVENANCE_MISMATCH,
                     f"The original install payload for {node.node_id} differs from its exact installation row.",
                 )
             compiled = payload.get("compiled_execution_plan")
@@ -3892,7 +3961,7 @@ class RecipeOperationService:
                 != canonical_message(stored_node_compiled)
             ):
                 blocked(
-                    "reconcile.spec_identity_mismatch",
+                    ReconcileCode.SPEC_IDENTITY_MISMATCH,
                     f"The original install payload and stored opaque specification differ for {node.node_id}.",
                 )
             identity = compiled.get("identity")
@@ -3912,13 +3981,13 @@ class RecipeOperationService:
                 or placement.get("role") != node.role
             ):
                 blocked(
-                    "reconcile.spec_identity_mismatch",
+                    ReconcileCode.SPEC_IDENTITY_MISMATCH,
                     f"The original specification for {node.node_id} is not bound to this recipe, image, and rank.",
                 )
             evidence = install_result.node_evidence.get(node.node_id)
             if not isinstance(evidence, Mapping):
                 blocked(
-                    "reconcile.install_provenance_unavailable",
+                    ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                     f"The original successful receipt for {node.node_id} is unavailable.",
                 )
             current_attempt = session.scalar(
@@ -3936,7 +4005,7 @@ class RecipeOperationService:
                 or evidence.get("installed_bytes") != node.installed_bytes
             ):
                 blocked(
-                    "reconcile.install_provenance_unavailable",
+                    ReconcileCode.INSTALL_PROVENANCE_UNAVAILABLE,
                     f"The current successful install attempt does not match recorded bytes for {node.node_id}.",
                 )
             if (
@@ -3945,7 +4014,7 @@ class RecipeOperationService:
                 or agent_node.revoked_at is not None
             ):
                 blocked(
-                    "reconcile.agent_unavailable",
+                    ReconcileCode.AGENT_UNAVAILABLE,
                     f"Node {node.node_id} is not an active authorized target.",
                 )
             # A succeeded, fenced reconcile attempt marked the rank uninstalled;
@@ -4014,15 +4083,19 @@ class RecipeOperationService:
                         holder="recipe-operation",
                     )
                 except AdmissionLockBusy as error:
-                    raise InstallAdmissionBusy("reconcile.capacity_busy") from error
+                    raise InstallAdmissionBusy(
+                        ReconcileCode.CAPACITY_BUSY,
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from error
                 authority = self._reconciliation_authority_in_session(
                     session, installation_id, lock=True
                 )
                 if canonical_message(authority.document()) != canonical_message(
                     expected_authority
                 ):
-                    raise RecipeOperationConflict(
-                        "reconciliation authority changed after preview"
+                    raise RecipeRequestInvalid(
+                        "reconciliation authority changed after preview",
+                        reason=InvalidRequestReason.CONFLICT,
                     )
                 existing = self._idempotent_in_session(
                     session,
@@ -4068,7 +4141,9 @@ class RecipeOperationService:
                     },
                 )
         except AdmissionLockBusy as error:
-            raise InstallAdmissionBusy("reconcile.capacity_busy") from error
+            raise InstallAdmissionBusy(
+                ReconcileCode.CAPACITY_BUSY, reason=WaitReason.OBSERVATION_UNAVAILABLE
+            ) from error
         except IntegrityError as error:
             raced = self._idempotent(
                 request_id,
@@ -4079,8 +4154,9 @@ class RecipeOperationService:
             )
             if raced is not None:
                 return raced
-            raise RecipeOperationConflict(
-                "request key was already used differently"
+            raise RecipeRequestInvalid(
+                "request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
             ) from error
         self._agent_jobs.notify_available()
         return self.get(job.id)
@@ -4137,9 +4213,10 @@ class RecipeOperationService:
                     session, installation_id, lock=True
                 )
                 if not plan.allowed:
-                    raise RecipeOperationConflict(
+                    raise RecipeRequestInvalid(
                         "uninstall plan is stale or blocked: "
-                        + "; ".join(reason.code for reason in plan.blockers)
+                        + "; ".join(reason.code for reason in plan.blockers),
+                        reason=InvalidRequestReason.SUPERSEDED,
                     )
                 if plan.disposition != "uninstall":
                     # A plan that never reached a node is abandoned by the
@@ -4191,8 +4268,9 @@ class RecipeOperationService:
             )
             if raced is not None:
                 return raced
-            raise RecipeOperationConflict(
-                "request key was already used differently"
+            raise RecipeRequestInvalid(
+                "request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
             ) from error
         self._agent_jobs.notify_available()
         return self.get(job.id)
@@ -4229,8 +4307,9 @@ class RecipeOperationService:
                 }
             plan = self._uninstall_plan_in_session(session, installation_id, lock=True)
             if not plan.allowed or plan.disposition != "abandon":
-                raise RecipeOperationConflict(
-                    "installation is not a never-installed plan; it cannot be abandoned"
+                raise RecipeRequestInvalid(
+                    "installation is not a never-installed plan; it cannot be abandoned",
+                    reason=InvalidRequestReason.UNSUPPORTED,
                 )
             nodes = tuple(
                 session.scalars(
@@ -4421,7 +4500,7 @@ class RecipeOperationService:
                 payload.get("build_id") != owner_id
                 or payload.get("build_input_sha256") != build.build_input_sha256
             ):
-                raise ValueError("stored build plan names another build")
+                raise BookkeepingUnknown("stored build plan names another build")
             return RecipeBuildPlan(
                 build_id=owner_id,
                 recipe_revision_id=parsed_payload.recipe_revision_id,
@@ -4481,7 +4560,7 @@ class RecipeOperationService:
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id)
             if job is None or not job.kind.startswith("recipe."):
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
             operations = tuple(
                 session.scalars(
                     select(AgentOperation).where(
@@ -4541,7 +4620,7 @@ class RecipeOperationService:
                 not isinstance(job.result, Mapping)
                 or job.result.get("cancel_requested") is not True
             ):
-                raise RecipeOperationConflict("recipe cancellation was not requested")
+                raise RecipeRequestInvalid("recipe cancellation was not requested")
             owner_id = _payload_string(job.payload, "owner_id")
             if owner_id is None:
                 retire_as_unknown(
@@ -4565,8 +4644,9 @@ class RecipeOperationService:
                     RecipeInstallation, owner_id, with_for_update=True
                 )
                 if node is None or installation is None:
-                    raise RecipeOperationConflict(
-                        "installation cancellation scope changed"
+                    raise RecipeRequestInvalid(
+                        "installation cancellation scope changed",
+                        reason=InvalidRequestReason.CONFLICT,
                     )
                 node.state = _RANK_FAILED
                 node.updated_at = now
@@ -4582,7 +4662,10 @@ class RecipeOperationService:
                 )
                 run = session.get(RecipeRun, owner_id, with_for_update=True)
                 if node is None or run is None:
-                    raise RecipeOperationConflict("run cancellation scope changed")
+                    raise RecipeRequestInvalid(
+                        "run cancellation scope changed",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
                 # The agent sends cancelled only after its exact host STOP has
                 # returned. Keep reservations for the current intent's stop.
                 node.state = "stopped"
@@ -5401,19 +5484,32 @@ class RecipeOperationService:
                     intent_current = intent is not None and _intent_is_current(
                         session, intent, job.targets
                     )
+                    # Whatever the failed Start launched is stopped, even when a
+                    # newer intent took the Sparks over meanwhile: the cleanup is
+                    # admitted under the intent that owns them now.  Without a
+                    # single owning intent the run stays ``lost`` (stoppable), so
+                    # the owner of the Sparks still finds it; it is never left
+                    # ``failed``, which nothing stops.
+                    cleanup_ordinal = (
+                        intent
+                        if intent_current
+                        else _shared_workload_intent(session, job.targets)
+                    )
                     if not intent_current:
-                        run.state = "failed"
+                        run.state = "stopping" if cleanup_ordinal else "lost"
                         run.route_error = (
-                            "start cleanup superseded by a newer workload intent"
-                            if intent is not None
-                            else "start cleanup has no provable workload intent"
+                            "start failed after a newer workload intent took over; "
+                            + (
+                                "cleanup queued"
+                                if cleanup_ordinal
+                                else "cleanup awaits the owning intent"
+                            )
                         )
                     if (
                         not session.scalar(
                             select(Job.id).where(Job.request_id == cleanup_request_id)
                         )
-                        and intent_current
-                        and intent is not None
+                        and cleanup_ordinal is not None
                     ):
                         stop_nodes = tuple(
                             session.scalars(
@@ -5495,7 +5591,7 @@ class RecipeOperationService:
                                     "sha256:"
                                 ),
                                 now=now,
-                                workload_intent_ordinal=intent,
+                                workload_intent_ordinal=cleanup_ordinal,
                             )
                             cleanup_queued = True
                 else:
@@ -5740,7 +5836,7 @@ class RecipeOperationService:
         with self._sessions() as session:
             job = session.get(Job, operation_id)
             if job is None or not job.kind.startswith("recipe."):
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
             return self._view(job, session=session)
 
     def cancel(
@@ -5763,7 +5859,7 @@ class RecipeOperationService:
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or not job.kind.startswith("recipe."):
-                raise RecipeOperationConflict("recipe operation is not cancellable")
+                raise RecipeRequestInvalid("recipe operation is not cancellable")
             bound_ordinal = job.payload.get("workload_intent_ordinal")
             superseded = False
             if (
@@ -5799,7 +5895,7 @@ class RecipeOperationService:
                     or not 1 <= len(actor) <= 256
                     or not isinstance(request_id, str)
                 ):
-                    raise RecipeOperationConflict(
+                    raise RecipeRequestInvalid(
                         "cancellation request identity is invalid"
                     )
                 reused = session.scalar(
@@ -5814,14 +5910,15 @@ class RecipeOperationService:
                     .limit(1)
                 )
                 if reused is not None:
-                    raise RecipeOperationConflict(
-                        "cancellation request key was already used differently"
+                    raise RecipeRequestInvalid(
+                        "cancellation request key was already used differently",
+                        reason=InvalidRequestReason.CONFLICT,
                     )
                 try:
                     if str(uuid.UUID(request_id)) != request_id:
-                        raise ValueError("noncanonical cancellation request key")
+                        raise InvalidValue("noncanonical cancellation request key")
                 except ValueError as error:
-                    raise RecipeOperationConflict(
+                    raise RecipeRequestInvalid(
                         "cancellation request identity is invalid"
                     ) from error
                 logging.getLogger(__name__).info(
@@ -5836,8 +5933,9 @@ class RecipeOperationService:
                     and previous.get("cancel_actor") == actor
                 ):
                     return self._view(job)
-                raise RecipeOperationConflict(
-                    "cancellation request key was already used differently"
+                raise RecipeRequestInvalid(
+                    "cancellation request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
             if job.state not in job_states.words(
                 LifecycleState.QUEUED,
@@ -5847,7 +5945,7 @@ class RecipeOperationService:
                 # A cancel always completes (rule 4): a parent that mirrors an
                 # order's wait (the Stop of a one-shot job in doubt, a legacy
                 # parked order) accepts it, and the orders end it.
-                raise RecipeOperationConflict("recipe operation is not cancellable")
+                raise RecipeRequestInvalid("recipe operation is not cancellable")
             previous = _recorded_result(job.kind, job.result, subject=job.id) or {}
             if previous.get("cancel_requested") is True:
                 if (
@@ -5856,8 +5954,9 @@ class RecipeOperationService:
                     and previous.get("cancel_actor") == actor
                 ):
                     return self._view(job)
-                raise RecipeOperationConflict(
-                    "cancellation request key was already used differently"
+                raise RecipeRequestInvalid(
+                    "cancellation request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
             children = tuple(
                 session.scalars(
@@ -6223,8 +6322,9 @@ class RecipeOperationService:
                 "57014",
             }:
                 raise
-            raise RecipeOperationConflict(
-                "build.consumer_busy: build ownership is changing; retry cancellation"
+            raise RecipeRetryLater(
+                f"{RecipeBuildCode.CONSUMER_BUSY}: build ownership is changing; retry cancellation",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
 
     def _cancel_prebuilt_build(
@@ -6288,12 +6388,12 @@ class RecipeOperationService:
                 try:
                     consumers = current_build_consumers(session, build)
                 except BuildConsumerError as error:
-                    raise RecipeOperationConflict(f"{error.code}: {error}") from error
+                    raise RecipeRequestInvalid(f"{error.code}: {error}") from error
                 if consumers:
                     if only_if_unneeded:
                         return False
-                    raise RecipeOperationConflict(
-                        "build.shared_consumers: accepted preparation still needs this build; "
+                    raise RecipeRequestInvalid(
+                        f"{RecipeBuildCode.SHARED_CONSUMERS}: accepted preparation still needs this build; "
                         "cancel its parent intent first"
                     )
             cancellation = request_build_cancellation(
@@ -6397,8 +6497,9 @@ class RecipeOperationService:
             except DBAPIError as error:
                 if getattr(error.orig, "sqlstate", None) != "55P03":
                     raise
-                raise RecipeOperationConflict(
-                    "build.consumer_busy: build ownership is changing; retry cancellation"
+                raise RecipeRetryLater(
+                    f"{RecipeBuildCode.CONSUMER_BUSY}: build ownership is changing; retry cancellation",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             if build is None or build.builder_node_id != node_id:
                 retire_as_unknown(
@@ -6414,12 +6515,12 @@ class RecipeOperationService:
                 try:
                     consumers = current_build_consumers(session, build)
                 except BuildConsumerError as error:
-                    raise RecipeOperationConflict(f"{error.code}: {error}") from error
+                    raise RecipeRequestInvalid(f"{error.code}: {error}") from error
                 if consumers:
                     if only_if_unneeded:
                         return False
-                    raise RecipeOperationConflict(
-                        "build.shared_consumers: accepted preparation still needs this build; "
+                    raise RecipeRequestInvalid(
+                        f"{RecipeBuildCode.SHARED_CONSUMERS}: accepted preparation still needs this build; "
                         "cancel its parent intent first"
                     )
             cancellation = request_build_cancellation(
@@ -6539,8 +6640,9 @@ class RecipeOperationService:
                         or typed_parent.workload_intent_ordinal
                         != workload_intent_ordinal
                     ):
-                        raise RecipeOperationConflict(
-                            "profile JobRun Stop request changed its owner"
+                        raise RecipeRequestInvalid(
+                            "profile JobRun Stop request changed its owner",
+                            reason=InvalidRequestReason.CONFLICT,
                         )
                     try:
                         validate_profile_stop_owner(session, authorization, now=now)
@@ -6563,8 +6665,9 @@ class RecipeOperationService:
                                 now=now,
                             )
                     except (ProfileStopAuthorityError, StopIteration) as error:
-                        raise RecipeOperationConflict(
-                            "profile JobRun Stop authority is stale"
+                        raise RecipeRequestInvalid(
+                            "profile JobRun Stop authority is stale",
+                            reason=InvalidRequestReason.SUPERSEDED,
                         ) from error
                     return self._view(pending_job, session=session)
                 if (
@@ -6573,8 +6676,9 @@ class RecipeOperationService:
                     or pending_job.payload.get("owner_id") != run_id
                     or pending_job.payload.get("execution_mode") != "one-shot-jobs"
                 ):
-                    raise RecipeOperationConflict(
-                        "request key was already used differently"
+                    raise RecipeRequestInvalid(
+                        "request key was already used differently",
+                        reason=InvalidRequestReason.CONFLICT,
                     )
                 bound = _bound_workload_intent(pending_job)
                 if (
@@ -6585,8 +6689,9 @@ class RecipeOperationService:
                 workload_intent_ordinal = bound
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or not _run_is_one_shot(session, run):
-                raise RecipeOperationConflict(
-                    "logical recipe run changed while stopping"
+                raise RecipeRequestInvalid(
+                    "logical recipe run changed while stopping",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
             admitted = self._stop_plan_in_session(
                 session,
@@ -7076,7 +7181,10 @@ class RecipeOperationService:
             if len(stop_impacts) != 1 or tuple(sorted(target_node_ids)) != tuple(
                 sorted(expected_targets)
             ):
-                raise ValueError("accepted profile has no unique Stop for this run")
+                raise InvalidValue(
+                    "accepted profile has no unique Stop for this run",
+                    reason=InvalidRequestReason.NOT_FOUND,
+                )
         except (TypeError, ValueError) as error:
             return retire_as_unknown(
                 "recipe.profile-stop",
@@ -7368,8 +7476,9 @@ class RecipeOperationService:
                 or len(children) != 1
                 or children[0].node_id not in parent.targets
             ):
-                raise RecipeOperationConflict(
-                    "artifact job cancellation authority changed"
+                raise RecipeRequestInvalid(
+                    "artifact job cancellation authority changed",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
             if (
                 parent.state == "cancelled"
@@ -7389,8 +7498,9 @@ class RecipeOperationService:
                 continue
             deadline = superseded_cancellation_deadline(parent.result)
             if deadline is None:
-                raise RecipeOperationConflict(
-                    "artifact job has no cancellation authority"
+                raise RecipeRequestInvalid(
+                    "artifact job has no cancellation authority",
+                    reason=InvalidRequestReason.NOT_FOUND,
                 )
             # The order carries the superseding cancel: the job mirrors it
             # (``cancelling``, or ended already) and reports the wait.
@@ -7614,7 +7724,10 @@ class RecipeOperationService:
 
         revision = _uninstall_recipe(session, installation, lock=lock)
         if revision is None:
-            raise RecipeOperationConflict("recipe revision authority is unavailable")
+            raise RecipeRetryLater(
+                "recipe revision authority is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         node_statement = (
             select(InstallationNode)
             .where(InstallationNode.installation_id == installation_id)
@@ -7949,19 +8062,24 @@ class RecipeOperationService:
             )
             or (owner_id is not None and existing.payload.get("owner_id") != owner_id)
         ):
-            raise RecipeOperationConflict("request key was already used differently")
+            raise RecipeRequestInvalid(
+                "request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         if installation_id is not None:
             if (
                 existing.kind not in {"recipe.start", "recipe.job.activate.v1"}
                 or existing.payload.get("owner_kind") != "run"
             ):
-                raise RecipeOperationConflict(
-                    "request key was already used differently"
+                raise RecipeRequestInvalid(
+                    "request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
             run = session.get(RecipeRun, existing.payload.get("owner_id"))
             if run is None or run.installation_id != installation_id:
-                raise RecipeOperationConflict(
-                    "request key was already used differently"
+                raise RecipeRequestInvalid(
+                    "request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
         if install_identity is not None:
             # An install replay returns the old job only for the same mapping
@@ -7976,8 +8094,9 @@ class RecipeOperationService:
                 or (installation.mapping_id, installation.recipe_build_id)
                 != install_identity
             ):
-                raise RecipeOperationConflict(
-                    "request key was already used differently"
+                raise RecipeRequestInvalid(
+                    "request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
         return existing
 
@@ -8047,7 +8166,10 @@ class RecipeOperationService:
             )
         except AdmissionLockBusy as error:
             if kind == "recipe.install":
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise InstallAdmissionBusy(
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         if tuple(node.node_id for node in target_nodes) != tuple(targets):
             raise RecipeRequestInvalid("workload intent target disappeared")
@@ -8070,7 +8192,10 @@ class RecipeOperationService:
                 )
             except AdmissionLockBusy as error:
                 if kind == "recipe.install":
-                    raise InstallAdmissionBusy("install.capacity_busy") from error
+                    raise InstallAdmissionBusy(
+                        InstallAdmissionCode.CAPACITY_BUSY,
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from error
                 raise RunAdmissionBusy("run capacity writer is busy") from error
             return next_ordinal
         if (
@@ -8113,7 +8238,7 @@ class RecipeOperationService:
                 for _node_id, payload in node_payloads:
                     payload_model.model_validate_json(canonical_message(payload))
             except Exception as error:
-                raise RecipeOperationConflict(
+                raise RecipeRequestInvalid(
                     f"{kind} payload does not satisfy its wire schema"
                 ) from error
         job_id = str(uuid.uuid4())
@@ -8151,7 +8276,10 @@ class RecipeOperationService:
             )
         except AdmissionLockBusy as error:
             if kind == "recipe.install":
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise InstallAdmissionBusy(
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         existing = self._idempotent_job_in_session(
             session,
@@ -8210,7 +8338,9 @@ class RecipeOperationService:
                 for _node_id, payload in flattened:
                     compiled_plan = payload.get("compiled_execution_plan")
                     if not isinstance(compiled_plan, Mapping):
-                        raise TypeError("compiled execution plan is missing")
+                        raise StoredStateTypeDamaged(
+                            "compiled execution plan is missing"
+                        )
                     validate_compiled_launch_payload(compiled_plan)
             except (CompiledExecutionPlanError, TypeError, ValueError) as error:
                 raise RecipeRequestInvalid(
@@ -8246,13 +8376,19 @@ class RecipeOperationService:
                 )
         except AdmissionLockBusy as error:
             if kind == "recipe.install":
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise InstallAdmissionBusy(
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         except OperationalError as error:
             if not is_admission_contention(error):
                 raise
             if kind == "recipe.install":
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise InstallAdmissionBusy(
+                    InstallAdmissionCode.CAPACITY_BUSY,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         return job
 
@@ -8535,25 +8671,25 @@ def _stored_phases(
         if raw_phases is None:
             return ()
         if not isinstance(raw_phases, list) or not raw_phases:
-            raise ValueError("stored operation phases are invalid")
+            raise BookkeepingUnknown("stored operation phases are invalid")
         phases: list[tuple[tuple[str, str, Mapping[str, object]], ...]] = []
         seen_operations: set[str] = set()
         for raw_phase in raw_phases:
             if not isinstance(raw_phase, list) or not raw_phase:
-                raise ValueError("stored operation phases are invalid")
+                raise BookkeepingUnknown("stored operation phases are invalid")
             group: list[tuple[str, str, Mapping[str, object]]] = []
             for raw_item in raw_phase:
                 if not isinstance(raw_item, Mapping):
-                    raise TypeError("stored operation phases are invalid")
+                    raise StoredStateTypeDamaged("stored operation phases are invalid")
                 operation_id = raw_item.get("operation_id")
                 node_id = raw_item.get("node_id")
                 item_payload = raw_item.get("payload")
                 if not isinstance(node_id, str) or not isinstance(
                     item_payload, Mapping
                 ):
-                    raise TypeError("stored operation phases are invalid")
+                    raise StoredStateTypeDamaged("stored operation phases are invalid")
                 if not isinstance(operation_id, str) or operation_id in seen_operations:
-                    raise ValueError("stored operation phases are invalid")
+                    raise BookkeepingUnknown("stored operation phases are invalid")
                 uuid.UUID(operation_id)
                 seen_operations.add(operation_id)
                 group.append((operation_id, node_id, dict(item_payload)))
@@ -8712,7 +8848,7 @@ def prepare_exact_recipe_run_observation_nodes(
         )
     )
     if included_run_ids - {node.run_id for node, _ in assigned}:
-        raise ValueError("recipe run observation is not assigned")
+        raise InvalidValue("recipe run observation is not assigned")
     if not included_run_ids:
         for node, run in assigned:
             if _aware(node.updated_at) >= observed_at:

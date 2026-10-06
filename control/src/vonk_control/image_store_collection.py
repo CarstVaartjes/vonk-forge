@@ -26,6 +26,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import ImageStoreCode
 
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -159,7 +160,7 @@ class ImageStoreCollector:
             return False
         log_event(
             _LOGGER,
-            "image_store.damaged_receipt_evicted",
+            ImageStoreCode.DAMAGED_RECEIPT_EVICTED,
             service="control-worker",
             address=address,
         )
@@ -263,7 +264,7 @@ class ImageStoreCollector:
 def _log_deferred(code: str, detail: str) -> None:
     log_event(
         _LOGGER,
-        "image_store.collection_deferred",
+        ImageStoreCode.COLLECTION_DEFERRED,
         service="control-worker",
         code=code,
         detail=detail,

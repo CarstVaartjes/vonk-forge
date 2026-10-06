@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from vonk_agent_protocol import TopologyCode
+
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 
 
@@ -30,7 +32,7 @@ def validate_topology(
     try:
         topology = recipe_topology(recipe)
     except RecipeRuntimeSpecError as error:
-        raise TopologyError("topology.invalid", str(error)) from error
+        raise TopologyError(TopologyCode.INVALID, str(error)) from error
     ordered = tuple(sorted(placements, key=lambda item: item.rank))
     nodes = [item.node_id for item in ordered]
     ranks = [item.rank for item in ordered]
@@ -41,7 +43,7 @@ def validate_topology(
         or len(ordered) != topology.node_count
     ):
         raise TopologyError(
-            "topology.placement_invalid",
+            TopologyCode.PLACEMENT_INVALID,
             "placement must match the exact topology with unique contiguous ranks",
         )
     expected_placements = [
@@ -51,11 +53,11 @@ def validate_topology(
     ]
     if [(item.role, item.endpoint_owner) for item in ordered] != expected_placements:
         raise TopologyError(
-            "topology.role_mismatch", "placement roles do not match the topology"
+            TopologyCode.ROLE_MISMATCH, "placement roles do not match the topology"
         )
     if any("runtime.vonk.v1" not in capabilities.get(node, ()) for node in nodes):
         raise TopologyError(
-            "topology.runtime_capability_missing",
+            TopologyCode.RUNTIME_CAPABILITY_MISSING,
             "every GPU node must advertise runtime.vonk.v1",
         )
     if not topology.distributed:
@@ -73,7 +75,7 @@ def validate_topology(
         ]
         if not speeds or max(speeds) < required:
             raise TopologyError(
-                "topology.fabric_insufficient",
+                TopologyCode.FABRIC_INSUFFICIENT,
                 f"{node} lacks {required} Mbps {connectivity} fabric",
             )
     return ordered

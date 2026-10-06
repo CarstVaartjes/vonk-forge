@@ -68,6 +68,7 @@ from pathlib import Path
 from vonk_agent_protocol import (
     CATEGORIZED_ERROR_BASES,
     LEGACY_WAIT_STATE,
+    REASON_CODE_ENUMS,
     AgentResultState,
     BlockerCategory,
     FailureCode,
@@ -450,6 +451,7 @@ _CONTRACT_CODE_ENUMS = {
         InvalidRequestReason,
         RunAdmissionCode,
         ResourceBlockerCode,
+        *REASON_CODE_ENUMS,
     )
 }
 
@@ -479,11 +481,23 @@ def _leading_text(node: ast.AST) -> str | None:
         for value in node.values:
             if isinstance(value, ast.Constant) and isinstance(value.value, str):
                 parts.append(value.value)
+            elif isinstance(value, ast.FormattedValue) and (
+                word := _contract_word(value.value)
+            ):
+                parts.append(word)
             else:
                 break
         return "".join(parts)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return _leading_text(node.left)
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "run_switch_code"
+        and node.args
+    ):
+        # The contract's wrapper of ``run-switch.`` plus another domain's code.
+        return "run-switch." + (_leading_text(node.args[0]) or "")
     return None
 
 
@@ -959,9 +973,12 @@ def evaluate_blocker_gate(
     document: dict[str, object],
     guard: Sequence[UncategorizedRaise] | None = None,
 ) -> list[str]:
+    from .blocker_retries import evaluate_retry_gate
+
     return [
         *evaluate_wait_gate(waits, document),
         *evaluate_raise_gate(raises, document),
+        *evaluate_retry_gate(document),
         *([] if guard is None else evaluate_guard_gate(guard, document)),
     ]
 

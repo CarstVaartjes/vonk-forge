@@ -17,8 +17,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentResult,
     InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
+    SecurityRefusalError,
+    SecurityRefusalReason,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
@@ -33,6 +37,12 @@ from .agent_jobs import (
 )
 from .agent_package_source import load_package_source
 from .bounded_json import require_integer
+from .categorized_errors import (
+    BookkeepingUnknown,
+    InvalidType,
+    InvalidValue,
+    MissingRecord,
+)
 from .lifecycle import CancelRequested, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter
 from .lifecycle.agent_upgrade import UNSUPPORTED_DISPATCH, AgentUpgradeAdapter
@@ -106,14 +116,23 @@ def _request_intent(
             "selectors": None if node_ids is None else list(node_ids),
         }
     if not isinstance(value, Mapping):
-        raise AgentUpgradeInvalid("agent upgrade request intent is invalid")
+        raise AgentUpgradeInvalid(
+            "agent upgrade request intent is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     if set(value) != {"all", "selectors"} or type(value.get("all")) is not bool:
-        raise AgentUpgradeInvalid("agent upgrade request intent is invalid")
+        raise AgentUpgradeInvalid(
+            "agent upgrade request intent is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     all_nodes = value["all"]
     selectors = value["selectors"]
     if all_nodes:
         if selectors is not None:
-            raise AgentUpgradeInvalid("agent upgrade request intent is invalid")
+            raise AgentUpgradeInvalid(
+                "agent upgrade request intent is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         return {"all": True, "selectors": None}
     if (
         not isinstance(selectors, list)
@@ -121,8 +140,21 @@ def _request_intent(
         or len(selectors) > 64
         or not all(isinstance(selector, str) and selector for selector in selectors)
     ):
-        raise AgentUpgradeInvalid("agent upgrade request intent is invalid")
+        raise AgentUpgradeInvalid(
+            "agent upgrade request intent is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     return {"all": False, "selectors": list(selectors)}
+
+
+def _conflict_detail(detail: str, spark_id: str | None) -> str:
+    if spark_id is None:
+        return detail
+    return (
+        f"Spark {spark_id} {detail}"
+        if _NODE_ID.fullmatch(spark_id) is not None
+        else "agent upgrade target is invalid"
+    )
 
 
 class AgentUpgradeConflict(RuntimeError):
@@ -130,29 +162,72 @@ class AgentUpgradeConflict(RuntimeError):
 
     The refusal text is surfaced to an operator, so a Spark is named only by its
     canonical identifier.  Any other ``spark_id`` is a stored row value and is
-    replaced rather than echoed.
+    replaced rather than echoed.  Raise one of the categorized subclasses.
     """
 
     def __init__(self, detail: str, *, spark_id: str | None = None) -> None:
-        if spark_id is not None:
-            detail = (
-                f"Spark {spark_id} {detail}"
-                if _NODE_ID.fullmatch(spark_id) is not None
-                else "agent upgrade target is invalid"
-            )
-        super().__init__(detail)
+        super().__init__(_conflict_detail(detail, spark_id))
 
 
 class AgentUpgradeInvalid(InvalidRequestError, AgentUpgradeConflict):
-    """The request, package or target list it names is not an upgrade the
-    Controller can plan.  Refused before anything is persisted; a stored plan is
-    never refused as this class (a damaged one ends its rollout, see
-    ``_advance_rollout``)."""
+    """The request, plan or manifest is malformed or conflicts with the request."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        spark_id: str | None = None,
+        reason: InvalidRequestReason | None = None,
+    ) -> None:
+        InvalidRequestError.__init__(
+            self, _conflict_detail(detail, spark_id), reason=reason
+        )
+
+
+class AgentUpgradeUnavailable(UnknownOutcomeError, AgentUpgradeConflict):
+    """Release or stored evidence is unavailable or moved: observe and retry."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        spark_id: str | None = None,
+        reason: WaitReason | None = None,
+    ) -> None:
+        UnknownOutcomeError.__init__(
+            self, _conflict_detail(detail, spark_id), reason=reason
+        )
+
+
+class AgentUpgradeRefused(SecurityRefusalError, AgentUpgradeConflict):
+    """The release evidence fails its identity or signature checks."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        spark_id: str | None = None,
+        reason: SecurityRefusalReason | None = None,
+    ) -> None:
+        SecurityRefusalError.__init__(
+            self, _conflict_detail(detail, spark_id), reason=reason
+        )
 
 
 class AgentUpgradeRetryLater(UnknownOutcomeError, AgentUpgradeConflict):
     """The release channel did not answer consistently (a release is being
     published).  Nothing was persisted; the caller asks again and converges."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        spark_id: str | None = None,
+        reason: WaitReason | None = WaitReason.OBSERVATION_UNAVAILABLE,
+    ) -> None:
+        UnknownOutcomeError.__init__(
+            self, _conflict_detail(detail, spark_id), reason=reason
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,7 +264,10 @@ class AgentUpgradeService:
             self._advance, self.advance_node, reconcile=self.heal_rollouts
         )
         if channel not in {"dev", "stable"}:
-            raise ValueError("agent upgrade channel is invalid")
+            raise InvalidValue(
+                "agent upgrade channel is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         self._channel = channel
         self._http = httpx2.Client(
             base_url=release_api_url,
@@ -208,7 +286,10 @@ class AgentUpgradeService:
             manifest_response = self._http.get(f"{prefix}/current.manifest")
             manifest_response.raise_for_status()
             if len(manifest_response.content) > 64 * 1024:
-                raise AgentUpgradeConflict("agent release manifest is too large")
+                raise AgentUpgradeUnavailable(
+                    "agent release manifest is too large",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             manifest = dict(
                 line.split("=", 1)
                 for line in manifest_response.text.splitlines()
@@ -221,11 +302,17 @@ class AgentUpgradeService:
                 or release_path
                 != f"artifacts/{self._channel}/releases/{generation}/release.json"
             ):
-                raise AgentUpgradeConflict("agent release manifest is invalid")
+                raise AgentUpgradeUnavailable(
+                    "agent release manifest is invalid",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             release_response = self._http.get(f"/{release_path}")
             release_response.raise_for_status()
             if len(release_response.content) > 256 * 1024:
-                raise AgentUpgradeConflict("agent release document is too large")
+                raise AgentUpgradeUnavailable(
+                    "agent release document is too large",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             release = release_response.json()
             artifact = release["artifacts"]["agent-package-linux-arm64"]
             signature_record = release["artifacts"][
@@ -234,18 +321,22 @@ class AgentUpgradeService:
             if not isinstance(artifact, Mapping) or not isinstance(
                 signature_record, Mapping
             ):
-                raise TypeError("agent release artifact record is not an object")
+                raise InvalidType(
+                    "agent release artifact record is not an object",
+                    reason=InvalidRequestReason.MALFORMED,
+                )
             signature_response = self._http.get(f"/{signature_record['path']}")
             signature_response.raise_for_status()
             signature = signature_response.text.strip()
         except (httpx2.HTTPError, KeyError, TypeError, ValueError) as error:
             # Name what could not be resolved and what to do about it; the
             # operator cannot see the release relay from the CLI.
-            raise AgentUpgradeConflict(
+            raise AgentUpgradeUnavailable(
                 f"the current {self._channel} agent package could not be resolved "
                 f"from the release channel ({type(error).__name__}); check that the "
                 "Controller reaches install.vonkforge.ai and that it serves a "
-                "complete release, then retry"
+                "complete release, then retry",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         if (
             release.get("channel") != self._channel
@@ -289,7 +380,8 @@ class AgentUpgradeService:
             node_ids is None or tuple(node_ids) != (repair["node_id"],)
         ):
             raise AgentUpgradeInvalid(
-                "agent repair requires exactly its explicit Spark"
+                "agent repair requires exactly its explicit Spark",
+                reason=InvalidRequestReason.INCOMPLETE,
             )
         # The agent wire requires a 64-hex authority revision on every
         # upgrade operation; the signed package digest names what it installs.
@@ -300,7 +392,10 @@ class AgentUpgradeService:
             or len(requested) != len(set(requested))
             or len(requested) > 64
         ):
-            raise AgentUpgradeInvalid("agent upgrade targets are invalid")
+            raise AgentUpgradeInvalid(
+                "agent upgrade targets are invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         skipped: dict[str, str] = {}
         installed: list[tuple[str, str, str]] = []
         with self._sessions() as session:
@@ -386,16 +481,21 @@ class AgentUpgradeService:
             or not isinstance(job.payload, Mapping)
             or "request_intent" not in job.payload
         ):
-            raise AgentUpgradeConflict("agent upgrade request key was already used")
+            raise AgentUpgradeInvalid(
+                "agent upgrade request key was already used",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         try:
             stored_intent = _request_intent(job.payload.get("request_intent"), None)
         except AgentUpgradeConflict:
-            raise AgentUpgradeConflict(
-                "agent upgrade request key was already used differently"
+            raise AgentUpgradeInvalid(
+                "agent upgrade request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
             ) from None
         if stored_intent != request_intent:
-            raise AgentUpgradeConflict(
-                "agent upgrade request key was already used differently"
+            raise AgentUpgradeInvalid(
+                "agent upgrade request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
             )
 
     def apply(
@@ -479,9 +579,12 @@ class AgentUpgradeService:
                 select(Job).where(Job.id == job_id).with_for_update(of=Job)
             )
             if parent is None:
-                raise KeyError(job_id)
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             if parent.kind != "agent-upgrade":
-                raise ValueError("job is not a resumable agent upgrade")
+                raise InvalidValue(
+                    "job is not a resumable agent upgrade",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             failed_dispatch = (
                 parent.state == "failed"
                 and parent.status_reason == UNSUPPORTED_DISPATCH
@@ -495,7 +598,10 @@ class AgentUpgradeService:
                 and not failed_dispatch
                 and not stale_dispatch
             ):
-                raise ValueError("job is not a resumable agent upgrade")
+                raise InvalidValue(
+                    "job is not a resumable agent upgrade",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             worker_attempt = (
                 None
                 if parent.current_attempt == 0
@@ -509,21 +615,33 @@ class AgentUpgradeService:
                 )
             )
             if parent.current_attempt > 0 and worker_attempt is None:
-                raise ValueError("agent upgrade worker dispatch audit is invalid")
+                raise BookkeepingUnknown(
+                    "agent upgrade worker dispatch audit is invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                )
             if worker_attempt is not None and worker_attempt.state == "running":
                 if _aware(worker_attempt.lease_deadline) > _aware(now):
-                    raise ValueError("agent upgrade worker dispatch is still active")
+                    raise InvalidValue(
+                        "agent upgrade worker dispatch is still active",
+                        reason=InvalidRequestReason.NOT_READY,
+                    )
                 self._rollouts.expire_worker_attempt(worker_attempt)
             if failed_dispatch or stale_dispatch:
                 if failed_dispatch and (
                     worker_attempt is None or worker_attempt.state != "failed"
                 ):
-                    raise ValueError("failed agent upgrade dispatch audit is invalid")
+                    raise BookkeepingUnknown(
+                        "failed agent upgrade dispatch audit is invalid",
+                        reason=WaitReason.JOB_STATE_UNCERTAIN,
+                    )
                 if stale_dispatch and (
                     worker_attempt is None
                     or not job_states.attempt_lapsed(worker_attempt)
                 ):
-                    raise ValueError("agent upgrade worker dispatch is not stale")
+                    raise InvalidValue(
+                        "agent upgrade worker dispatch is not stale",
+                        reason=InvalidRequestReason.NOT_READY,
+                    )
             package = parent.payload.get("package")
             order = parent.payload.get("node_order")
             repair = parent.payload.get("repair_manifest")
@@ -546,11 +664,17 @@ class AgentUpgradeService:
                 or order != parent.targets
                 or (repair is not None and not isinstance(repair, Mapping))
             ):
-                raise ValueError("stored agent upgrade plan is invalid")
+                raise BookkeepingUnknown(
+                    "stored agent upgrade plan is invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                )
             try:
                 normalized_intent = _request_intent(request_intent, None)
             except AgentUpgradeConflict as error:
-                raise ValueError("stored agent upgrade plan is invalid") from error
+                raise BookkeepingUnknown(
+                    "stored agent upgrade plan is invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                ) from error
             try:
                 normalized_package = self._package(package)
                 normalized_repair = (
@@ -559,11 +683,17 @@ class AgentUpgradeService:
                     else self._repair_manifest(repair, normalized_package)
                 )
             except AgentUpgradeConflict as error:
-                raise ValueError("stored agent upgrade plan is invalid") from error
+                raise BookkeepingUnknown(
+                    "stored agent upgrade plan is invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                ) from error
             if normalized_repair is not None and order != [
                 normalized_repair["node_id"]
             ]:
-                raise ValueError("stored agent upgrade plan is invalid")
+                raise BookkeepingUnknown(
+                    "stored agent upgrade plan is invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                )
             plan_digest = hashlib.sha256(
                 canonical_message(
                     {
@@ -581,12 +711,18 @@ class AgentUpgradeService:
                 )
             ).hexdigest()
             if parent.payload_digest != plan_digest:
-                raise ValueError("stored agent upgrade plan is invalid")
+                raise BookkeepingUnknown(
+                    "stored agent upgrade plan is invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                )
             from vonk_agent_protocol.contracts import AgentUpgradePayload
 
             sources = parent.payload["sources"]
             if not isinstance(sources, dict) or set(sources) != set(order):
-                raise ValueError("stored rollback sources are invalid")
+                raise BookkeepingUnknown(
+                    "stored rollback sources are invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                )
             stored_operations = list(
                 session.scalars(
                     select(AgentOperation)
@@ -608,7 +744,10 @@ class AgentUpgradeService:
             if len({operation.node_id for operation in stored_operations}) != len(
                 stored_operations
             ):
-                raise ValueError("stored agent upgrade operation is invalid")
+                raise BookkeepingUnknown(
+                    "stored agent upgrade operation is invalid",
+                    reason=WaitReason.JOB_STATE_UNCERTAIN,
+                )
             for operation in stored_operations:
                 payload = read_stored_model(AgentUpgradePayload, operation.payload)
                 source = read_stored_model(
@@ -635,13 +774,19 @@ class AgentUpgradeService:
                     or operation.payload_digest
                     != hashlib.sha256(canonical_message(operation.payload)).hexdigest()
                 ):
-                    raise ValueError("stored agent upgrade operation is invalid")
+                    raise BookkeepingUnknown(
+                        "stored agent upgrade operation is invalid",
+                        reason=WaitReason.JOB_STATE_UNCERTAIN,
+                    )
             # Deferred (offline) Sparks are passed over while later ones
             # upgrade, so materialized operations need not form a prefix.
             for operation in active:
                 if operation.state == "queued":
                     if operation.current_attempt != 0:
-                        raise ValueError("stored agent upgrade attempt is invalid")
+                        raise BookkeepingUnknown(
+                            "stored agent upgrade attempt is invalid",
+                            reason=WaitReason.JOB_STATE_UNCERTAIN,
+                        )
                     continue
                 active_attempt = session.scalar(
                     select(AgentOperationAttempt)
@@ -652,7 +797,10 @@ class AgentUpgradeService:
                     .with_for_update(of=AgentOperationAttempt)
                 )
                 if active_attempt is None or active_attempt.state != "running":
-                    raise ValueError("stored agent upgrade attempt is invalid")
+                    raise BookkeepingUnknown(
+                        "stored agent upgrade attempt is invalid",
+                        reason=WaitReason.JOB_STATE_UNCERTAIN,
+                    )
             if failed_dispatch:
                 self._rollouts.reopen(parent, now, reason=None)
             else:
@@ -671,7 +819,10 @@ class AgentUpgradeService:
                         "failed",
                         *agent_operation_states.ATTEMPT_OBSERVING,
                     }:
-                        raise ValueError("stored agent upgrade attempt is invalid")
+                        raise BookkeepingUnknown(
+                            "stored agent upgrade attempt is invalid",
+                            reason=WaitReason.JOB_STATE_UNCERTAIN,
+                        )
                     # Operator resume is a new dispatch decision. For an
                     # attempted install it must establish a fresh full safety
                     # fence regardless of the stored helper result. Old agents
@@ -1217,7 +1368,10 @@ class AgentUpgradeService:
             or not url.endswith("/vonk-forge-agent.deb")
             or any(marker in url for marker in ("?", "#", "@"))
         ):
-            raise AgentUpgradeInvalid("agent upgrade package is invalid")
+            raise AgentUpgradeInvalid(
+                "agent upgrade package is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         return document
 
     @classmethod
@@ -1245,7 +1399,10 @@ class AgentUpgradeService:
             or _SHA256.fullmatch(str(document["authority_sha256"])) is None
             or not isinstance(manifest_package_value, Mapping)
         ):
-            raise AgentUpgradeConflict("agent repair manifest is invalid")
+            raise AgentUpgradeInvalid(
+                "agent repair manifest is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         manifest_package = cls._package(manifest_package_value)
         expected_url = (
             "https://install.vonkforge.ai/repair-capsules/"
@@ -1253,10 +1410,14 @@ class AgentUpgradeService:
             f"{manifest_package['package_sha256']}/vonk-forge-agent.deb"
         )
         if manifest_package["package_url"] != expected_url:
-            raise AgentUpgradeConflict("agent repair package URL is not canonical")
+            raise AgentUpgradeInvalid(
+                "agent repair package URL is not canonical",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         if dict(package) != manifest_package:
-            raise AgentUpgradeConflict(
-                "agent repair manifest does not match its package descriptor"
+            raise AgentUpgradeInvalid(
+                "agent repair manifest does not match its package descriptor",
+                reason=InvalidRequestReason.CONFLICT,
             )
         return {**document, "package": manifest_package}
 

@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.fleet_profile_application_progress_supersede_code_type_0 import check_fleet_profile_application_progress_supersede_code_type_0
-from ..models.fleet_profile_application_progress_supersede_code_type_0 import FleetProfileApplicationProgressSupersedeCodeType0
+from ..models.supersede_code import check_supersede_code
+from ..models.supersede_code import SupersedeCode
 from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
@@ -51,7 +51,7 @@ class FleetProfileApplicationProgress:
             retry_due_at (datetime.datetime | None | Unset):
             retry_of_application_id (None | str | Unset):
             step_results (FleetProfileApplicationProgressStepResults | Unset):
-            supersede_code (FleetProfileApplicationProgressSupersedeCodeType0 | None | Unset):
+            supersede_code (None | SupersedeCode | Unset):
             superseded_by (None | str | Unset):
             switch_adapter (FleetProfileSwitchAdapterState | None | Unset):
             total_steps (int | Unset):  Default: 0.
@@ -73,7 +73,7 @@ class FleetProfileApplicationProgress:
     retry_due_at: datetime.datetime | None | Unset = UNSET
     retry_of_application_id: None | str | Unset = UNSET
     step_results: FleetProfileApplicationProgressStepResults | Unset = UNSET
-    supersede_code: FleetProfileApplicationProgressSupersedeCodeType0 | None | Unset = UNSET
+    supersede_code: None | SupersedeCode | Unset = UNSET
     superseded_by: None | str | Unset = UNSET
     switch_adapter: FleetProfileSwitchAdapterState | None | Unset = UNSET
     total_steps: int | Unset = 0
@@ -442,7 +442,7 @@ class FleetProfileApplicationProgress:
 
 
 
-        def _parse_supersede_code(data: object) -> FleetProfileApplicationProgressSupersedeCodeType0 | None | Unset:
+        def _parse_supersede_code(data: object) -> None | SupersedeCode | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -450,14 +450,14 @@ class FleetProfileApplicationProgress:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                supersede_code_type_0 = check_fleet_profile_application_progress_supersede_code_type_0(data)
+                supersede_code_type_0 = check_supersede_code(data)
 
 
 
                 return supersede_code_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(FleetProfileApplicationProgressSupersedeCodeType0 | None | Unset, data)
+            return cast(None | SupersedeCode | Unset, data)
 
         supersede_code = _parse_supersede_code(d.pop("supersede_code", UNSET))
 

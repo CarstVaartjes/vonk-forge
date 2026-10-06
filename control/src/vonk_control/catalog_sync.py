@@ -16,7 +16,7 @@ from typing import Protocol
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import CatalogSyncCode, canonical_message
 
 from .bounded_json import require_integer, require_sequence
 from .catalog_service import CatalogService
@@ -129,7 +129,7 @@ class ManagedRecipeCatalogSyncService:
                 expected_commit,
             ):
                 raise CatalogSyncError(
-                    "catalog.sync_request_reused",
+                    CatalogSyncCode.REQUEST_REUSED,
                     "request key was already used for different sync semantics",
                 )
             return _view(existing)
@@ -176,7 +176,7 @@ class ManagedRecipeCatalogSyncService:
                     active = None
                 if active is not None:
                     raise CatalogSyncError(
-                        "catalog.sync_in_progress",
+                        CatalogSyncCode.IN_PROGRESS,
                         f"managed catalog sync {active.id} is already running",
                     )
                 session.add(run)
@@ -185,18 +185,18 @@ class ManagedRecipeCatalogSyncService:
             if replay is not None:
                 return _view(replay)
             raise CatalogSyncError(
-                "catalog.sync_in_progress", "another managed catalog sync is running"
+                CatalogSyncCode.IN_PROGRESS, "another managed catalog sync is running"
             ) from error
         try:
             snapshot = self._reader.list()
             if snapshot.repository != self._repository:
                 raise CatalogSyncError(
-                    "catalog.sync_repository_changed",
+                    CatalogSyncCode.REPOSITORY_CHANGED,
                     "recipe library repository identity changed",
                 )
             if expected_commit is not None and snapshot.commit != expected_commit:
                 raise CatalogSyncError(
-                    "catalog.sync_preview_changed",
+                    CatalogSyncCode.PREVIEW_CHANGED,
                     "recipe library changed since it was reviewed",
                 )
             prepare = getattr(self._reader, "prepare", None)
@@ -209,7 +209,7 @@ class ManagedRecipeCatalogSyncService:
         except Exception as error:
             # Whatever went wrong, never leave the run "running": it would
             # block every later sync until its lease expired.
-            code = str(getattr(error, "code", "catalog.sync_failed"))
+            code = str(getattr(error, "code", CatalogSyncCode.FAILED))
             detail = str(getattr(error, "detail", str(error))) or type(error).__name__
             self._fail(run.id, code, detail)
             raise
@@ -227,7 +227,7 @@ class ManagedRecipeCatalogSyncService:
         run.state = "failed"
         run.active_slot = None
         run.result = json.loads(canonical_message(_result(failed)))
-        run.error_code = "catalog.sync_lease_expired"
+        run.error_code = CatalogSyncCode.LEASE_EXPIRED
         run.error_detail = "managed catalog sync made no progress and was replaced"
         run.completed_at = self._clock()
 
@@ -280,7 +280,7 @@ class ManagedRecipeCatalogSyncService:
             return replace(
                 view,
                 last_error=CatalogSyncFailure(
-                    code=failure.error_code or "catalog.sync_failed",
+                    code=failure.error_code or CatalogSyncCode.FAILED,
                     detail=failure.error_detail or "managed catalog sync failed",
                     occurred_at=failure.completed_at,
                 ),
@@ -300,7 +300,7 @@ class ManagedRecipeCatalogSyncService:
             # Reading the library failed before any sync could start; record
             # it so sync-status shows why the catalog is not advancing.
             self._record_read_failure(
-                str(getattr(error, "code", "catalog.sync_failed")),
+                str(getattr(error, "code", CatalogSyncCode.FAILED)),
                 str(getattr(error, "detail", str(error))) or type(error).__name__,
             )
             raise
@@ -401,7 +401,7 @@ class ManagedRecipeCatalogSyncService:
             self._record_problem_values(
                 result,
                 uri=uri if isinstance(uri, str) else None,
-                code=str(problem.get("code", "catalog.sync_item_failed")),
+                code=str(problem.get("code", CatalogSyncCode.ITEM_FAILED)),
                 detail=str(problem.get("detail", "catalog document was skipped")),
             )
             self._progress(run_id, result)
@@ -415,7 +415,7 @@ class ManagedRecipeCatalogSyncService:
                 self._record_problem_values(
                     result,
                     uri=None,
-                    code=str(getattr(error, "code", "catalog.sync_model_failed")),
+                    code=str(getattr(error, "code", CatalogSyncCode.MODEL_FAILED)),
                     detail=str(getattr(error, "detail", str(error))),
                 )
             self._progress(run_id, result)
@@ -431,7 +431,7 @@ class ManagedRecipeCatalogSyncService:
                 self._record_problem(
                     result,
                     item,
-                    "catalog.sync_identity_changed",
+                    CatalogSyncCode.IDENTITY_CHANGED,
                     "canonical recipe identity changed",
                 )
             elif (
@@ -463,7 +463,7 @@ class ManagedRecipeCatalogSyncService:
                         or hydrated.content_sha256 != item.content_sha256
                     ):
                         raise CatalogSyncError(
-                            "catalog.sync_revision_changed",
+                            CatalogSyncCode.REVISION_CHANGED,
                             "recipe changed while the exact library snapshot was applied",
                         )
                     if previous is not None and previous.node_count is not None:
@@ -483,7 +483,7 @@ class ManagedRecipeCatalogSyncService:
                             self._record_problem(
                                 result,
                                 item,
-                                "recipe.topology_changed",
+                                CatalogSyncCode.RECIPE_TOPOLOGY_CHANGED,
                                 f"new revision needs {incoming_count} Spark(s) but "
                                 f"the current one needs {previous.node_count}; "
                                 "a different Spark count needs a new recipe id, "
@@ -522,7 +522,7 @@ class ManagedRecipeCatalogSyncService:
                     self._record_problem(
                         result,
                         item,
-                        str(getattr(error, "code", "catalog.sync_item_failed")),
+                        str(getattr(error, "code", CatalogSyncCode.ITEM_FAILED)),
                         str(getattr(error, "detail", str(error))),
                     )
             self._progress(run_id, result)
@@ -568,7 +568,7 @@ class ManagedRecipeCatalogSyncService:
                 self._record_problem_values(
                     result,
                     uri=None,
-                    code="catalog.sync_prebuilt_images_failed",
+                    code=CatalogSyncCode.PREBUILT_IMAGES_FAILED,
                     detail=str(error)[:256] or type(error).__name__,
                 )
         result["state"] = "partial" if result["problems"] else "current"
@@ -617,7 +617,7 @@ class ManagedRecipeCatalogSyncService:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
                 raise CatalogSyncError(
-                    "catalog.sync_state_invalid", "managed catalog sync state changed"
+                    CatalogSyncCode.STATE_INVALID, "managed catalog sync state changed"
                 )
             run.heartbeat_at = self._clock()
             run.observed_commit = snapshot.commit
@@ -634,7 +634,7 @@ class ManagedRecipeCatalogSyncService:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
                 raise CatalogSyncError(
-                    "catalog.sync_state_invalid", "managed catalog sync state changed"
+                    CatalogSyncCode.STATE_INVALID, "managed catalog sync state changed"
                 )
             parsed = _result(result)
             run.heartbeat_at = self._clock()
@@ -650,7 +650,7 @@ class ManagedRecipeCatalogSyncService:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != "running":
                 raise CatalogSyncError(
-                    "catalog.sync_state_invalid", "managed catalog sync state changed"
+                    CatalogSyncCode.STATE_INVALID, "managed catalog sync state changed"
                 )
             run.state = "succeeded"
             run.active_slot = None
@@ -697,26 +697,26 @@ class ManagedRecipeCatalogSyncService:
             parsed = uuid.UUID(request_key)
         except ValueError as error:
             raise CatalogSyncError(
-                "catalog.sync_request_invalid", "sync request key must be a UUID"
+                CatalogSyncCode.REQUEST_INVALID, "sync request key must be a UUID"
             ) from error
         if str(parsed) != request_key.lower():
             raise CatalogSyncError(
-                "catalog.sync_request_invalid", "sync request key must be canonical"
+                CatalogSyncCode.REQUEST_INVALID, "sync request key must be canonical"
             )
         if trigger not in {"manual", "automatic"}:
             raise CatalogSyncError(
-                "catalog.sync_trigger_invalid", "sync trigger is invalid"
+                CatalogSyncCode.TRIGGER_INVALID, "sync trigger is invalid"
             )
         if not actor.strip() or len(actor) > 200:
             raise CatalogSyncError(
-                "catalog.sync_actor_invalid", "sync actor is invalid"
+                CatalogSyncCode.ACTOR_INVALID, "sync actor is invalid"
             )
         if expected_commit is not None and (
             len(expected_commit) != 40
             or any(char not in "0123456789abcdef" for char in expected_commit)
         ):
             raise CatalogSyncError(
-                "catalog.sync_commit_invalid",
+                CatalogSyncCode.COMMIT_INVALID,
                 "expected commit must be lowercase Git SHA-1",
             )
 
@@ -775,7 +775,7 @@ def _result(value: object) -> ManagedCatalogSyncResult:
         unknown["problems"] = [
             {
                 "recipe_uri": None,
-                "code": "catalog.sync_result_unreadable",
+                "code": CatalogSyncCode.RESULT_UNREADABLE,
                 "detail": "stored catalog sync result was unreadable; it is re-synced",
             }
         ]

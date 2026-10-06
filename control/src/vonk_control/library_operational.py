@@ -8,7 +8,10 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import RunAdmissionCode
+from vonk_agent_protocol import (
+    LibraryProjectionCode,
+    RunAdmissionCode,
+)
 
 from .library_contract import (
     _MAX_CANDIDATE_NODES,
@@ -143,7 +146,7 @@ def _run_health(
             expected_rank_count=expected_count,
             healthy_rank_count=0,
             healthy=False,
-            evidence_code="projection.evidence_truncated",
+            evidence_code=LibraryProjectionCode.EVIDENCE_TRUNCATED,
             evidence_detail=f"The persisted run plan has {expected_count} members, above the active {_MAX_CANDIDATE_NODES}-member evidence limit; rank health fails closed.",
         )
     expected: list[_MemberEvidence] = []

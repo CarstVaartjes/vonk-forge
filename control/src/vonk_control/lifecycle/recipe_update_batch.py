@@ -33,6 +33,10 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from vonk_agent_protocol import (
+    RecipeUpdateCode,
+)
+
 from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
@@ -75,7 +79,7 @@ _STORED = {
 #: speaks the core vocabulary, an old spelling adopted by its contract type.
 _PENDING_CHILD = "pending"
 _CANCEL_EFFECT_UNKNOWN = (
-    "recipe-update.cancel-effect-unknown: a child operation was still being "
+    f"{RecipeUpdateCode.CANCEL_EFFECT_UNKNOWN}: a child operation was still being "
     "cancelled when the stop budget ended; its own lifecycle owns it"
 )
 

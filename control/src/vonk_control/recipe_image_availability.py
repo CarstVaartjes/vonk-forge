@@ -31,9 +31,22 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
+    InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
+    ModelCacheCode,
     OperationMemberProgress,
     OperationProgress,
+    RecipeBuildCode,
+    RecipeImageCode,
+    RecipePackageCode,
+    RecipeUpdateCode,
+    RuntimeImageCode,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 from vonk_forge_contracts import RecipeDefinition, read_recipe
@@ -73,6 +86,8 @@ from .cache_removal_review import (
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
+from .categorized_errors import InvalidValue, MissingRecord
+from .categorized_faults import security_reason
 from .content_identity import ImageContent, same_image
 from .failure_classification import is_redownload, is_security_failure
 from .lifecycle.core import STOP_BUDGET
@@ -138,6 +153,8 @@ from .revision_images import revision_archives, revision_images
 from .runtime_image_preparation import (
     OCIImageTransport,
     RuntimeImagePreparationError,
+    RuntimeImagePreparationRefused,
+    RuntimeImagePreparationUnknown,
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
     RuntimeImageStorage,
@@ -172,16 +189,16 @@ _CANCELLATION_UUID = re.compile(
 # operation remains the current intent.
 _TERMINAL_FAILURE_CODES = frozenset(
     {
-        "build.security_invalid",
-        "build.source_invalid",
-        "recipe_image.recipe_invalid",
-        "recipe_image.recipe_unavailable",
-        "recipe_image.runtime_invalid",
-        "registry.destination_forbidden",
-        "registry.redirect_forbidden",
-        "runtime_image.image_unpinned",
-        "runtime_image.receipt_identity_conflict",
-        "runtime_image.source_mismatch",
+        RecipeBuildCode.SECURITY_INVALID,
+        RecipeBuildCode.SOURCE_INVALID,
+        RecipeImageCode.RECIPE_INVALID,
+        RecipeImageCode.RECIPE_UNAVAILABLE,
+        RecipeImageCode.RUNTIME_INVALID,
+        RuntimeImageCode.DESTINATION_FORBIDDEN,
+        RuntimeImageCode.REDIRECT_FORBIDDEN,
+        RuntimeImageCode.IMAGE_UNPINNED,
+        RuntimeImageCode.RECEIPT_IDENTITY_CONFLICT,
+        RuntimeImageCode.SOURCE_MISMATCH,
     }
 )
 
@@ -214,55 +231,55 @@ def _removal_retry_is_due(
 
 _CAPACITY_FAILURE_CODES = frozenset(
     {
-        "build.insufficient_disk",
-        "build.insufficient_memory",
-        "recipe_image.insufficient_disk",
-        "recipe_image.insufficient_memory",
-        "runtime_image.insufficient_disk",
+        RecipeBuildCode.INSUFFICIENT_DISK,
+        RecipeBuildCode.INSUFFICIENT_MEMORY,
+        RecipeImageCode.INSUFFICIENT_DISK,
+        RecipeImageCode.INSUFFICIENT_MEMORY,
+        RuntimeImageCode.INSUFFICIENT_DISK,
     }
 )
 _INTEGRITY_FAILURE_CODES = frozenset(
     {
-        "registry.digest_mismatch",
-        "recipe_package.digest_mismatch",
-        "runtime_image.digest_mismatch",
-        "runtime_image.archive_mismatch",
-        "runtime_image.archive_conflict",
-        "runtime_image.evidence_invalid",
+        RuntimeImageCode.DIGEST_MISMATCH,
+        RecipePackageCode.DIGEST_MISMATCH,
+        RuntimeImageCode.DIGEST_MISMATCH_,
+        RuntimeImageCode.ARCHIVE_MISMATCH,
+        RuntimeImageCode.ARCHIVE_CONFLICT,
+        RuntimeImageCode.EVIDENCE_INVALID,
     }
 )
 # Another transaction held a record this one needed for an instant (a model
 # download writing its progress, say). That is a wait to retry, never a failure
 # and never a raw database message.
-DATABASE_BUSY_CODE = "recipe_image.database_busy"
+DATABASE_BUSY_CODE = RecipeImageCode.DATABASE_BUSY
 DATABASE_BUSY_DETAIL = (
     "Another operation was changing the same record; this retries automatically."
 )
 _DEPENDENCY_WAIT_CODES = frozenset(
     {
         DATABASE_BUSY_CODE,
-        "recipe_image.build_capacity_wait",
-        "runtime_image.transfer_contended",
-        "runtime_image.publication_contended",
-        "build.consumer_busy",
-        "build.cancellation_pending",
-        "recipe_image.build_wait",
+        RecipeImageCode.BUILD_CAPACITY_WAIT,
+        RuntimeImageCode.TRANSFER_CONTENDED,
+        RuntimeImageCode.PUBLICATION_CONTENDED,
+        RecipeBuildCode.CONSUMER_BUSY,
+        RecipeBuildCode.CANCELLATION_PENDING,
+        RecipeImageCode.BUILD_WAIT,
     }
 )
 # A newer preparation for the same recipe supersedes an older one that has not
 # started.  The cancellation is recorded on the operation itself (terminal
 # state, typed failure evidence, and a bounded status reason) so newer intent
 # wins visibly and the older attempt never consumes a builder or a queue slot.
-SUPERSEDED_PREPARATION_CODE = "recipe_image.superseded_by_newer_revision"
+SUPERSEDED_PREPARATION_CODE = RecipeImageCode.SUPERSEDED_BY_NEWER_REVISION
 # Verified cache bytes can disappear (NAS restore, eviction, partial cleanup).
 # That is ordinary cache loss, not corruption: it must re-prepare, never ask an
 # operator to inspect a terminal failure.
-_RECOVERABLE_MISS_CODES = frozenset({"runtime_image.cache_missing"})
+_RECOVERABLE_MISS_CODES = frozenset({RuntimeImageCode.CACHE_MISSING})
 
 
 # A recipe whose stored build source the Controller's source policy refuses; the
 # refusal is final for that source and names the file and line of each finding.
-SOURCE_POLICY_REFUSED_CODE = "recipe_image.source_policy_refused"
+SOURCE_POLICY_REFUSED_CODE = RecipeImageCode.SOURCE_POLICY_REFUSED
 
 
 _CLAIM_SCAN_WINDOW = 256
@@ -305,6 +322,73 @@ class RecipeImageAvailabilityError(RuntimeError):
         self.free_bytes = free_bytes
         self.shortfall_bytes = shortfall_bytes
         super().__init__(detail)
+
+
+class RecipeImageAvailabilityRefused(
+    SecurityRefusalError, RecipeImageAvailabilityError
+):
+    """A refusal at a security boundary: review, scope or source authority that does not match."""
+
+    def __init__(
+        self,
+        *args: Any,
+        reason: SecurityRefusalReason | None = None,
+        **fields: Any,
+    ) -> None:
+        RecipeImageAvailabilityError.__init__(self, *args, **fields)
+        self.typed_reason = (
+            reason if reason is not None else security_reason(args[0] if args else None)
+        )
+
+
+class RecipeImageAvailabilityInvalid(InvalidRequestError, RecipeImageAvailabilityError):
+    """A malformed, stale or out-of-contract request: rejected before effects."""
+
+    def __init__(
+        self,
+        *args: Any,
+        reason: InvalidRequestReason | None = InvalidRequestReason.MALFORMED,
+        field: str | None = None,
+        **fields: Any,
+    ) -> None:
+        RecipeImageAvailabilityError.__init__(self, *args, **fields)
+        self.typed_reason = reason
+        self.typed_field = field
+
+
+class RecipeImageAvailabilityUnknown(UnknownOutcomeError, RecipeImageAvailabilityError):
+    """Unconfirmed bookkeeping, a busy owner or a transient failure: observed and retried, never a refusal."""
+
+    def __init__(
+        self,
+        *args: Any,
+        reason: WaitReason | None = None,
+        **fields: Any,
+    ) -> None:
+        RecipeImageAvailabilityError.__init__(self, *args, **fields)
+        self.typed_reason = reason
+
+
+class _ModelQueueFailed(RecipeImageAvailabilityUnknown):
+    """A Model cache call raised: the availability error carries its cause."""
+
+    def __init__(self, error: BaseException, action: str) -> None:
+        if _is_database_busy(error):
+            super().__init__(
+                DATABASE_BUSY_CODE,
+                DATABASE_BUSY_DETAIL,
+                retryable=True,
+                recovery_actions=("retry",),
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        else:
+            super().__init__(
+                RecipeImageCode.MODEL_CACHE_UNAVAILABLE,
+                f"{action} ({_failure_detail(error)[:200]})",
+                retryable=True,
+                recovery_actions=("retry",),
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
 
 
 class RecipeAuthorityResolver(Protocol):
@@ -497,14 +581,14 @@ class _RecipeRemovalSelection:
     model_scope: ModelCacheRemovalScope | None
 
 
-class _AvailabilityClaimLost(RuntimeImagePreparationError):
+class _AvailabilityClaimLost(RuntimeImagePreparationUnknown):
     """Stop an executor whose durable attempt can no longer accept writes."""
 
     def __init__(self) -> None:
         # Preserve this control outcome through image preparation's typed
         # exception boundary; contention must not become a transfer failure.
         super().__init__(
-            "recipe_image.claim_lost", "availability execution claim is unavailable"
+            RecipeImageCode.CLAIM_LOST, "availability execution claim is unavailable"
         )
 
 
@@ -519,8 +603,8 @@ def _is_digest(value: object) -> bool:
 
 def _digest(value: object, *, field: str) -> str:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
-        raise RecipeImageAvailabilityError(
-            "recipe_image.identity_invalid",
+        raise RecipeImageAvailabilityInvalid(
+            RecipeImageCode.IDENTITY_INVALID,
             f"{field} must be a lowercase SHA-256 digest",
         )
     return value
@@ -534,16 +618,16 @@ def _optional_digest(value: object, *, field: str) -> str | None:
 
 def _canonical_cancellation_id(value: object) -> str:
     if not isinstance(value, str) or not _CANCELLATION_UUID.fullmatch(value):
-        raise RecipeImageAvailabilityError(
-            "recipe_image.cancellation_invalid",
+        raise RecipeImageAvailabilityInvalid(
+            RecipeImageCode.CANCELLATION_INVALID,
             "cancellation request identity must be a canonical UUID",
         )
     try:
         if str(uuid.UUID(value)) != value:
-            raise ValueError("noncanonical UUID")
+            raise InvalidValue("noncanonical UUID")
     except ValueError as error:
-        raise RecipeImageAvailabilityError(
-            "recipe_image.cancellation_invalid",
+        raise RecipeImageAvailabilityInvalid(
+            RecipeImageCode.CANCELLATION_INVALID,
             "cancellation request identity must be a canonical UUID",
         ) from error
     return value
@@ -553,15 +637,15 @@ def _canonical_recipe(value: object) -> RecipeDefinition:
     if isinstance(value, RecipeDefinition):
         return value
     if not isinstance(value, Mapping):
-        raise RecipeImageAvailabilityError(
-            "recipe_image.recipe_invalid",
+        raise RecipeImageAvailabilityInvalid(
+            RecipeImageCode.RECIPE_INVALID,
             "selected recipe is not a canonical RecipeDefinition",
         )
     try:
         return read_recipe(value)
     except Exception as error:
-        raise RecipeImageAvailabilityError(
-            "recipe_image.recipe_invalid",
+        raise RecipeImageAvailabilityInvalid(
+            RecipeImageCode.RECIPE_INVALID,
             "selected recipe is not a canonical RecipeDefinition",
         ) from error
 
@@ -626,26 +710,6 @@ def _is_database_busy(error: BaseException | None) -> bool:
         error = error.__cause__
         seen += 1
     return False
-
-
-def _model_queue_error(
-    error: BaseException, action: str
-) -> RecipeImageAvailabilityError:
-    """The availability error for a ModelCache call that raised, with its cause."""
-
-    if _is_database_busy(error):
-        return RecipeImageAvailabilityError(
-            DATABASE_BUSY_CODE,
-            DATABASE_BUSY_DETAIL,
-            retryable=True,
-            recovery_actions=("retry",),
-        )
-    return RecipeImageAvailabilityError(
-        "recipe_image.model_cache_unavailable",
-        f"{action} ({_failure_detail(error)[:200]})",
-        retryable=True,
-        recovery_actions=("retry",),
-    )
 
 
 def _failure_code(error: BaseException) -> str:
@@ -751,9 +815,9 @@ class RecipeImageAvailabilityService:
         claim_lease_seconds: int = 120,
     ) -> None:
         if not 1 <= max_parallel <= 16:
-            raise ValueError("availability parallelism is invalid")
+            raise InvalidValue("availability parallelism is invalid")
         if not 10 <= claim_lease_seconds <= 3_600:
-            raise ValueError("availability claim lease is invalid")
+            raise InvalidValue("availability claim lease is invalid")
         self._sessions = sessions
         self._storage = storage
         self._authority = authority
@@ -791,9 +855,10 @@ class RecipeImageAvailabilityService:
             or revision.state != "active"
             or not isinstance(revision.content_digest, str)
         ):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.selector_missing",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.SELECTOR_MISSING,
                 "selected recipe revision is not active",
+                reason=InvalidRequestReason.NOT_FOUND,
             )
         # The recipe document itself is not read: its cache is selected by the
         # revision identity, so a revision whose stored document is damaged can
@@ -818,9 +883,10 @@ class RecipeImageAvailabilityService:
         model_scope: ModelCacheRemovalScope | None = None
         if with_model:
             if self._model_cache is None:
-                raise RecipeImageAvailabilityError(
-                    "model_cache.unavailable",
+                raise RecipeImageAvailabilityInvalid(
+                    ModelCacheCode.UNAVAILABLE,
                     "model cache removal is unavailable",
+                    reason=InvalidRequestReason.NOT_FOUND,
                 )
             model_scope = cast(
                 ModelCacheRemovalCoordinator, self._model_cache
@@ -837,8 +903,8 @@ class RecipeImageAvailabilityService:
         """Resolve logical selectors to the current head, retaining exact pins."""
 
         if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.selector_invalid", "recipe selector is required"
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.SELECTOR_INVALID, "recipe selector is required"
             )
         selector = selector.strip().casefold()
         with self._sessions() as session:
@@ -892,13 +958,16 @@ class RecipeImageAvailabilityService:
                 )
             rows = list(session.scalars(query.where(active_head_revision())))
         if not rows:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.selector_missing", "recipe selector was not found"
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.SELECTOR_MISSING,
+                "recipe selector was not found",
+                reason=InvalidRequestReason.NOT_FOUND,
             )
         if len(rows) != 1:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.selector_ambiguous",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.SELECTOR_AMBIGUOUS,
                 "recipe selector matches multiple recipes",
+                reason=InvalidRequestReason.CONFLICT,
             )
         return rows[0].id
 
@@ -929,14 +998,16 @@ class RecipeImageAvailabilityService:
         try:
             encoded = canonical_message(operation.payload)
             if len(encoded) > MAX_ARTIFACT_OWNER_SCAN_BYTES:
-                raise ValueError(
-                    "stored recipe removal owner exceeds the scan byte budget"
+                raise InvalidValue(
+                    "stored recipe removal owner exceeds the scan byte budget",
+                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
                 )
             owner = read_stored_model(RecipeCacheRemovalOwner, encoded, from_json=True)
         except (TypeError, ValueError) as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.OPERATION_INVALID,
                 "stored recipe removal owner is malformed",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         plan = owner.plan
         intent = plan.intent
@@ -958,9 +1029,10 @@ class RecipeImageAvailabilityService:
             or operation.payload_digest != self._removal_payload_digest(payload)
             or operation.targets != []
         ):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.OPERATION_INVALID,
                 "stored recipe removal plan does not match its Job owner",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         if operation.state in job_states.words(
             LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
@@ -968,16 +1040,18 @@ class RecipeImageAvailabilityService:
             owner.checkpoint.failure is not None
             and not owner.checkpoint.failure.retryable
         ):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.OPERATION_INVALID,
                 "active recipe removal has a terminal failure checkpoint",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         if operation.state == "failed" and (
             owner.checkpoint.failure is None or owner.checkpoint.failure.retryable
         ):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.OPERATION_INVALID,
                 "failed recipe removal has no terminal failure checkpoint",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         return owner
 
@@ -1019,15 +1093,17 @@ class RecipeImageAvailabilityService:
     ) -> dict[str, object]:
         owner = self._read_removal_owner(operation)
         if owner.plan.intent != intent:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.OPERATION_INVALID,
                 "stored removal projection intent changed",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         if operation.state == "succeeded":
             if not isinstance(operation.result, Mapping):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.operation_invalid",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.OPERATION_INVALID,
                     "successful removal has no stored result",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             try:
                 result = read_stored_model(
@@ -1041,9 +1117,10 @@ class RecipeImageAvailabilityService:
                     from_json=True,
                 )
             except (TypeError, ValidationError) as error:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.operation_invalid",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.OPERATION_INVALID,
                     "stored recipe removal result is malformed",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             if (
                 result.action != intent.action
@@ -1062,17 +1139,19 @@ class RecipeImageAvailabilityService:
                 or owner.checkpoint.model_index != len(owner.plan.model_children)
                 or owner.checkpoint.failure is not None
             ):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.operation_invalid",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.OPERATION_INVALID,
                     "stored removal result does not match its accepted intent",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             document: dict[str, object] = result.model_dump(mode="json")
             document["progress"] = self._removal_progress_document(operation, owner)
             return document
         if operation.result is not None:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.OPERATION_INVALID,
                 "unfinished recipe removal has a terminal result",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         return {
             "schema_version": SCHEMA_VERSION,
@@ -1120,9 +1199,10 @@ class RecipeImageAvailabilityService:
         with_model: bool,
     ) -> dict[str, object]:
         if operation.kind != REMOVE_OPERATION_KIND:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.request_key_reused",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.REQUEST_KEY_REUSED,
                 "request key was already used for another operation",
+                reason=InvalidRequestReason.CONFLICT,
             )
         owner = self._read_removal_owner(operation)
         intent = owner.plan.intent
@@ -1132,9 +1212,10 @@ class RecipeImageAvailabilityService:
             or intent.request_key != request_id
             or intent.with_model is not with_model
         ):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.request_key_reused",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.REQUEST_KEY_REUSED,
                 "request key was already used for another removal intent",
+                reason=InvalidRequestReason.CONFLICT,
             )
         return self._read_removal_result(operation, intent)
 
@@ -1203,7 +1284,7 @@ class RecipeImageAvailabilityService:
             # refuses a with-model review without it).
             if own_model_identities and not model_identities <= own_model_identities:
                 precondition = CacheRemovalBlocker(
-                    code="artifact.removal_owner_unresolved",
+                    code=ArtifactLifecycleCode.REMOVAL_OWNER_UNRESOLVED,
                     detail="recipe removal holds an incomplete model deletion fence",
                     retryable=True,
                     recovery_actions=["retry"],
@@ -1264,7 +1345,7 @@ class RecipeImageAvailabilityService:
                     code=(
                         translated.code
                         if translated is not None
-                        else "artifact.reference_scan_failed"
+                        else ArtifactLifecycleCode.REFERENCE_SCAN_FAILED
                     ),
                     detail=(
                         translated.detail
@@ -1299,7 +1380,7 @@ class RecipeImageAvailabilityService:
         blockers: list[CacheRemovalBlocker] = []
         blockers.extend(
             CacheRemovalBlocker(
-                code="artifact.deletion_in_progress",
+                code=ArtifactLifecycleCode.DELETION_IN_PROGRESS,
                 detail=finding.reason,
                 retryable=True,
                 recovery_actions=["observe_removal_operation"],
@@ -1311,13 +1392,13 @@ class RecipeImageAvailabilityService:
                 "runtime-image",
                 image_findings,
                 "runtime image",
-                "recipe_image.removal_referenced",
+                RecipeImageCode.REMOVAL_REFERENCED,
             ),
             (
                 "model-set",
                 model_findings,
                 "model cache set",
-                "model_cache.removal_referenced",
+                ModelCacheCode.REMOVAL_REFERENCED,
             ),
         ):
             reasons = [
@@ -1394,7 +1475,7 @@ class RecipeImageAvailabilityService:
                     code=(
                         translated.code
                         if translated is not None
-                        else "artifact.reference_scan_failed"
+                        else ArtifactLifecycleCode.REFERENCE_SCAN_FAILED
                     ),
                     detail=(
                         translated.detail
@@ -1409,7 +1490,7 @@ class RecipeImageAvailabilityService:
         if gate_owners:
             blockers.append(
                 CacheRemovalBlocker(
-                    code="artifact.deletion_in_progress",
+                    code=ArtifactLifecycleCode.DELETION_IN_PROGRESS,
                     detail=(
                         f"{len(gate_owners)} cache identity/identities are reserved "
                         "for another removal: " + "; ".join(sorted(gate_owners)[:4])
@@ -1440,7 +1521,7 @@ class RecipeImageAvailabilityService:
                     elif observed_bytes > expected_bytes:
                         blockers.append(
                             CacheRemovalBlocker(
-                                code="runtime_image.archive_size_mismatch",
+                                code=RuntimeImageCode.ARCHIVE_SIZE_MISMATCH,
                                 detail=(
                                     f"runtime image {archive} has {observed_bytes} bytes; "
                                     f"the authorized size is {expected_bytes}"
@@ -1465,7 +1546,7 @@ class RecipeImageAvailabilityService:
                         else:
                             blockers.append(
                                 CacheRemovalBlocker(
-                                    code="runtime_image.receipt_identity_conflict",
+                                    code=RuntimeImageCode.RECEIPT_IDENTITY_CONFLICT,
                                     detail=(
                                         f"runtime image {archive} receipt does not "
                                         "match the authorized identity"
@@ -1502,8 +1583,10 @@ class RecipeImageAvailabilityService:
         if scope is None:
             return ()
         if self._model_cache is None:
-            raise RecipeImageAvailabilityError(
-                "model_cache.unavailable", "model cache removal is unavailable"
+            raise RecipeImageAvailabilityInvalid(
+                ModelCacheCode.UNAVAILABLE,
+                "model cache removal is unavailable",
+                reason=InvalidRequestReason.NOT_FOUND,
             )
         assets = cast(
             ModelCacheRemovalCoordinator, self._model_cache
@@ -1522,25 +1605,25 @@ class RecipeImageAvailabilityService:
         observed: dict[tuple[str, str], CacheRemovalAsset] = {}
         for asset in assets:
             if not isinstance(asset, CacheRemovalAsset):
-                raise RecipeImageAvailabilityError(
-                    "model_cache.review_invalid",
+                raise RecipeImageAvailabilityRefused(
+                    ModelCacheCode.REVIEW_INVALID,
                     "ModelCache returned an invalid typed asset status",
                 )
             identity = (asset.kind, asset.sha256)
             if identity in observed:
-                raise RecipeImageAvailabilityError(
-                    "model_cache.review_invalid",
+                raise RecipeImageAvailabilityRefused(
+                    ModelCacheCode.REVIEW_INVALID,
                     "ModelCache returned duplicate reviewed asset identities",
                 )
             if expected.get(identity) != asset.disposition:
-                raise RecipeImageAvailabilityError(
-                    "model_cache.review_invalid",
+                raise RecipeImageAvailabilityRefused(
+                    ModelCacheCode.REVIEW_INVALID,
                     "ModelCache asset status does not match the exact removal scope",
                 )
             observed[identity] = asset
         if set(observed) != set(expected):
-            raise RecipeImageAvailabilityError(
-                "model_cache.review_invalid",
+            raise RecipeImageAvailabilityRefused(
+                ModelCacheCode.REVIEW_INVALID,
                 "ModelCache asset status is incomplete for the exact removal scope",
             )
         return tuple(observed[key] for key in sorted(observed))
@@ -1627,7 +1710,7 @@ class RecipeImageAvailabilityService:
         }
         asset_blockers = [
             CacheRemovalBlocker(
-                code="artifact.asset_availability_unknown",
+                code=ArtifactLifecycleCode.ASSET_AVAILABILITY_UNKNOWN,
                 detail=(f"{asset.kind} {asset.sha256} storage readiness is unknown"),
                 retryable=True,
                 recovery_actions=["retry"],
@@ -1660,12 +1743,12 @@ class RecipeImageAvailabilityService:
         """Return one complete read-only review of exact recipe cache effects."""
 
         if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.selector_invalid", "recipe selector is required"
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.SELECTOR_INVALID, "recipe selector is required"
             )
         if type(with_model) is not bool:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.removal_choice_invalid",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.REMOVAL_CHOICE_INVALID,
                 "with_model must be an explicit boolean",
             )
         normalized = selector.strip().casefold()
@@ -1681,7 +1764,7 @@ class RecipeImageAvailabilityService:
                     )
                 )
         except ArtifactLifecycleError as error:
-            raise RecipeImageAvailabilityError(
+            raise RecipeImageAvailabilityRefused(
                 error.code,
                 error.detail,
                 retryable=error.retryable,
@@ -1715,8 +1798,8 @@ class RecipeImageAvailabilityService:
         """
 
         if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.selector_invalid", "recipe selector is required"
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.SELECTOR_INVALID, "recipe selector is required"
             )
         selector = selector.strip().casefold()
         with self._sessions() as session:
@@ -1734,7 +1817,7 @@ class RecipeImageAvailabilityService:
         observed_blockers = refusing_removal_blockers(observed_review)
         if observed_blockers:
             first_blocker = observed_blockers[0]
-            raise RecipeImageAvailabilityError(
+            raise RecipeImageAvailabilityRefused(
                 first_blocker.code,
                 first_blocker.detail,
                 retryable=first_blocker.retryable,
@@ -1834,7 +1917,7 @@ class RecipeImageAvailabilityService:
                 current_blockers = refusing_removal_blockers(current_review)
                 if current_blockers:
                     first_blocker = current_blockers[0]
-                    raise RecipeImageAvailabilityError(
+                    raise RecipeImageAvailabilityRefused(
                         first_blocker.code,
                         first_blocker.detail,
                         retryable=first_blocker.retryable,
@@ -1863,8 +1946,8 @@ class RecipeImageAvailabilityService:
                         scope=model_scope,
                     )
                     if accepted_child is None:
-                        raise RecipeImageAvailabilityError(
-                            "model_cache.removal_scope_changed",
+                        raise RecipeImageAvailabilityRefused(
+                            ModelCacheCode.REMOVAL_SCOPE_CHANGED,
                             "model cache scope changed before the recipe removal was accepted",
                         )
                     child_id, accepted_key, selected_sets, plan_digest = accepted_child
@@ -1873,8 +1956,8 @@ class RecipeImageAvailabilityService:
                         or accepted_key != child_request_key
                         or selected_sets != model_scope.selected_sets
                     ):
-                        raise RecipeImageAvailabilityError(
-                            "model_cache.removal_scope_changed",
+                        raise RecipeImageAvailabilityRefused(
+                            ModelCacheCode.REMOVAL_SCOPE_CHANGED,
                             "accepted model removal does not match the reviewed recipe scope",
                         )
                     model_children.append(
@@ -1921,10 +2004,11 @@ class RecipeImageAvailabilityService:
                 )
                 owner_bytes = len(canonical_message(owner.model_dump(mode="json")))
                 if owner_bytes > MAX_ARTIFACT_OWNER_SCAN_BYTES:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.removal_scope_limited",
+                    raise RecipeImageAvailabilityInvalid(
+                        RecipeImageCode.REMOVAL_SCOPE_LIMITED,
                         "recipe removal owner is "
                         f"{owner_bytes} bytes; limit is {MAX_ARTIFACT_OWNER_SCAN_BYTES} bytes",
+                        reason=InvalidRequestReason.LIMIT_EXCEEDED,
                     )
                 now = self._clock()
                 now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
@@ -1961,14 +2045,14 @@ class RecipeImageAvailabilityService:
                     with_model=with_model,
                 )
         except ArtifactLifecycleError as error:
-            raise RecipeImageAvailabilityError(
+            raise RecipeImageAvailabilityRefused(
                 error.code,
                 error.detail,
                 retryable=error.retryable,
                 recovery_actions=("retry",) if error.retryable else (),
             ) from error
         except ModelCacheConflict as error:
-            raise RecipeImageAvailabilityError(
+            raise RecipeImageAvailabilityRefused(
                 error.code,
                 error.detail,
                 retryable=error.recovery == "retry",
@@ -1979,11 +2063,12 @@ class RecipeImageAvailabilityService:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
             if operation is None:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.operation_missing",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.OPERATION_MISSING,
                     "accepted recipe removal owner could not be read",
                     retryable=True,
                     recovery_actions=("retry",),
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             intent = self._read_removal_intent(operation)
             return self._read_removal_result(operation, intent)
@@ -1992,7 +2077,10 @@ class RecipeImageAvailabilityService:
         """Advance bounded, durable cache removals without claiming image slots."""
 
         if not 1 <= limit <= 16:
-            raise ValueError("recipe removal batch limit is invalid")
+            raise InvalidValue(
+                "recipe removal batch limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         advanced = 0
         boundary: tuple[datetime, str] | None = None
         while advanced < limit:
@@ -2096,8 +2184,8 @@ class RecipeImageAvailabilityService:
                     return False
                 reclaimed_now = self._storage.remove_published(archive_sha256)
                 if reclaimed_now not in {0, pending_bytes}:
-                    raise RuntimeImagePreparationError(
-                        "runtime_image.archive_mismatch",
+                    raise RuntimeImagePreparationUnknown(
+                        RuntimeImageCode.ARCHIVE_MISMATCH,
                         "published image length changed during the fenced removal",
                     )
                 return self._complete_recipe_image_removal(
@@ -2181,11 +2269,12 @@ class RecipeImageAvailabilityService:
                 return None
             references = runtime_image_reference_reasons(session, (identity.sha256,))
             if references[identity.sha256]:
-                raise RecipeImageAvailabilityError(
-                    "artifact.reference_changed",
+                raise RecipeImageAvailabilityUnknown(
+                    ArtifactLifecycleCode.REFERENCE_CHANGED,
                     "runtime image acquired an active reference while removal was reserved",
                     retryable=True,
                     recovery_actions=("retry",),
+                    reason=WaitReason.SCOPE_CHANGED,
                 )
             pending_bytes = checkpoint.image_pending_bytes
             if pending_bytes is None:
@@ -2263,7 +2352,7 @@ class RecipeImageAvailabilityService:
         if self._model_cache is None:
             return self._record_recipe_removal_failure(
                 operation_id,
-                code="model_cache.unavailable",
+                code=ModelCacheCode.UNAVAILABLE,
                 detail="model cache child status is unavailable",
                 retryable=True,
                 retry_after_seconds=5,
@@ -2274,14 +2363,14 @@ class RecipeImageAvailabilityService:
         except ModelCacheNotFound:
             return self._record_recipe_removal_failure(
                 operation_id,
-                code="model_cache.removal_child_missing",
+                code=ModelCacheCode.REMOVAL_CHILD_MISSING,
                 detail="accepted model-removal child is unavailable",
                 retryable=False,
             )
         except ModelCacheError as error:
             return self._record_recipe_removal_failure(
                 operation_id,
-                code="model_cache.removal_child_invalid",
+                code=ModelCacheCode.REMOVAL_CHILD_INVALID,
                 detail=error.detail,
                 retryable=False,
             )
@@ -2304,14 +2393,14 @@ class RecipeImageAvailabilityService:
         ):
             return self._record_recipe_removal_failure(
                 operation_id,
-                code="model_cache.removal_child_mismatch",
+                code=ModelCacheCode.REMOVAL_CHILD_MISMATCH,
                 detail="model-removal child identity does not match its accepted recipe owner",
                 retryable=False,
             )
         if operation.state in model_cache_states.LIVE:
             return self._record_recipe_removal_failure(
                 operation_id,
-                code="model_cache.removal_child_pending",
+                code=ModelCacheCode.REMOVAL_CHILD_PENDING,
                 detail="waiting for the accepted model-removal child to finish",
                 retryable=True,
                 retry_after_seconds=5,
@@ -2319,7 +2408,7 @@ class RecipeImageAvailabilityService:
         if operation.state != "succeeded":
             return self._record_recipe_removal_failure(
                 operation_id,
-                code="model_cache.removal_child_failed",
+                code=ModelCacheCode.REMOVAL_CHILD_FAILED,
                 detail="accepted model-removal child did not complete successfully",
                 retryable=False,
             )
@@ -2331,14 +2420,14 @@ class RecipeImageAvailabilityService:
         except (TypeError, ValueError, ValidationError):
             return self._record_recipe_removal_failure(
                 operation_id,
-                code="model_cache.removal_child_invalid",
+                code=ModelCacheCode.REMOVAL_CHILD_INVALID,
                 detail="successful model-removal child has an invalid result",
                 retryable=False,
             )
         if result.removed_entries != child.selected_sets or result.cancelled_operations:
             return self._record_recipe_removal_failure(
                 operation_id,
-                code="model_cache.removal_child_mismatch",
+                code=ModelCacheCode.REMOVAL_CHILD_MISMATCH,
                 detail="model-removal child result does not match its accepted scope",
                 retryable=False,
             )
@@ -2453,7 +2542,7 @@ class RecipeImageAvailabilityService:
                 failure = read_stored_model(
                     AvailabilityOperationFailure,
                     {
-                        "code": safe.get("code", "recipe_image.removal_failed"),
+                        "code": safe.get("code", RecipeImageCode.REMOVAL_FAILED),
                         "detail": safe.get("detail", "recipe removal did not complete"),
                         "recovery_actions": [] if retryable else ["inspect"],
                         "retryable": retryable,
@@ -2531,11 +2620,12 @@ class RecipeImageAvailabilityService:
                 intent_archives = tuple(owner.plan.image_archives)
                 references = runtime_image_reference_reasons(session, intent_archives)
                 if any(references[digest] for digest in intent_archives):
-                    raise RecipeImageAvailabilityError(
-                        "artifact.reference_changed",
+                    raise RecipeImageAvailabilityUnknown(
+                        ArtifactLifecycleCode.REFERENCE_CHANGED,
                         "a runtime image reference remains after the removal effects",
                         retryable=True,
                         recovery_actions=("retry",),
+                        reason=WaitReason.SCOPE_CHANGED,
                     )
                 if identities:
                     clear_removal(
@@ -2632,7 +2722,7 @@ class RecipeImageAvailabilityService:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
             if operation is None:
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
             kind = operation.kind
         if kind == UPDATE_KIND:
             try:
@@ -2642,14 +2732,15 @@ class RecipeImageAvailabilityService:
             except DBAPIError as error:
                 if getattr(error.orig, "sqlstate", None) != "55P03":
                     raise
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.cancel_busy",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.CANCEL_BUSY,
                     "recipe cancellation is changing; retry with the same request key",
                     retryable=True,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
         if kind != OPERATION_KIND:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.not_cancellable",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.NOT_CANCELLABLE,
                 "operation is not a current recipe preparation",
             )
         try:
@@ -2660,7 +2751,7 @@ class RecipeImageAvailabilityService:
                     .with_for_update(nowait=True)
                 )
                 if job is None:
-                    raise KeyError(operation_id)
+                    raise MissingRecord(operation_id)
                 self._request_cancellation(
                     session,
                     job,
@@ -2672,10 +2763,11 @@ class RecipeImageAvailabilityService:
         except DBAPIError as error:
             if getattr(error.orig, "sqlstate", None) != "55P03":
                 raise
-            raise RecipeImageAvailabilityError(
-                "recipe_image.cancel_busy",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.CANCEL_BUSY,
                 "recipe cancellation is changing; retry with the same request key",
                 retryable=True,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         return self.get(operation_id)
 
@@ -2690,8 +2782,8 @@ class RecipeImageAvailabilityService:
         authorize: bool,
     ) -> RecipeOperationCancellationResult:
         if job.kind not in {OPERATION_KIND, UPDATE_KIND}:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.not_cancellable",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.NOT_CANCELLABLE,
                 "operation is not a current recipe preparation",
             )
         if authorize:
@@ -2699,8 +2791,8 @@ class RecipeImageAvailabilityService:
         cancellation_id = _canonical_cancellation_id(request_id)
         normalized_reason = " ".join(reason.split()) if isinstance(reason, str) else ""
         if not normalized_reason or len(normalized_reason) > 512:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.cancellation_invalid",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.CANCELLATION_INVALID,
                 "cancellation reason must contain 1 to 512 normalized characters",
             )
         current = self._stored_cancellation(job)
@@ -2711,15 +2803,16 @@ class RecipeImageAvailabilityService:
                 and current.reason == normalized_reason
             ):
                 return current
-            raise RecipeImageAvailabilityError(
-                "recipe_image.cancel_request_key_reused",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.CANCEL_REQUEST_KEY_REUSED,
                 "operation already has a different cancellation request",
+                reason=InvalidRequestReason.CONFLICT,
             )
         if job.state not in job_states.words(
             LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
         ):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.not_cancellable",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.NOT_CANCELLABLE,
                 "recipe operation is no longer active",
             )
         used = session.scalar(
@@ -2735,9 +2828,10 @@ class RecipeImageAvailabilityService:
             .limit(1)
         )
         if used is not None:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.cancel_request_key_reused",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.CANCEL_REQUEST_KEY_REUSED,
                 "cancellation request key was already used",
+                reason=InvalidRequestReason.CONFLICT,
             )
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
@@ -2834,7 +2928,10 @@ class RecipeImageAvailabilityService:
         """Reconcile accepted cancellation fences without claiming image slots."""
 
         if not 1 <= limit <= 100:
-            raise ValueError("cancellation reconciliation limit is invalid")
+            raise InvalidValue(
+                "cancellation reconciliation limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         progressed = self._updates.reconcile_cancellations(limit=limit)
         with self._sessions() as session:
             operation_ids = tuple(
@@ -3182,7 +3279,7 @@ class RecipeImageAvailabilityService:
                 operation.updated_at = self._clock()
                 return True
         except RuntimeImagePreparationError as error:
-            if error.code == "runtime_image.publication_contended":
+            if error.code == RuntimeImageCode.PUBLICATION_CONTENDED:
                 return False
             raise
         except DBAPIError as error:
@@ -3341,12 +3438,12 @@ class RecipeImageAvailabilityService:
         """Refresh metadata and queue one exact selected Recipe operation."""
 
         if not isinstance(recipe_revision_id, str) or not recipe_revision_id.strip():
-            raise RecipeImageAvailabilityError(
-                "recipe_image.recipe_invalid", "recipe revision is required"
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.RECIPE_INVALID, "recipe revision is required"
             )
         if force and force_rebuild:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.action_invalid",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.ACTION_INVALID,
                 "force cannot be combined with an explicit image action",
             )
         model_digest = _optional_digest(model_digest, field="model_digest")
@@ -3451,7 +3548,7 @@ class RecipeImageAvailabilityService:
                 failure = view.failure or {}
                 return (
                     make_blocker(
-                        str(failure.get("code") or "recipe_image.preparation_failed"),
+                        str(failure.get("code") or RecipeImageCode.PREPARATION_FAILED),
                         f"Preparing this recipe failed: "
                         f"{failure.get('detail') or view.state}. "
                         f"The Controller asks again after {retry_at.isoformat()}.",
@@ -3467,7 +3564,7 @@ class RecipeImageAvailabilityService:
         else:
             return (
                 make_blocker(
-                    "recipe_image.preparation_failed",
+                    RecipeImageCode.PREPARATION_FAILED,
                     "Preparing this recipe kept failing; inspect its operations.",
                     severity="error",
                 ),
@@ -3476,7 +3573,7 @@ class RecipeImageAvailabilityService:
             return ()
         return view.blockers or (
             make_blocker(
-                "recipe_image.preparing",
+                RecipeImageCode.PREPARING,
                 "Preparing the model and runtime image "
                 f"({view.progress.get('phase', 'prepare')}).",
                 severity="info",
@@ -3492,8 +3589,8 @@ class RecipeImageAvailabilityService:
         except RecipeImageAvailabilityError:
             raise
         except Exception as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.metadata_refresh_failed",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.METADATA_REFRESH_FAILED,
                 "latest recipe metadata could not be refreshed",
                 retryable=_retryable(error),
                 retry_after_seconds=_retry_after(error),
@@ -3523,9 +3620,10 @@ class RecipeImageAvailabilityService:
             force_rebuild = intent.force_rebuild
         force = intent.force
         if self._authority is None:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.metadata_refresh_unavailable",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.METADATA_REFRESH_UNAVAILABLE,
                 "latest recipe metadata could not be refreshed",
+                reason=InvalidRequestReason.NOT_FOUND,
             )
         raw_recipe, runtime = self._refresh_authority(recipe_revision_id, force=force)
         if isinstance(intent, RecipeSelectorIntent):
@@ -3539,16 +3637,17 @@ class RecipeImageAvailabilityService:
                 )
         _canonical_recipe(raw_recipe)
         if not isinstance(runtime, Mapping):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.runtime_invalid",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.RUNTIME_INVALID,
                 "selected recipe runtime projection is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         try:
             with self._sessions.begin() as session:
                 if update_claim is not None:
                     if not isinstance(intent, RecipeRevisionIntent):
-                        raise RecipeImageAvailabilityError(
-                            "recipe_update.operation_invalid",
+                        raise RecipeImageAvailabilityInvalid(
+                            RecipeUpdateCode.OPERATION_INVALID,
                             "update child requires an exact revision",
                         )
                     self._updates.authorize_child(
@@ -3560,16 +3659,18 @@ class RecipeImageAvailabilityService:
                     or revision.kind != "recipe"
                     or revision.state != "active"
                 ):
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.recipe_unavailable",
+                    raise RecipeImageAvailabilityInvalid(
+                        RecipeImageCode.RECIPE_UNAVAILABLE,
                         "selected recipe revision is unavailable or inactive",
+                        reason=InvalidRequestReason.NOT_FOUND,
                     )
                 if effective_execution_key is None:
                     effective_execution_key = revision.execution_key
                 if effective_execution_key != revision.execution_key:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.identity_conflict",
+                    raise RecipeImageAvailabilityInvalid(
+                        RecipeImageCode.IDENTITY_CONFLICT,
                         "selected recipe execution identity changed",
+                        reason=InvalidRequestReason.CONFLICT,
                     )
                 if force:
                     force_rebuild = True
@@ -3578,9 +3679,10 @@ class RecipeImageAvailabilityService:
                 if not isinstance(runtime_build_input, str) and not isinstance(
                     provisional_intent, str
                 ):
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.build_input_missing",
+                    raise RecipeImageAvailabilityUnknown(
+                        RecipeImageCode.BUILD_INPUT_MISSING,
                         "authoritative runtime projection lacks the exact build input digest",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
                 if isinstance(runtime_build_input, str):
                     runtime_build_input = _digest(
@@ -3589,9 +3691,10 @@ class RecipeImageAvailabilityService:
                     if build_input_sha256 is None:
                         build_input_sha256 = runtime_build_input
                     elif build_input_sha256 != runtime_build_input:
-                        raise RecipeImageAvailabilityError(
-                            "recipe_image.identity_conflict",
+                        raise RecipeImageAvailabilityInvalid(
+                            RecipeImageCode.IDENTITY_CONFLICT,
                             "submitted build input does not match authoritative runtime metadata",
+                            reason=InvalidRequestReason.CONFLICT,
                         )
                 identity_key = build_input_sha256
                 payload: dict[str, object] = {
@@ -3631,7 +3734,7 @@ class RecipeImageAvailabilityService:
                         now=self._clock(),
                     )
                 except ArtifactLifecycleError as error:
-                    raise RecipeImageAvailabilityError(
+                    raise RecipeImageAvailabilityRefused(
                         error.code,
                         error.detail,
                         retryable=error.retryable,
@@ -3670,7 +3773,7 @@ class RecipeImageAvailabilityService:
         try:
             lock_availability_build_dependency(session, payload)
         except BuildConsumerError as error:
-            raise RecipeImageAvailabilityError(
+            raise RecipeImageAvailabilityUnknown(
                 error.code,
                 str(error),
                 retryable=error.retryable,
@@ -3703,11 +3806,12 @@ class RecipeImageAvailabilityService:
             if not isinstance(plan_digest, str) or not isinstance(
                 artifact_set_sha256, str
             ):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.model_cache_invalid",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.MODEL_CACHE_INVALID,
                     "ModelCache returned an incomplete exact artifact plan",
                     retryable=True,
                     recovery_actions=("retry",),
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             manifest = self._model_cache.resolve_artifact_set(
                 recipe_revision_id=recipe_revision_id
@@ -3716,18 +3820,20 @@ class RecipeImageAvailabilityService:
             artifacts = manifest_document.get("artifacts")
             new_bytes = preview.get("new_bytes")
             if type(new_bytes) is not int or new_bytes < 0:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.model_cache_invalid",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.MODEL_CACHE_INVALID,
                     "ModelCache returned incomplete transfer accounting",
                     retryable=True,
                     recovery_actions=("retry",),
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             if manifest.digest != artifact_set_sha256:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.model_cache_invalid",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.MODEL_CACHE_INVALID,
                     "resolved model artifact identity changed during planning",
                     retryable=True,
                     recovery_actions=("retry",),
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             operation = None
             list_operations = getattr(self._model_cache, "list_operations", None)
@@ -3780,7 +3886,7 @@ class RecipeImageAvailabilityService:
         except RecipeImageAvailabilityError:
             raise
         except Exception as error:
-            raise _model_queue_error(
+            raise _ModelQueueFailed(
                 error, "exact Model artifact preparation could not be queued"
             ) from error
         model_content_digests = manifest_document["model_content_digests"]
@@ -3808,31 +3914,34 @@ class RecipeImageAvailabilityService:
 
         artifact_set_sha256 = getattr(operation, "artifact_set_sha256", None)
         if not isinstance(artifact_set_sha256, str):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.model_cache_invalid",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.MODEL_CACHE_INVALID,
                 "integrity failure did not retain an artifact-set identity",
                 retryable=True,
                 recovery_actions=("retry",),
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         repair_preview = getattr(self._model_cache, "repair_preview", None)
         start_repair = getattr(self._model_cache, "start_repair", None)
         if repair_preview is None or start_repair is None:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.model_cache_unavailable",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.MODEL_CACHE_UNAVAILABLE,
                 "ModelCache does not expose the canonical repair workflow",
                 retryable=True,
                 recovery_actions=("retry",),
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         preview = repair_preview(artifact_set_sha256)
         plan_digest = (
             preview.get("plan_digest") if isinstance(preview, Mapping) else None
         )
         if not isinstance(plan_digest, str):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.model_cache_invalid",
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.MODEL_CACHE_INVALID,
                 "ModelCache returned an incomplete repair plan",
                 retryable=True,
                 recovery_actions=("retry",),
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         request_key = str(
             uuid.uuid5(
@@ -3945,7 +4054,7 @@ class RecipeImageAvailabilityService:
                 ),
             }
         except Exception as error:
-            raise _model_queue_error(
+            raise _ModelQueueFailed(
                 error, "Model artifact operation could not be resumed"
             ) from error
 
@@ -3957,9 +4066,10 @@ class RecipeImageAvailabilityService:
         intent: RecipeAvailabilityIntent,
     ) -> RecipeImageAvailabilityView:
         if existing.kind != OPERATION_KIND or existing.actor != actor:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.request_key_reused",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.REQUEST_KEY_REUSED,
                 "request key was already used for another operation",
+                reason=InvalidRequestReason.CONFLICT,
             )
         try:
             payload = require_mapping(existing.payload, "availability payload")
@@ -3975,9 +4085,10 @@ class RecipeImageAvailabilityService:
             )
             stored = None
         if stored != intent:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.request_key_reused",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.REQUEST_KEY_REUSED,
                 "request key was already used for another operation",
+                reason=InvalidRequestReason.CONFLICT,
             )
         return self._view(existing)
 
@@ -3998,7 +4109,7 @@ class RecipeImageAvailabilityService:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
             if operation is None or operation.kind != OPERATION_KIND:
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
             return self._view(operation)
 
     def get_operator_operation(
@@ -4009,14 +4120,14 @@ class RecipeImageAvailabilityService:
         with self._sessions() as session:
             operation = session.get(Job, operation_id)
             if operation is None:
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
             if operation.kind == OPERATION_KIND:
                 return self._view(operation)
             if operation.kind == REMOVE_OPERATION_KIND:
                 intent = self._read_removal_intent(operation)
                 return self._read_removal_result(operation, intent)
             if operation.kind != UPDATE_KIND:
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
         return self._updates.get(operation_id)
 
     def get_operator_request(
@@ -4033,7 +4144,7 @@ class RecipeImageAvailabilityService:
                 REMOVE_OPERATION_KIND,
                 UPDATE_KIND,
             }:
-                raise KeyError(request_key)
+                raise MissingRecord(request_key)
             operation_id = operation.id
         return self.get_operator_operation(operation_id)
 
@@ -4046,7 +4157,10 @@ class RecipeImageAvailabilityService:
         boundary: tuple[str, str] | None = None,
     ) -> tuple[tuple[RecipeImageAvailabilityView, ...], int, tuple[str, str] | None]:
         if not 1 <= limit <= 100:
-            raise ValueError("availability list limit is invalid")
+            raise InvalidValue(
+                "availability list limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         with self._sessions() as session:
             query = select(Job).where(Job.kind == OPERATION_KIND)
             count_query = (
@@ -4094,10 +4208,10 @@ class RecipeImageAvailabilityService:
         with self._sessions() as session:
             previous = session.get(Job, operation_id)
             if previous is None or previous.kind != OPERATION_KIND:
-                raise KeyError(operation_id)
+                raise MissingRecord(operation_id)
             if previous.state != "failed":
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.not_retryable", "operation is not failed"
+                raise RecipeImageAvailabilityInvalid(
+                    RecipeImageCode.NOT_RETRYABLE, "operation is not failed"
                 )
             previous_payload = (
                 previous.payload if isinstance(previous.payload, Mapping) else {}
@@ -4148,7 +4262,10 @@ class RecipeImageAvailabilityService:
 
     def resume_operations(self, *, limit: int = 16) -> int:
         if not 1 <= limit <= 100:
-            raise ValueError("availability operation limit is invalid")
+            raise InvalidValue(
+                "availability operation limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         with self._sessions() as session:
             # SQLAlchemy's scalar count expression is portable across the
             # SQLite fixtures and PostgreSQL deployment.
@@ -4174,7 +4291,10 @@ class RecipeImageAvailabilityService:
 
     def run_pending(self, *, limit: int = 1) -> int:
         if not 1 <= limit <= 16:
-            raise ValueError("availability worker batch limit is invalid")
+            raise InvalidValue(
+                "availability worker batch limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         removals = self.advance_removals(limit=1)
         self.reconcile_cancellations(limit=limit)
         update_claim = self.claim_update(f"update-{uuid.uuid4().hex}")
@@ -4196,7 +4316,10 @@ class RecipeImageAvailabilityService:
         """
 
         if not 1 <= limit <= self._max_parallel:
-            raise ValueError("availability claim limit is invalid")
+            raise InvalidValue(
+                "availability claim limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         owner_id = owner_id or str(uuid.uuid4())
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
@@ -4328,7 +4451,7 @@ class RecipeImageAvailabilityService:
             "retry_after_at": _iso(now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS))
         }
         if not any(
-            item.code == "recipe_image.waiting_for_model"
+            item.code == RecipeImageCode.WAITING_FOR_MODEL
             for item in read_blockers(payload.get("blockers"))
         ):
             self._record_blockers(
@@ -4336,7 +4459,7 @@ class RecipeImageAvailabilityService:
                 updated,
                 [
                     make_blocker(
-                        "recipe_image.waiting_for_model",
+                        RecipeImageCode.WAITING_FOR_MODEL,
                         "Waiting for the model download to finish; "
                         "the runtime image is already prepared.",
                         severity="info",
@@ -4655,8 +4778,10 @@ class RecipeImageAvailabilityService:
             recipe = self._stored_recipe(payload)
             runtime = payload["runtime"]
             if not isinstance(runtime, Mapping):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.runtime_invalid", "runtime projection is invalid"
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.RUNTIME_INVALID,
+                    "runtime projection is invalid",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             request_intent = read_availability_intent(payload.get("request"))
             if isinstance(request_intent, RecipeRetryIntent) and isinstance(
@@ -4725,7 +4850,7 @@ class RecipeImageAvailabilityService:
                     required_bytes = child_failure.get("required_bytes")
                     free_bytes = child_failure.get("free_bytes")
                     shortfall_bytes = child_failure.get("shortfall_bytes")
-                    raise RecipeImageAvailabilityError(
+                    raise RecipeImageAvailabilityUnknown(
                         failure_code,
                         str(
                             child_failure.get(
@@ -4757,8 +4882,8 @@ class RecipeImageAvailabilityService:
                             shortfall_bytes if type(shortfall_bytes) is int else None
                         ),
                     )
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.model_cache_failed",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.MODEL_CACHE_FAILED,
                     "one or more exact Model artifacts could not be prepared",
                     retryable=True,
                     recovery_actions=("retry",),
@@ -4877,11 +5002,12 @@ class RecipeImageAvailabilityService:
             ):
                 recipe_revision_id = payload.get("recipe_revision_id")
                 if not isinstance(recipe_revision_id, str):
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.model_cache_invalid",
+                    raise RecipeImageAvailabilityUnknown(
+                        RecipeImageCode.MODEL_CACHE_INVALID,
                         "availability operation lacks its exact recipe revision",
                         retryable=True,
                         recovery_actions=("retry",),
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
                 preview = self._model_cache.download_preview(
                     recipe_revision_id=recipe_revision_id
@@ -4895,11 +5021,12 @@ class RecipeImageAvailabilityService:
                     or type(new_bytes) is not int
                     or new_bytes < 0
                 ):
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.model_cache_invalid",
+                    raise RecipeImageAvailabilityUnknown(
+                        RecipeImageCode.MODEL_CACHE_INVALID,
                         "ModelCache returned an incomplete exact artifact plan",
                         retryable=True,
                         recovery_actions=("retry",),
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
                 if new_bytes > 0:
                     return self._ensure_model_child(
@@ -4913,7 +5040,7 @@ class RecipeImageAvailabilityService:
             return dict(child) | {
                 "state": "failed",
                 "failure": {
-                    "code": "recipe_image.model_child_missing",
+                    "code": RecipeImageCode.MODEL_CHILD_MISSING,
                     "detail": "durable ModelCache child operation is unavailable",
                     "retryable": True,
                     "recovery_actions": ["retry"],
@@ -4942,11 +5069,12 @@ class RecipeImageAvailabilityService:
                     .execution_options(populate_existing=True)
                 )
                 if model_operation is None and self._model_cache is not None:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.model_child_missing",
+                    raise RecipeImageAvailabilityUnknown(
+                        RecipeImageCode.MODEL_CHILD_MISSING,
                         "durable ModelCache child operation is unavailable",
                         retryable=True,
                         recovery_actions=("retry",),
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
             operation = session.scalar(
                 select(Job)
@@ -4972,8 +5100,8 @@ class RecipeImageAvailabilityService:
                     or self._model_child_has_cancel_intent(model_operation)
                 )
             ):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.model_child_cancelled",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.MODEL_CHILD_CANCELLED,
                     "ModelCache child was cancelled while joining the operation",
                     retryable=True,
                     recovery_actions=("resume", "retry"),
@@ -5027,7 +5155,7 @@ class RecipeImageAvailabilityService:
                 payload,
                 [
                     make_blocker(
-                        "recipe_image.waiting_for_model",
+                        RecipeImageCode.WAITING_FOR_MODEL,
                         "Waiting for the model download to finish.",
                         severity="info",
                     )
@@ -5053,9 +5181,10 @@ class RecipeImageAvailabilityService:
             )
 
         if self._builder is None:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.build_unavailable",
+            raise RecipeImageAvailabilityInvalid(
+                RecipeImageCode.BUILD_UNAVAILABLE,
                 "no canonical recipe build executor is configured",
+                reason=InvalidRequestReason.NOT_FOUND,
             )
         build_input_sha256 = payload.get("build_input_sha256")
         dispatch_identity_missing = not isinstance(build_input_sha256, str)
@@ -5081,17 +5210,20 @@ class RecipeImageAvailabilityService:
             progress=report,
         )
         if not isinstance(build_receipt, Mapping):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.build_invalid", "builder returned no receipt"
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.BUILD_INVALID,
+                "builder returned no receipt",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         if dispatch_identity_missing:
             resolved_input = build_receipt.get("build_input_sha256")
             if not isinstance(resolved_input, str):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_input_missing",
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.BUILD_INPUT_MISSING,
                     "dispatch did not bind an exact build input identity",
                     retryable=True,
                     recovery_actions=("retry",),
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             with self._sessions.begin() as session:
                 operation = self._require_claim(session, claim)
@@ -5170,7 +5302,7 @@ class RecipeImageAvailabilityService:
                     now=self._clock(),
                 )
             except ArtifactLifecycleError as error:
-                raise RuntimeImagePreparationError(
+                raise RuntimeImagePreparationRefused(
                     error.code, error.detail, retryable=error.retryable
                 ) from error
             operation.payload = dict(operation.payload) | {
@@ -5219,7 +5351,7 @@ class RecipeImageAvailabilityService:
                     now=now,
                 )
             except ArtifactLifecycleError as error:
-                raise RuntimeImagePreparationError(
+                raise RuntimeImagePreparationRefused(
                     error.code, error.detail, retryable=error.retryable
                 ) from error
             payload = dict(operation.payload)
@@ -5399,7 +5531,7 @@ class RecipeImageAvailabilityService:
                     payload,
                     [
                         make_blocker(
-                            "recipe_image.waiting_for_worker",
+                            RecipeImageCode.WAITING_FOR_WORKER,
                             f"All {busy} image preparation workers are busy preparing "
                             "other runtime images; this starts when one is free.",
                             severity="info",
@@ -5539,7 +5671,7 @@ class RecipeImageAvailabilityService:
                 and isinstance(dependency, Mapping)
                 and dependency.get("operation_id") == settled_build_id
             )
-            if exact_build_settled or str(code) == "runtime_image.cache_missing":
+            if exact_build_settled or str(code) == RuntimeImageCode.CACHE_MISSING:
                 # The failed effect is settled; a later execution claim may
                 # create a new child. Observation waits retain the exact child.
                 payload.pop("build_dependency", None)
@@ -5565,13 +5697,20 @@ class RecipeImageAvailabilityService:
         raw_failure = payload.get("failure")
         failure = raw_failure if isinstance(raw_failure, Mapping) else None
         if operation.state == "succeeded" and (result is None or failure is not None):
-            raise ValueError(
-                "successful image availability requires a result and no failure"
+            raise InvalidValue(
+                "successful image availability requires a result and no failure",
+                reason=InvalidRequestReason.INCOMPLETE,
             )
         if operation.state == "failed" and failure is None:
-            raise ValueError("failed image availability requires failure evidence")
+            raise InvalidValue(
+                "failed image availability requires failure evidence",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         if operation.state != "succeeded" and result is not None:
-            raise ValueError("image availability result requires success")
+            raise InvalidValue(
+                "image availability result requires success",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         if image_ready:
             image_bytes = image_result.get("image_bytes")
             image_progress.update(

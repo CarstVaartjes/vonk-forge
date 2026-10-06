@@ -4,6 +4,7 @@ from typing import Literal
 
 import pytest
 from fastapi.testclient import TestClient
+from vonk_agent_protocol import NodeOfflineReason
 from vonk_control import api as control_api
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
@@ -57,9 +58,9 @@ def _fleet_snapshot(
                     offline_reason=(
                         None
                         if online_state == "online"
-                        else "certificate-expired"
+                        else NodeOfflineReason.CERTIFICATE_EXPIRED
                         if certificate_state == "expired"
-                        else "stale"
+                        else NodeOfflineReason.STALE
                     ),
                     last_seen_at=NOW,
                     last_seen_age_seconds=0,

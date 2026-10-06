@@ -23,8 +23,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureResult,
+    InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
+    RecipeBuildCode,
     RecipeBuildEvidence,
+    RecipeImageCode,
+    UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
@@ -37,6 +43,7 @@ from .admission_locking import (
     node_admission_key,
 )
 from .bounded_json import require_mapping
+from .categorized_errors import InvalidValue
 from .content_identity import reusable_build
 from .models import (
     AgentNode,
@@ -77,9 +84,47 @@ from .runtime_image_preparation import (
 from .strict_json import read_stored_model
 from .worker_memory_contract import WorkerMemoryComponent
 
+
 # An availability operation whose image is the catalog's prebuilt one: the
 # Controller pulls it, so it holds no Spark and takes no builder slot while it
 # waits for its model or its pull.
+class AvailabilityInvalid(InvalidRequestError, RecipeImageAvailabilityError):
+    """The selected recipe or its compiled runtime is not a valid request.
+
+    The operator-facing availability fields stay those of
+    :class:`RecipeImageAvailabilityError`; the type adds the contract's
+    invalid-request category and its closed reason.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        reason: InvalidRequestReason,
+        **fields: Any,
+    ) -> None:
+        RecipeImageAvailabilityError.__init__(self, code, detail, **fields)
+        self.typed_reason = reason
+        self.typed_field = None
+
+
+class AvailabilityUnsettled(UnknownOutcomeError, RecipeImageAvailabilityError):
+    """A build whose evidence is missing, changed, unavailable or still pending:
+    an unknown outcome the scheduler observes again, never a refusal."""
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        reason: WaitReason,
+        **fields: Any,
+    ) -> None:
+        RecipeImageAvailabilityError.__init__(self, code, detail, **fields)
+        self.typed_reason = reason
+
+
 PREBUILT_PULL_KEY = "prebuilt_pull"
 
 
@@ -93,16 +138,16 @@ def _pulls_prebuilt_image(job: Job) -> bool:
 
 _BUILDER_ADMISSION_CODES = frozenset(
     {
-        "build.node_unknown",
-        "build.node_incompatible",
-        "build.capacity_busy",
-        "build.inventory_missing",
-        "build.inventory_stale",
-        "build.capability_missing",
-        "build.network_capability_missing",
-        "build.insufficient_disk",
-        "build.insufficient_memory",
-        "build.runtime_changed",
+        RecipeBuildCode.NODE_UNKNOWN,
+        RecipeBuildCode.NODE_INCOMPATIBLE,
+        RecipeBuildCode.CAPACITY_BUSY,
+        RecipeBuildCode.INVENTORY_MISSING,
+        RecipeBuildCode.INVENTORY_STALE,
+        RecipeBuildCode.CAPABILITY_MISSING,
+        RecipeBuildCode.NETWORK_CAPABILITY_MISSING,
+        RecipeBuildCode.INSUFFICIENT_DISK,
+        RecipeBuildCode.INSUFFICIENT_MEMORY,
+        RecipeBuildCode.RUNTIME_CHANGED,
     }
 )
 
@@ -118,7 +163,10 @@ class RecipeImageAvailabilityScheduler:
         owner_id: str | None = None,
     ) -> None:
         if not 1 <= max_workers <= 16:
-            raise ValueError("availability scheduler parallelism is invalid")
+            raise InvalidValue(
+                "availability scheduler parallelism is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         self._service = service
         self._max_workers = max_workers
         self._executor = ThreadPoolExecutor(
@@ -226,7 +274,10 @@ def build_recipe_image_availability(
 
     image_root = artifact_root or getattr(settings, "agent_artifact_root", None)
     if image_root is None:
-        raise ValueError("recipe image artifact root is required")
+        raise InvalidValue(
+            "recipe image artifact root is required",
+            reason=InvalidRequestReason.INCOMPLETE,
+        )
     storage = FilesystemRuntimeImageStorage(image_root)
     transport = OciLayoutImageTransport()
 
@@ -244,17 +295,19 @@ def build_recipe_image_availability(
                 )
             )
             if revision is None:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.recipe_unavailable",
+                raise AvailabilityInvalid(
+                    RecipeImageCode.RECIPE_UNAVAILABLE,
                     "selected recipe revision is unavailable or inactive",
+                    reason=InvalidRequestReason.NOT_FOUND,
                 )
             try:
                 recipe = read_recipe(revision.document)
                 entities = resolve_recipe_entities(session, revision.document)
             except Exception as error:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.recipe_invalid",
+                raise AvailabilityInvalid(
+                    RecipeImageCode.RECIPE_INVALID,
                     "selected recipe is not a canonical RecipeDefinition",
+                    reason=InvalidRequestReason.MALFORMED,
                 ) from error
             resolved_revision_id = revision.id
             # Build resolution consults managed storage. Close the read
@@ -271,18 +324,20 @@ def build_recipe_image_availability(
                     # The stored build source breaks the Controller's policy.
                     # A later identical request reads the same source, so name
                     # the refusal and do not offer a retry.
-                    raise RecipeImageAvailabilityError(
+                    raise AvailabilityInvalid(
                         SOURCE_POLICY_REFUSED_CODE,
                         str(error)[:512],
                         retryable=False,
                         recovery_actions=("inspect",),
+                        reason=InvalidRequestReason.UNSUPPORTED,
                     ) from error
                 except Exception as error:
-                    raise RecipeImageAvailabilityError(
-                        str(getattr(error, "code", "recipe_image.build_unavailable")),
+                    raise AvailabilityUnsettled(
+                        str(getattr(error, "code", RecipeImageCode.BUILD_UNAVAILABLE)),
                         str(error)[:512],
                         retryable=True,
                         recovery_actions=("retry",),
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     ) from error
             if resolution is not None:
                 cached = None if force else _cached_build_receipt(resolution)
@@ -321,9 +376,10 @@ def build_recipe_image_availability(
             except RecipeImageAvailabilityError:
                 raise
             except Exception as error:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.runtime_invalid",
+                raise AvailabilityInvalid(
+                    RecipeImageCode.RUNTIME_INVALID,
                     "compiled runtime projection is unavailable",
+                    reason=InvalidRequestReason.MALFORMED,
                 ) from error
             # These fields are Controller scheduler metadata.  They are
             # persisted with the operation so a restart can reconstruct a
@@ -354,9 +410,10 @@ def build_recipe_image_availability(
             payload = parent.payload
             runtime = payload.get("runtime")
             if not isinstance(runtime, Mapping):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.operation_invalid",
+                raise AvailabilityUnsettled(
+                    RecipeImageCode.OPERATION_INVALID,
                     "accepted build runtime is invalid",
+                    reason=WaitReason.STALE_PLAN,
                 )
             dependency = _build_dependency(payload)
             child = None
@@ -369,8 +426,10 @@ def build_recipe_image_availability(
                     )
                 )
                 if dependency.operation_id is not None and child is None:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.build_invalid", "accepted build child is missing"
+                    raise AvailabilityUnsettled(
+                        RecipeImageCode.BUILD_INVALID,
+                        "accepted build child is missing",
+                        reason=WaitReason.RECEIPT_MISSING,
                     )
             builder_id = runtime.get("builder_node_id")
             digest = payload.get("build_input_sha256")
@@ -386,9 +445,10 @@ def build_recipe_image_availability(
                     or runtime.get("input_intent_sha256")
                     != resolution.input_intent_sha256
                 ):
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.identity_conflict",
+                    raise AvailabilityUnsettled(
+                        RecipeImageCode.IDENTITY_CONFLICT,
                         "accepted build intent no longer matches its resolution",
+                        reason=WaitReason.SCOPE_CHANGED,
                     )
                 # Selecting new capacity would count an accepted build's own
                 # reservation against its consumers. Resolve an active exact
@@ -409,15 +469,17 @@ def build_recipe_image_availability(
                         policy = parse_stored_build_policy(candidate.policy_report)
                         request = parse_stored_build_plan(candidate.plan)
                     except RecipeExecutionContractError as error:
-                        raise RecipeImageAvailabilityError(
-                            "recipe_image.build_invalid",
+                        raise AvailabilityUnsettled(
+                            RecipeImageCode.BUILD_INVALID,
                             "accepted shared build evidence is invalid",
+                            reason=WaitReason.REPORT_UNCERTAIN,
                         ) from error
                     if policy.builder_binary_digest is None:
-                        raise RecipeImageAvailabilityError(
-                            "recipe_image.build_invalid",
+                        raise AvailabilityUnsettled(
+                            RecipeImageCode.BUILD_INVALID,
                             "accepted shared build has no recorded builder identity",
                             retryable=False,
+                            reason=WaitReason.RECEIPT_MISSING,
                         )
                     if (
                         policy.artifact_format != BUILD_ARTIFACT_FORMAT
@@ -440,10 +502,11 @@ def build_recipe_image_availability(
                         or request.recipe_content_sha256
                         != resolution.recipe_content_sha256
                     ):
-                        raise RecipeImageAvailabilityError(
-                            "recipe_image.build_invalid",
+                        raise AvailabilityUnsettled(
+                            RecipeImageCode.BUILD_INVALID,
                             "accepted shared build request identity changed",
                             retryable=False,
+                            reason=WaitReason.SCOPE_CHANGED,
                         )
                     builder_id = candidate.builder_node_id
                     digest = candidate.build_input_sha256
@@ -475,7 +538,7 @@ def build_recipe_image_availability(
                         build_input_sha256=digest,
                     )
                 except BuildConsumerError as error:
-                    raise _build_dependency_error(error) from error
+                    raise _BuildDependencyFailure(error) from error
                 if build is not None:
                     child = session.scalar(
                         select(Job)
@@ -501,10 +564,11 @@ def build_recipe_image_availability(
                 or not isinstance(builder_id, str)
                 or not isinstance(digest, str)
             ):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_invalid",
+                raise AvailabilityUnsettled(
+                    RecipeImageCode.BUILD_INVALID,
                     "accepted build child identity changed",
                     retryable=False,
+                    reason=WaitReason.SCOPE_CHANGED,
                 )
             dependency = dependency or _new_build_dependency(parent)
             dependency = dependency.model_copy(
@@ -543,9 +607,10 @@ def build_recipe_image_availability(
             raw_builder_node_id if isinstance(raw_builder_node_id, str) else None
         )
         if not isinstance(revision_id, str):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.build_input_missing",
+            raise AvailabilityUnsettled(
+                RecipeImageCode.BUILD_INPUT_MISSING,
                 "canonical build plan is unavailable after restart",
+                reason=WaitReason.RECEIPT_MISSING,
             )
         resolution = recipe_builds.resolve(revision_id)
         cached = None if force else _cached_build_receipt(resolution)
@@ -633,7 +698,7 @@ def build_recipe_image_availability(
                             )
                         except AdmissionLockBusy:
                             skipped[candidate_id] = (
-                                "recipe_image.builder_busy",
+                                RecipeImageCode.BUILDER_BUSY,
                                 "another change to this Spark is in progress",
                             )
                             continue
@@ -644,7 +709,7 @@ def build_recipe_image_availability(
                         )
                         if locked is None:
                             skipped[candidate_id] = (
-                                "recipe_image.builder_busy",
+                                RecipeImageCode.BUILDER_BUSY,
                                 "another change to this Spark is in progress",
                             )
                             continue
@@ -669,7 +734,7 @@ def build_recipe_image_availability(
                         )
                         if work_for(candidate_id, current_jobs) > 0:
                             skipped[candidate_id] = (
-                                "recipe_image.builder_occupied",
+                                RecipeImageCode.BUILDER_OCCUPIED,
                                 "already building or preparing another image",
                             )
                             occupied.append(candidate_id)
@@ -683,7 +748,7 @@ def build_recipe_image_availability(
                         # and a Spark build still waits for a free builder.
                         selected_candidate = occupied[0]
                     if selected_candidate is None:
-                        raise _capacity_wait(skipped, candidate_ids)
+                        raise _CapacityWait(skipped, candidate_ids)
         while selected_plan is None and selected_candidate is not None:
             candidate_id = selected_candidate
             try:
@@ -711,9 +776,10 @@ def build_recipe_image_availability(
                         None,
                     )
                     continue
-                raise RecipeImageAvailabilityError(
-                    code or "recipe_image.build_unavailable",
+                raise AvailabilityUnsettled(
+                    code or RecipeImageCode.BUILD_UNAVAILABLE,
                     str(error)[:512],
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             # Admission can still refuse the plan when it is persisted; the
             # wait then names why this was a Spark build at all.
@@ -730,7 +796,7 @@ def build_recipe_image_availability(
                     )
                 except AdmissionLockBusy:
                     skipped[candidate_id] = (
-                        "recipe_image.builder_busy",
+                        RecipeImageCode.BUILDER_BUSY,
                         "another change to this Spark is in progress",
                     )
                     attempted_candidates.add(candidate_id)
@@ -763,7 +829,7 @@ def build_recipe_image_availability(
                 )
                 if locked is None:
                     skipped[candidate_id] = (
-                        "recipe_image.builder_busy",
+                        RecipeImageCode.BUILDER_BUSY,
                         "another change to this Spark is in progress",
                     )
                     attempted_candidates.add(candidate_id)
@@ -795,7 +861,7 @@ def build_recipe_image_availability(
                 )
                 if work_for(candidate_id, current_jobs) > 0 and not pulls_prebuilt:
                     skipped[candidate_id] = (
-                        "recipe_image.builder_occupied",
+                        RecipeImageCode.BUILDER_OCCUPIED,
                         "already building or preparing another image",
                     )
                     attempted_candidates.add(candidate_id)
@@ -829,15 +895,17 @@ def build_recipe_image_availability(
                             None,
                         )
                         continue
-                    raise RecipeImageAvailabilityError(
-                        code or "recipe_image.build_unavailable",
+                    raise AvailabilityUnsettled(
+                        code or RecipeImageCode.BUILD_UNAVAILABLE,
                         str(error)[:512],
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     ) from error
                 builder_node_id = candidate_id
                 if selected_plan is None:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.build_unavailable",
+                    raise AvailabilityUnsettled(
+                        RecipeImageCode.BUILD_UNAVAILABLE,
                         "selected Recipe build plan is unavailable",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
                 build_input_sha256 = selected_plan.build_input_sha256
                 try:
@@ -849,11 +917,12 @@ def build_recipe_image_availability(
                         build_id=selected_plan.build_id,
                     )
                 except BuildConsumerError as error:
-                    raise RecipeImageAvailabilityError(
+                    raise AvailabilityUnsettled(
                         error.code,
                         str(error),
                         retryable=error.retryable,
                         recovery_actions=("retry",) if error.retryable else (),
+                        reason=WaitReason.SCOPE_CHANGED,
                     ) from error
                 assigned_runtime = dict(parent_runtime)
                 assigned_runtime["builder_node_id"] = candidate_id
@@ -868,14 +937,14 @@ def build_recipe_image_availability(
         if builder_node_id is None:
             # A resolved plan always carries the builder that produced it, so
             # without one the operation can only wait for capacity.
-            raise _capacity_wait(skipped, candidate_ids, prebuilt_unused)
+            raise _CapacityWait(skipped, candidate_ids, prebuilt_unused)
         if selected_plan is None:
             try:
                 prepared = recipe_builds.prepare_plan(
                     revision_id, builder_node_id, now=clock(), resolution=resolution
                 )
             except Exception as error:
-                raise _build_planning_error(error) from error
+                raise _BuildPlanningFailure(error) from error
             with sessions.begin() as session:
                 service._require_claim(session, claim)
                 try:
@@ -883,17 +952,19 @@ def build_recipe_image_availability(
                         session, prepared, now=clock()
                     )
                 except Exception as error:
-                    raise _build_planning_error(error) from error
+                    raise _BuildPlanningFailure(error) from error
         if selected_plan is None:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.build_unavailable",
+            raise AvailabilityUnsettled(
+                RecipeImageCode.BUILD_UNAVAILABLE,
                 "reconstructed Recipe build plan is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         plan = selected_plan
         if plan.build_input_sha256 != build_input_sha256:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.identity_conflict",
+            raise AvailabilityUnsettled(
+                RecipeImageCode.IDENTITY_CONFLICT,
                 "reconstructed build plan does not match the operation identity",
+                reason=WaitReason.SCOPE_CHANGED,
             )
         # Publish the exact dependency before relying on the shared child.
         # This also re-enters ownership when a previously recorded image was
@@ -909,18 +980,20 @@ def build_recipe_image_availability(
                     build_id=plan.build_id,
                 )
             except BuildConsumerError as error:
-                raise RecipeImageAvailabilityError(
+                raise AvailabilityUnsettled(
                     error.code,
                     str(error),
                     retryable=error.retryable,
                     recovery_actions=("retry",) if error.retryable else (),
+                    reason=WaitReason.SCOPE_CHANGED,
                 ) from error
             parent_payload = dict(parent.payload)
             stored_runtime = parent_payload.get("runtime")
             if not isinstance(stored_runtime, Mapping):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.operation_invalid",
+                raise AvailabilityUnsettled(
+                    RecipeImageCode.OPERATION_INVALID,
                     "accepted availability runtime identity is invalid",
+                    reason=WaitReason.STALE_PLAN,
                 )
             parent_runtime = dict(stored_runtime)
             parent_runtime.update(
@@ -953,8 +1026,10 @@ def build_recipe_image_availability(
                 or parent.payload.get("build_input_sha256") != build_input_sha256
                 or runtime.get("builder_node_id") != builder_node_id
             ):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_invalid", "accepted build dependency changed"
+                raise AvailabilityUnsettled(
+                    RecipeImageCode.BUILD_INVALID,
+                    "accepted build dependency changed",
+                    reason=WaitReason.SCOPE_CHANGED,
                 )
 
         try:
@@ -967,11 +1042,12 @@ def build_recipe_image_availability(
                 admission_guard=admission_guard,
             )
         except RecipeBuildAdmissionBusy as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.build_capacity_wait",
+            raise AvailabilityUnsettled(
+                RecipeImageCode.BUILD_CAPACITY_WAIT,
                 str(error),
                 retryable=True,
                 recovery_actions=("resume", "retry"),
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         except RecipeOperationConflict:
             recovered = recover_build(claim)
@@ -982,15 +1058,19 @@ def build_recipe_image_availability(
             parent = service._require_claim(session, claim)
             current = _build_dependency(parent.payload)
             if current is None or str(current.request_key) != build_request_id:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_invalid", "accepted build dependency changed"
+                raise AvailabilityUnsettled(
+                    RecipeImageCode.BUILD_INVALID,
+                    "accepted build dependency changed",
+                    reason=WaitReason.SCOPE_CHANGED,
                 )
             if (
                 current.operation_id is not None
                 and str(current.operation_id) != operation.id
             ):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_invalid", "accepted build child changed"
+                raise AvailabilityUnsettled(
+                    RecipeImageCode.BUILD_INVALID,
+                    "accepted build child changed",
+                    reason=WaitReason.SCOPE_CHANGED,
                 )
             current = current.model_copy(
                 update={"operation_id": uuid.UUID(operation.id)}
@@ -1037,7 +1117,10 @@ async def run_availability_scheduler(
     """Run scheduler ticks off the event loop until application shutdown."""
 
     if interval_seconds <= 0:
-        raise ValueError("availability scheduler interval must be positive")
+        raise InvalidValue(
+            "availability scheduler interval must be positive",
+            reason=InvalidRequestReason.OUT_OF_RANGE,
+        )
     while not stop.is_set():
         await asyncio.to_thread(scheduler.tick)
         try:
@@ -1055,8 +1138,10 @@ def _build_dependency(payload: Mapping[str, object]) -> RecipeBuildDependency | 
             RecipeBuildDependency, json.dumps(value, allow_nan=False), from_json=True
         )
     except (TypeError, ValueError) as error:
-        raise RecipeImageAvailabilityError(
-            "recipe_image.build_invalid", "accepted build dependency is malformed"
+        raise AvailabilityUnsettled(
+            RecipeImageCode.BUILD_INVALID,
+            "accepted build dependency is malformed",
+            reason=WaitReason.REPORT_UNCERTAIN,
         ) from error
 
 
@@ -1071,13 +1156,17 @@ def _new_build_dependency(parent: Job) -> RecipeBuildDependency:
     )
 
 
-def _build_dependency_error(error: BuildConsumerError) -> RecipeImageAvailabilityError:
-    return RecipeImageAvailabilityError(
-        error.code,
-        str(error),
-        retryable=error.retryable,
-        recovery_actions=("retry",) if error.retryable else (),
-    )
+class _BuildDependencyFailure(AvailabilityUnsettled):
+    """The shared build the operation depends on cannot be joined or kept."""
+
+    def __init__(self, error: BuildConsumerError) -> None:
+        super().__init__(
+            error.code,
+            str(error),
+            reason=WaitReason.SCOPE_CHANGED,
+            retryable=error.retryable,
+            recovery_actions=("retry",) if error.retryable else (),
+        )
 
 
 def _prebuilt_blocker(decision: PrebuiltDecision) -> OperationBlocker:
@@ -1090,75 +1179,86 @@ def _prebuilt_blocker(decision: PrebuiltDecision) -> OperationBlocker:
     )
 
 
-def _capacity_wait(
-    skipped: Mapping[str, tuple[str, str]],
-    candidate_ids: tuple[str, ...],
-    prebuilt_unused: PrebuiltDecision | None = None,
-) -> RecipeImageAvailabilityError:
+class _CapacityWait(AvailabilityUnsettled):
     """A wait for a builder that names every Spark passed over and why.
 
     When the catalog's prebuilt image could not be used, that comes first:
     it is why a Spark build was needed at all.
     """
 
-    if not candidate_ids:
-        blockers: list[OperationBlocker] = [
-            make_blocker(
-                "recipe_image.no_builder",
-                "No active linux-arm64 Spark is enrolled to build this image.",
-                severity="error",
-            )
-        ]
-    else:
-        blockers = [
-            make_blocker(code, detail, node_ids=[node_id])
-            for node_id, (code, detail) in sorted(skipped.items())
-        ] or [
-            make_blocker(
-                "recipe_image.build_capacity_wait",
-                "No Spark could be selected to build this image yet.",
-            )
-        ]
-    detail = "no Spark can build this image right now: " + "; ".join(
-        f"{item.node_ids[0][:12] if item.node_ids else 'fleet'}: {item.code}"
-        for item in blockers[:6]
-    )
-    if prebuilt_unused is not None:
-        blockers.insert(0, _prebuilt_blocker(prebuilt_unused))
-        detail = f"prebuilt image not used ({prebuilt_unused}); {detail}"
-    return RecipeImageAvailabilityError(
-        "recipe_image.build_capacity_wait",
-        detail[:512],
-        retryable=True,
-        recovery_actions=("resume", "retry"),
-        blockers=blockers,
-    )
-
-
-def _build_planning_error(error: Exception) -> RecipeImageAvailabilityError:
-    code = str(getattr(error, "code", ""))
-    if code in _BUILDER_ADMISSION_CODES:
-        # Keep the builder's own reason visible: "full" and "no fresh
-        # inventory" need different operator attention.
-        blockers = [make_blocker(code, str(error)[:200])]
-        detail = (
-            f"selected Recipe builder is currently unavailable or full ({code}: "
-            f"{str(error)[:200]})"
+    def __init__(
+        self,
+        skipped: Mapping[str, tuple[str, str]],
+        candidate_ids: tuple[str, ...],
+        prebuilt_unused: PrebuiltDecision | None = None,
+    ) -> None:
+        if not candidate_ids:
+            blockers: list[OperationBlocker] = [
+                make_blocker(
+                    RecipeImageCode.NO_BUILDER,
+                    "No active linux-arm64 Spark is enrolled to build this image.",
+                    severity="error",
+                )
+            ]
+        else:
+            blockers = [
+                make_blocker(code, detail, node_ids=[node_id])
+                for node_id, (code, detail) in sorted(skipped.items())
+            ] or [
+                make_blocker(
+                    RecipeImageCode.BUILD_CAPACITY_WAIT,
+                    "No Spark could be selected to build this image yet.",
+                )
+            ]
+        detail = "no Spark can build this image right now: " + "; ".join(
+            f"{item.node_ids[0][:12] if item.node_ids else 'fleet'}: {item.code}"
+            for item in blockers[:6]
         )
-        prebuilt_unused = getattr(error, "prebuilt_unused", None)
-        if isinstance(prebuilt_unused, PrebuiltDecision):
+        if prebuilt_unused is not None:
             blockers.insert(0, _prebuilt_blocker(prebuilt_unused))
             detail = f"prebuilt image not used ({prebuilt_unused}); {detail}"
-        return RecipeImageAvailabilityError(
-            "recipe_image.build_capacity_wait",
+        super().__init__(
+            RecipeImageCode.BUILD_CAPACITY_WAIT,
             detail[:512],
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
             retryable=True,
             recovery_actions=("resume", "retry"),
             blockers=blockers,
         )
-    return RecipeImageAvailabilityError(
-        code or "recipe_image.build_unavailable", str(error)[:512]
-    )
+
+
+class _BuildPlanningFailure(AvailabilityUnsettled):
+    """The Recipe build plan could not be prepared or stored: a capacity wait
+    when the builder is full or has no fresh inventory, else unavailable."""
+
+    def __init__(self, error: Exception) -> None:
+        code = str(getattr(error, "code", ""))
+        if code in _BUILDER_ADMISSION_CODES:
+            # Keep the builder's own reason visible: "full" and "no fresh
+            # inventory" need different operator attention.
+            blockers = [make_blocker(code, str(error)[:200])]
+            detail = (
+                "selected Recipe builder is currently unavailable or full "
+                f"({code}: {str(error)[:200]})"
+            )
+            prebuilt_unused = getattr(error, "prebuilt_unused", None)
+            if isinstance(prebuilt_unused, PrebuiltDecision):
+                blockers.insert(0, _prebuilt_blocker(prebuilt_unused))
+                detail = f"prebuilt image not used ({prebuilt_unused}); {detail}"
+            super().__init__(
+                RecipeImageCode.BUILD_CAPACITY_WAIT,
+                detail[:512],
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                retryable=True,
+                recovery_actions=("resume", "retry"),
+                blockers=blockers,
+            )
+            return
+        super().__init__(
+            code or RecipeImageCode.BUILD_UNAVAILABLE,
+            str(error)[:512],
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
 
 
 def _recorded_decision(policy: object) -> PrebuiltDecision | None:
@@ -1197,10 +1297,11 @@ def _observe_build(
     progress: Callable[[Mapping[str, object]], None],
 ) -> Mapping[str, object]:
     if operation.state == "cancelled":
-        raise RecipeImageAvailabilityError(
-            "recipe_image.build_cancelled",
+        raise AvailabilityUnsettled(
+            RecipeImageCode.BUILD_CANCELLED,
             "accepted build was cancelled",
             recovery_actions=("force_rebuild",),
+            reason=WaitReason.SCOPE_CHANGED,
         )
     if operation.state in job_states.words(
         LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
@@ -1222,15 +1323,16 @@ def _observe_build(
                 f"waiting for build {operation.id} on {builder_node_id}: "
                 f"{operation.state}"
             )
-        blockers = [make_blocker("recipe_image.build_wait", wait)]
+        blockers = [make_blocker(RecipeImageCode.BUILD_WAIT, wait)]
         if decision is not None:
             blockers.insert(0, _prebuilt_blocker(decision))
-        raise RecipeImageAvailabilityError(
-            "recipe_image.build_wait",
+        raise AvailabilityUnsettled(
+            RecipeImageCode.BUILD_WAIT,
             wait,
             retryable=True,
             retry_after_seconds=5,
             blockers=blockers,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     if operation.state in job_states.words(LifecycleState.FAILED):
         aggregate = operation.result
@@ -1243,20 +1345,22 @@ def _observe_build(
             else None
         )
         if not isinstance(raw_failure, Mapping):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.build_invalid",
+            raise AvailabilityUnsettled(
+                RecipeImageCode.BUILD_INVALID,
                 "canonical Recipe build failure evidence is missing or invalid",
                 step="build",
+                reason=WaitReason.RECEIPT_MISSING,
             )
         try:
             failure = read_stored_model(
                 AgentFailureResult, canonical_message(raw_failure), from_json=True
             )
         except (TypeError, ValueError) as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.build_invalid",
+            raise AvailabilityUnsettled(
+                RecipeImageCode.BUILD_INVALID,
                 "canonical Recipe build failure evidence is missing or invalid",
                 step="build",
+                reason=WaitReason.RECEIPT_MISSING,
             ) from error
         failure_document = failure.model_dump(mode="json", exclude_none=True)
         retryable = (
@@ -1274,18 +1378,21 @@ def _observe_build(
                 or failure.diagnostics.stdout.text
                 or diagnostic
             )
-        raise RecipeImageAvailabilityError(
-            failure.error_code or "recipe_image.build_failed",
+        raise AvailabilityUnsettled(
+            failure.error_code or RecipeImageCode.BUILD_FAILED,
             detail,
             retryable=retryable,
             retry_after_seconds=(failure.retry_after_seconds if retryable else None),
             log_excerpt=diagnostic or None,
             step=failure.stage or "build",
             settled_build_operation_id=operation.id,
+            reason=WaitReason.REPORT_UNCERTAIN,
         )
     if operation.state != "succeeded" or not isinstance(operation.result, Mapping):
-        raise RecipeImageAvailabilityError(
-            "recipe_image.build_invalid", "canonical Recipe build outcome is invalid"
+        raise AvailabilityUnsettled(
+            RecipeImageCode.BUILD_INVALID,
+            "canonical Recipe build outcome is invalid",
+            reason=WaitReason.REPORT_UNCERTAIN,
         )
     aggregate = operation.result
     successful_nodes = aggregate.get("successful_nodes")
@@ -1300,17 +1407,20 @@ def _observe_build(
         or builder_node_id not in successful_nodes
         or not isinstance(raw_evidence, Mapping)
     ):
-        raise RecipeImageAvailabilityError(
-            "recipe_image.build_invalid",
+        raise AvailabilityUnsettled(
+            RecipeImageCode.BUILD_INVALID,
             "canonical Recipe build evidence is incomplete",
+            reason=WaitReason.RECEIPT_MISSING,
         )
     try:
         evidence = read_stored_model(
             RecipeBuildEvidence, json.dumps(dict(raw_evidence)), from_json=True
         )
     except (TypeError, ValueError) as error:
-        raise RecipeImageAvailabilityError(
-            "recipe_image.build_invalid", "canonical Recipe build evidence is invalid"
+        raise AvailabilityUnsettled(
+            RecipeImageCode.BUILD_INVALID,
+            "canonical Recipe build evidence is invalid",
+            reason=WaitReason.REPORT_UNCERTAIN,
         ) from error
     return evidence.model_dump(mode="json") | {
         "state": operation.state,
@@ -1346,9 +1456,10 @@ def _cached_build_receipt(resolution: Any) -> Mapping[str, object] | None:
         or isinstance(resolution.image_bytes, bool)
         or resolution.image_bytes < 1
     ):
-        raise RecipeImageAvailabilityError(
-            "recipe_image.build_invalid",
+        raise AvailabilityUnsettled(
+            RecipeImageCode.BUILD_INVALID,
             "cached Recipe build receipt is incomplete",
+            reason=WaitReason.RECEIPT_MISSING,
         )
     return {
         "state": "succeeded",
@@ -1379,8 +1490,10 @@ def _compile_consistent_runtime(
 
     roles = tuple(recipe.topology.roles)
     if not roles:
-        raise RecipeImageAvailabilityError(
-            "recipe_image.runtime_invalid", "canonical recipe has no topology roles"
+        raise AvailabilityInvalid(
+            RecipeImageCode.RUNTIME_INVALID,
+            "canonical recipe has no topology roles",
+            reason=InvalidRequestReason.MALFORMED,
         )
     compiled: list[Mapping[str, object]] = []
     first_rank = 0
@@ -1396,9 +1509,10 @@ def _compile_consistent_runtime(
             )
             runtime = projection.get("runtime")
             if not isinstance(runtime, Mapping):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.runtime_invalid",
+                raise AvailabilityInvalid(
+                    RecipeImageCode.RUNTIME_INVALID,
                     "compiled runtime projection is unavailable",
+                    reason=InvalidRequestReason.MALFORMED,
                 )
             compiled.append(runtime)
         first_rank += role_count
@@ -1409,9 +1523,10 @@ def _compile_consistent_runtime(
         != identity
         for runtime in compiled[1:]
     ):
-        raise RecipeImageAvailabilityError(
-            "recipe_image.runtime_invalid",
+        raise AvailabilityInvalid(
+            RecipeImageCode.RUNTIME_INVALID,
             "canonical recipe roles do not share one runtime image identity",
+            reason=InvalidRequestReason.MALFORMED,
         )
     return first
 

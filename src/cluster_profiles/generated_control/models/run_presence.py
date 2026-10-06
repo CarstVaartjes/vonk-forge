@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.run_presence_degraded_reason_type_0 import check_run_presence_degraded_reason_type_0
-from ..models.run_presence_degraded_reason_type_0 import RunPresenceDegradedReasonType0
+from ..models.run_degraded_reason import check_run_degraded_reason
+from ..models.run_degraded_reason import RunDegradedReason
 from ..models.run_presence_group_state import check_run_presence_group_state
 from ..models.run_presence_group_state import RunPresenceGroupState
 from ..models.run_presence_rank_state import check_run_presence_rank_state
@@ -55,7 +55,7 @@ class RunPresence:
             run_id (str):
             run_state (RunPresenceRunState):
             title (str):
-            degraded_reason (None | RunPresenceDegradedReasonType0 | Unset):
+            degraded_reason (None | RunDegradedReason | Unset):
             option_choices (RunPresenceOptionChoices | Unset):
             recipe_update (None | RecipeUpdateNotice | Unset):
             route_reason (None | str | Unset):
@@ -79,7 +79,7 @@ class RunPresence:
     run_id: str
     run_state: RunPresenceRunState
     title: str
-    degraded_reason: None | RunPresenceDegradedReasonType0 | Unset = UNSET
+    degraded_reason: None | RunDegradedReason | Unset = UNSET
     option_choices: RunPresenceOptionChoices | Unset = UNSET
     recipe_update: None | RecipeUpdateNotice | Unset = UNSET
     route_reason: None | str | Unset = UNSET
@@ -248,7 +248,7 @@ class RunPresence:
 
         title = d.pop("title")
 
-        def _parse_degraded_reason(data: object) -> None | RunPresenceDegradedReasonType0 | Unset:
+        def _parse_degraded_reason(data: object) -> None | RunDegradedReason | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -256,14 +256,14 @@ class RunPresence:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                degraded_reason_type_0 = check_run_presence_degraded_reason_type_0(data)
+                degraded_reason_type_0 = check_run_degraded_reason(data)
 
 
 
                 return degraded_reason_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(None | RunPresenceDegradedReasonType0 | Unset, data)
+            return cast(None | RunDegradedReason | Unset, data)
 
         degraded_reason = _parse_degraded_reason(d.pop("degraded_reason", UNSET))
 

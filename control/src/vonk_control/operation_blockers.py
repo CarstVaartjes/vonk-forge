@@ -13,13 +13,14 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, ValidationError
+from vonk_agent_protocol import RunSwitchCode, adopt_reason_code
 
 from .strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16
 
 #: An operation is repeating a phase that failed (it is not merely waiting).
-PHASE_RETRY_CODE = "run-switch.phase-retry"
+PHASE_RETRY_CODE = RunSwitchCode.PHASE_RETRY
 #: A retry is a stall worth an operator's attention from this attempt on, so a
 #: brief contention hold never raises one.
 STALL_RETRY_ATTEMPT = 3
@@ -79,8 +80,12 @@ def read_blockers(value: object) -> list[OperationBlocker]:
     for item in value:
         if not isinstance(item, Mapping):
             continue
+        stored = dict(item)
+        if isinstance(stored.get("code"), str):
+            # A row written before a code was respelled reads as the current spelling.
+            stored["code"] = adopt_reason_code(stored["code"])
         try:
-            result.append(OperationBlocker.model_validate(dict(item)))
+            result.append(OperationBlocker.model_validate(stored))
         except ValidationError:
             continue
     return result[:MAX_BLOCKERS]

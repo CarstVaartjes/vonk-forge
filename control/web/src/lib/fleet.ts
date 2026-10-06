@@ -1,4 +1,5 @@
 import type {VisualFleetNode} from "../api/types";
+import {NodeOfflineReason, ProjectionCode} from "../api/vocabulary.generated";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
 /** The words `vonkctl fleet` uses. */
@@ -19,9 +20,9 @@ export function telemetryFreshnessAt(observedAt: string | null | undefined, now:
 }
 
 const TELEMETRY_WARNING_CODES = new Set<VisualFleetNode["warnings"][number]["code"]>([
-  "telemetry.missing",
-  "telemetry.delayed",
-  "telemetry.stale",
+  ProjectionCode.TELEMETRY_MISSING,
+  ProjectionCode.TELEMETRY_DELAYED,
+  ProjectionCode.TELEMETRY_STALE,
 ]);
 
 export function reconcileTelemetryWarnings(
@@ -32,8 +33,8 @@ export function reconcileTelemetryWarnings(
   const reconciled = warnings.filter(warning => !TELEMETRY_WARNING_CODES.has(warning.code));
   if (freshness === "live") return reconciled;
   const warning: VisualFleetNode["warnings"][number] = freshness === "delayed"
-    ? {code: "telemetry.delayed", detail: "Telemetry delivery is delayed.", severity: "warning"}
-    : {code: "telemetry.stale", detail: "Telemetry is stale.", severity: "warning"};
+    ? {code: ProjectionCode.TELEMETRY_DELAYED, detail: "Telemetry delivery is delayed.", severity: "warning"}
+    : {code: ProjectionCode.TELEMETRY_STALE, detail: "Telemetry is stale.", severity: "warning"};
   reconciled.splice(insertionIndex < 0 ? reconciled.length : Math.min(insertionIndex, reconciled.length), 0, warning);
   return reconciled;
 }
@@ -67,17 +68,17 @@ export function nodeRecipeUpdates(node: VisualFleetNode): {runId: string; title:
 }
 
 const OFFLINE_REASON_LABELS: Record<NonNullable<VisualFleetNode["connection"]["offline_reason"]>, string> = {
-  "unregistered": "Node is not registered",
-  "agent-inactive": "Agent is inactive",
-  "agent-revoked": "Agent was revoked",
-  "never-seen": "Agent has never connected",
-  "last-seen-in-future": "Agent clock is ahead",
-  "stale": "Agent presence timed out",
-  "certificate-missing": "Certificate missing",
-  "certificate-not-yet-valid": "Certificate not yet valid",
-  "certificate-expired": "Certificate expired",
-  "certificate-revoked": "Certificate revoked",
-  "certificate-inactive": "Certificate inactive",
+  [NodeOfflineReason.UNREGISTERED]: "Node is not registered",
+  [NodeOfflineReason.AGENT_INACTIVE]: "Agent is inactive",
+  [NodeOfflineReason.AGENT_REVOKED]: "Agent was revoked",
+  [NodeOfflineReason.NEVER_SEEN]: "Agent has never connected",
+  [NodeOfflineReason.LAST_SEEN_IN_FUTURE]: "Agent clock is ahead",
+  [NodeOfflineReason.STALE]: "Agent presence timed out",
+  [NodeOfflineReason.CERTIFICATE_MISSING]: "Certificate missing",
+  [NodeOfflineReason.CERTIFICATE_NOT_YET_VALID]: "Certificate not yet valid",
+  [NodeOfflineReason.CERTIFICATE_EXPIRED]: "Certificate expired",
+  [NodeOfflineReason.CERTIFICATE_REVOKED]: "Certificate revoked",
+  [NodeOfflineReason.CERTIFICATE_INACTIVE]: "Certificate inactive",
 };
 
 export function offlineReasonLabel(reason: VisualFleetNode["connection"]["offline_reason"]): string {
@@ -162,6 +163,6 @@ export function nodeCpuClock(node: VisualFleetNode): {clock: string; temperature
   return {
     clock: typeof maximum === "number" ? `${ghz(current)} of ${ghz(maximum)} GHz` : `${ghz(current)} GHz`,
     temperature: typeof sample.gpu_temperature_c === "number" ? `${sample.gpu_temperature_c} °C` : null,
-    lowClock: node.warnings.some(warning => warning.code === "cpu.low-clock"),
+    lowClock: node.warnings.some(warning => warning.code === ProjectionCode.CPU_LOW_CLOCK),
   };
 }

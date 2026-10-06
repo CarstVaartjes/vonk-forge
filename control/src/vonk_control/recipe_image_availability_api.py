@@ -13,7 +13,12 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol import LifecycleState, LifecycleSubject, state_adopter
+from vonk_agent_protocol import (
+    LifecycleState,
+    LifecycleSubject,
+    RecipeImageCode,
+    state_adopter,
+)
 
 from .auth import MUTATION_ROLES
 from .bounded_json import require_integer, require_sequence
@@ -432,7 +437,7 @@ def install_recipe_operator_routes(
         with_model = result.get("with_model")
         if not isinstance(with_model, bool):
             raise RecipeImageAvailabilityError(
-                "recipe_image.operation_invalid",
+                RecipeImageCode.OPERATION_INVALID,
                 "stored removal choice is malformed",
             )
         reclaimed_bytes = require_integer(

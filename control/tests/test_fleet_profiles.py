@@ -15,7 +15,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import Engine, Table, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, SupersedeCode
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -496,6 +496,10 @@ class _SwitchAdapter:
     def recovery_refused(self, application_id: str, *, session: Session) -> bool:
         del application_id, session
         return False
+
+    def failure_signature(self, application_id: str, *, session: Session) -> str | None:
+        del application_id, session
+        return None
 
     def start(
         self,
@@ -4174,7 +4178,10 @@ def test_a_superseded_application_names_its_reason_and_never_a_failure() -> None
     with pytest.raises(ValueError, match="reason code"):
         type(view).model_validate(ended.model_dump())
     named = ended.model_copy(
-        update={"reason_code": "superseded-by-retry", "superseded_by": _uuid(982)}
+        update={
+            "reason_code": SupersedeCode.SUPERSEDED_BY_RETRY,
+            "superseded_by": _uuid(982),
+        }
     )
     type(view).model_validate(named.model_dump())
     # A retry supersession must name its successor; others may not name a failure.

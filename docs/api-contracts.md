@@ -305,6 +305,31 @@ state stays the core's), and why an attempt is observed (`observation_cause`:
 children done is `failed` with `partial: true`. The agent wire keeps its four result
 words and is mapped to the stored words at one place.
 
+## Reason, blocker, warning and attention codes
+
+Every code the Controller shows as *why* something is waiting, refused, blocked or
+degraded is a member of a closed enum in
+`agent_protocol/src/vonk_agent_protocol/reason_codes.py`, grouped by the domain
+that raises it (`ModelCacheCode`, `RecipeImageCode`, `RuntimeImageCode`,
+`ProfileReasonCode`, `RunSwitchCode`, `ProjectionCode`, `InstallAdmissionCode`,
+`RunAdmissionCode`, ...). The values are the words already stored and shown; the
+module closes the set and adds none. `ReasonCodeVocabulary` publishes the enums
+into `wire.json` (Rust), the OpenAPI document and the generated TypeScript
+constants, and `make_blocker`, `ProjectionReason`, the error classes, the
+`code=` / `*_code=` fields and the Run/Switch message prefixes take a member, never
+a string. Stored text stays text (fail-open): a row or a relayed code this release
+does not know is read and shown as it is, and a respelled code is adopted through
+`RETIRED_CODE_SPELLINGS` (`adopt_reason_code`). A code that wraps another domain's
+(`run-switch.` plus a resource, reconcile, stop or uninstall code) is looked up with
+`run_switch_code`, and a code built from a closed pair (`resource.context_unknown`)
+with `resource_term_code`; both are total over their members. Agent-originated
+free text (the runtime preflight finding code) is shown in the detail, not as a
+Controller code.
+
+The vocabulary ratchet keeps this flat at zero: a literal equal to a member, and
+any string constant in a code position (see [testing and CI](testing-and-ci.md)),
+fails. A new code is added to its domain enum first.
+
 Every agent operation result is one `OperationOutcome`
 (`agent_protocol/src/vonk_agent_protocol/outcome.py`), tagged by `kind`:
 

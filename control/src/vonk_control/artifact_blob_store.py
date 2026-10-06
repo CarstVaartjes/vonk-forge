@@ -13,6 +13,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
+)
+
+from .categorized_errors import InvalidValue
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 
 # The reference fence is a short critical section around one blob verification
@@ -25,6 +35,31 @@ _REFERENCE_LOCK_RETRY_SECONDS = 0.05
 
 class ArtifactBlobStoreError(ValueError):
     pass
+
+
+class ArtifactBlobInvalid(InvalidRequestError, ArtifactBlobStoreError):
+    """An upload or digest outside its declared contract (size, chunk, format)."""
+
+
+class ArtifactBlobQuotaExhausted(InvalidRequestError, ArtifactBlobStoreError):
+    """The upload does not fit the configured storage quota."""
+
+
+class ArtifactBlobDigestMismatch(SecurityRefusalError, ArtifactBlobStoreError):
+    """Uploaded bytes do not hash to the digest the request declared."""
+
+
+class ArtifactBlobUnsafePath(SecurityRefusalError, ArtifactBlobStoreError):
+    """A storage key, path or root that is not the exact content-addressed place."""
+
+
+class ArtifactBlobBusy(UnknownOutcomeError, ArtifactBlobStoreError):
+    """The reference fence is held by a reconciliation: the caller retries."""
+
+
+class ArtifactBlobUnavailable(UnknownOutcomeError, FileNotFoundError):
+    """Stored bytes are absent or of another size: unknown, replaced by the next
+    identical upload."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +81,10 @@ class _BlobReservation:
 class ArtifactBlobStore:
     def __init__(self, root: Path, *, max_stored_bytes: int = 16 * 1024**3) -> None:
         if not root.is_absolute() or max_stored_bytes < 1:
-            raise ValueError("artifact blob store configuration is invalid")
+            raise InvalidValue(
+                "artifact blob store configuration is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         self._root = root
         self._max_stored_bytes = max_stored_bytes
 
@@ -92,7 +130,10 @@ class ArtifactBlobStore:
     ) -> StoredArtifactBlob:
         self._digest(expected_sha256)
         if not 0 <= expected_bytes <= maximum_bytes:
-            raise ArtifactBlobStoreError("artifact upload size is outside its bound")
+            raise ArtifactBlobInvalid(
+                "artifact upload size is outside its bound",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         self._prepare_root()
         reservation, existing = self._reserve(expected_sha256, expected_bytes)
         if existing is not None:
@@ -100,17 +141,27 @@ class ArtifactBlobStore:
             observed = 0
             async for chunk in chunks:
                 if not isinstance(chunk, bytes):
-                    raise ArtifactBlobStoreError("artifact upload chunk is invalid")
+                    raise ArtifactBlobInvalid(
+                        "artifact upload chunk is invalid",
+                        reason=InvalidRequestReason.MALFORMED,
+                    )
                 observed += len(chunk)
                 if observed > expected_bytes:
-                    raise ArtifactBlobStoreError(
-                        "artifact upload exceeds its declared size"
+                    raise ArtifactBlobInvalid(
+                        "artifact upload exceeds its declared size",
+                        reason=InvalidRequestReason.LIMIT_EXCEEDED,
                     )
                 digest.update(chunk)
             if observed != expected_bytes:
-                raise ArtifactBlobStoreError("artifact upload size does not match")
+                raise ArtifactBlobInvalid(
+                    "artifact upload size does not match",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             if digest.hexdigest() != expected_sha256:
-                raise ArtifactBlobStoreError("artifact upload SHA-256 does not match")
+                raise ArtifactBlobDigestMismatch(
+                    "artifact upload SHA-256 does not match",
+                    reason=SecurityRefusalReason.DIGEST_MISMATCH,
+                )
             return existing
         assert reservation is not None
         temporary = Path()
@@ -126,20 +177,30 @@ class ArtifactBlobStore:
             with os.fdopen(descriptor, "wb") as stream:
                 async for chunk in chunks:
                     if not isinstance(chunk, bytes):
-                        raise ArtifactBlobStoreError("artifact upload chunk is invalid")
+                        raise ArtifactBlobInvalid(
+                            "artifact upload chunk is invalid",
+                            reason=InvalidRequestReason.MALFORMED,
+                        )
                     observed += len(chunk)
                     if observed > maximum_bytes or observed > expected_bytes:
-                        raise ArtifactBlobStoreError(
-                            "artifact upload exceeds its declared size"
+                        raise ArtifactBlobInvalid(
+                            "artifact upload exceeds its declared size",
+                            reason=InvalidRequestReason.LIMIT_EXCEEDED,
                         )
                     digest.update(chunk)
                     stream.write(chunk)
                 stream.flush()
                 os.fsync(stream.fileno())
             if observed != expected_bytes:
-                raise ArtifactBlobStoreError("artifact upload size does not match")
+                raise ArtifactBlobInvalid(
+                    "artifact upload size does not match",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             if digest.hexdigest() != expected_sha256:
-                raise ArtifactBlobStoreError("artifact upload SHA-256 does not match")
+                raise ArtifactBlobDigestMismatch(
+                    "artifact upload SHA-256 does not match",
+                    reason=SecurityRefusalReason.DIGEST_MISMATCH,
+                )
             stored = self._commit(temporary, expected_sha256, observed)
             temporary = Path()
             return stored
@@ -157,9 +218,15 @@ class ArtifactBlobStore:
     ) -> StoredArtifactBlob:
         self._digest(expected_sha256)
         if len(content) > maximum_bytes:
-            raise ArtifactBlobStoreError("artifact bytes exceed the limit")
+            raise ArtifactBlobInvalid(
+                "artifact bytes exceed the limit",
+                reason=InvalidRequestReason.LIMIT_EXCEEDED,
+            )
         if hashlib.sha256(content).hexdigest() != expected_sha256:
-            raise ArtifactBlobStoreError("artifact upload SHA-256 does not match")
+            raise ArtifactBlobDigestMismatch(
+                "artifact upload SHA-256 does not match",
+                reason=SecurityRefusalReason.DIGEST_MISMATCH,
+            )
         self._prepare_root()
         reservation, existing = self._reserve(expected_sha256, len(content))
         if existing is not None:
@@ -189,12 +256,18 @@ class ArtifactBlobStore:
         self._digest(sha256)
         expected_key = f"{sha256[:2]}/{sha256}"
         if storage_key != expected_key:
-            raise ArtifactBlobStoreError("artifact storage key is invalid")
+            raise ArtifactBlobUnsafePath(
+                "artifact storage key is invalid",
+                reason=SecurityRefusalReason.UNSAFE_PATH,
+            )
         path = self._root / sha256[:2] / sha256
         if path.is_symlink() or not path.is_file() or path.stat().st_size != size_bytes:
             # Absent or damaged bytes are unknown, not a refusal: the reader
             # sees "not found" and the next identical upload replaces them.
-            raise FileNotFoundError("stored artifact is unavailable")
+            raise ArtifactBlobUnavailable(
+                "stored artifact is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         # Bytes are hashed once, on upload; the file is named by that digest.
         return path
 
@@ -208,10 +281,16 @@ class ArtifactBlobStore:
         expected_key = f"{sha256[:2]}/{sha256}"
         self._digest(sha256)
         if storage_key != expected_key:
-            raise ArtifactBlobStoreError("artifact storage key is invalid")
+            raise ArtifactBlobUnsafePath(
+                "artifact storage key is invalid",
+                reason=SecurityRefusalReason.UNSAFE_PATH,
+            )
         path = self._root / storage_key
         if path.is_symlink():
-            raise ArtifactBlobStoreError("artifact storage path is unsafe")
+            raise ArtifactBlobUnsafePath(
+                "artifact storage path is unsafe",
+                reason=SecurityRefusalReason.UNSAFE_PATH,
+            )
         if path.exists():
             path.unlink()
 
@@ -241,9 +320,15 @@ class ArtifactBlobStore:
                     _reference_fenced=True,
                 )
         if not 1 <= batch_limit <= 10_000:
-            raise ValueError("artifact reconciliation batch limit is invalid")
+            raise InvalidValue(
+                "artifact reconciliation batch limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         if not 0 <= orphan_grace_seconds <= 3600:
-            raise ValueError("artifact reconciliation orphan grace is invalid")
+            raise InvalidValue(
+                "artifact reconciliation orphan grace is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         for digest in referenced_sha256:
             self._digest(digest)
         self._prepare_root()
@@ -367,8 +452,9 @@ class ArtifactBlobStore:
                 return
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    raise ArtifactBlobStoreError(
-                        "artifact storage references are being reconciled"
+                    raise ArtifactBlobBusy(
+                        "artifact storage references are being reconciled",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     ) from None
                 time.sleep(_REFERENCE_LOCK_RETRY_SECONDS)
 
@@ -392,7 +478,10 @@ class ArtifactBlobStore:
                 + self._unreserved_temporary_bytes(set(reservations))
             )
             if accounted > self._max_stored_bytes:
-                raise ArtifactBlobStoreError("artifact storage quota is exhausted")
+                raise ArtifactBlobQuotaExhausted(
+                    "artifact storage quota is exhausted",
+                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                )
             os.replace(temporary, destination)
             descriptor = os.open(directory, os.O_RDONLY)
             try:
@@ -418,12 +507,18 @@ class ArtifactBlobStore:
     def _prepare_root(self) -> None:
         self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self._root.is_symlink() or not self._root.is_dir():
-            raise ArtifactBlobStoreError("artifact storage root is unsafe")
+            raise ArtifactBlobUnsafePath(
+                "artifact storage root is unsafe",
+                reason=SecurityRefusalReason.UNSAFE_PATH,
+            )
         for name in (".tmp", ".reservations"):
             path = self._root / name
             path.mkdir(mode=0o700, exist_ok=True)
             if path.is_symlink() or not path.is_dir():
-                raise ArtifactBlobStoreError("artifact storage metadata path is unsafe")
+                raise ArtifactBlobUnsafePath(
+                    "artifact storage metadata path is unsafe",
+                    reason=SecurityRefusalReason.UNSAFE_PATH,
+                )
 
     def _stored_bytes(self) -> int:
         total = 0
@@ -460,7 +555,10 @@ class ArtifactBlobStore:
                 + self._unreserved_temporary_bytes(set(reservations))
             )
             if accounted + size_bytes > self._max_stored_bytes:
-                raise ArtifactBlobStoreError("artifact storage quota is exhausted")
+                raise ArtifactBlobQuotaExhausted(
+                    "artifact storage quota is exhausted",
+                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                )
             token = uuid.uuid4().hex
             path = self._root / ".reservations" / f"{token}.reserve"
             descriptor = os.open(
@@ -555,11 +653,20 @@ class ArtifactBlobStore:
             or value != value.lower()
             or any(character not in "0123456789abcdef" for character in value)
         ):
-            raise ArtifactBlobStoreError("artifact digest is invalid")
+            raise ArtifactBlobInvalid(
+                "artifact digest is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
 
 
 __all__ = [
+    "ArtifactBlobBusy",
+    "ArtifactBlobDigestMismatch",
+    "ArtifactBlobInvalid",
+    "ArtifactBlobQuotaExhausted",
     "ArtifactBlobStore",
     "ArtifactBlobStoreError",
+    "ArtifactBlobUnavailable",
+    "ArtifactBlobUnsafePath",
     "StoredArtifactBlob",
 ]

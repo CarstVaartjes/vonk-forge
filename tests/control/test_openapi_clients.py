@@ -490,7 +490,8 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
         "inactive",
     ]
     offline = schema["NodeConnection"]["properties"]["offline_reason"]
-    assert offline["anyOf"][0]["enum"] == [
+    assert offline["anyOf"][0] == {"$ref": "#/components/schemas/NodeOfflineReason"}
+    assert schema["NodeOfflineReason"]["enum"] == [
         "unregistered",
         "agent-inactive",
         "agent-revoked",
@@ -509,7 +510,13 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
     )
     typescript = TYPESCRIPT_CLIENT.read_text()
     assert 'certificate_state: "valid" | "missing" | "not-yet-valid"' in typescript
-    assert 'degraded_reason?: ("external-member" | "mapping-incomplete"' in typescript
+    assert (
+        'degraded_reason?: components["schemas"]["InstallDegradedReason"]' in typescript
+    )
+    assert schema["InstallDegradedReason"]["enum"][:2] == [
+        "external-member",
+        "mapping-incomplete",
+    ]
 
 
 def test_generated_telemetry_contract_is_concrete() -> None:

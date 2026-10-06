@@ -1463,8 +1463,6 @@ def test_every_conflict_type_declares_what_a_retry_does_with_it() -> None:
     types listed here may park; any other new type fails this test until it is
     classified (and, if it supersedes, carries a contract reason code)."""
 
-    from typing import get_args
-
     from vonk_control.fleet_profile_contract import FleetProfileSupersedeCode
     from vonk_control.fleet_profiles import RETRY_SUPERSEDE, RETRY_WAIT
 
@@ -1486,7 +1484,7 @@ def test_every_conflict_type_declares_what_a_retry_does_with_it() -> None:
         if cls.retry_disposition == RETRY_WAIT:
             actual_waits.add(cls.__name__)
         else:
-            assert cls.supersede_code in get_args(FleetProfileSupersedeCode)
+            assert cls.supersede_code in set(FleetProfileSupersedeCode)
     assert actual_waits == waits
 
 
@@ -1517,3 +1515,116 @@ def test_parking_refuses_an_error_that_waiting_cannot_resolve(
         service._park_for_retry(
             row, progress, [], because=FleetProfileAdmissionBusy("busy")
         )
+
+
+def _fail_pending_children(sessions, reason: str) -> int:
+    """Fail every Run/Switch child that has not ended, the way a crashing start does."""
+
+    failed = 0
+    with sessions.begin() as session:
+        for child in session.scalars(
+            select(Job).where(Job.kind == "recipe.run-switch.v2")
+        ):
+            if child.state not in {"failed", "succeeded", "cancelled"}:
+                child.state = "failed"
+                child.status_reason = reason
+                failed += 1
+    return failed
+
+
+def test_a_deterministic_crash_ends_after_the_failure_budget(tmp_path: Path) -> None:
+    """A start that fails the same way every time is retried a bounded number of
+    times, then ends ``failed`` with the typed evidence, instead of relaunching the
+    workload every minute for as long as the intent stands."""
+
+    from vonk_control.fleet_profiles import PROFILE_REPEATED_FAILURE_CODE
+    from vonk_control.lifecycle.core import RECOVERY
+
+    sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    crash = "temporary runtime dependency unavailable"
+    clock = {"now": lifecycle._clock()}
+    service._clock = lambda: clock["now"]
+    for _ in range(RECOVERY.max_failures + 3):
+        clock["now"] += timedelta(hours=2)
+        for _tick in range(4):
+            service.tick()
+            _fail_pending_children(sessions, crash)
+
+    with sessions() as session:
+        applications = tuple(
+            session.scalars(
+                select(FleetProfileApplication).order_by(
+                    FleetProfileApplication.created_at
+                )
+            )
+        )
+    # The first failure plus the budgeted retries, and not one more.
+    assert len(applications) == RECOVERY.max_failures
+    last = service.application(applications[-1].id)
+    assert last.state == "failed" and last.next_attempt_at is None
+    assert [blocker.code for blocker in last.blockers] == [
+        PROFILE_REPEATED_FAILURE_CODE
+    ]
+    assert f"{RECOVERY.max_failures} times" in (last.status_reason or "")
+    assert crash in (last.status_reason or "")
+    assert not service._recovery_wanted(
+        *_row_and_progress(sessions, applications[-1].id)
+    )
+    # Earlier attempts were superseded by their retries, as for any automatic retry.
+    assert service.application(first.id).state == "superseded"
+
+
+def _row_and_progress(sessions, application_id: str):
+    from vonk_control.fleet_profiles import _persisted_profile_progress
+
+    session = sessions()
+    row = session.get(FleetProfileApplication, application_id)
+    assert row is not None
+    return session, row, _persisted_profile_progress(row)
+
+
+def _crash_rounds(sessions, service, clock, reasons: list[str]) -> int:
+    """Run retry rounds in which each new start crashes with the round's reason."""
+
+    for reason in reasons:
+        clock["now"] += timedelta(hours=2)
+        for _tick in range(4):
+            service.tick()
+            _fail_pending_children(sessions, reason)
+    with sessions() as session:
+        return len(tuple(session.scalars(select(FleetProfileApplication))))
+
+
+def test_a_failure_that_changes_keeps_being_retried(tmp_path: Path) -> None:
+    """Retries are for causes that change: different failures never use up the
+    budget."""
+
+    from vonk_control.lifecycle.core import RECOVERY
+
+    sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
+    clock = {"now": lifecycle._clock()}
+    service._clock = lambda: clock["now"]
+    changing = ["port in use", "disk full", "image pull failed", "gpu busy"] * 2
+    applications = _crash_rounds(sessions, service, clock, changing)
+    # Seven rounds of four different crashes: every one still got its retry.
+    assert applications > RECOVERY.max_failures + 1
+
+
+def test_a_failure_that_differs_only_in_numbers_is_the_same_failure(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.lifecycle.core import RECOVERY
+
+    sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
+    clock = {"now": lifecycle._clock()}
+    service._clock = lambda: clock["now"]
+    same = [
+        f"runtime exited with code {index}"
+        for index in range(RECOVERY.max_failures + 2)
+    ]
+    applications = _crash_rounds(sessions, service, clock, same)
+    # Numbers are not the cause (it is one failure repeating), so it ends at the
+    # budget; the load's first, different failure was not part of the streak.
+    assert applications == RECOVERY.max_failures + 1

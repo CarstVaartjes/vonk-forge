@@ -26,6 +26,7 @@ from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
+    OperationFailureCode,
     OperationMemberProgress,
     OperationProgress,
     RecipeJobRunResult,
@@ -1107,7 +1108,9 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
             parsed.reason or f"Artifact process exited with code {parsed.exit_code}"
         )
         return OperationFailureEvidence(
-            error_code="artifact_process_failed", summary=reason[:256], detail=reason
+            error_code=OperationFailureCode.ARTIFACT_PROCESS_FAILED,
+            summary=reason[:256],
+            detail=reason,
         )
     return _failure_projection(item.get("result"))
 
@@ -2331,10 +2334,18 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
 
 def _contract_component_schemas() -> dict[str, dict[str, object]]:
     from pydantic.json_schema import models_json_schema
-    from vonk_agent_protocol import ErrorCatalog, LifecycleVocabulary
+    from vonk_agent_protocol import (
+        ErrorCatalog,
+        LifecycleVocabulary,
+        ReasonCodeVocabulary,
+    )
 
     _references, document = models_json_schema(
-        [(LifecycleVocabulary, "validation"), (ErrorCatalog, "validation")],
+        [
+            (LifecycleVocabulary, "validation"),
+            (ReasonCodeVocabulary, "validation"),
+            (ErrorCatalog, "validation"),
+        ],
         ref_template="#/components/schemas/{model}",
     )
     return deepcopy(document["$defs"])

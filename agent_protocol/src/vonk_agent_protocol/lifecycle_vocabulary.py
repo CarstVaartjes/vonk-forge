@@ -579,6 +579,7 @@ class SecurityRefusalReason(WireEnum):
     CONTROLLER_AUTHENTICATION_REQUIRED = "controller.authentication_required"
     CONTROLLER_FLEET_ENROLLMENT_DENIED = "controller.fleet.enrollment_denied"
     CONTROLLER_REQUEST_REJECTED = "controller.request_rejected"
+    DIGEST_MISMATCH = "digest_verification_failed"
     DISTRIBUTION_REVOKED = "distribution.revoked"
     FORBIDDEN = "forbidden"
     GRANT_INVALID = "grant_invalid"
@@ -622,9 +623,11 @@ class SecurityRefusalReason(WireEnum):
     RUNTIME_IMAGE_AUTHORIZATION_INVALID = "runtime_image.authorization_invalid"
     RUNTIME_IMAGE_AUTHORIZATION_REVOKED = "runtime_image.authorization_revoked"
     RUNTIME_IMAGE_IDENTITY_INVALID = "runtime_image_identity_invalid"
+    STALE_FENCE = "stale_fence"
     TUF_METADATA_INVALID = "tuf.metadata_invalid"
     TUF_SIGNATURE_INVALID = "tuf.signature_invalid"
     UNAUTHORIZED = "unauthorized"
+    UNSAFE_PATH = "unsafe_path"
 
 
 #: Suffixes of the same security families, so a new producer of an existing

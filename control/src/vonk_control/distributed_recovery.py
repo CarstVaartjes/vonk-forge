@@ -13,13 +13,20 @@ from typing import Literal, Protocol
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import RecipeStartPayload, canonical_message
+from vonk_agent_protocol import (
+    InvalidRequestReason,
+    RecipeStartPayload,
+    WaitReason,
+    canonical_message,
+)
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .agent_jobs import release_owned_reservations_in_session
+from .categorized_errors import UnsettledOutcome
 from .distributed_lifecycle import (
     DistributedLifecycleError,
+    DistributedRecoveryInvalid,
     canonical_distributed_readiness,
 )
 from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
@@ -149,7 +156,7 @@ class _RecoveryRunStops(Protocol):
     ) -> Job | Residue: ...
 
 
-class _RecoveryDependencyPending(Exception):
+class _RecoveryDependencyPending(UnsettledOutcome):
     """A recoverable precondition is not ready yet; keep the run current."""
 
 
@@ -563,13 +570,19 @@ def recovery_start_plan(
         "deadline",
         "start_phases",
     }:
-        raise DistributedLifecycleError("distributed recovery authority is invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed recovery authority is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     enforce_recovery_deadline(payload, now=now, require_unexpired=require_unexpired)
     failed_rank = value["failed_rank"]
     deadline_value = value["deadline"]
     phases = _decode_phases(value.get("start_phases"))
     if phases is None:
-        raise DistributedLifecycleError("distributed recovery phases are invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed recovery phases are invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     marker = {
         "schema_version": 1,
         "failed_rank": failed_rank,
@@ -593,7 +606,10 @@ def enforce_recovery_deadline(
         {"schema_version", "failed_rank", "deadline"},
         {"schema_version", "failed_rank", "deadline", "start_phases"},
     ):
-        raise DistributedLifecycleError("distributed recovery authority is invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed recovery authority is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     failed_rank = value.get("failed_rank")
     deadline_value = value.get("deadline")
     if (
@@ -602,17 +618,27 @@ def enforce_recovery_deadline(
         or failed_rank < 0
         or not isinstance(deadline_value, str)
     ):
-        raise DistributedLifecycleError("distributed recovery authority is invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed recovery authority is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     try:
         deadline = datetime.fromisoformat(deadline_value)
     except ValueError as error:
-        raise DistributedLifecycleError(
-            "distributed recovery authority is invalid"
+        raise DistributedRecoveryInvalid(
+            "distributed recovery authority is invalid",
+            reason=InvalidRequestReason.MALFORMED,
         ) from error
     if deadline.tzinfo is None or deadline.utcoffset() is None:
-        raise DistributedLifecycleError("distributed recovery authority is invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed recovery authority is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     if require_unexpired and _aware(now) >= _aware(deadline):
-        raise DistributedLifecycleError("distributed recovery deadline elapsed")
+        raise DistributedRecoveryInvalid(
+            "distributed recovery deadline elapsed",
+            reason=InvalidRequestReason.OUT_OF_RANGE,
+        )
     return True
 
 
@@ -965,7 +991,8 @@ def _singleton_recovery_authority(
         < timedelta(seconds=ROUTE_EVIDENCE_MAX_AGE_SECONDS)
     ):
         raise _RecoveryDependencyPending(
-            "singleton recovery waits for a fresh Controller-observed Spark presence report"
+            "singleton recovery waits for a fresh Controller-observed Spark presence report",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     accepted = _accepted_start_authority(
         session, run, revision.content_digest, run_node.node_id
@@ -1498,7 +1525,8 @@ def _recovery_authority(
         ):
             raise _RecoveryDependencyPending(
                 "distributed recovery waits for a fresh Controller-observed "
-                "Spark presence report"
+                "Spark presence report",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         presences[node.node_id] = presence.management_address
     original = _original_start_authority(session, run, revision.content_digest)
@@ -1848,7 +1876,10 @@ def _decode_phases(
 
 def _aware(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
-        raise DistributedLifecycleError("distributed recovery clock is invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed recovery clock is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     return value.astimezone(UTC)
 
 

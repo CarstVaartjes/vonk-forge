@@ -487,9 +487,17 @@ def test_write_counts_lowers_and_never_adds() -> None:
     guard = scan_guard_raises(guard_paths(document))
     assert write_counts(document, waits, raises, guard) == document
     fewer = write_counts(document, waits[:-3], raises[:-5], guard[:-7])
-    assert fewer["categorized_raises"]["ceiling"] == (  # type: ignore[index]
-        document["categorized_raises"]["ceiling"] - 7  # type: ignore[index, operator]
-    )
+    sites = [UncategorizedRaise("p.py", "X", "f", line) for line in range(10)]
+    grandfathered = {
+        **document,
+        "categorized_raises": {
+            **document["categorized_raises"],  # type: ignore[dict-item]
+            "grandfathered": {"p.py": 10},
+            "ceiling": 10,
+        },
+    }
+    lowered = write_counts(grandfathered, waits, raises, sites[:-7])
+    assert lowered["categorized_raises"]["ceiling"] == 3  # type: ignore[index]
     assert fewer["max_debt"] <= document["max_debt"]  # type: ignore[operator]
     assert fewer["debt_ceiling"]["total"] <= document["debt_ceiling"]["total"]  # type: ignore[index, operator]
     assert evaluate_wait_gate(waits[:-3], fewer) == []

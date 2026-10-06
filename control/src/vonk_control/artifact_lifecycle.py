@@ -18,7 +18,17 @@ from typing import Literal, cast
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
+    InvalidRequestError,
+    InvalidRequestReason,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
+)
 
+from .categorized_errors import InvalidValue
 from .models import ArtifactLifecycleGate
 
 ArtifactKind = Literal["model-set", "model-object", "runtime-image"]
@@ -34,9 +44,15 @@ class ArtifactIdentity:
 
     def __post_init__(self) -> None:
         if self.kind not in {"model-set", "model-object", "runtime-image"}:
-            raise ValueError("artifact lifecycle kind is invalid")
+            raise InvalidValue(
+                "artifact lifecycle kind is invalid",
+                reason=InvalidRequestReason.UNSUPPORTED,
+            )
         if not isinstance(self.sha256, str) or _DIGEST.fullmatch(self.sha256) is None:
-            raise ValueError("artifact lifecycle digest is invalid")
+            raise InvalidValue(
+                "artifact lifecycle digest is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
 
 
 def _identity_order(identity: ArtifactIdentity) -> tuple[int, str]:
@@ -61,8 +77,8 @@ def retryable_artifact_database_error(
 
     state = _sqlstate(error)
     if state in _RETRYABLE_SQLSTATES:
-        return ArtifactLifecycleError(
-            "artifact.reference_busy",
+        return ArtifactReferenceUnsettled(
+            ArtifactLifecycleCode.REFERENCE_BUSY,
             f"artifact reference transaction conflicted with PostgreSQL ({state}); retry the operation",
             retryable=True,
         )
@@ -70,8 +86,8 @@ def retryable_artifact_database_error(
         diagnostic = getattr(error.orig, "diag", None)
         primary = getattr(diagnostic, "message_primary", None)
         if isinstance(primary, str) and "statement timeout" in primary.lower():
-            return ArtifactLifecycleError(
-                "artifact.reference_timeout",
+            return ArtifactReferenceUnsettled(
+                ArtifactLifecycleCode.REFERENCE_TIMEOUT,
                 "artifact reference SQL exceeded the caller's statement time budget; retry the operation",
                 retryable=True,
             )
@@ -98,6 +114,54 @@ class ArtifactLifecycleError(RuntimeError):
         self.detail = detail[:512]
         self.retryable = retryable
         super().__init__(self.detail)
+
+
+class ArtifactReferenceUnsettled(UnknownOutcomeError, ArtifactLifecycleError):
+    """A gate is busy, reserved for removal, or cannot be read right now: the
+    owner observes and retries, nothing is refused."""
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        retryable: bool = False,
+        reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE,
+    ) -> None:
+        ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
+        self.typed_reason = reason
+
+
+class ArtifactReferenceIdentityStale(InvalidRequestError, ArtifactLifecycleError):
+    """The accepted identities disagree with the current membership: the caller
+    refreshes its plan and asks again."""
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        retryable: bool = False,
+        reason: InvalidRequestReason = InvalidRequestReason.CONFLICT,
+    ) -> None:
+        ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
+        self.typed_reason = reason
+        self.typed_field = None
+
+
+class ArtifactRemovalFenceLost(SecurityRefusalError, ArtifactLifecycleError):
+    """The removal fence is no longer this owner's: it must not release it."""
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        retryable: bool = False,
+        reason: SecurityRefusalReason = SecurityRefusalReason.STALE_FENCE,
+    ) -> None:
+        ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
+        self.typed_reason = reason
 
 
 def lock_reference_gates(
@@ -129,8 +193,8 @@ def lock_reference_gates(
                 )
             )
             if acquired is not True:
-                raise ArtifactLifecycleError(
-                    "artifact.reference_busy",
+                raise ArtifactReferenceUnsettled(
+                    ArtifactLifecycleCode.REFERENCE_BUSY,
                     "artifact reference ownership is changing; retry the operation",
                     retryable=True,
                 )
@@ -170,8 +234,8 @@ def lock_reference_gates(
             )
         )
         if locked is None:
-            raise ArtifactLifecycleError(
-                "artifact.reference_unavailable",
+            raise ArtifactReferenceUnsettled(
+                ArtifactLifecycleCode.REFERENCE_UNAVAILABLE,
                 "artifact reference ownership could not be read safely",
                 retryable=True,
             )
@@ -189,8 +253,8 @@ def require_reference_open(
 
     for row in lock_reference_gates(session, identities, now=now):
         if row.removal_owner_id is not None:
-            raise ArtifactLifecycleError(
-                "artifact.deletion_in_progress",
+            raise ArtifactReferenceUnsettled(
+                ArtifactLifecycleCode.DELETION_IN_PROGRESS,
                 f"{row.artifact_kind} {row.artifact_sha256} is reserved for removal",
                 retryable=True,
             )
@@ -278,13 +342,22 @@ def reserve_removal_owners(
     by_identity: dict[ArtifactIdentity, tuple[RemovalOwnerKind, str, str]] = {}
     for identity, owner_kind, owner_id, fence in assignments:
         if owner_kind not in {"model-cache-operation", "recipe-image-job"}:
-            raise ValueError("artifact removal owner kind is invalid")
+            raise InvalidValue(
+                "artifact removal owner kind is invalid",
+                reason=InvalidRequestReason.UNSUPPORTED,
+            )
         if not owner_id or not fence:
-            raise ValueError("artifact removal owner identity is incomplete")
+            raise InvalidValue(
+                "artifact removal owner identity is incomplete",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         owner = (owner_kind, owner_id, fence)
         previous = by_identity.setdefault(identity, owner)
         if previous != owner:
-            raise ValueError("one artifact identity has multiple removal owners")
+            raise InvalidValue(
+                "one artifact identity has multiple removal owners",
+                reason=InvalidRequestReason.CONFLICT,
+            )
 
     rows = lock_reference_gates(session, by_identity, now=now)
     for row in rows:
@@ -298,8 +371,8 @@ def reserve_removal_owners(
             and row.removal_fence == fence
         )
         if row.removal_owner_id is not None and not same_owner:
-            raise ArtifactLifecycleError(
-                "artifact.deletion_busy",
+            raise ArtifactReferenceUnsettled(
+                ArtifactLifecycleCode.DELETION_BUSY,
                 f"{row.artifact_kind} {row.artifact_sha256} has another removal owner",
                 retryable=True,
             )
@@ -381,8 +454,8 @@ def clear_removal(
             or row.removal_owner_id != owner_id
             or row.removal_fence != fence
         ):
-            raise ArtifactLifecycleError(
-                "artifact.deletion_fence_lost",
+            raise ArtifactRemovalFenceLost(
+                ArtifactLifecycleCode.DELETION_FENCE_LOST,
                 "artifact removal fence changed before it could be released",
             )
         row.removal_owner_kind = None
@@ -395,6 +468,9 @@ __all__ = [
     "ArtifactIdentity",
     "ArtifactKind",
     "ArtifactLifecycleError",
+    "ArtifactReferenceIdentityStale",
+    "ArtifactReferenceUnsettled",
+    "ArtifactRemovalFenceLost",
     "RemovalOwnerKind",
     "check_removal_fence_nowait",
     "clear_removal",

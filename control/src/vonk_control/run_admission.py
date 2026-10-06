@@ -12,7 +12,13 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import ResourceBlockerCode, RunAdmissionCode
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
+    ResourceBlockerCode,
+    RunAdmissionCode,
+    UnknownOutcomeError,
+)
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 
@@ -24,6 +30,7 @@ from .admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
+from .categorized_errors import InvalidType, InvalidValue, MissingRecord
 from .install_admission import AdmissionReason
 from .inventory_repository import InventoryRepository
 from .legal_admission import territorial_admission
@@ -125,7 +132,7 @@ def run_port_demand(
 ) -> RunPortDemand:
     interfaces = document.get("interfaces")
     if not isinstance(interfaces, list):
-        raise TypeError("recipe interfaces are invalid")
+        raise InvalidType("recipe interfaces are invalid")
     interface = next(
         (
             item
@@ -143,11 +150,11 @@ def run_port_demand(
     ]
     if interface is None and len(artifact_interfaces) == 1:
         if node_count != 1:
-            raise TypeError("artifact job recipes currently require one node")
+            raise InvalidType("artifact job recipes currently require one node")
         return RunPortDemand((), None)
     port = interface.get("port") if interface is not None else None
     if type(port) is not int or not 1 <= port <= 65535:
-        raise TypeError("recipe interface port is invalid")
+        raise InvalidType("recipe interface port is invalid")
     return RunPortDemand(
         service_host_port_candidates(port, node_count=node_count),
         RENDEZVOUS_PORT if node_count > 1 and endpoint_owner else None,
@@ -274,7 +281,19 @@ class RunPlanConflict(RuntimeError):
     code = RunAdmissionCode.PLAN_INVALID
 
 
-class RunAdmissionBusy(RunPlanConflict):
+class RunPlanInvalid(InvalidRequestError, RunPlanConflict):
+    """The run plan is stale, invalid or blocked by admission evidence: the
+    request is rejected and asked again against the current plan."""
+
+    def __init__(
+        self,
+        *args: object,
+        reason: InvalidRequestReason | None = InvalidRequestReason.CONFLICT,
+    ) -> None:
+        super().__init__(*args, reason=reason)
+
+
+class RunAdmissionBusy(UnknownOutcomeError, RunPlanConflict):
     """A competing capacity writer or retryable plan blocker holds this admission.
 
     The class code ``run.capacity_busy`` names lock contention only.  Any other
@@ -342,7 +361,7 @@ def require_admissible(plan: RunPlan) -> None:
             code=first.code,
             blockers=blockers,
         )
-    raise RunPlanConflict(
+    raise RunPlanInvalid(
         "run.plan_invalid: run plan is blocked by current admission evidence"
         + (f" ({_blocker_text(blockers)})" if blockers else "")
     )
@@ -442,25 +461,35 @@ class RunAdmissionService:
         ) as session:
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
-                raise KeyError(installation_id)
+                raise MissingRecord(installation_id)
             if installation.state != "installed":
-                raise ValueError("recipe installation is not complete")
+                raise InvalidValue(
+                    "recipe installation is not complete",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             mapping = session.get(ClusterMapping, installation.mapping_id)
             if (
                 mapping is None
                 or mapping.state != "ready"
                 or mapping.generation != installation.mapping_generation
             ):
-                raise ValueError(
-                    "cluster mapping generation changed after installation"
+                raise InvalidValue(
+                    "cluster mapping generation changed after installation",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
             revision = _active_recipe_revision(session, installation.recipe_revision_id)
             if revision is None or revision.state != "active":
-                raise ValueError("recipe revision is unavailable")
+                raise InvalidValue(
+                    "recipe revision is unavailable",
+                    reason=InvalidRequestReason.NOT_FOUND,
+                )
             try:
                 resolved_entities = resolve_recipe_entities(session, revision.document)
             except RecipeRuntimeSpecError as error:
-                raise ValueError("exact recipe dependencies are unavailable") from error
+                raise InvalidValue(
+                    "exact recipe dependencies are unavailable",
+                    reason=InvalidRequestReason.NOT_FOUND,
+                ) from error
             resolved_models = resolved_entities.get("models")
             model_documents = (
                 {
@@ -480,8 +509,9 @@ class RunAdmissionService:
             )
             model_document = getattr(model_version, "document", None)
             if not isinstance(model_document, Mapping):
-                raise ValueError(  # noqa: TRY004
-                    "exact model license authority is unavailable"
+                raise InvalidValue(
+                    "exact model license authority is unavailable",
+                    reason=InvalidRequestReason.NOT_FOUND,
                 )
             legal_admission = territorial_admission(
                 model_document,
@@ -552,7 +582,10 @@ class RunAdmissionService:
             (item for item in mapping_nodes if item.endpoint_owner), None
         )
         if endpoint_owner is None:
-            raise TypeError("mapping endpoint owner is missing")
+            raise InvalidType(
+                "mapping endpoint owner is missing",
+                reason=InvalidRequestReason.NOT_FOUND,
+            )
         plans: list[RunNodePlan] = []
         fabric_addresses: list[str] = []
         released = tuple(released_run_ids)
@@ -599,7 +632,7 @@ class RunAdmissionService:
                 )
             role = role_by_name.get(placement.role)
             if role is None:
-                raise TypeError("topology role memory is invalid")
+                raise InvalidType("topology role memory is invalid")
             memory_need = memory_requirement(
                 revision.document,
                 role.resources.memory,
@@ -609,8 +642,9 @@ class RunAdmissionService:
             )
             required = memory_need.demand.total_bytes
             if required is None:
-                raise ValueError(
-                    "run memory demand is unavailable for the selected settings"
+                raise InvalidValue(
+                    "run memory demand is unavailable for the selected settings",
+                    reason=InvalidRequestReason.NOT_FOUND,
                 )
             memory_floor = memory_need.floor_bytes
             memory_kind = memory_need.kind
@@ -626,6 +660,7 @@ class RunAdmissionService:
                         *excluded_profile_application_ids,
                         *((profile_application_id,) if profile_application_id else ()),
                     ),
+                    observed_at=snapshot.observed_at if snapshot else None,
                 )
                 port_exclusions = {
                     "excluded_run_ids": released,
@@ -918,11 +953,16 @@ class RunAdmissionService:
                 for node in plan.nodes
             )
         ):
-            raise RunPlanConflict(RunAdmissionCode.PLAN_STALE)
+            raise RunPlanInvalid(
+                RunAdmissionCode.PLAN_STALE, reason=InvalidRequestReason.SUPERSEDED
+            )
         try:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
-            raise RunPlanConflict(RunAdmissionCode.DEPENDENCIES_STALE) from error
+            raise RunPlanInvalid(
+                RunAdmissionCode.DEPENDENCIES_STALE,
+                reason=InvalidRequestReason.SUPERSEDED,
+            ) from error
         # The fresh plan above chose each node's endpoint host port under the
         # node locks this admission holds; reserve exactly that port.
         port_demands = {
@@ -992,7 +1032,7 @@ class RunAdmissionService:
                 }
             )
         except RecipeExecutionContractError as error:
-            raise RunPlanConflict(RunAdmissionCode.PLAN_INVALID) from error
+            raise RunPlanInvalid(RunAdmissionCode.PLAN_INVALID) from error
         run = RecipeRun(
             installation_id=plan.installation_id,
             mapping_id=plan.mapping_id,

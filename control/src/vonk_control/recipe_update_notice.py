@@ -13,12 +13,13 @@ from typing import Annotated
 from pydantic import ConfigDict, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import ProjectionCode
 from vonk_forge_contracts import read_recipe
 
 from .models import CatalogDocumentRevision
 from .strict_json import StrictJSONModel
 
-RECIPE_UPDATE_AVAILABLE = "recipe.update_available"
+RECIPE_UPDATE_AVAILABLE = ProjectionCode.RECIPE_UPDATE_AVAILABLE
 _Text = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 _Detail = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 

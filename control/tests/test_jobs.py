@@ -284,3 +284,24 @@ def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> Non
     assert stored.state == "queued"
     assert stored.current_attempt == 0
     assert stored.payload == {"immutable": "upgrade-plan"}
+
+
+def test_job_refusals_are_invalid_requests_with_reasons(service) -> None:
+    from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
+
+    jobs, _ = service
+    jobs.enqueue("probe", "admin", "abc", ["spk_1"], {"a": 1}, request_id="r1")
+    with pytest.raises(InvalidRequestError) as differently:
+        jobs.enqueue("probe", "admin", "abc", ["spk_1"], {"a": 2}, request_id="r1")
+    assert differently.value.typed_reason is InvalidRequestReason.CONFLICT
+    with pytest.raises(InvalidRequestError) as missing:
+        jobs.get("absent")
+    assert missing.value.typed_reason is InvalidRequestReason.NOT_FOUND
+    with pytest.raises(InvalidRequestError) as sensitive:
+        jobs.enqueue("probe", "admin", "abc", ["spk_1"], {"token": "x"})
+    assert sensitive.value.typed_reason is InvalidRequestReason.MALFORMED
+    with pytest.raises(InvalidRequestError) as stale:
+        jobs.enqueue_guarded(
+            "probe", "admin", "abc", ["spk_1"], {}, authority_check=lambda: False
+        )
+    assert stale.value.typed_reason is InvalidRequestReason.SUPERSEDED

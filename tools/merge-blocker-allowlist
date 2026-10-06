@@ -1,0 +1,118 @@
+#!/usr/bin/env -S uv run --project control --frozen python
+"""Three-way merge of ``tools/blocker-allowlist.json`` for integration branches.
+
+``merge-blocker-allowlist BASE OURS THEIRS OUT`` merges per *site*, not per text
+line: each ``(path, class, function, code)`` key keeps the count OURS has plus
+whatever THEIRS changed against BASE, in the family THEIRS moved it to (else the
+family OURS has).  Ceilings and grandfathered counts merge the same way as
+deltas.  Other sections must agree or be changed on one side only.  The merged
+ceilings are an upper bound: run
+``python -m control.tests.blocker_boundaries --write-baseline`` afterwards to
+lower them to the real counts, and ``--classify-new`` for sites that no family
+lists.  Never hand-merge the ceilings.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+
+Key = tuple[str, str, str, str]
+
+
+def _index(document: dict) -> dict[Key, tuple[str, int]]:
+    return {
+        (path, cls, function, code): (family["family"], count)
+        for family in document["fail_closed"]
+        for path, cls, function, code, count in family["sites"]
+    }
+
+
+def _delta_dict(base: dict, ours: dict, theirs: dict) -> dict:
+    """Per-module counts as deltas; a negative sum (both sides lowered the same
+    module by different routes) clamps to zero and the baseline rewrite settles it."""
+
+    merged: dict = {}
+    for key in sorted(set(base) | set(ours) | set(theirs)):
+        value = ours.get(key, 0) + theirs.get(key, 0) - base.get(key, 0)
+        if value > 0:
+            merged[key] = value
+    return merged
+
+
+def merge(base: dict, ours: dict, theirs: dict) -> dict:
+    result = json.loads(json.dumps(ours))
+    for section in ("schema", "scope", "max_debt", "operator_waits"):
+        if ours[section] == theirs[section] or theirs[section] == base[section]:
+            continue
+        if ours[section] == base[section]:
+            result[section] = theirs[section]
+        else:
+            raise ValueError(f"both sides changed {section}; merge it by hand")
+    ceiling = result["debt_ceiling"]
+    for key in ("total", "unaudited"):
+        ceiling[key] = (
+            ours["debt_ceiling"][key]
+            + theirs["debt_ceiling"][key]
+            - base["debt_ceiling"][key]
+        )
+    guard = result["categorized_raises"]
+    guard["ceiling"] = (
+        ours["categorized_raises"]["ceiling"]
+        + theirs["categorized_raises"]["ceiling"]
+        - base["categorized_raises"]["ceiling"]
+    )
+    guard["grandfathered"] = _delta_dict(
+        base["categorized_raises"]["grandfathered"],
+        ours["categorized_raises"]["grandfathered"],
+        theirs["categorized_raises"]["grandfathered"],
+    )
+    ib, io, it = _index(base), _index(ours), _index(theirs)
+    families = {family["family"]: family for family in result["fail_closed"]}
+    theirs_families = {family["family"]: family for family in theirs["fail_closed"]}
+    for key in sorted(set(ib) | set(io) | set(it)):
+        count_b = ib.get(key, (None, 0))[1]
+        count_o = io.get(key, (None, 0))[1]
+        count_t = it.get(key, (None, 0))[1]
+        count = count_o + count_t - count_b
+        count = max(count, 0)  # removed on both sides
+        family_o = io.get(key, (None, 0))[0]
+        family_t = it.get(key, (None, 0))[0]
+        if family_o is not None:
+            site = next(s for s in families[family_o]["sites"] if tuple(s[:4]) == key)
+            families[family_o]["sites"].remove(site)
+        if count == 0:
+            continue
+        family = family_t if count_t != count_b and family_t else family_o
+        family = family or family_t or ib[key][0]
+        if family not in families:
+            source = theirs_families.get(family) or next(
+                f for f in base["fail_closed"] if f["family"] == family
+            )
+            families[family] = {k: v for k, v in source.items() if k != "sites"}
+            families[family]["sites"] = []
+            result["fail_closed"].append(families[family])
+        families[family]["sites"].append([*key, count])
+    for family in result["fail_closed"]:
+        family["sites"].sort(key=lambda site: tuple(site[:4]))
+    result["fail_closed"] = [f for f in result["fail_closed"] if f["sites"]]
+    return result
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 4:
+        print("usage: merge-blocker-allowlist BASE OURS THEIRS OUT", file=sys.stderr)
+        return 2
+    from control.tests.blocker_boundaries import dump_document
+
+    base, ours, theirs = (json.loads(Path(p).read_text()) for p in argv[:3])
+    Path(argv[3]).write_text(dump_document(merge(base, ours, theirs)), encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

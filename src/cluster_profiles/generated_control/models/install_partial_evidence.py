@@ -8,12 +8,12 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.install_degraded_reason import check_install_degraded_reason
+from ..models.install_degraded_reason import InstallDegradedReason
 from ..models.install_partial_evidence_group_state import check_install_partial_evidence_group_state
 from ..models.install_partial_evidence_group_state import InstallPartialEvidenceGroupState
 from ..models.install_partial_evidence_rank_state import check_install_partial_evidence_rank_state
 from ..models.install_partial_evidence_rank_state import InstallPartialEvidenceRankState
-from ..models.install_partial_evidence_reason import check_install_partial_evidence_reason
-from ..models.install_partial_evidence_reason import InstallPartialEvidenceReason
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -38,7 +38,7 @@ class InstallPartialEvidence:
             present_ranks (list[int]):
             rank (int):
             rank_state (InstallPartialEvidenceRankState):
-            reason (InstallPartialEvidenceReason):
+            reason (InstallDegradedReason): Why an installation is shown partial in the fleet projection.
             recipe_id (str):
             recipe_revision_id (str):
             title (str):
@@ -53,7 +53,7 @@ class InstallPartialEvidence:
     present_ranks: list[int]
     rank: int
     rank_state: InstallPartialEvidenceRankState
-    reason: InstallPartialEvidenceReason
+    reason: InstallDegradedReason
     recipe_id: str
     recipe_revision_id: str
     title: str
@@ -153,7 +153,7 @@ class InstallPartialEvidence:
 
 
 
-        reason = check_install_partial_evidence_reason(d.pop("reason"))
+        reason = check_install_degraded_reason(d.pop("reason"))
 
 
 

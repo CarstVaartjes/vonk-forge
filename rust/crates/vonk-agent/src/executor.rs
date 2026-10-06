@@ -2694,11 +2694,21 @@ fn temporary_runtime_observation_failure() -> ExecutionResult {
 /// observation failed" when the answer was that the workload process had exited
 /// and printed why.
 fn runtime_observation_failure(error: &crate::host_runtime::HostRuntimeError) -> ExecutionResult {
+    // The observation worked when the helper says the process exited: it
+    // inspected the container and found it dead. Name that, not a failed look.
+    let exited = matches!(
+        error,
+        crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
+            if code == "runtime_process_exited"
+    );
+    let lead = if exited {
+        "the workload process exited"
+    } else {
+        "exact workload runtime observation failed"
+    };
     let reason = match error.diagnostic() {
-        Some(detail) if !detail.is_empty() => {
-            format!("exact workload runtime observation failed: {error}: {detail}")
-        }
-        _ => format!("exact workload runtime observation failed: {error}"),
+        Some(detail) if !detail.is_empty() => format!("{lead}: {error}: {detail}"),
+        _ => format!("{lead}: {error}"),
     };
     let mut failure = Failure::new(reason).process_logs(crate::failure_evidence::diagnostic_logs(
         error.process_logs(),

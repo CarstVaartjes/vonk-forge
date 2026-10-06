@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.recipe_presence_degraded_reason_type_0 import check_recipe_presence_degraded_reason_type_0
-from ..models.recipe_presence_degraded_reason_type_0 import RecipePresenceDegradedReasonType0
+from ..models.install_degraded_reason import check_install_degraded_reason
+from ..models.install_degraded_reason import InstallDegradedReason
 from ..models.recipe_presence_group_state import check_recipe_presence_group_state
 from ..models.recipe_presence_group_state import RecipePresenceGroupState
 from ..models.recipe_presence_rank_state import check_recipe_presence_rank_state
@@ -44,7 +44,7 @@ class RecipePresence:
             title (str):
             topology_name (str):
             affected_ranks (list[int] | Unset):
-            degraded_reason (None | RecipePresenceDegradedReasonType0 | Unset):
+            degraded_reason (InstallDegradedReason | None | Unset):
             installed_bytes (int | None | Unset):
             required_bytes (int | None | Unset):
      """
@@ -63,7 +63,7 @@ class RecipePresence:
     title: str
     topology_name: str
     affected_ranks: list[int] | Unset = UNSET
-    degraded_reason: None | RecipePresenceDegradedReasonType0 | Unset = UNSET
+    degraded_reason: InstallDegradedReason | None | Unset = UNSET
     installed_bytes: int | None | Unset = UNSET
     required_bytes: int | None | Unset = UNSET
 
@@ -199,7 +199,7 @@ class RecipePresence:
         affected_ranks = cast(list[int], d.pop("affected_ranks", UNSET))
 
 
-        def _parse_degraded_reason(data: object) -> None | RecipePresenceDegradedReasonType0 | Unset:
+        def _parse_degraded_reason(data: object) -> InstallDegradedReason | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -207,14 +207,14 @@ class RecipePresence:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                degraded_reason_type_0 = check_recipe_presence_degraded_reason_type_0(data)
+                degraded_reason_type_0 = check_install_degraded_reason(data)
 
 
 
                 return degraded_reason_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(None | RecipePresenceDegradedReasonType0 | Unset, data)
+            return cast(InstallDegradedReason | None | Unset, data)
 
         degraded_reason = _parse_degraded_reason(d.pop("degraded_reason", UNSET))
 

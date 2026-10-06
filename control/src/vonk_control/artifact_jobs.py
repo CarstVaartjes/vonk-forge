@@ -11,7 +11,7 @@ from collections.abc import AsyncIterable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NoReturn
 
 from pydantic import (
     BeforeValidator,
@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
     AgentProtocolError,
     ArtifactPreparation,
     InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
     LifecycleSubject,
     RecipeJobFile,
@@ -35,7 +36,10 @@ from vonk_agent_protocol import (
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
+    SecurityRefusalError,
+    SecurityRefusalReason,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
     recipe_job_manifest_sha256,
     state_adopter,
@@ -50,6 +54,7 @@ from .artifact_blob_store import (
     ArtifactBlobStoreError,
     StoredArtifactBlob,
 )
+from .categorized_errors import InvalidValue, MissingRecord
 from .cluster_mappings import mapping_option_choices
 from .compiled_artifact_contract import (
     CompiledArtifactContract,
@@ -125,6 +130,43 @@ class ArtifactJobTransferClosedError(InvalidRequestError, ArtifactJobError):
     """A request against a transfer that is already closed."""
 
 
+class ArtifactJobInvalid(InvalidRequestError, ArtifactJobError):
+    """A request outside the job's, the run's or the recipe's contract."""
+
+
+class ArtifactJobRefused(SecurityRefusalError, ArtifactJobError):
+    """A refusal at the job's identity, authority or content-digest edge."""
+
+
+class ArtifactResultInvalid(InvalidRequestError, AgentProtocolError):
+    """An agent result that breaks the job's contract (the job ends failed)."""
+
+
+class ArtifactResultRefused(SecurityRefusalError, AgentProtocolError):
+    """An agent result reported under another job's identity."""
+
+
+def _translate_blob_error(error: ArtifactBlobStoreError) -> NoReturn:
+    """Carry a blob-store failure into the job's error family, in its category."""
+
+    if isinstance(error, SecurityRefusalError):
+        raise ArtifactJobRefused(
+            str(error),
+            reason=error.typed_reason or SecurityRefusalReason.FORBIDDEN,
+        ) from error
+    if isinstance(error, UnknownOutcomeError):
+        raise ArtifactJobUnavailableError(
+            str(error),
+            reason=error.typed_reason or WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
+    reason = (
+        error.typed_reason
+        if isinstance(error, InvalidRequestError) and error.typed_reason is not None
+        else InvalidRequestReason.MALFORMED
+    )
+    raise ArtifactJobInvalid(str(error), reason=reason) from error
+
+
 def _active_recipe_revision(
     session: Session, revision_id: str
 ) -> tuple[CatalogDocumentRevision, RecipeDefinition] | None:
@@ -192,13 +234,19 @@ def _input_manifest(job: ArtifactJob) -> RecipeJobInputManifest:
             from_json=True,
         )
     except (TypeError, ValueError) as error:
-        raise ArtifactJobError("stored artifact input manifest is invalid") from error
+        raise ArtifactJobUnavailableError(
+            "stored artifact input manifest is invalid",
+            reason=WaitReason.JOB_STATE_UNCERTAIN,
+        ) from error
     if (
         manifest.total_bytes != job.input_total_bytes
         or recipe_job_manifest_sha256(tuple(manifest.files))
         != job.input_manifest_sha256
     ):
-        raise ArtifactJobError("stored artifact input manifest identity is invalid")
+        raise ArtifactJobUnavailableError(
+            "stored artifact input manifest identity is invalid",
+            reason=WaitReason.JOB_STATE_UNCERTAIN,
+        )
     return manifest
 
 
@@ -273,18 +321,21 @@ class ArtifactJobResponse(ArtifactJobContractModel):
         if (self.operation_id is None) != (self.submit_request_id is None) or (
             self.state is None
         ) != (self.preparation is not None):
-            raise ValueError(
+            raise InvalidValue(
                 "artifact submission operation and request identity must be paired, "
-                "and a job is either being prepared or has a lifecycle state"
+                "and a job is either being prepared or has a lifecycle state",
+                reason=InvalidRequestReason.INCOMPLETE,
             )
         if self.state == "succeeded":
             if self.output_manifest_sha256 is None or self.result_evidence is None:
-                raise ValueError(
-                    "successful artifact job requires output manifest and result evidence"
+                raise InvalidValue(
+                    "successful artifact job requires output manifest and result evidence",
+                    reason=InvalidRequestReason.INCOMPLETE,
                 )
             if self.status_reason is not None:
-                raise ValueError(
-                    "successful artifact job cannot retain a failure reason"
+                raise InvalidValue(
+                    "successful artifact job cannot retain a failure reason",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
             try:
                 _validate_outputs_against_contract(
@@ -298,19 +349,27 @@ class ArtifactJobResponse(ArtifactJobContractModel):
                     terminal=True,
                 )
             except ArtifactJobError as error:
-                raise ValueError(str(error)) from error
+                raise InvalidValue(
+                    str(error), reason=InvalidRequestReason.MALFORMED
+                ) from error
         if (
             self.state in {LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR}
             and not (self.status_reason or "").strip()
         ):
-            raise ValueError("failed or waiting artifact job requires a status reason")
+            raise InvalidValue(
+                "failed or waiting artifact job requires a status reason",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         if (
             self.state == LifecycleState.NEEDS_OPERATOR
             and "stop" not in self.supported_actions
         ):
             # Rule 3 of the lifecycle core, as a contract: a job never waits for
             # an operator without an action the operator can take.
-            raise ValueError("a waiting artifact job must advertise its stop action")
+            raise InvalidValue(
+                "a waiting artifact job must advertise its stop action",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         return self
 
 
@@ -400,7 +459,9 @@ def _recipe_interface(document: Mapping[str, object]) -> str:
         else []
     )
     if len(artifact_interfaces) != 1 or not isinstance(artifact_interfaces[0], str):
-        raise ArtifactJobError("recipe interface is unavailable")
+        raise ArtifactJobUnavailableError(
+            "recipe interface is unavailable", reason=WaitReason.OBSERVATION_UNAVAILABLE
+        )
     return artifact_interfaces[0]
 
 
@@ -416,7 +477,9 @@ def _compile_contract(
     try:
         return compile_artifact_contract(document, interface_name)
     except (TypeError, ValueError) as error:
-        raise ArtifactJobError(str(error)) from error
+        raise ArtifactJobUnavailableError(
+            str(error), reason=WaitReason.OBSERVATION_UNAVAILABLE
+        ) from error
 
 
 def _canonical_contract(value: object) -> CompiledArtifactContract:
@@ -427,7 +490,10 @@ def _canonical_contract(value: object) -> CompiledArtifactContract:
             else CompiledArtifactContract.parse(value)
         )
     except (TypeError, ValueError) as error:
-        raise ArtifactJobError("compiled artifact contract is invalid") from error
+        raise ArtifactJobUnavailableError(
+            "compiled artifact contract is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
 
 
 def _contract_sha256(contract: CompiledArtifactContract | Mapping[str, object]) -> str:
@@ -438,7 +504,10 @@ def _validate_parameter_definition(raw: Mapping[str, object]) -> dict[str, objec
     try:
         return validate_parameter_definition(raw).model_dump(mode="json")
     except (TypeError, ValueError) as error:
-        raise ArtifactJobError("artifact parameter contract is invalid") from error
+        raise ArtifactJobUnavailableError(
+            "artifact parameter contract is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
 
 
 def _output_mappings(
@@ -466,21 +535,27 @@ def _effective_output_limits(
             parsed.output_limits.model_dump(mode="json")
         )
     except (AgentProtocolError, KeyError, TypeError) as error:
-        raise ArtifactJobError("artifact output limits are invalid") from error
+        raise ArtifactJobInvalid(
+            "artifact output limits are invalid", reason=InvalidRequestReason.MALFORMED
+        ) from error
     if (
         requested.max_files > allowed.max_files
         or requested.max_file_bytes > allowed.max_file_bytes
         or requested.max_total_bytes > allowed.max_total_bytes
         or not set(requested.allowed_media_types) <= set(allowed.allowed_media_types)
     ):
-        raise ArtifactJobError("artifact output limits exceed the recipe contract")
+        raise ArtifactJobInvalid(
+            "artifact output limits exceed the recipe contract",
+            reason=InvalidRequestReason.LIMIT_EXCEEDED,
+        )
     required_slots = [item for item in parsed.output.slots if item.min_files > 0]
     if requested.max_files < sum(item.min_files for item in required_slots) or any(
         not set(item.media_types) & set(requested.allowed_media_types)
         for item in required_slots
     ):
-        raise ArtifactJobError(
-            "artifact output limits cannot satisfy the recipe contract"
+        raise ArtifactJobInvalid(
+            "artifact output limits cannot satisfy the recipe contract",
+            reason=InvalidRequestReason.CONFLICT,
         )
     return requested
 
@@ -492,36 +567,52 @@ def _validate_inputs_against_contract(
     parsed = _canonical_contract(contract)
     slots = {item.id: item for item in parsed.input.slots}
     if not slots and inputs:
-        raise ArtifactJobError("recipe does not accept artifact input files")
+        raise ArtifactJobInvalid(
+            "recipe does not accept artifact input files",
+            reason=InvalidRequestReason.UNSUPPORTED,
+        )
     for item in inputs:
         slot = slots.get(item.slot)
         if slot is None:
-            raise ArtifactJobError(f"artifact input slot {item.slot} is undeclared")
+            raise ArtifactJobInvalid(
+                f"artifact input slot {item.slot} is undeclared",
+                reason=InvalidRequestReason.UNKNOWN_FIELD,
+            )
         if item.media_type not in slot.media_types:
-            raise ArtifactJobError(
-                f"artifact input {item.name} media type is not allowed"
+            raise ArtifactJobInvalid(
+                f"artifact input {item.name} media type is not allowed",
+                reason=InvalidRequestReason.UNSUPPORTED,
             )
         if item.size_bytes > slot.max_file_bytes:
-            raise ArtifactJobError(f"artifact input {item.name} exceeds its slot limit")
+            raise ArtifactJobInvalid(
+                f"artifact input {item.name} exceeds its slot limit",
+                reason=InvalidRequestReason.LIMIT_EXCEEDED,
+            )
         extensions = slot.extensions
         if extensions and not any(
             item.name.lower().endswith(ext) for ext in extensions
         ):
-            raise ArtifactJobError(
-                f"artifact input {item.name} extension is not allowed"
+            raise ArtifactJobInvalid(
+                f"artifact input {item.name} extension is not allowed",
+                reason=InvalidRequestReason.UNSUPPORTED,
             )
     for slot_id, slot in slots.items():
         selected = [item for item in inputs if item.slot == slot_id]
         if not slot.min_files <= len(selected) <= slot.max_files:
-            raise ArtifactJobError(
-                f"artifact input slot {slot_id} file count is invalid"
+            raise ArtifactJobInvalid(
+                f"artifact input slot {slot_id} file count is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
             )
         if sum(item.size_bytes for item in selected) > slot.max_total_bytes:
-            raise ArtifactJobError(
-                f"artifact input slot {slot_id} bytes exceed the limit"
+            raise ArtifactJobInvalid(
+                f"artifact input slot {slot_id} bytes exceed the limit",
+                reason=InvalidRequestReason.LIMIT_EXCEEDED,
             )
     if sum(item.size_bytes for item in inputs) > parsed.input.max_bytes:
-        raise ArtifactJobError("artifact job input bytes exceed the recipe contract")
+        raise ArtifactJobInvalid(
+            "artifact job input bytes exceed the recipe contract",
+            reason=InvalidRequestReason.LIMIT_EXCEEDED,
+        )
 
 
 def _validate_outputs_against_contract(
@@ -542,30 +633,42 @@ def _validate_outputs_against_contract(
             if output.name.endswith(extension)
         ]
         if not matches:
-            raise ArtifactJobError(f"artifact output {output.name} has no unique slot")
+            raise ArtifactJobInvalid(
+                f"artifact output {output.name} has no unique slot",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         longest = max(length for length, _slot in matches)
         longest_slots = {slot.id: slot for length, slot in matches if length == longest}
         if len(longest_slots) != 1:
-            raise ArtifactJobError(f"artifact output {output.name} has no unique slot")
+            raise ArtifactJobInvalid(
+                f"artifact output {output.name} has no unique slot",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         slot = next(iter(longest_slots.values()))
         if output.size_bytes > slot.max_file_bytes:
-            raise ArtifactJobError(
-                f"artifact output {output.name} exceeds its slot limit"
+            raise ArtifactJobInvalid(
+                f"artifact output {output.name} exceeds its slot limit",
+                reason=InvalidRequestReason.LIMIT_EXCEEDED,
             )
         assignments[slot.id].append(output)
     for slot in slots:
         selected = assignments[slot.id]
         minimum = slot.min_files if terminal else 0
         if not minimum <= len(selected) <= slot.max_files:
-            raise ArtifactJobError(
-                f"artifact output slot {slot.id} file count is invalid"
+            raise ArtifactJobInvalid(
+                f"artifact output slot {slot.id} file count is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
             )
         if sum(item.size_bytes for item in selected) > slot.max_total_bytes:
-            raise ArtifactJobError(
-                f"artifact output slot {slot.id} bytes exceed the limit"
+            raise ArtifactJobInvalid(
+                f"artifact output slot {slot.id} bytes exceed the limit",
+                reason=InvalidRequestReason.LIMIT_EXCEEDED,
             )
     if sum(item.size_bytes for item in outputs) > parsed.output.max_total_bytes:
-        raise ArtifactJobError("artifact output bytes exceed the recipe contract")
+        raise ArtifactJobInvalid(
+            "artifact output bytes exceed the recipe contract",
+            reason=InvalidRequestReason.LIMIT_EXCEEDED,
+        )
 
 
 def _effective_parameters(
@@ -575,7 +678,10 @@ def _effective_parameters(
     if isinstance(contract, CompiledArtifactContract):
         by_name = {item.name: item for item in contract.parameters}
         if set(supplied) - set(by_name):
-            raise ArtifactJobError("artifact job contains undeclared parameters")
+            raise ArtifactJobInvalid(
+                "artifact job contains undeclared parameters",
+                reason=InvalidRequestReason.UNKNOWN_FIELD,
+            )
         effective: dict[str, object] = {}
         for name, definition in by_name.items():
             value = supplied.get(name, definition.default)
@@ -596,8 +702,9 @@ def _effective_parameters(
                 and value in definition.allowed_values
             )
             if not valid_type:
-                raise ArtifactJobError(
-                    f"artifact job parameter {name} has the wrong type"
+                raise ArtifactJobInvalid(
+                    f"artifact job parameter {name} has the wrong type",
+                    reason=InvalidRequestReason.MALFORMED,
                 )
             if (
                 isinstance(value, (int, float))
@@ -609,19 +716,22 @@ def _effective_parameters(
                     and value > definition.maximum
                 )
             ):
-                raise ArtifactJobError(
-                    f"artifact job parameter {name} is outside its range"
+                raise ArtifactJobInvalid(
+                    f"artifact job parameter {name} is outside its range",
+                    reason=InvalidRequestReason.OUT_OF_RANGE,
                 )
             if isinstance(definition.pattern, str) and isinstance(value, str):
                 try:
                     matched = re.fullmatch(definition.pattern, value) is not None
                 except re.error as error:
-                    raise ArtifactJobError(
-                        "artifact parameter pattern is invalid"
+                    raise ArtifactJobInvalid(
+                        "artifact parameter pattern is invalid",
+                        reason=InvalidRequestReason.MALFORMED,
                     ) from error
                 if not matched:
-                    raise ArtifactJobError(
-                        f"artifact job parameter {name} does not match"
+                    raise ArtifactJobInvalid(
+                        f"artifact job parameter {name} does not match",
+                        reason=InvalidRequestReason.MALFORMED,
                     )
             effective[name] = value
         return effective
@@ -630,14 +740,20 @@ def _effective_parameters(
     # service paths always take the typed branch above.
     definitions = contract.get("parameters") if isinstance(contract, Mapping) else None
     if not isinstance(definitions, list):
-        raise ArtifactJobError("artifact parameter contract is invalid")
+        raise ArtifactJobInvalid(
+            "artifact parameter contract is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     by_name = {
         item["name"]: item
         for item in definitions
         if isinstance(item, Mapping) and isinstance(item.get("name"), str)
     }
     if set(supplied) - set(by_name):
-        raise ArtifactJobError("artifact job contains undeclared parameters")
+        raise ArtifactJobInvalid(
+            "artifact job contains undeclared parameters",
+            reason=InvalidRequestReason.UNKNOWN_FIELD,
+        )
     effective: dict[str, object] = {}
     for name, definition in by_name.items():
         value = supplied.get(name, definition.get("default"))
@@ -658,7 +774,10 @@ def _effective_parameters(
             and value in definition.get("allowed_values", [])
         )
         if not valid_type:
-            raise ArtifactJobError(f"artifact job parameter {name} has the wrong type")
+            raise ArtifactJobInvalid(
+                f"artifact job parameter {name} has the wrong type",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         minimum = definition.get("minimum")
         maximum = definition.get("maximum")
         if (
@@ -671,19 +790,24 @@ def _effective_parameters(
                 and value > maximum
             )
         ):
-            raise ArtifactJobError(
-                f"artifact job parameter {name} is outside its range"
+            raise ArtifactJobInvalid(
+                f"artifact job parameter {name} is outside its range",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
             )
         pattern = definition.get("pattern")
         if isinstance(pattern, str) and isinstance(value, str):
             try:
                 matched = re.fullmatch(pattern, value) is not None
             except re.error as error:
-                raise ArtifactJobError(
-                    "artifact parameter pattern is invalid"
+                raise ArtifactJobInvalid(
+                    "artifact parameter pattern is invalid",
+                    reason=InvalidRequestReason.MALFORMED,
                 ) from error
             if not matched:
-                raise ArtifactJobError(f"artifact job parameter {name} does not match")
+                raise ArtifactJobInvalid(
+                    f"artifact job parameter {name} does not match",
+                    reason=InvalidRequestReason.MALFORMED,
+                )
         effective[name] = value
     return effective
 
@@ -701,20 +825,28 @@ def _canonical_declared_parameters(
     try:
         decoded = json.loads(canonical_message(value))
     except (TypeError, ValueError) as error:
-        raise ArtifactJobError(
-            "artifact job parameters must be a JSON object"
+        raise ArtifactJobInvalid(
+            "artifact job parameters must be a JSON object",
+            reason=InvalidRequestReason.MALFORMED,
         ) from error
     if not isinstance(decoded, dict):
-        raise ArtifactJobError("artifact job parameters must be a JSON object")
+        raise ArtifactJobInvalid(
+            "artifact job parameters must be a JSON object",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     effective = _effective_parameters(contract, decoded)
     try:
         canonical = json.loads(canonical_message(effective))
     except (TypeError, ValueError) as error:
-        raise ArtifactJobError(
-            "artifact job parameters are not canonical JSON"
+        raise ArtifactJobInvalid(
+            "artifact job parameters are not canonical JSON",
+            reason=InvalidRequestReason.MALFORMED,
         ) from error
     if not isinstance(canonical, dict):
-        raise ArtifactJobError("artifact job parameters must be a JSON object")
+        raise ArtifactJobInvalid(
+            "artifact job parameters must be a JSON object",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     return canonical
 
 
@@ -725,25 +857,38 @@ def _artifact_submission_in_session(
         return None
     submission = session.get(Job, artifact_job.operation_id)
     if submission is None or submission.kind != "recipe.job.run.v1":
-        raise ArtifactJobError("artifact job submission owner is invalid")
+        raise ArtifactJobUnavailableError(
+            "artifact job submission owner is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     payload = submission.payload
     if not isinstance(payload, Mapping):
-        raise ArtifactJobError("artifact job submission owner is invalid")
+        raise ArtifactJobUnavailableError(
+            "artifact job submission owner is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     try:
         payload_digest = hashlib.sha256(canonical_message(payload)).hexdigest()
     except (TypeError, ValueError):
-        raise ArtifactJobError("artifact job submission owner is invalid") from None
+        raise ArtifactJobUnavailableError(
+            "artifact job submission owner is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from None
     if (
         payload_digest != submission.payload_digest
         or payload.get("owner_kind") != "artifact-job"
         or payload.get("owner_id") != artifact_job.id
     ):
-        raise ArtifactJobError("artifact job submission owner is invalid")
+        raise ArtifactJobUnavailableError(
+            "artifact job submission owner is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     try:
         _UUID_ID_ADAPTER.validate_python(submission.request_id, strict=True)
     except ValidationError:
-        raise ArtifactJobError(
-            "artifact job submission request identity is invalid"
+        raise ArtifactJobUnavailableError(
+            "artifact job submission request identity is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from None
     return submission
 
@@ -759,7 +904,10 @@ class ArtifactJobService:
         retention_seconds: int = 7 * 24 * 60 * 60,
     ) -> None:
         if not 3600 <= retention_seconds <= 365 * 24 * 60 * 60:
-            raise ValueError("artifact job retention is invalid")
+            raise InvalidValue(
+                "artifact job retention is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         self._sessions = sessions
         self._recipe_operations = recipe_operations
         self._blob_store = blob_store
@@ -768,7 +916,10 @@ class ArtifactJobService:
 
     def reconcile_storage(self, *, batch_limit: int = 1000) -> dict[str, object]:
         if not 1 <= batch_limit <= 10_000:
-            raise ValueError("artifact reconciliation batch limit is invalid")
+            raise InvalidValue(
+                "artifact reconciliation batch limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         with self._blob_store.reference_reconciliation():
             return self._reconcile_storage_fenced(batch_limit=batch_limit)
 
@@ -868,19 +1019,37 @@ class ArtifactJobService:
             )
         )
         if len(parsed_inputs) > MAX_INPUT_FILES:
-            raise ArtifactJobError("artifact job has too many input files")
+            raise ArtifactJobInvalid(
+                "artifact job has too many input files",
+                reason=InvalidRequestReason.LIMIT_EXCEEDED,
+            )
         if len({item.name for item in parsed_inputs}) != len(parsed_inputs):
-            raise ArtifactJobError("artifact input names must be unique")
+            raise ArtifactJobInvalid(
+                "artifact input names must be unique",
+                reason=InvalidRequestReason.DUPLICATE,
+            )
         total = sum(item.size_bytes for item in parsed_inputs)
         if total > MAX_INPUT_TOTAL_BYTES:
-            raise ArtifactJobError("artifact job input bytes exceed the limit")
+            raise ArtifactJobInvalid(
+                "artifact job input bytes exceed the limit",
+                reason=InvalidRequestReason.LIMIT_EXCEEDED,
+            )
         if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
-            raise ArtifactJobError("artifact job timeout is invalid")
+            raise ArtifactJobInvalid(
+                "artifact job timeout is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         if not 1 <= timeout_seconds <= 3_600:
-            raise ArtifactJobError("artifact job timeout is invalid")
+            raise ArtifactJobInvalid(
+                "artifact job timeout is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         supplied_parameters = _json_copy(parameters)
         if not isinstance(supplied_parameters, dict):
-            raise ArtifactJobError("artifact job parameters must be an object")
+            raise ArtifactJobInvalid(
+                "artifact job parameters must be an object",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         manifest = RecipeJobInputManifest(
             schema_version=1, total_bytes=total, files=list(parsed_inputs)
         ).model_dump(mode="json")
@@ -912,8 +1081,9 @@ class ArtifactJobService:
                     select(ArtifactJob).where(ArtifactJob.request_id == request_id)
                 )
                 if existing is None:
-                    raise ArtifactJobError(
-                        "artifact job request key collision"
+                    raise ArtifactJobInvalid(
+                        "artifact job request key collision",
+                        reason=InvalidRequestReason.CONFLICT,
                     ) from None
                 return self._create_in_session(
                     session,
@@ -964,10 +1134,16 @@ class ArtifactJobService:
             or existing.timeout_seconds != timeout_seconds
             or existing.actor != actor
         ):
-            raise ArtifactJobError("request key was already used differently")
+            raise ArtifactJobInvalid(
+                "request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         run = session.get(RecipeRun, run_id)
         if run is None or existing is None and run.state != "running":
-            raise ArtifactJobError("recipe run is not accepting jobs")
+            raise ArtifactJobInvalid(
+                "recipe run is not accepting jobs",
+                reason=InvalidRequestReason.NOT_READY,
+            )
         installation = session.get(RecipeInstallation, run.installation_id)
         resolved = (
             _active_recipe_revision(session, installation.recipe_revision_id)
@@ -975,27 +1151,37 @@ class ArtifactJobService:
             else None
         )
         if resolved is None:
-            raise ArtifactJobError("recipe revision is unavailable")
+            raise ArtifactJobInvalid(
+                "recipe revision is unavailable", reason=InvalidRequestReason.NOT_FOUND
+            )
         _revision, recipe = resolved
         document = recipe.model_dump(mode="json")
         if _recipe_interface(document) != interface or interface == "openai":
             if existing is not None:
-                raise ArtifactJobError("request key was already used differently")
-            raise ArtifactJobError("artifact job interface does not match the run")
+                raise ArtifactJobInvalid(
+                    "request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
+            raise ArtifactJobInvalid(
+                "artifact job interface does not match the run",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         try:
             contract = _compile_contract(document, interface)
             contract_digest = _contract_sha256(contract)
             parameters_copy = _effective_parameters(contract, supplied_parameters)
             limits = _effective_output_limits(contract, output_limits)
             if timeout_seconds > contract.max_timeout_seconds:
-                raise ArtifactJobError(
-                    "artifact job timeout exceeds the recipe contract"
+                raise ArtifactJobInvalid(
+                    "artifact job timeout exceeds the recipe contract",
+                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
                 )
             _validate_inputs_against_contract(contract, parsed_inputs)
         except ArtifactJobError:
             if existing is not None:
-                raise ArtifactJobError(
-                    "request key was already used differently"
+                raise ArtifactJobInvalid(
+                    "request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
                 ) from None
             raise
         effective_limits = limits.to_mapping()
@@ -1007,7 +1193,10 @@ class ArtifactJobService:
                 or existing.compiled_contract != contract_mapping
                 or existing.contract_sha256 != contract_digest
             ):
-                raise ArtifactJobError("request key was already used differently")
+                raise ArtifactJobInvalid(
+                    "request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             return self._view_in_session(session, existing)
         artifact_job = ArtifactJobAdapter.new_job(
             id=str(uuid.uuid4()),
@@ -1060,7 +1249,7 @@ class ArtifactJobService:
                     expected_sha256, content, maximum_bytes=MAX_INPUT_FILE_BYTES
                 )
             except ArtifactBlobStoreError as error:
-                raise ArtifactJobError(str(error)) from error
+                _translate_blob_error(error)
             return self._attach_input(
                 job_id, name=name, media_type=media_type, stored=stored
             )
@@ -1079,7 +1268,10 @@ class ArtifactJobService:
             job_id, name=name, media_type=media_type, expected_sha256=expected_sha256
         )
         if content_length != expected_bytes:
-            raise ArtifactJobError("artifact input Content-Length does not match")
+            raise ArtifactJobInvalid(
+                "artifact input Content-Length does not match",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         with self._blob_store.reference_attachment():
             try:
                 stored = await self._blob_store.put_stream(
@@ -1089,7 +1281,7 @@ class ArtifactJobService:
                     maximum_bytes=MAX_INPUT_FILE_BYTES,
                 )
             except ArtifactBlobStoreError as error:
-                raise ArtifactJobError(str(error)) from error
+                _translate_blob_error(error)
             return self._attach_input(
                 job_id, name=name, media_type=media_type, stored=stored
             )
@@ -1100,9 +1292,12 @@ class ArtifactJobService:
         with self._sessions() as session:
             job = session.get(ArtifactJob, job_id)
             if job is None:
-                raise KeyError(job_id)
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             if ajs.preparation_of(job) != ajs.DRAFT:
-                raise ArtifactJobError("artifact job inputs are immutable")
+                raise ArtifactJobInvalid(
+                    "artifact job inputs are immutable",
+                    reason=InvalidRequestReason.IMMUTABLE,
+                )
             declaration = self._input_declaration(job, name)
             size_bytes = None if declaration is None else declaration.get("size_bytes")
             if (
@@ -1111,7 +1306,10 @@ class ArtifactJobService:
                 or declaration.get("sha256") != expected_sha256
                 or not isinstance(size_bytes, int)
             ):
-                raise ArtifactJobError("artifact input does not match its declaration")
+                raise ArtifactJobInvalid(
+                    "artifact input does not match its declaration",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             return size_bytes
 
     def _attach_input(
@@ -1126,9 +1324,12 @@ class ArtifactJobService:
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
             if job is None:
-                raise KeyError(job_id)
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             if ajs.preparation_of(job) != ajs.DRAFT:
-                raise ArtifactJobError("artifact job inputs are immutable")
+                raise ArtifactJobInvalid(
+                    "artifact job inputs are immutable",
+                    reason=InvalidRequestReason.IMMUTABLE,
+                )
             declaration = self._input_declaration(job, name)
             if (
                 declaration is None
@@ -1136,12 +1337,17 @@ class ArtifactJobService:
                 or declaration.get("sha256") != stored.sha256
                 or declaration.get("size_bytes") != stored.size_bytes
             ):
-                raise ArtifactJobError("artifact input does not match its declaration")
+                raise ArtifactJobInvalid(
+                    "artifact input does not match its declaration",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             self._put_blob_in_session(session, stored, now)
             existing = self._file_in_session(session, job_id, "input", name)
             if existing is not None:
                 if existing.blob_sha256 != stored.sha256:
-                    raise ArtifactJobError("artifact input changed")
+                    raise ArtifactJobInvalid(
+                        "artifact input changed", reason=InvalidRequestReason.CONFLICT
+                    )
                 return self._view_in_session(session, job)
             session.add(
                 ArtifactJobFile(
@@ -1164,16 +1370,22 @@ class ArtifactJobService:
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
             if job is None:
-                raise KeyError(job_id)
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             if ajs.preparation_of(job) == ajs.READY:
                 return self._view_in_session(session, job)
             if ajs.preparation_of(job) != ajs.DRAFT:
-                raise ArtifactJobError("artifact job cannot be finalized")
+                raise ArtifactJobInvalid(
+                    "artifact job cannot be finalized",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             expected = _input_manifest(job).model_dump(mode="json")["files"]
             uploaded = self._files_in_session(session, job_id, "input")
             observed = [self._file_mapping(item) for item in uploaded]
             if expected != observed:
-                raise ArtifactJobError("artifact job inputs are incomplete")
+                raise ArtifactJobInvalid(
+                    "artifact job inputs are incomplete",
+                    reason=InvalidRequestReason.INCOMPLETE,
+                )
             ArtifactJobAdapter.mark_ready(job, now)
             return self._view_in_session(session, job)
 
@@ -1182,21 +1394,30 @@ class ArtifactJobService:
         with self._sessions.begin() as session:
             artifact_job = session.get(ArtifactJob, job_id, with_for_update=True)
             if artifact_job is None:
-                raise KeyError(job_id)
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             if artifact_job.operation_id is not None:
                 submission = _artifact_submission_in_session(session, artifact_job)
                 if submission is None:
-                    raise ArtifactJobError("artifact job submission owner is invalid")
+                    raise ArtifactJobUnavailableError(
+                        "artifact job submission owner is invalid",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    )
                 if submission.request_id != request_id:
-                    raise ArtifactJobError(
-                        "artifact job was submitted under another request identity"
+                    raise ArtifactJobInvalid(
+                        "artifact job was submitted under another request identity",
+                        reason=InvalidRequestReason.CONFLICT,
                     )
                 return self._view_in_session(session, artifact_job)
             if ajs.preparation_of(artifact_job) != ajs.READY:
-                raise ArtifactJobError("artifact job is not ready")
+                raise ArtifactJobInvalid(
+                    "artifact job is not ready", reason=InvalidRequestReason.NOT_READY
+                )
             run = session.get(RecipeRun, artifact_job.run_id, with_for_update=True)
             if run is None or run.state != "running":
-                raise ArtifactJobError("recipe run is not accepting jobs")
+                raise ArtifactJobInvalid(
+                    "recipe run is not accepting jobs",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             concurrent = session.scalar(
                 select(ArtifactJob.id)
                 .where(
@@ -1207,8 +1428,9 @@ class ArtifactJobService:
                 .limit(1)
             )
             if concurrent is not None:
-                raise ArtifactJobError(
-                    "another artifact job already owns this run reservation"
+                raise ArtifactJobInvalid(
+                    "another artifact job already owns this run reservation",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (
@@ -1219,7 +1441,10 @@ class ArtifactJobService:
             if installation is None or resolved is None:
                 # The run's installation or recipe revision no longer exists:
                 # a genuine absence, refused request-led with its own code.
-                raise ArtifactJobError("recipe job workload identity is unavailable")
+                raise ArtifactJobInvalid(
+                    "recipe job workload identity is unavailable",
+                    reason=InvalidRequestReason.NOT_FOUND,
+                )
             revision, _recipe = resolved
             node = self._job_node_in_session(session, run)
             # Rebuild from evidence, not from the stored run plan: the accepted
@@ -1229,12 +1454,16 @@ class ArtifactJobService:
                 installation_plan = parse_stored_installation_plan(installation.plan)
             except RecipeExecutionContractError as error:
                 _record_unservable_run(run.id, f"stored installation plan: {error}")
-                raise ArtifactJobError(
-                    "installed job execution plan is invalid"
+                raise ArtifactJobUnavailableError(
+                    "installed job execution plan is unreadable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             if node.node_id not in installation_plan.compiled_execution_plans:
                 _record_unservable_run(run.id, "no compiled plan for the job node")
-                raise ArtifactJobError("installed job execution plan is unavailable")
+                raise ArtifactJobUnavailableError(
+                    "installed job execution plan is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             installed_document = installation_plan.compiled_execution_plans[
                 node.node_id
             ].model_dump(mode="json")
@@ -1243,12 +1472,14 @@ class ArtifactJobService:
             if type(floor) is not int:
                 _record_unservable_run(run.id, "installed plan has no memory floor")
                 raise ArtifactJobUnavailableError(
-                    "installed job execution plan is invalid"
+                    "installed job execution plan is invalid",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             stored_contract = self._stored_contract(session, artifact_job)
             if isinstance(stored_contract, Residue):
                 raise ArtifactJobUnavailableError(
-                    "artifact job contract is unavailable"
+                    "artifact job contract is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             contract = stored_contract
             try:
@@ -1256,8 +1487,9 @@ class ArtifactJobService:
                     contract, artifact_job.parameters
                 )
             except (ArtifactJobError, TypeError, ValueError) as error:
-                raise ArtifactJobError(
-                    "stored artifact job parameters are invalid"
+                raise ArtifactJobUnavailableError(
+                    "stored artifact job parameters are invalid",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             mapping = (
                 session.get(ClusterMapping, run.mapping_id)
@@ -1319,7 +1551,7 @@ class ArtifactJobService:
         with self._sessions() as session:
             job = session.get(ArtifactJob, job_id)
             if job is None:
-                raise KeyError(job_id)
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             return self._view_in_session(session, job)
 
     def get_by_request_id(self, request_id: str) -> ArtifactJobView:
@@ -1329,17 +1561,20 @@ class ArtifactJobService:
                 select(ArtifactJob).where(ArtifactJob.request_id == request_id)
             )
             if job is None:
-                raise KeyError(request_id)
+                raise MissingRecord(request_id, reason=InvalidRequestReason.NOT_FOUND)
             return self._view_in_session(session, job)
 
     def list_for_run(
         self, run_id: str, *, limit: int = 100
     ) -> tuple[ArtifactJobView, ...]:
         if not 1 <= limit <= 100:
-            raise ArtifactJobError("artifact job list limit is invalid")
+            raise ArtifactJobInvalid(
+                "artifact job list limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
         with self._sessions() as session:
             if session.get(RecipeRun, run_id) is None:
-                raise KeyError(run_id)
+                raise MissingRecord(run_id, reason=InvalidRequestReason.NOT_FOUND)
             jobs = tuple(
                 session.scalars(
                     select(ArtifactJob)
@@ -1357,12 +1592,14 @@ class ArtifactJobService:
         with self._sessions() as session:
             job = session.get(ArtifactJob, job_id)
             if job is None:
-                raise KeyError(job_id)
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             operation_id = job.operation_id
             state = ajs.state_of(job)
             evidence = _result_evidence(job.result_evidence)
         if state in {ajs.SUCCEEDED, ajs.FAILED}:
-            raise ArtifactJobError("artifact job is not cancellable")
+            raise ArtifactJobInvalid(
+                "artifact job is not cancellable", reason=InvalidRequestReason.CONFLICT
+            )
         if state == ajs.CANCELLED and operation_id is None:
             if (
                 evidence is not None
@@ -1371,8 +1608,9 @@ class ArtifactJobService:
                 and evidence.get("cancel_reason") == cancellation_reason
             ):
                 return self.get(job_id)
-            raise ArtifactJobError(
-                "cancellation request key was already used differently"
+            raise ArtifactJobInvalid(
+                "cancellation request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
             )
         if operation_id is not None:
             try:
@@ -1380,7 +1618,9 @@ class ArtifactJobService:
                     operation_id, actor=actor, request_id=request_id, reason=reason
                 )
             except RecipeOperationConflict as error:
-                raise ArtifactJobError(str(error)) from error
+                raise ArtifactJobInvalid(
+                    str(error), reason=InvalidRequestReason.CONFLICT
+                ) from error
         now = self._clock()
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
@@ -1423,10 +1663,18 @@ class ArtifactJobService:
                 )
             )
             if row is None:
-                raise KeyError(sha256)
+                raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
             blob = session.get(ArtifactJobBlob, sha256)
             if blob is None:
-                raise ArtifactJobError("stored artifact input is inconsistent")
+                # The file row has no blob row: the bytes are unknown, not a
+                # refusal. The reader is told "not found" and re-uploads.
+                retire_as_unknown(
+                    "artifact-job.blob",
+                    sha256,
+                    BookkeepingReason.ROW_INCOMPLETE,
+                    "stored input has no blob row",
+                )
+                raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
             try:
                 path = self._blob_store.resolve(
                     blob.storage_key, sha256, blob.size_bytes
@@ -1437,9 +1685,11 @@ class ArtifactJobService:
                 retire_as_unknown(
                     "artifact-job.blob", sha256, note="stored bytes are absent"
                 )
-                raise KeyError(sha256) from None
+                raise MissingRecord(
+                    sha256, reason=InvalidRequestReason.NOT_FOUND
+                ) from None
             except ArtifactBlobStoreError as error:
-                raise ArtifactJobError(str(error)) from error
+                _translate_blob_error(error)
             return path, row.media_type, row.size_bytes
 
     def put_output(
@@ -1467,7 +1717,7 @@ class ArtifactJobService:
                     expected_sha256, content, maximum_bytes=1024**3
                 )
             except ArtifactBlobStoreError as error:
-                raise ArtifactJobError(str(error)) from error
+                _translate_blob_error(error)
             self._attach_output(job_id, node_id=node_id, parsed=parsed, stored=stored)
 
     async def put_output_stream(
@@ -1500,7 +1750,7 @@ class ArtifactJobService:
                     maximum_bytes=1024**3,
                 )
             except ArtifactBlobStoreError as error:
-                raise ArtifactJobError(str(error)) from error
+                _translate_blob_error(error)
             self._attach_output(job_id, node_id=node_id, parsed=parsed, stored=stored)
 
     def _validate_output_upload(
@@ -1522,20 +1772,29 @@ class ArtifactJobService:
                 raise ArtifactJobTransferClosedError("artifact job transfer is closed")
             _validate_outputs_against_contract(contract, projected, terminal=False)
             if parsed.media_type not in limits.allowed_media_types:
-                raise ArtifactJobError("artifact output media type is not allowed")
+                raise ArtifactJobInvalid(
+                    "artifact output media type is not allowed",
+                    reason=InvalidRequestReason.UNSUPPORTED,
+                )
             if (
                 len(existing)
                 + (0 if any(item.name == parsed.name for item in existing) else 1)
                 > limits.max_files
             ):
-                raise ArtifactJobError("artifact output file count exceeds the limit")
+                raise ArtifactJobInvalid(
+                    "artifact output file count exceeds the limit",
+                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                )
             if (
                 parsed.size_bytes > limits.max_file_bytes
                 or sum(item.size_bytes for item in existing if item.name != parsed.name)
                 + parsed.size_bytes
                 > limits.max_total_bytes
             ):
-                raise ArtifactJobError("artifact output bytes exceed the limit")
+                raise ArtifactJobInvalid(
+                    "artifact output bytes exceed the limit",
+                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                )
 
     def _attach_output(
         self,
@@ -1546,20 +1805,28 @@ class ArtifactJobService:
         stored: StoredArtifactBlob,
     ) -> None:
         if stored.sha256 != parsed.sha256 or stored.size_bytes != parsed.size_bytes:
-            raise ArtifactJobError("stored artifact output does not match declaration")
+            raise ArtifactJobInvalid(
+                "stored artifact output does not match declaration",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         now = self._clock()
         with self._sessions.begin() as session:
             job = self._authorized_agent_job(session, job_id, node_id, lock=True)
             limits = RecipeJobOutputLimits.parse(job.output_limits)
             if parsed.media_type not in limits.allowed_media_types:
-                raise ArtifactJobError("artifact output media type is not allowed")
+                raise ArtifactJobInvalid(
+                    "artifact output media type is not allowed",
+                    reason=InvalidRequestReason.UNSUPPORTED,
+                )
             existing = self._files_in_session(session, job_id, "output")
             same_name = next(
                 (item for item in existing if item.name == parsed.name), None
             )
             if same_name is not None:
                 if same_name.blob_sha256 != parsed.sha256:
-                    raise ArtifactJobError("artifact output changed")
+                    raise ArtifactJobInvalid(
+                        "artifact output changed", reason=InvalidRequestReason.CONFLICT
+                    )
                 return
             projected = tuple(
                 RecipeJobFile.parse(self._file_mapping(item), maximum_bytes=1024**3)
@@ -1572,13 +1839,19 @@ class ArtifactJobService:
                 raise ArtifactJobTransferClosedError("artifact job transfer is closed")
             _validate_outputs_against_contract(contract, projected, terminal=False)
             if len(existing) + 1 > limits.max_files:
-                raise ArtifactJobError("artifact output file count exceeds the limit")
+                raise ArtifactJobInvalid(
+                    "artifact output file count exceeds the limit",
+                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                )
             if (
                 parsed.size_bytes > limits.max_file_bytes
                 or sum(item.size_bytes for item in existing) + parsed.size_bytes
                 > limits.max_total_bytes
             ):
-                raise ArtifactJobError("artifact output bytes exceed the limit")
+                raise ArtifactJobInvalid(
+                    "artifact output bytes exceed the limit",
+                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                )
             self._put_blob_in_session(session, stored, now)
             session.add(
                 ArtifactJobFile(
@@ -1600,9 +1873,12 @@ class ArtifactJobService:
         with self._sessions() as session:
             job = session.get(ArtifactJob, job_id)
             if job is None:
-                raise KeyError(job_id)
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             if ajs.state_of(job) != ajs.SUCCEEDED:
-                raise ArtifactJobError("artifact job result is not available")
+                raise ArtifactJobInvalid(
+                    "artifact job result is not available",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             row = session.scalar(
                 select(ArtifactJobFile).where(
                     ArtifactJobFile.artifact_job_id == job_id,
@@ -1613,7 +1889,7 @@ class ArtifactJobService:
             )
             blob = session.get(ArtifactJobBlob, sha256) if row is not None else None
             if row is None or blob is None:
-                raise KeyError(sha256)
+                raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
             try:
                 path = self._blob_store.resolve(
                     blob.storage_key, sha256, blob.size_bytes
@@ -1624,9 +1900,11 @@ class ArtifactJobService:
                 retire_as_unknown(
                     "artifact-job.blob", sha256, note="stored bytes are absent"
                 )
-                raise KeyError(sha256) from None
+                raise MissingRecord(
+                    sha256, reason=InvalidRequestReason.NOT_FOUND
+                ) from None
             except ArtifactBlobStoreError as error:
-                raise ArtifactJobError(str(error)) from error
+                _translate_blob_error(error)
             return path, row.media_type, row.name, row.size_bytes
 
     def consume_agent_result(
@@ -1667,8 +1945,9 @@ class ArtifactJobService:
                     or waiting_result.exit_code != 130
                     or waiting_result.outputs
                 ):
-                    raise AgentProtocolError(
-                        "waiting artifact result identity or output is invalid"
+                    raise ArtifactResultInvalid(
+                        "waiting artifact result identity or output is invalid",
+                        reason=InvalidRequestReason.MALFORMED,
                     )
             except (AgentProtocolError, TypeError, ValueError) as error:
                 self._reject_result(
@@ -1700,7 +1979,10 @@ class ArtifactJobService:
         try:
             result = RecipeJobRunResult.parse(raw_result)
             if result.job_id != artifact_job.id or result.run_id != artifact_job.run_id:
-                raise AgentProtocolError("artifact result identity does not match")
+                raise ArtifactResultRefused(
+                    "artifact result identity does not match",
+                    reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                )
             uploaded = self._files_in_session(session, artifact_job.id, "output")
             observed = tuple(
                 RecipeJobFile.parse(self._file_mapping(item), maximum_bytes=1024**3)
@@ -1710,20 +1992,27 @@ class ArtifactJobService:
             if tuple(item.to_mapping() for item in result.outputs) != tuple(
                 item.to_mapping() for item in observed
             ):
-                raise AgentProtocolError(
-                    "artifact result does not match uploaded outputs"
+                raise ArtifactResultInvalid(
+                    "artifact result does not match uploaded outputs",
+                    reason=InvalidRequestReason.MALFORMED,
                 )
             if any(
                 item.media_type not in limits.allowed_media_types
                 for item in result.outputs
             ):
-                raise AgentProtocolError("artifact result media type is not allowed")
+                raise ArtifactResultInvalid(
+                    "artifact result media type is not allowed",
+                    reason=InvalidRequestReason.MALFORMED,
+                )
             if (
                 len(result.outputs) > limits.max_files
                 or sum(item.size_bytes for item in result.outputs)
                 > limits.max_total_bytes
             ):
-                raise AgentProtocolError("artifact result exceeds output limits")
+                raise ArtifactResultInvalid(
+                    "artifact result exceeds output limits",
+                    reason=InvalidRequestReason.MALFORMED,
+                )
             succeeded = state == "succeeded" and result.exit_code == 0
             failed = state == "failed" and result.exit_code != 0
             cancelled = bool(
@@ -1734,18 +2023,25 @@ class ArtifactJobService:
                 and parent.result.get("cancel_requested") is True
             )
             if cancelled and uploaded:
-                raise AgentProtocolError(
-                    "cancelled artifact result cannot retain uploaded outputs"
+                raise ArtifactResultInvalid(
+                    "cancelled artifact result cannot retain uploaded outputs",
+                    reason=InvalidRequestReason.MALFORMED,
                 )
             if succeeded:
                 result_contract = self._stored_contract(session, artifact_job)
                 if isinstance(result_contract, Residue):
-                    raise AgentProtocolError("artifact job contract is unreadable")
+                    raise ArtifactResultInvalid(
+                        "artifact job contract is unreadable",
+                        reason=InvalidRequestReason.MALFORMED,
+                    )
                 _validate_outputs_against_contract(
                     result_contract, result.outputs, terminal=True
                 )
             if not (succeeded or failed or cancelled):
-                raise AgentProtocolError("artifact result state and exit code disagree")
+                raise ArtifactResultInvalid(
+                    "artifact result state and exit code disagree",
+                    reason=InvalidRequestReason.MALFORMED,
+                )
         except (AgentProtocolError, TypeError, ValueError) as error:
             self._reject_result(adapter, operation, parent, artifact_job, error, now)
             return
@@ -1802,10 +2098,13 @@ class ArtifactJobService:
             statement = statement.with_for_update(of=ArtifactJob)
         job = session.scalar(statement)
         if job is None or job.operation_id is None:
-            raise KeyError(job_id)
+            raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
         parent = session.get(Job, job.operation_id)
         if parent is None or node_id not in parent.targets:
-            raise ArtifactJobError("agent is not authorized for this artifact job")
+            raise ArtifactJobRefused(
+                "agent is not authorized for this artifact job",
+                reason=SecurityRefusalReason.FORBIDDEN,
+            )
         order = session.scalar(
             select(AgentOperation.state).where(
                 AgentOperation.parent_job_id == job.operation_id
@@ -1860,7 +2159,10 @@ class ArtifactJobService:
         if not candidates and len(nodes) == 1:
             candidates = list(nodes)
         if len(candidates) != 1 or candidates[0].state != "running":
-            raise ArtifactJobError("artifact job endpoint owner is not running")
+            raise ArtifactJobUnavailableError(
+                "artifact job endpoint owner is not running",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         return candidates[0]
 
     @staticmethod
@@ -1873,7 +2175,10 @@ class ArtifactJobService:
                 blob.size_bytes != stored.size_bytes
                 or blob.storage_key != stored.storage_key
             ):
-                raise ArtifactJobError("content-addressed artifact collision")
+                raise ArtifactJobRefused(
+                    "content-addressed artifact collision",
+                    reason=SecurityRefusalReason.DIGEST_MISMATCH,
+                )
             return
         session.add(
             ArtifactJobBlob(
@@ -1932,7 +2237,10 @@ class ArtifactJobService:
         }
         if item.direction == "input":
             if item.slot is None:
-                raise ArtifactJobError("artifact input slot is unavailable")
+                raise ArtifactJobUnavailableError(
+                    "artifact input slot is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             value = {"slot": item.slot, **value}
         return value
 
@@ -1987,7 +2295,7 @@ class ArtifactJobService:
         if isinstance(contract, Residue):
             # The stored contract is damaged and nothing re-derives it: the job
             # is unreadable, which readers see as not found.
-            raise KeyError(job.id)
+            raise MissingRecord(job.id, reason=InvalidRequestReason.NOT_FOUND)
         manifest = _input_manifest(job)
         view = ArtifactJobView(
             id=job.id,

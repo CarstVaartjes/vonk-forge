@@ -15,8 +15,9 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import SecurityRefusalError
+from vonk_agent_protocol import InvalidRequestReason, SecurityRefusalError
 
+from .categorized_errors import InvalidType, InvalidValue, MissingRecord
 from .compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
 from .lifecycle.job import JobAdapter
 from .models import AgentOperation, Job, JobAttempt
@@ -117,10 +118,16 @@ def _canonical_payload(
         if isinstance(value, Mapping):
             for key, child in value.items():
                 if not isinstance(key, str):
-                    raise TypeError("job payload keys must be strings")
+                    raise InvalidType(
+                        "job payload keys must be strings",
+                        reason=InvalidRequestReason.MALFORMED,
+                    )
                 child_path = path + (key,)
                 if _SENSITIVE.search(key) and child_path not in safe_quota_fields:
-                    raise ValueError("job payload contains a sensitive field")
+                    raise InvalidValue(
+                        "job payload contains a sensitive field",
+                        reason=InvalidRequestReason.MALFORMED,
+                    )
                 inspect(child, child_path)
         elif isinstance(value, list):
             for child in value:
@@ -147,7 +154,9 @@ def _canonical_payload(
         else _MAX_PAYLOAD
     )
     if len(encoded) > maximum:
-        raise ValueError("job payload is too large")
+        raise InvalidValue(
+            "job payload is too large", reason=InvalidRequestReason.LIMIT_EXCEEDED
+        )
     return copied, encoded
 
 
@@ -163,7 +172,10 @@ def _canonical_targets(value: object) -> list[str]:
         )
         return _TARGETS.validate_json(encoded, strict=True)
     except (TypeError, ValueError, ValidationError) as error:
-        raise ValueError("job targets must be a JSON array of strings") from error
+        raise InvalidValue(
+            "job targets must be a JSON array of strings",
+            reason=InvalidRequestReason.MALFORMED,
+        ) from error
 
 
 _ADAPTER = JobAdapter()
@@ -191,7 +203,10 @@ class JobService:
         request_id: str | None = None,
     ) -> Job:
         if not all(value.strip() for value in (kind, actor, authority_revision)):
-            raise ValueError("job kind, actor, and authority revision are required")
+            raise InvalidValue(
+                "job kind, actor, and authority revision are required",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         clean_targets = _canonical_targets(targets)
         clean, encoded = _canonical_payload(payload, kind=kind)
         now = self._clock()
@@ -215,7 +230,10 @@ class JobService:
                 if existing is not None:
                     _canonical_targets(existing.targets)
                     if not self._same_request(existing, job):
-                        raise ValueError("request key was already used differently")
+                        raise InvalidValue(
+                            "request key was already used differently",
+                            reason=InvalidRequestReason.CONFLICT,
+                        )
                     session.expunge(existing)
                     return existing
                 session.add(job)
@@ -226,8 +244,9 @@ class JobService:
                     select(Job).where(Job.request_id == job.request_id)
                 )
                 if existing is None or not self._same_request(existing, job):
-                    raise ValueError(
-                        "request key was already used differently"
+                    raise InvalidValue(
+                        "request key was already used differently",
+                        reason=InvalidRequestReason.CONFLICT,
                     ) from None
                 session.expunge(existing)
                 return existing
@@ -236,7 +255,7 @@ class JobService:
         with self._sessions() as session:
             job = session.get(Job, job_id)
             if job is None:
-                raise KeyError(job_id)
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             job.targets = _canonical_targets(job.targets)
             session.expunge(job)
             return job
@@ -255,9 +274,15 @@ class JobService:
         """Create a job only while its external acceptance evidence stays current."""
 
         if not callable(authority_check):
-            raise TypeError("job enqueue authority check is invalid")
+            raise InvalidType(
+                "job enqueue authority check is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         if not all(value.strip() for value in (kind, actor, authority_revision)):
-            raise ValueError("job kind, actor, and authority revision are required")
+            raise InvalidValue(
+                "job kind, actor, and authority revision are required",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         clean_targets = _canonical_targets(targets)
         clean, encoded = _canonical_payload(payload, kind=kind)
         now = self._clock()
@@ -281,15 +306,24 @@ class JobService:
                 if existing is not None:
                     _canonical_targets(existing.targets)
                     if not self._same_request(existing, job):
-                        raise ValueError("request key was already used differently")
+                        raise InvalidValue(
+                            "request key was already used differently",
+                            reason=InvalidRequestReason.CONFLICT,
+                        )
                     session.expunge(existing)
                     return existing
                 if authority_check() is not True:
-                    raise ValueError("fleet acceptance evidence is stale")
+                    raise InvalidValue(
+                        "fleet acceptance evidence is stale",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
                 session.add(job)
                 session.flush()
                 if authority_check() is not True:
-                    raise ValueError("fleet acceptance evidence is stale")
+                    raise InvalidValue(
+                        "fleet acceptance evidence is stale",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
             return job
         except IntegrityError:
             with self._sessions() as session:
@@ -297,8 +331,9 @@ class JobService:
                     select(Job).where(Job.request_id == job.request_id)
                 )
                 if existing is None or not self._same_request(existing, job):
-                    raise ValueError(
-                        "request key was already used differently"
+                    raise InvalidValue(
+                        "request key was already used differently",
+                        reason=InvalidRequestReason.CONFLICT,
                     ) from None
                 session.expunge(existing)
                 return existing
@@ -319,7 +354,10 @@ class JobService:
         self, worker_id: str, lease_seconds: int, *, kinds: Sequence[str]
     ) -> AttemptFence | None:
         if not worker_id.strip() or lease_seconds <= 0:
-            raise ValueError("worker and positive lease are required")
+            raise InvalidValue(
+                "worker and positive lease are required",
+                reason=InvalidRequestReason.INCOMPLETE,
+            )
         now = self._clock()
         with self._claim_lock, self._sessions.begin() as session:
             statement = (
@@ -392,7 +430,9 @@ class JobService:
 
     def heartbeat(self, fence: AttemptFence, lease_seconds: int) -> AttemptFence:
         if lease_seconds <= 0:
-            raise ValueError("lease must be positive")
+            raise InvalidValue(
+                "lease must be positive", reason=InvalidRequestReason.OUT_OF_RANGE
+            )
         with self._sessions.begin() as session:
             job, attempt = self._active(session, fence)
             deadline = self._clock() + timedelta(seconds=lease_seconds)

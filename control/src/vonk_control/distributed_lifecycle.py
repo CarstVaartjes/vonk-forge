@@ -4,11 +4,30 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
+    UnknownOutcomeError,
+)
 from vonk_forge_contracts.recipe import RecipeTopology
 
 
 class DistributedLifecycleError(RuntimeError):
     pass
+
+
+class DistributedRecoveryInvalid(InvalidRequestError, DistributedLifecycleError):
+    """A malformed or out-of-contract distributed request, marker or document.
+
+    It keeps the :class:`DistributedLifecycleError` every caller catches and adds
+    the contract's invalid-request category, without the builtin ``ValueError``
+    that would widen what an ``except ValueError`` elsewhere catches.
+    """
+
+
+class DistributedRecoveryUnsettled(UnknownOutcomeError, DistributedLifecycleError):
+    """Evidence or bookkeeping that cannot settle the recovery here (missing,
+    stale or unavailable): an unknown outcome the next observation reconciles."""
 
 
 # Health-probe budget. Initial start and durable recovery retain the accepted
@@ -32,21 +51,30 @@ def canonical_distributed_readiness(
         return None
     owners = tuple(role for role in topology.roles if role.endpoint_owner)
     if len(owners) != 1 or owners[0].count != 1:
-        raise DistributedLifecycleError("distributed endpoint topology is invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed endpoint topology is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     openai_interfaces = tuple(
         interface
         for interface in interfaces
         if isinstance(interface, Mapping) and interface.get("adapter") == "openai"
     )
     if len(openai_interfaces) > 1:
-        raise DistributedLifecycleError("distributed readiness interface is invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed readiness interface is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     if not openai_interfaces:
         # Job interfaces have filesystem completion semantics and do not
         # expose an HTTP endpoint for collective readiness.
         return None
     path = openai_interfaces[0].get("health_path")
     if not isinstance(path, str) or not path.startswith("/"):
-        raise DistributedLifecycleError("distributed readiness path is invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed readiness path is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     return {
         "strategy": "endpoint-owner-after-all-ranks",
         "path": path,
@@ -57,5 +85,7 @@ def canonical_distributed_readiness(
 __all__ = [
     "DEFAULT_DISTRIBUTED_READINESS_TIMEOUT_SECONDS",
     "DistributedLifecycleError",
+    "DistributedRecoveryInvalid",
+    "DistributedRecoveryUnsettled",
     "canonical_distributed_readiness",
 ]

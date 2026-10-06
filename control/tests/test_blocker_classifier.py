@@ -44,7 +44,9 @@ def _site(
         (_site("StaleAgentAttempt", "fence is stale"), SECURITY),
         (_site("SourceBundleError", "bundle.digest_mismatch"), SECURITY),
         (_site("RecipeBuildError", "build.signature_invalid"), SECURITY),
-        (_site("InstallAdmissionBusy", "install.capacity_busy"), RETRIED),
+        # An unknown-outcome class is a handoff only where a registered loop is
+        # proven to retry it (test_blocker_retries); by type alone it is debt.
+        (_site("InstallAdmissionBusy", "install.capacity_busy"), DEBT),
         (_site("RecipeRouteSuperseded", "route publication was superseded"), RETRIED),
         (_site("CursorError", "operation cursor is invalid"), INPUT),
         (_site("HarnessCompileError", "harness mounts overlap"), INPUT),
@@ -88,3 +90,19 @@ def test_new_sites_become_one_family_per_module_and_category() -> None:
 def test_listed_sites_are_not_proposed_again() -> None:
     sites = scan_raises()
     assert propose_families(sites, load_allowlist()) == []
+
+
+@pytest.mark.parametrize(
+    ("cls", "category"),
+    [
+        ("InvalidValue", INPUT),
+        ("MissingRecord", INPUT),
+        ("SecurityRefused", SECURITY),
+        ("UnsettledOutcome", DEBT),
+        ("AdmissionLockBusy", DEBT),
+    ],
+)
+def test_a_class_of_a_category_type_names_its_family(cls: str, category: str) -> None:
+    """The error type decides, whatever the message says."""
+
+    assert classify(_site(cls, "stored plan is missing")).category == category

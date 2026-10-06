@@ -12,10 +12,10 @@ from ..models.node_connection_agent_state import check_node_connection_agent_sta
 from ..models.node_connection_agent_state import NodeConnectionAgentState
 from ..models.node_connection_certificate_state import check_node_connection_certificate_state
 from ..models.node_connection_certificate_state import NodeConnectionCertificateState
-from ..models.node_connection_offline_reason_type_0 import check_node_connection_offline_reason_type_0
-from ..models.node_connection_offline_reason_type_0 import NodeConnectionOfflineReasonType0
 from ..models.node_connection_online_state import check_node_connection_online_state
 from ..models.node_connection_online_state import NodeConnectionOnlineState
+from ..models.node_offline_reason import check_node_offline_reason
+from ..models.node_offline_reason import NodeOfflineReason
 from typing import cast
 import datetime
 
@@ -36,7 +36,7 @@ class NodeConnection:
             certificate_state (NodeConnectionCertificateState):
             last_seen_age_seconds (float | None):
             last_seen_at (datetime.datetime | None):
-            offline_reason (NodeConnectionOfflineReasonType0 | None):
+            offline_reason (NodeOfflineReason | None):
             online_state (NodeConnectionOnlineState):
      """
 
@@ -44,7 +44,7 @@ class NodeConnection:
     certificate_state: NodeConnectionCertificateState
     last_seen_age_seconds: float | None
     last_seen_at: datetime.datetime | None
-    offline_reason: NodeConnectionOfflineReasonType0 | None
+    offline_reason: NodeOfflineReason | None
     online_state: NodeConnectionOnlineState
 
 
@@ -128,20 +128,20 @@ class NodeConnection:
         last_seen_at = _parse_last_seen_at(d.pop("last_seen_at"))
 
 
-        def _parse_offline_reason(data: object) -> NodeConnectionOfflineReasonType0 | None:
+        def _parse_offline_reason(data: object) -> NodeOfflineReason | None:
             if data is None:
                 return data
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                offline_reason_type_0 = check_node_connection_offline_reason_type_0(data)
+                offline_reason_type_0 = check_node_offline_reason(data)
 
 
 
                 return offline_reason_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(NodeConnectionOfflineReasonType0 | None, data)
+            return cast(NodeOfflineReason | None, data)
 
         offline_reason = _parse_offline_reason(d.pop("offline_reason"))
 

@@ -33,6 +33,21 @@ records the literals that predate it, per file, and
 * TypeScript has no baseline at all: the web app reads the generated
   ``vocabulary.generated.ts``.
 
+Two further tiers have no baseline either; they are flat at zero.  The reason
+codes (``vonk_agent_protocol.reason_codes``: blockers, refusals, warnings and
+attention codes, grouped by domain) are closed enums too:
+
+``reason_code``
+    a string literal equal to a member of a reason-code enum, or a message that
+    starts with one (``"run-switch.x: detail"``), anywhere outside the contract;
+``code_position``
+    a string constant (or an f-string) in a position that names a code: the
+    ``code=`` / ``*_code=`` keyword of a call, the first argument of
+    ``make_blocker``, the code argument of an error class or helper that takes
+    one, a ``code`` / ``*_CODE`` class or module attribute and a ``code``
+    parameter default.  This is what makes a *new* free-string code fail, whether
+    or not it is a word the enums already know: add it to the enum first.
+
 ``python -m control.tests.vocabulary_literals --write-baseline`` lowers the counts
 after a literal was removed; it never raises one.
 """
@@ -49,6 +64,7 @@ from pathlib import Path
 
 from vonk_agent_protocol import (
     LEGACY_WAIT_STATE,
+    REASON_CODE_ENUMS,
     AgentResultState,
     ErrorCategory,
     FailureCode,
@@ -124,6 +140,7 @@ NON_LIFECYCLE_STATE_SITES: dict[str, tuple[int, str]] = {
 ALLOWED_FILES = frozenset(
     {
         "agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py",
+        "agent_protocol/src/vonk_agent_protocol/reason_codes.py",
         "agent_protocol/src/vonk_agent_protocol/outcome.py",
         "control/src/vonk_control/agent_outcome.py",
         # The CLI ships without the contract package; this is its one copy of the
@@ -149,6 +166,10 @@ STORED_STATE = "stored_state"
 #: (``waiting``, ``partial``, ``cancelling``, ``expired``), found by context.
 LEGACY_STATE = "legacy_state"
 TIERS = (DISTINCTIVE, STORED_STATE, LEGACY_STATE)
+#: Tiers without a baseline: any occurrence fails.
+REASON_CODE = "reason_code"
+CODE_POSITION = "code_position"
+FLAT_TIERS = (REASON_CODE, CODE_POSITION)
 
 #: The lifecycle state words that persisted rows of the legacy kinds still carry.
 STORED_STATE_WORDS = frozenset(
@@ -194,6 +215,26 @@ def _vocabulary_words() -> frozenset[str]:
         words.update(member.value for member in enum)
     return frozenset(words)
 
+
+#: The Controller is where reasons are raised.  The CLI ships without the contract
+#: package, so it spells the codes it renders; ``test_the_cli_spells_only_contract_codes``
+#: keeps those spellings equal to members.
+REASON_CODE_ROOT = "control/src/"
+#: Enums whose words are ordinary kind names that other columns share
+#: (``recipe-installation`` is also an entity kind); a literal is not a code by
+#: its spelling alone, so only the typed fields carry these.
+PLAIN_WORD_ENUMS = frozenset({"CacheReferenceReason"})
+#: Every word of a reason-code enum that cannot be mistaken for prose
+#: (``reconcile.membership_changed``, ``superseded-by-intent``).  The plain words
+#: some enums also carry (``stale``, ``context``) are typed by their field instead.
+REASON_CODE_WORDS = frozenset(
+    member.value
+    for enum in REASON_CODE_ENUMS
+    if enum.__name__ not in PLAIN_WORD_ENUMS
+    for member in enum
+    if any(mark in member.value for mark in _SEPARATORS)
+)
+_REASON_PREFIX = re.compile(r"^([a-z][a-z0-9_.-]*[.-][a-z0-9_.-]*?)(?::\s|\s|$)")
 
 VOCABULARY_WORDS = _vocabulary_words()
 DISTINCTIVE_WORDS = frozenset(
@@ -293,6 +334,17 @@ def _python_files() -> Iterator[Path]:
         yield from sorted((REPO_ROOT / root).rglob("*.py"))
 
 
+def _is_reason_code_text(text: str) -> bool:
+    """A reason-code word, or a message that starts with one (``code: detail``)."""
+
+    if text in REASON_CODE_WORDS:
+        return True
+    match = _REASON_PREFIX.match(text)
+    return bool(
+        match and match.group(1) in REASON_CODE_WORDS and text != match.group(1)
+    )
+
+
 def scan_python(
     files: Iterable[Path] | None = None, root: Path = REPO_ROOT
 ) -> Counter[tuple[str, str]]:
@@ -314,6 +366,14 @@ def scan_python(
                 and (tier := tier_of(node.value)) is not None
             ):
                 counts[(tier, relative)] += 1
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docstrings
+                and relative.startswith(REASON_CODE_ROOT)
+                and _is_reason_code_text(node.value)
+            ):
+                counts[(REASON_CODE, relative)] += 1
         found = (
             sum(1 for _ in _legacy_state_literals(tree, docstrings))
             if any(
@@ -344,9 +404,178 @@ def scan_typescript(
         if relative in TYPESCRIPT_GENERATED or _TYPESCRIPT_TEST.search(relative):
             continue
         for match in _TYPESCRIPT_STRING.finditer(path.read_text(encoding="utf-8")):
-            if match.group(2) in DISTINCTIVE_WORDS:
+            if (
+                match.group(2) in DISTINCTIVE_WORDS
+                or match.group(2) in REASON_CODE_WORDS
+            ):
                 counts[relative] += 1
     return counts
+
+
+#: The Controller is where reasons are raised; the CLI only renders them.
+CODE_POSITION_ROOT = "control/src"
+_CODE_NAME = re.compile(r"^(code|reason_code|[a-z0-9_]+_code|[A-Z0-9_]+_CODE)$")
+#: Names ending in ``_code`` that are not reason codes (HTTP and process statuses).
+_NOT_REASON_CODE_NAMES = frozenset(
+    {"status_code", "exit_code", "return_code", "http_code", "returncode"}
+)
+
+
+def _is_code_name(name: str) -> bool:
+    return bool(_CODE_NAME.match(name)) and name.lower() not in _NOT_REASON_CODE_NAMES
+
+
+def _string_leaves(node: ast.AST | None) -> Iterator[ast.expr]:
+    """String constants and f-strings an expression can evaluate to."""
+
+    if (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value
+        or isinstance(node, ast.JoinedStr)
+    ):
+        yield node
+    elif isinstance(node, ast.IfExp):
+        yield from _string_leaves(node.body)
+        yield from _string_leaves(node.orelse)
+    elif isinstance(node, ast.BoolOp):
+        for value in node.values:
+            yield from _string_leaves(value)
+
+
+def _code_parameter_index(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> int | None:
+    arguments = [*function.args.posonlyargs, *function.args.args]
+    if arguments and arguments[0].arg in {"self", "cls"}:
+        arguments = arguments[1:]
+    for index, argument in enumerate(arguments):
+        if _is_code_name(argument.arg):
+            return index
+    return None
+
+
+def scan_code_positions(
+    files: Iterable[Path] | None = None, root: Path = REPO_ROOT
+) -> list[str]:
+    """Every string constant in a position that names a code, as ``path:line: why``."""
+
+    paths = (
+        list(files)
+        if files is not None
+        else sorted((REPO_ROOT / CODE_POSITION_ROOT).rglob("*.py"))
+    )
+    trees = {
+        path: ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for path in paths
+    }
+    class_index: dict[str, int] = {}
+    class_bases: dict[str, list[str]] = {}
+    own_init: set[str] = set()
+    for tree in trees.values():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            class_bases[node.name] = [
+                base.id if isinstance(base, ast.Name) else ast.unparse(base)
+                for base in node.bases
+            ]
+            for member in node.body:
+                if isinstance(member, ast.FunctionDef) and member.name == "__init__":
+                    own_init.add(node.name)
+                    index = _code_parameter_index(member)
+                    if index is not None:
+                        class_index[node.name] = index
+
+    def class_code_index(name: str, seen: frozenset[str] = frozenset()) -> int | None:
+        if name in class_index:
+            return class_index[name]
+        if name in own_init:
+            # Its own constructor takes no code (it passes a fixed one up), so a
+            # string given to it is a detail, not a code.
+            return None
+        for base in class_bases.get(name, ()):
+            if base not in seen:
+                found = class_code_index(base, seen | {name})
+                if found is not None:
+                    return found
+        return None
+
+    found: list[str] = []
+
+    def report(path: Path, leaf: ast.expr, why: str) -> None:
+        relative = path.relative_to(root).as_posix()
+        found.append(f"{relative}:{leaf.lineno}: {why}: {ast.unparse(leaf)[:60]}")
+
+    for path, tree in trees.items():
+        functions = {
+            node.name: index
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name != "__init__"
+            and (index := _code_parameter_index(node)) is not None
+        }
+        scopes = [tree, *(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef))]
+        for scope in scopes:
+            for statement in scope.body:
+                targets: list[ast.expr] = []
+                if isinstance(statement, ast.Assign):
+                    targets = statement.targets
+                elif isinstance(statement, ast.AnnAssign):
+                    targets = [statement.target]
+                for target in targets:
+                    if isinstance(target, ast.Name) and _is_code_name(target.id):
+                        value = getattr(statement, "value", None)
+                        for leaf in _string_leaves(value):
+                            report(path, leaf, f"attribute {target.id}")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if (
+                        isinstance(target, ast.Attribute)
+                        and isinstance(target.value, ast.Name)
+                        and target.value.id == "self"
+                        and _is_code_name(target.attr)
+                    ):
+                        for leaf in _string_leaves(node.value):
+                            report(path, leaf, f"self.{target.attr}")
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                arguments = [*node.args.posonlyargs, *node.args.args]
+                defaults = node.args.defaults
+                for argument, default in zip(
+                    arguments[len(arguments) - len(defaults) :], defaults, strict=True
+                ):
+                    if _is_code_name(argument.arg):
+                        for leaf in _string_leaves(default):
+                            report(path, leaf, f"default of {argument.arg}")
+            elif isinstance(node, ast.Call):
+                function = node.func
+                name = (
+                    function.id
+                    if isinstance(function, ast.Name)
+                    else function.attr
+                    if isinstance(function, ast.Attribute)
+                    else None
+                )
+                for keyword in node.keywords:
+                    if keyword.arg and _is_code_name(keyword.arg):
+                        for leaf in _string_leaves(keyword.value):
+                            report(path, leaf, f"{name}({keyword.arg}=)")
+                if name is None:
+                    continue
+                index = (
+                    0
+                    if name == "make_blocker"
+                    else class_code_index(name)
+                    if name in class_bases
+                    else functions.get(name)
+                    if isinstance(function, ast.Name)
+                    else None
+                )
+                if index is not None and len(node.args) > index:
+                    for leaf in _string_leaves(node.args[index]):
+                        report(path, leaf, f"code argument of {name}")
+    return sorted(set(found))
 
 
 def load_baseline() -> dict[str, dict[str, int]]:
@@ -402,6 +631,25 @@ def problems(
     return found
 
 
+def flat_problems(
+    counts: Counter[tuple[str, str]], positions: Iterable[str]
+) -> list[str]:
+    """The flat tiers: every reason-code literal and every free-string code position."""
+
+    found = [
+        f"{path}: {n} reason-code literal(s); use the member of the "
+        f"vonk_agent_protocol.reason_codes enum instead of spelling the word"
+        for (tier, path), n in sorted(counts.items())
+        if tier == REASON_CODE
+    ]
+    found.extend(
+        f"{position} (a code is a member of a vonk_agent_protocol.reason_codes "
+        f"enum, never a string; add the code to its domain enum first)"
+        for position in positions
+    )
+    return found
+
+
 def lowered_baseline(
     counts: Counter[tuple[str, str]], baseline: dict[str, dict[str, int]]
 ) -> dict[str, dict[str, int]]:
@@ -441,7 +689,11 @@ def main(argv: list[str]) -> int:
         for (tier, path), n in sorted(counts.items()):
             print(f"{tier}\t{n}\t{path}")
         return 0
-    found = floor_problems(counts) + problems(counts, load_baseline())
+    found = (
+        floor_problems(counts)
+        + problems(counts, load_baseline())
+        + flat_problems(counts, scan_code_positions())
+    )
     for line in found:
         print(line)
     return 1 if found else 0

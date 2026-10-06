@@ -1055,6 +1055,12 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AdmissionCode
+         * @description The shared admission lock refused because capacity is held by another admission.
+         * @enum {string}
+         */
+        AdmissionCode: "admission.capacity_busy";
+        /**
          * AgentFailureKind
          * @enum {string}
          */
@@ -1338,6 +1344,12 @@ export interface components {
             /** Reserved Input Names */
             reserved_input_names: string[];
         };
+        /**
+         * ArtifactLifecycleCode
+         * @description Why an artifact (model file, image archive, blob) cannot be removed, referenced or changed right now.
+         * @enum {string}
+         */
+        ArtifactLifecycleCode: "artifact.asset_availability_unknown" | "artifact.deletion_busy" | "artifact.deletion_fence_lost" | "artifact.deletion_in_progress" | "artifact.reference_busy" | "artifact.reference_changed" | "artifact.reference_identity_mismatch" | "artifact.reference_scan_failed" | "artifact.reference_scan_limited" | "artifact.reference_timeout" | "artifact.reference_unavailable" | "artifact.removal_owner_invalid" | "artifact.removal_owner_unresolved";
         /** ArtifactOutputContract */
         ArtifactOutputContract: {
             /** Max Total Bytes */
@@ -1623,6 +1635,12 @@ export interface components {
             state: "available" | "missing" | "unknown";
         };
         /**
+         * CacheReferenceReason
+         * @description What keeps a cached artifact from being removed.
+         * @enum {string}
+         */
+        CacheReferenceReason: "recipe-installation" | "running-model" | "saved-profile";
+        /**
          * CacheRemovalAsset
          * @description One exact cache identity and its owner-reported storage condition.
          */
@@ -1747,6 +1765,12 @@ export interface components {
             /** Unified Memory Bytes */
             unified_memory_bytes: number;
         };
+        /**
+         * CatalogCode
+         * @description Refusals of the recipe catalog and the recipe library documents.
+         * @enum {string}
+         */
+        CatalogCode: "catalog.actor" | "catalog.candidate_exists" | "catalog.conflict" | "catalog.document_exists" | "catalog.document_invalid" | "catalog.document_missing" | "catalog.head_missing" | "catalog.identities" | "catalog.identity_changed" | "catalog.insufficient_role" | "catalog.invalid_request" | "catalog.model_artifact_missing" | "catalog.model_reference_invalid" | "catalog.model_reference_missing" | "catalog.not_candidate" | "catalog.not_found" | "catalog.recipe_invalid" | "catalog.reference" | "catalog.reference_missing" | "catalog.request_failed" | "catalog.revision_missing" | "catalog.stale_revision" | "catalog.unavailable" | "recipe_library.document_invalid" | "recipe_library.hash_mismatch" | "recipe_library.model_document_invalid" | "recipe_library.package_handle_invalid" | "recipe_library.release_invalid" | "recipe_library.source_invalid" | "recipe_release.signature_invalid";
         /** CatalogProblem */
         CatalogProblem: {
             /** Code */
@@ -1756,6 +1780,18 @@ export interface components {
             /** Request Id */
             request_id: string;
         };
+        /**
+         * CatalogSyncCode
+         * @description Catalog synchronisation refusals and per-item problems.
+         * @enum {string}
+         */
+        CatalogSyncCode: "catalog.sync_actor_invalid" | "catalog.sync_commit_invalid" | "catalog.sync_failed" | "catalog.sync_identity_changed" | "catalog.sync_in_progress" | "catalog.sync_item_failed" | "catalog.sync_lease_expired" | "catalog.sync_model_failed" | "catalog.sync_not_found" | "catalog.sync_prebuilt_images_failed" | "catalog.sync_preview_changed" | "catalog.sync_repository_changed" | "catalog.sync_request_invalid" | "catalog.sync_request_reused" | "catalog.sync_result_unreadable" | "catalog.sync_revision_changed" | "catalog.sync_state_invalid" | "catalog.sync_trigger_invalid" | "recipe.topology_changed";
+        /**
+         * ClusterMappingCode
+         * @description Refusals of a cluster mapping (recipe-to-Spark assignment) request.
+         * @enum {string}
+         */
+        ClusterMappingCode: "mapping.actor" | "mapping.endpoint_owner" | "mapping.node_count" | "mapping.node_incompatible" | "mapping.node_unknown" | "mapping.nodes_invalid" | "mapping.option_invalid" | "mapping.parameter_type" | "mapping.parameter_unknown" | "mapping.parameter_value" | "mapping.parameters_invalid" | "mapping.ready_immutable" | "mapping.recipe_unresolved" | "mapping.stale_plan" | "mapping.topology_invalid";
         /**
          * CompatibilityIdentity
          * @description Immutable inputs for an exceptional reusable preparation artifact.
@@ -1873,6 +1909,18 @@ export interface components {
             /** Verified Sha256 */
             verified_sha256?: string | null;
         };
+        /**
+         * ControllerErrorCode
+         * @description Generic Controller request and fleet-operation problem codes.
+         * @enum {string}
+         */
+        ControllerErrorCode: "controller.conflict" | "controller.fleet.revocation_uncertain" | "controller.fleet.upgrade_conflict" | "controller.http_" | "controller.internal_error" | "controller.invalid_request" | "controller.not_found" | "controller.request_too_large" | "controller.unavailable";
+        /**
+         * DistributionCode
+         * @description Why a distribution assignment object cannot be served to a Spark.
+         * @enum {string}
+         */
+        DistributionCode: "distribution.assignment_conflict" | "distribution.expired" | "distribution.model_set_identity_unavailable" | "distribution.model_set_mismatch" | "distribution.object_invalid" | "distribution.object_unavailable" | "distribution.runtime_image_mismatch" | "distribution.unassigned" | "distribution.wrong_node";
         /**
          * DistributionObject
          * @description One model file referenced by an assignment.
@@ -2504,8 +2552,7 @@ export interface components {
             step_results?: {
                 [key: string]: components["schemas"]["FleetProfileStepResult"];
             };
-            /** Supersede Code */
-            supersede_code?: ("superseded-by-retry" | "superseded-by-intent" | "effects-changed-during-admission") | null;
+            supersede_code?: components["schemas"]["SupersedeCode"] | null;
             /** Superseded By */
             superseded_by?: string | null;
             switch_adapter?: components["schemas"]["FleetProfileSwitchAdapterState"] | null;
@@ -2557,8 +2604,7 @@ export interface components {
             /** Profile Id */
             profile_id: string;
             progress: components["schemas"]["FleetProfileApplicationProgress"];
-            /** Reason Code */
-            reason_code?: ("superseded-by-retry" | "superseded-by-intent" | "effects-changed-during-admission") | null;
+            reason_code?: components["schemas"]["SupersedeCode"] | null;
             /** Request Key */
             request_key: string;
             result: components["schemas"]["FleetProfileApplicationResult"] | null;
@@ -3564,6 +3610,24 @@ export interface components {
             repository: string;
         };
         /**
+         * ImageStoreCode
+         * @description Refusals and damage found by the Controller OCI image store.
+         * @enum {string}
+         */
+        ImageStoreCode: "image_store.busy" | "image_store.collection_deferred" | "image_store.copy_failed" | "image_store.damaged_receipt_evicted" | "image_store.digest_invalid" | "image_store.import_incomplete" | "image_store.manifest_corrupt" | "image_store.manifest_invalid" | "image_store.manifest_unreadable" | "image_store.manifest_unsupported" | "image_store.reference_scan_failed" | "image_store.reference_unpinned" | "image_store.referenced_manifest_damaged";
+        /**
+         * InstallAdmissionCode
+         * @description Why an installation is not admitted (or is waiting) on a Spark.
+         * @enum {string}
+         */
+        InstallAdmissionCode: "install.agent_upgrade_required" | "install.artifact_size_underdeclared" | "install.artifact_store_read_only" | "install.capacity_busy" | "install.compiled_plan_unavailable" | "install.dependencies_stale" | "install.image_distribution_pending" | "install.image_size_underdeclared" | "install.insufficient_disk" | "install.inventory_missing" | "install.model_identity_unavailable" | "install.plan_invalid" | "install.plan_stale" | "install.stale_inventory";
+        /**
+         * InstallDegradedReason
+         * @description Why an installation is shown partial in the fleet projection.
+         * @enum {string}
+         */
+        InstallDegradedReason: "external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "installation-not-installed" | "rank-not-installed" | "rank-incomplete-bytes";
+        /**
          * InstallPartialEvidence
          * @description Why one recipe installation group on a Spark is not complete.
          */
@@ -3590,11 +3654,7 @@ export interface components {
              * @enum {string}
              */
             rank_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
-            /**
-             * Reason
-             * @enum {string}
-             */
-            reason: "external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "installation-not-installed" | "rank-not-installed" | "rank-incomplete-bytes";
+            reason: components["schemas"]["InstallDegradedReason"];
             /** Recipe Id */
             recipe_id: string;
             /** Recipe Revision Id */
@@ -3890,6 +3950,12 @@ export interface components {
         JsonValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
             [key: string]: components["schemas"]["JsonValue"];
         } | null;
+        /**
+         * LibraryAssessmentCode
+         * @description Why a library entry is not assessed runnable on the current fleet.
+         * @enum {string}
+         */
+        LibraryAssessmentCode: "library.assessment_unavailable" | "library.cache_missing" | "library.capacity_unavailable" | "library.insufficient_nodes";
         /** LibraryFacetValues */
         LibraryFacetValues: {
             /** Alignment */
@@ -4036,6 +4102,12 @@ export interface components {
             /** Version */
             version: string;
         };
+        /**
+         * LibraryProjectionCode
+         * @description Reasons the library projection truncates what it lists.
+         * @enum {string}
+         */
+        LibraryProjectionCode: "projection.evidence_truncated" | "projection.reasons_truncated";
         /** LibraryRecipeIdentity */
         LibraryRecipeIdentity: {
             /** Content Sha256 */
@@ -4418,6 +4490,12 @@ export interface components {
             targets: components["schemas"]["TargetAssetState"][];
         };
         /**
+         * ModelCacheBlockerCode
+         * @description Why a model download plan is blocked or waiting.
+         * @enum {string}
+         */
+        ModelCacheBlockerCode: "insufficient-reserved-storage" | "model-not-cached" | "recipe-not-cached";
+        /**
          * ModelCacheCancellation
          * @description Durable record of the one accepted cancellation request.
          */
@@ -4441,6 +4519,12 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /**
+         * ModelCacheCode
+         * @description Model cache resolution, storage, removal and operation problems.
+         * @enum {string}
+         */
+        ModelCacheCode: "model_cache.access_recheck_unavailable" | "model_cache.artifact_count" | "model_cache.artifact_duplicate" | "model_cache.artifact_invalid" | "model_cache.artifact_missing" | "model_cache.artifact_unverified" | "model_cache.cancellation_invalid" | "model_cache.cancellation_key_reused" | "model_cache.capacity" | "model_cache.coverage_incomplete" | "model_cache.credentials_missing" | "model_cache.cursor_invalid" | "model_cache.dependency_count" | "model_cache.digest_invalid" | "model_cache.digest_mismatch" | "model_cache.digest_size_conflict" | "model_cache.document_unreadable" | "model_cache.download_blocked" | "model_cache.entry_missing" | "model_cache.fixture_sources_forbidden" | "model_cache.identity_conflict" | "model_cache.identity_mismatch" | "model_cache.interrupted" | "model_cache.lock_unavailable" | "model_cache.manifest_identity_mismatch" | "model_cache.manifest_invalid" | "model_cache.manifest_too_large" | "model_cache.model_content_digests_invalid" | "model_cache.model_definition_invalid" | "model_cache.model_definition_missing" | "model_cache.model_dependency_cycle" | "model_cache.model_pin_invalid" | "model_cache.model_variant_invalid" | "model_cache.not_cancellable" | "model_cache.object_busy" | "model_cache.operation_failed" | "model_cache.operation_missing" | "model_cache.operation_not_observable" | "model_cache.operation_not_retryable" | "model_cache.operation_unreadable" | "model_cache.payload_invalid" | "model_cache.pin_mismatch" | "model_cache.pin_required" | "model_cache.plan_invalid" | "model_cache.range_invalid" | "model_cache.rate_limited" | "model_cache.recipe_identity_ambiguous" | "model_cache.recipe_identity_invalid" | "model_cache.recipe_identity_missing" | "model_cache.recipe_invalid" | "model_cache.recipe_model_missing" | "model_cache.recipe_revision_invalid" | "model_cache.recipe_revision_missing" | "model_cache.redirect_forbidden" | "model_cache.release_asset_identity_conflict" | "model_cache.release_metadata_invalid" | "model_cache.removal_child_failed" | "model_cache.removal_child_invalid" | "model_cache.removal_child_mismatch" | "model_cache.removal_child_missing" | "model_cache.removal_child_pending" | "model_cache.removal_invalid" | "model_cache.removal_path_unsafe" | "model_cache.removal_plan_invalid" | "model_cache.removal_referenced" | "model_cache.removal_scope_changed" | "model_cache.removal_scope_invalid" | "model_cache.removal_scope_unavailable" | "model_cache.removal_wait" | "model_cache.request_key_invalid" | "model_cache.request_key_reused" | "model_cache.review_invalid" | "model_cache.review_unavailable" | "model_cache.revision_invalid" | "model_cache.revision_missing" | "model_cache.schema_unsupported" | "model_cache.selector_ambiguous" | "model_cache.selector_invalid" | "model_cache.selector_missing" | "model_cache.source_invalid" | "model_cache.source_size_mismatch" | "model_cache.source_truncated" | "model_cache.source_unavailable" | "model_cache.source_unsupported" | "model_cache.source_untrusted" | "model_cache.stale_plan" | "model_cache.unavailable" | "model_cache.upstream_check_budget_exhausted" | "model_cache.upstream_check_failed" | "model_cache.upstream_revision_invalid";
         /** ModelCacheDownloadResult */
         ModelCacheDownloadResult: {
             /** Artifact Set Sha256 */
@@ -4760,8 +4844,7 @@ export interface components {
             last_seen_age_seconds: number | null;
             /** Last Seen At */
             last_seen_at: string | null;
-            /** Offline Reason */
-            offline_reason: ("unregistered" | "agent-inactive" | "agent-revoked" | "never-seen" | "last-seen-in-future" | "stale" | "certificate-missing" | "certificate-not-yet-valid" | "certificate-expired" | "certificate-revoked" | "certificate-inactive") | null;
+            offline_reason: components["schemas"]["NodeOfflineReason"] | null;
             /**
              * Online State
              * @enum {string}
@@ -4803,6 +4886,12 @@ export interface components {
             /** Plan Digest */
             plan_digest: string;
         };
+        /**
+         * NodeOfflineReason
+         * @description Why a node is shown offline in the fleet projection.
+         * @enum {string}
+         */
+        NodeOfflineReason: "unregistered" | "agent-inactive" | "agent-revoked" | "never-seen" | "last-seen-in-future" | "stale" | "certificate-missing" | "certificate-not-yet-valid" | "certificate-expired" | "certificate-revoked" | "certificate-inactive";
         /** NodeProfileChange */
         NodeProfileChange: {
             /** Entity Id */
@@ -4913,6 +5002,12 @@ export interface components {
             /** Href */
             href: string;
         };
+        /**
+         * OperationFailureCode
+         * @description Error codes of a stored operation failure evidence record.
+         * @enum {string}
+         */
+        OperationFailureCode: "fleet_profile_application_failed" | "artifact_process_failed";
         /**
          * OperationFailureEvidence
          * @description Small, sanitized operator evidence safe to expose in status responses.
@@ -5141,6 +5236,12 @@ export interface components {
         };
         ParameterDefinition: components["schemas"]["StringParameter"] | components["schemas"]["IntegerParameter"] | components["schemas"]["FloatParameter"] | components["schemas"]["BooleanParameter"] | components["schemas"]["EnumParameter"];
         ParameterScalar: boolean | number | string;
+        /**
+         * PrebuiltImageCode
+         * @description Why a prebuilt runtime image is, or is not, used.
+         * @enum {string}
+         */
+        PrebuiltImageCode: "prebuilt.build_key_mismatch" | "prebuilt.not_pinned" | "prebuilt.pull_failed_recently" | "prebuilt.used";
         /** PreparationReason */
         PreparationReason: {
             /** Code */
@@ -5155,13 +5256,21 @@ export interface components {
              */
             severity: "blocker" | "warning" | "info";
         };
+        /**
+         * ProfileReasonCode
+         * @description Reasons a fleet profile cannot be applied or is waiting.
+         * @enum {string}
+         */
+        ProfileReasonCode: "profile.admission_busy" | "profile.admission_effect_busy" | "profile.application_intent.invalid" | "profile.choices_unreadable" | "profile.cleanup_delegated" | "profile.distributed_cross_scope" | "profile.failure_repeated" | "profile.incomplete_multi_spark_model" | "profile.interruption_expected" | "profile.pending_cross_scope" | "profile.preparation_not_started" | "profile.preparation_scope_mismatch" | "profile.preparation_unavailable" | "profile.recipe_unavailable" | "profile.recovery_assignments_changed" | "profile.recovery_cache_pending" | "profile.recovery_scope_changed" | "profile.recovery_waiting" | "profile.resource_recheck_unavailable" | "profile.retry_conflict" | "profile.retry_executor_unavailable" | "profile.retry_intent_unavailable" | "profile.retry_review_unavailable" | "profile.review_stale" | "profile.runtime_image_rebuild_pending" | "profile.shared_installation_scope" | "profile.spark_removed" | "profile.spark_unavailable" | "profile.stale_plan" | "profile.switch_authority_unavailable" | "profile.switch_scope_unresolved" | "profile.topology_incomplete" | "profile.recovery_artifact_changed" | "profile.runtime-image-changed" | "profile.selection_lost" | "profile.asset_reservation_unavailable";
+        /**
+         * ProjectionCode
+         * @description Warnings and attention items of the fleet and library projections.
+         * @enum {string}
+         */
+        ProjectionCode: "cpu.low-clock" | "install.partial" | "inventory.missing" | "inventory.stale" | "network.nas-route-wifi-no-wired-port" | "network.nas-route-wifi-wired-port-down" | "network.nas-route-wifi-wired-port-unused" | "node.offline" | "profile.retrying" | "recipe.update_available" | "run.degraded" | "telemetry.delayed" | "telemetry.missing" | "telemetry.stale";
         /** ProjectionReason */
         ProjectionReason: {
-            /**
-             * Code
-             * @enum {string}
-             */
-            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "profile.retrying" | "run.degraded" | "recipe.update_available" | "cpu.low-clock" | "network.nas-route-wifi-no-wired-port" | "network.nas-route-wifi-wired-port-down" | "network.nas-route-wifi-wired-port-unused";
+            code: components["schemas"]["ProjectionCode"];
             /** Detail */
             detail: string;
             install_partial?: components["schemas"]["InstallPartialEvidence"] | null;
@@ -5172,6 +5281,56 @@ export interface components {
              * @enum {string}
              */
             severity: "info" | "warning" | "error";
+        };
+        /**
+         * ReasonCodeVocabulary
+         * @description Carrier that publishes every reason-code enum into the wire schema.
+         *
+         *     The model is never sent: it exists so the schema exporter, the Rust
+         *     generator and the OpenAPI/TypeScript generators emit each closed word set
+         *     from this one module.
+         */
+        ReasonCodeVocabulary: {
+            admission_code: components["schemas"]["AdmissionCode"];
+            artifact_lifecycle_code: components["schemas"]["ArtifactLifecycleCode"];
+            cache_reference_reason: components["schemas"]["CacheReferenceReason"];
+            catalog_code: components["schemas"]["CatalogCode"];
+            catalog_sync_code: components["schemas"]["CatalogSyncCode"];
+            cluster_mapping_code: components["schemas"]["ClusterMappingCode"];
+            controller_error_code: components["schemas"]["ControllerErrorCode"];
+            distribution_code: components["schemas"]["DistributionCode"];
+            image_store_code: components["schemas"]["ImageStoreCode"];
+            install_admission_code: components["schemas"]["InstallAdmissionCode"];
+            install_degraded_reason: components["schemas"]["InstallDegradedReason"];
+            library_assessment_code: components["schemas"]["LibraryAssessmentCode"];
+            library_projection_code: components["schemas"]["LibraryProjectionCode"];
+            model_cache_blocker_code: components["schemas"]["ModelCacheBlockerCode"];
+            model_cache_code: components["schemas"]["ModelCacheCode"];
+            node_offline_reason: components["schemas"]["NodeOfflineReason"];
+            operation_failure_code: components["schemas"]["OperationFailureCode"];
+            prebuilt_image_code: components["schemas"]["PrebuiltImageCode"];
+            profile_reason_code: components["schemas"]["ProfileReasonCode"];
+            projection_code: components["schemas"]["ProjectionCode"];
+            recipe_build_code: components["schemas"]["RecipeBuildCode"];
+            recipe_image_code: components["schemas"]["RecipeImageCode"];
+            recipe_operation_code: components["schemas"]["RecipeOperationCode"];
+            recipe_package_code: components["schemas"]["RecipePackageCode"];
+            recipe_update_code: components["schemas"]["RecipeUpdateCode"];
+            reconcile_code: components["schemas"]["ReconcileCode"];
+            resource_planning_code: components["schemas"]["ResourcePlanningCode"];
+            resource_term: components["schemas"]["ResourceTerm"];
+            resource_term_problem: components["schemas"]["ResourceTermProblem"];
+            run_degraded_reason: components["schemas"]["RunDegradedReason"];
+            run_switch_code: components["schemas"]["RunSwitchCode"];
+            runtime_image_code: components["schemas"]["RuntimeImageCode"];
+            runtime_preflight_code: components["schemas"]["RuntimePreflightCode"];
+            source_bundle_code: components["schemas"]["SourceBundleCode"];
+            source_policy_code: components["schemas"]["SourcePolicyCode"];
+            stop_plan_code: components["schemas"]["StopPlanCode"];
+            storage_demand_code: components["schemas"]["StorageDemandCode"];
+            supersede_code: components["schemas"]["SupersedeCode"];
+            topology_code: components["schemas"]["TopologyCode"];
+            uninstall_plan_code: components["schemas"]["UninstallPlanCode"];
         };
         /**
          * RecipeAlternative
@@ -5206,6 +5365,12 @@ export interface components {
          * @description The build service is stopped; the fenced attempt is the whole answer.
          */
         RecipeBuildCleanupEvidence: Record<string, never>;
+        /**
+         * RecipeBuildCode
+         * @description Recipe image build planning and recording problems.
+         * @enum {string}
+         */
+        RecipeBuildCode: "build.adapter_unavailable" | "build.cancellation_pending" | "build.capability_missing" | "build.capacity_busy" | "build.capacity_contract_invalid" | "build.consumer_busy" | "build.consumer_invalid" | "build.contract_invalid" | "build.dependencies_stale" | "build.evidence_invalid" | "build.image_size_invalid" | "build.input_mismatch" | "build.insufficient_disk" | "build.insufficient_memory" | "build.inventory_missing" | "build.inventory_stale" | "build.network_capability_missing" | "build.node_incompatible" | "build.node_unknown" | "build.plan_invalid" | "build.producer_invalid" | "build.recipe_unresolved" | "build.resolution_stale" | "build.resources_invalid" | "build.result_conflict" | "build.runtime_changed" | "build.security_invalid" | "build.source_invalid" | "build.source_unavailable" | "build.state" | "build.shared_consumers";
         /** RecipeBuildDefinition */
         RecipeBuildDefinition: {
             base_image: components["schemas"]["RecipeImage"];
@@ -5504,6 +5669,12 @@ export interface components {
              */
             schema_version: 2;
         };
+        /**
+         * RecipeImageCode
+         * @description Runtime image availability, preparation and cache-removal problems.
+         * @enum {string}
+         */
+        RecipeImageCode: "recipe_image.action_invalid" | "recipe_image.build_cancelled" | "recipe_image.build_capacity_wait" | "recipe_image.build_failed" | "recipe_image.build_input_missing" | "recipe_image.build_invalid" | "recipe_image.build_unavailable" | "recipe_image.build_wait" | "recipe_image.builder_busy" | "recipe_image.builder_occupied" | "recipe_image.cancel_busy" | "recipe_image.cancel_request_key_reused" | "recipe_image.cancellation_invalid" | "recipe_image.claim_lost" | "recipe_image.database_busy" | "recipe_image.identity_conflict" | "recipe_image.identity_invalid" | "recipe_image.insufficient_disk" | "recipe_image.insufficient_memory" | "recipe_image.metadata_refresh_failed" | "recipe_image.metadata_refresh_unavailable" | "recipe_image.model_cache_failed" | "recipe_image.model_cache_invalid" | "recipe_image.model_cache_unavailable" | "recipe_image.model_child_cancelled" | "recipe_image.model_child_missing" | "recipe_image.no_builder" | "recipe_image.not_cancellable" | "recipe_image.not_retryable" | "recipe_image.operation_invalid" | "recipe_image.operation_missing" | "recipe_image.preparation_failed" | "recipe_image.preparing" | "recipe_image.recipe_invalid" | "recipe_image.recipe_unavailable" | "recipe_image.removal_choice_invalid" | "recipe_image.removal_failed" | "recipe_image.removal_referenced" | "recipe_image.removal_scope_limited" | "recipe_image.request_key_reused" | "recipe_image.runtime_invalid" | "recipe_image.selector_ambiguous" | "recipe_image.selector_invalid" | "recipe_image.selector_missing" | "recipe_image.source_policy_refused" | "recipe_image.superseded_by_newer_revision" | "recipe_image.waiting_for_model" | "recipe_image.waiting_for_worker";
         /** RecipeInputSlot */
         RecipeInputSlot: {
             /** Description */
@@ -5741,6 +5912,12 @@ export interface components {
             /** Recovery */
             recovery?: "retry creates a new operation" | null;
         };
+        /**
+         * RecipeOperationCode
+         * @description Recipe operation conflicts.
+         * @enum {string}
+         */
+        RecipeOperationCode: "recipe.operation_conflict";
         /** RecipeOperatorRequest */
         RecipeOperatorRequest: {
             /** Request Key */
@@ -5852,6 +6029,12 @@ export interface components {
             /** Min Files */
             min_files: number;
         };
+        /**
+         * RecipePackageCode
+         * @description Recipe package download and verification problems.
+         * @enum {string}
+         */
+        RecipePackageCode: "recipe_package.cache_unavailable" | "recipe_package.digest_mismatch" | "recipe_package.document_incompatible" | "recipe_package.extract_invalid" | "recipe_package.not_found" | "recipe_package.package_invalid" | "recipe_package.release_incomplete" | "recipe_package.release_invalid" | "recipe_package.response_invalid" | "recipe_package.schema_incompatible" | "recipe_package.snapshot_changed" | "recipe_package.unavailable" | "recipe_package.uri_invalid" | "recipe_package.url_insecure" | "recipe_package.url_invalid";
         /** RecipeParallelism */
         RecipeParallelism: {
             /** Backend */
@@ -5869,8 +6052,7 @@ export interface components {
             affected_ranks?: number[];
             /** Complete */
             complete: boolean;
-            /** Degraded Reason */
-            degraded_reason?: ("external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "installation-not-installed" | "rank-not-installed" | "rank-incomplete-bytes") | null;
+            degraded_reason?: components["schemas"]["InstallDegradedReason"] | null;
             /** Expected Rank Count */
             expected_rank_count: number;
             /**
@@ -6177,6 +6359,12 @@ export interface components {
             state: "pending" | "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
         };
         /**
+         * RecipeUpdateCode
+         * @description Recipe update batch problems.
+         * @enum {string}
+         */
+        RecipeUpdateCode: "recipe_update.claim_lost" | "recipe_update.observation_invalid" | "recipe_update.operation_invalid" | "recipe_update.request_key_reused" | "recipe_update.scope_invalid" | "recipe-update.cancel-effect-unknown";
+        /**
          * RecipeUpdateFailure
          * @description Bounded admission failure or observation of the referenced child's failure.
          */
@@ -6313,6 +6501,12 @@ export interface components {
             request: components["schemas"]["RecipeHttpServingRequest"] | components["schemas"]["RecipeJobServingRequest"];
         };
         /**
+         * ReconcileCode
+         * @description Why an installation reconcile is blocked.
+         * @enum {string}
+         */
+        ReconcileCode: "reconcile.active_effect_unknown" | "reconcile.agent_unavailable" | "reconcile.capacity_busy" | "reconcile.install_provenance_mismatch" | "reconcile.install_provenance_unavailable" | "reconcile.installation_effect_unknown" | "reconcile.installation_identity_mismatch" | "reconcile.installation_identity_unavailable" | "reconcile.membership_changed" | "reconcile.operation_active" | "reconcile.rank_membership_changed" | "reconcile.recipe_revision_unavailable" | "reconcile.spec_identity_mismatch";
+        /**
          * RemovedRecipeNodeResult
          * @description Result emitted by the Controller's logical uninstall projection.
          */
@@ -6381,6 +6575,24 @@ export interface components {
             weights_bytes?: number | null;
         };
         /**
+         * ResourcePlanningCode
+         * @description Resource planning (memory, disk, parallelism) refusals and unknowns.
+         * @enum {string}
+         */
+        ResourcePlanningCode: "resource.estimate_uncertain" | "resource.evidence_invalid" | "resource.evidence_unknown" | "resource.knobs_invalid" | "resource.parallelism_duplicate" | "resource.parallelism_inconsistent" | "resource.parallelism_type" | "resource.parallelism_unknown" | "resource.settings_kind_unknown" | "resource.settings_type" | "resource.settings_unknown" | "resource.stop_release_unknown" | "resource.context_unknown" | "resource.context_evidence_invalid" | "resource.context_unsupported" | "resource.context_evidence_unknown" | "resource.concurrency_unknown" | "resource.concurrency_evidence_invalid" | "resource.concurrency_unsupported" | "resource.concurrency_evidence_unknown" | "resource.batch_unknown" | "resource.batch_evidence_invalid" | "resource.batch_unsupported" | "resource.batch_evidence_unknown";
+        /**
+         * ResourceTerm
+         * @description The effective settings whose capacity cost the resource planner derives.
+         * @enum {string}
+         */
+        ResourceTerm: "context" | "concurrency" | "batch";
+        /**
+         * ResourceTermProblem
+         * @description What is wrong with the evidence for one resource term.
+         * @enum {string}
+         */
+        ResourceTermProblem: "unknown" | "evidence_invalid" | "unsupported" | "evidence_unknown";
+        /**
          * RolloutPreparation
          * @description Normalized preparation identity shared by profiles, Run, web and CLI.
          */
@@ -6417,6 +6629,12 @@ export interface components {
          * @enum {string}
          */
         RunAdmissionCode: "run.plan_invalid" | "run.plan_stale" | "run.dependencies_stale" | "run.capacity_busy" | "run.target_membership_changed" | "run.mapping_not_ready" | "run.inventory_missing" | "run.stale_inventory" | "run.insufficient_memory" | "run.port_occupied" | "run.rendezvous_port_occupied" | "run.unreconciled_lost_rank" | "run.not_installed" | "run.fabric_address_missing" | "run.fabric_address_duplicate";
+        /**
+         * RunDegradedReason
+         * @description Why a run is shown degraded in the fleet projection.
+         * @enum {string}
+         */
+        RunDegradedReason: "external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "run-not-running" | "rank-not-running" | "rank-stale" | "route-not-published";
         /**
          * RunMemoryResidualRange
          * @description Possible remaining bytes for one exact active run reservation.
@@ -6486,8 +6704,7 @@ export interface components {
         RunPresence: {
             /** Alias */
             alias: string;
-            /** Degraded Reason */
-            degraded_reason?: ("external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "run-not-running" | "rank-not-running" | "rank-stale" | "route-not-published") | null;
+            degraded_reason?: components["schemas"]["RunDegradedReason"] | null;
             /** Expected Rank Count */
             expected_rank_count: number;
             /**
@@ -6736,6 +6953,12 @@ export interface components {
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
         };
+        /**
+         * RunSwitchCode
+         * @description Run/Switch phase blockers, waits and failure codes.
+         * @enum {string}
+         */
+        RunSwitchCode: "run-switch.active-run-conflict" | "run-switch.advance-failed" | "run-switch.agent-upgrade-required" | "run-switch.artifact-identity-unknown" | "run-switch.artifact-inspection-unavailable" | "run-switch.artifact-manifest-unknown" | "run-switch.artifact-phase-executor-unavailable" | "run-switch.artifact-verification-result-invalid" | "run-switch.cleanup-reclaim-evidence-invalid" | "run-switch.cleanup-reclaimed-bytes-exceed-plan" | "run-switch.cleanup-reference-protection-evidence-invalid" | "run-switch.cleanup-reference-protection-overlap" | "run-switch.cleanup-scope-invalid" | "run-switch.container-build-evidence-invalid" | "run-switch.container-build-executor-unavailable" | "run-switch.container-build-identity-unavailable" | "run-switch.container-build-parent-changed" | "run-switch.container-build-parent-invalid" | "run-switch.container-build-plan-invalid" | "run-switch.container-build-receipt-unavailable" | "run-switch.container-build-required" | "run-switch.container-build-state-invalid" | "run-switch.container-build-unavailable" | "run-switch.cross-group_conflict" | "run-switch.disk-envelope-invalid" | "run-switch.disk-eviction-planned" | "run-switch.effect-uncertain" | "run-switch.final-verification" | "run-switch.final-verification-clock-invalid" | "run-switch.final-verification-failed" | "run-switch.final-verification-timeout" | "run-switch.final-verification-unavailable" | "run-switch.install-executor-unavailable" | "run-switch.install-preparation-unavailable" | "run-switch.installation-handoff-unavailable" | "run-switch.installation-identity-changed" | "run-switch.installation-identity-unavailable" | "run-switch.installation-membership-changed" | "run-switch.installation-preparation-unavailable" | "run-switch.installation-verification-failed" | "run-switch.installation-verification-unavailable" | "run-switch.insufficient-disk" | "run-switch.insufficient-memory" | "run-switch.interface-invalid" | "run-switch.inventory-stale" | "run-switch.inventory-unknown" | "run-switch.mapping_group_mismatch" | "run-switch.mapping_invalid" | "run-switch.mapping_materialization_unavailable" | "run-switch.memory-envelope-invalid" | "run-switch.model-download-artifact-set-mismatch" | "run-switch.model-download-byte-evidence-mismatch" | "run-switch.model-download-coverage-incomplete" | "run-switch.model_recipe_mismatch" | "run-switch.model_revision_unavailable" | "run-switch.nas-coverage-unknown" | "run-switch.nas-download-blocked" | "run-switch.nas-download-required" | "run-switch.option_invalid" | "run-switch.phase-retry" | "run-switch.plan-refresh-unavailable" | "run-switch.plan-targets-changed" | "run-switch.post-stop-inventory-pending" | "run-switch.post-stop-memory-pool-changed" | "run-switch.preflight-recipe-changed" | "run-switch.prepare-subphase-unsupported" | "run-switch.profile.incomplete_multi_spark_model" | "run-switch.profile_stop_scope_changed" | "run-switch.receipt_invalid" | "run-switch.recipe-build-compatibility-unknown" | "run-switch.recipe-build-incompatible" | "run-switch.recipe-build-unavailable" | "run-switch.recipe_dependencies_unavailable" | "run-switch.recipe_digest_changed" | "run-switch.recipe_unresolved" | "run-switch.reconciliation-assessment-unavailable" | "run-switch.reconciliation-authority-unavailable" | "run-switch.reconciliation-prerequisite" | "run-switch.reconciliation-receipts-retained" | "run-switch.reconciliation-state-verification-failed" | "run-switch.reconciliation-verification-failed" | "run-switch.request_key_reused_differently" | "run-switch.resource-contract-invalid" | "run-switch.resource.insufficient" | "run-switch.resource.insufficient_capacity" | "run-switch.resource.insufficient_capacity_after_stop" | "run-switch.resource.insufficient_reservation_budget" | "run-switch.resource.resident_usage_unknown" | "run-switch.run-not-active" | "run-switch.run_admission_blocked" | "run-switch.run_admission_unavailable" | "run-switch.runtime-build-verification-mismatch" | "run-switch.runtime-image-authorization-mismatch" | "run-switch.runtime-image-executor-unavailable" | "run-switch.runtime-image-owner-changed" | "run-switch.runtime-image-preparation-layout-mismatch" | "run-switch.runtime-image-preparation-receipt-invalid" | "run-switch.runtime-image-preparing" | "run-switch.runtime-image-reference-identity-mismatch" | "run-switch.runtime-image-waiting-without-child" | "run-switch.spark-unavailable" | "run-switch.start-observation" | "run-switch.start-observation-expired" | "run-switch.start_installation_unavailable" | "run-switch.stop-plan-unavailable" | "run-switch.stop-still-unresolved-after-cancellation" | "run-switch.stop-target-disappeared" | "run-switch.stopped-run-identity-changed" | "run-switch.stopped-run-membership-changed" | "run-switch.target-not-active" | "run-switch.transfer-byte-evidence-invalid" | "run-switch.uninstall-assessment-unavailable" | "run-switch.uninstall-blocked" | "run-switch.uninstall-issued-prerequisite" | "run-switch.uninstall_target_unavailable" | "run-switch.waiting" | "run-switch.reason-unclassified" | "run-switch.cancel-effect-unknown" | "run-switch.container-build-start-unavailable" | "run-switch.distributed-recovery-active" | "run-switch.final-owner-state-unknown" | "run-switch.final-verification-expired" | "run-switch.install-plan-unavailable" | "run-switch.install-preflight-expired" | "run-switch.install-preparation-failed" | "run-switch.install-start-failed" | "run-switch.installation-handoff-inconsistent" | "run-switch.plan_blocked" | "run-switch.reconciliation-start-failed" | "run-switch.route-health-recovery-active" | "run-switch.route-owner-failed" | "run-switch.route-publication-pending" | "run-switch.route-withdrawn-owner-unknown" | "run-switch.run-owner-active" | "run-switch.run-owner-terminal" | "run-switch.stale_plan" | "run-switch.stop-verification-pending" | "run-switch.superseded" | "run-switch.uninstall-abandon-failed" | "run-switch.uninstall-start-failed" | "run-switch.recipe.stop-issued-pending" | "run-switch.recipe.install-issued-pending" | "run-switch.recipe.uninstall-issued-pending" | "run-switch.recipe.reconcile-issued-pending" | "run-switch.artifact-job-cancellation-issued-pending" | "run-switch.transfer-executor-unavailable" | "run-switch.transfer-waiting-without-child" | "run-switch.transfer-returned-no-evidence" | "run-switch.verify-executor-unavailable" | "run-switch.verify-waiting-without-child" | "run-switch.verify-returned-no-evidence" | "run-switch.cleanup-executor-unavailable" | "run-switch.cleanup-waiting-without-child" | "run-switch.cleanup-returned-no-evidence" | "run-switch.resource.capacity_unknown" | "run-switch.resource.estimate_uncertain" | "run-switch.resource.evidence_invalid" | "run-switch.resource.evidence_unknown" | "run-switch.resource.knobs_invalid" | "run-switch.resource.parallelism_duplicate" | "run-switch.resource.parallelism_inconsistent" | "run-switch.resource.parallelism_type" | "run-switch.resource.parallelism_unknown" | "run-switch.resource.settings_kind_unknown" | "run-switch.resource.settings_type" | "run-switch.resource.settings_unknown" | "run-switch.resource.stop_release_unknown" | "run-switch.reconcile.active_effect_unknown" | "run-switch.reconcile.agent_unavailable" | "run-switch.reconcile.capacity_busy" | "run-switch.reconcile.install_provenance_mismatch" | "run-switch.reconcile.install_provenance_unavailable" | "run-switch.reconcile.installation_effect_unknown" | "run-switch.reconcile.installation_identity_mismatch" | "run-switch.reconcile.installation_identity_unavailable" | "run-switch.reconcile.membership_changed" | "run-switch.reconcile.operation_active" | "run-switch.reconcile.rank_membership_changed" | "run-switch.reconcile.recipe_revision_unavailable" | "run-switch.reconcile.spec_identity_mismatch" | "run-switch.stop.capacity_release_deferred" | "run-switch.stop.rank_membership_changed" | "run-switch.stop.reservation_membership_changed" | "run-switch.stop.run_not_stoppable" | "run-switch.stop.target_scope_changed" | "run-switch.uninstall.abandon-never-installed" | "run-switch.uninstall.active_run" | "run-switch.uninstall.active_runs_truncated" | "run-switch.uninstall.bytes_unknown" | "run-switch.uninstall.installation_not_uninstallable" | "run-switch.uninstall.operation_active" | "run-switch.uninstall.rank_membership_changed";
         /** RunSwitchContainerBuildResult */
         RunSwitchContainerBuildResult: {
             /** Build Id */
@@ -7577,6 +7800,12 @@ export interface components {
             [key: string]: components["schemas"]["JsonValue"];
         };
         /**
+         * RuntimeImageCode
+         * @description Runtime image preparation, receipt and registry problems.
+         * @enum {string}
+         */
+        RuntimeImageCode: "registry.destination_forbidden" | "registry.digest_mismatch" | "registry.redirect_forbidden" | "runtime_image.architecture_mismatch" | "runtime_image.architecture_missing" | "runtime_image.archive_conflict" | "runtime_image.archive_invalid" | "runtime_image.archive_mismatch" | "runtime_image.archive_size_mismatch" | "runtime_image.archive_unavailable" | "runtime_image.build_archive_digest" | "runtime_image.build_digest" | "runtime_image.build_id" | "runtime_image.build_incomplete" | "runtime_image.cache_missing" | "runtime_image.config_missing" | "runtime_image.digest_invalid" | "runtime_image.digest_mismatch" | "runtime_image.evidence_invalid" | "runtime_image.identity_invalid" | "runtime_image.image_unpinned" | "runtime_image.inspect_invalid" | "runtime_image.insufficient_disk" | "runtime_image.interface_mismatch" | "runtime_image.interface_missing" | "runtime_image.lock_unavailable" | "runtime_image.publication_contended" | "runtime_image.receipt_contract_newer" | "runtime_image.receipt_identity_conflict" | "runtime_image.receipt_identity_invalid" | "runtime_image.receipt_invalid" | "runtime_image.receipt_persistence_failed" | "runtime_image.receipt_unavailable" | "runtime_image.receipt_write_failed" | "runtime_image.recipe_invalid" | "runtime_image.reference_intent_invalid" | "runtime_image.removal_storage_failed" | "runtime_image.runtime_invalid" | "runtime_image.source_mismatch" | "runtime_image.transfer_contended";
+        /**
          * RuntimeImageIdentity
          * @description Executable OCI identity, independent of its transfer observations.
          */
@@ -7736,6 +7965,12 @@ export interface components {
              */
             spark_coverage: "complete" | "partial" | "unknown";
         };
+        /**
+         * RuntimePreflightCode
+         * @description Runtime preflight blockers.
+         * @enum {string}
+         */
+        RuntimePreflightCode: "runtime_preflight.child_missing" | "runtime_preflight.execution_failed" | "runtime_preflight.host_changed" | "runtime_preflight.node_revoked" | "runtime_preflight.operation_missing" | "runtime_preflight.receipt_invalid" | "runtime_preflight.receipt_missing" | "runtime_preflight.required" | "runtime_preflight.requirement_unknown" | "runtime_preflight.requirements_changed" | "runtime_preflight.stale" | "runtime_preflight.node_missing" | "runtime_preflight.capability_failed";
         /** RuntimePreflightFinding */
         RuntimePreflightFinding: {
             /** Capability */
@@ -7780,7 +8015,19 @@ export interface components {
          *     this enum, so the Controller and the contract cannot disagree.
          * @enum {string}
          */
-        SecurityRefusalReason: "401" | "403" | "agent.certificate.rotation.conflict" | "agent.enrollment.submit.rejected" | "agent.identity_mismatch" | "agent.tombstone_fenced" | "catalog.authentication_required" | "controller.authentication_required" | "controller.fleet.enrollment_denied" | "controller.request_rejected" | "distribution.revoked" | "forbidden" | "grant_invalid" | "grant_node_mismatch" | "grant_unauthorized" | "helper.authorization_invalid" | "helper_grant_invalid" | "helper_grant_node_mismatch" | "helper_grant_unauthorized" | "helper_operation_invalid_artifact" | "helper_peer_identity_invalid" | "helper_request_installation_identity_invalid" | "helper_request_plan_binding_invalid" | "helper_request_replayed" | "helper_runtime_image_identity_invalid" | "host_helper.authority_denied" | "local.identity_expired" | "local.identity_failed" | "model_cache.credentials_denied" | "model_cache.credentials_invalid" | "model_cache.source_access_denied" | "operation_invalid_artifact" | "peer_identity_invalid" | "permission_denied" | "recipe_update.authority_denied" | "request_replayed" | "run-switch.artifact-digest-verification-failed" | "run-switch.cleanup-nas-eviction-forbidden" | "run-switch.cleanup-reclaimed-digest-not-planned" | "run-switch.runtime-image-preparation-digest-mismatch" | "runtime_image.authorization_invalid" | "runtime_image.authorization_revoked" | "runtime_image_identity_invalid" | "tuf.metadata_invalid" | "tuf.signature_invalid" | "unauthorized";
+        SecurityRefusalReason: "401" | "403" | "agent.certificate.rotation.conflict" | "agent.enrollment.submit.rejected" | "agent.identity_mismatch" | "agent.tombstone_fenced" | "catalog.authentication_required" | "controller.authentication_required" | "controller.fleet.enrollment_denied" | "controller.request_rejected" | "digest_verification_failed" | "distribution.revoked" | "forbidden" | "grant_invalid" | "grant_node_mismatch" | "grant_unauthorized" | "helper.authorization_invalid" | "helper_grant_invalid" | "helper_grant_node_mismatch" | "helper_grant_unauthorized" | "helper_operation_invalid_artifact" | "helper_peer_identity_invalid" | "helper_request_installation_identity_invalid" | "helper_request_plan_binding_invalid" | "helper_request_replayed" | "helper_runtime_image_identity_invalid" | "host_helper.authority_denied" | "local.identity_expired" | "local.identity_failed" | "model_cache.credentials_denied" | "model_cache.credentials_invalid" | "model_cache.source_access_denied" | "operation_invalid_artifact" | "peer_identity_invalid" | "permission_denied" | "recipe_update.authority_denied" | "request_replayed" | "run-switch.artifact-digest-verification-failed" | "run-switch.cleanup-nas-eviction-forbidden" | "run-switch.cleanup-reclaimed-digest-not-planned" | "run-switch.runtime-image-preparation-digest-mismatch" | "runtime_image.authorization_invalid" | "runtime_image.authorization_revoked" | "runtime_image_identity_invalid" | "stale_fence" | "tuf.metadata_invalid" | "tuf.signature_invalid" | "unauthorized" | "unsafe_path";
+        /**
+         * SourceBundleCode
+         * @description Recipe source bundle validation problems.
+         * @enum {string}
+         */
+        SourceBundleCode: "bundle.archive_too_large" | "bundle.digest_invalid" | "bundle.digest_mismatch" | "bundle.duplicate_path" | "bundle.empty" | "bundle.entry_forbidden" | "bundle.expanded_too_large" | "bundle.file_invalid" | "bundle.file_too_large" | "bundle.invalid_archive" | "bundle.manifest_invalid" | "bundle.metadata_mismatch" | "bundle.not_found" | "bundle.path_forbidden" | "bundle.path_too_long" | "bundle.read_failed" | "bundle.size_mismatch" | "bundle.storage_collision" | "bundle.storage_conflict" | "bundle.storage_unavailable" | "bundle.too_many_files" | "source.digest_mismatch";
+        /**
+         * SourcePolicyCode
+         * @description Findings of the build source policy (Dockerfile and Compose rules).
+         * @enum {string}
+         */
+        SourcePolicyCode: "compose.capabilities" | "compose.devices" | "compose.host_bind" | "compose.host_namespace" | "compose.invalid" | "compose.privileged" | "compose.service_invalid" | "compose.too_large" | "compose.unconfined" | "compose.volumes_invalid" | "dockerfile.add_forbidden" | "dockerfile.base_placeholder" | "dockerfile.base_unpinned" | "dockerfile.build_privilege" | "dockerfile.copy_base_placeholder" | "dockerfile.copy_base_unpinned" | "dockerfile.copy_invalid" | "dockerfile.copy_path" | "dockerfile.from_missing" | "dockerfile.heredoc_forbidden" | "dockerfile.invalid_utf8" | "dockerfile.missing" | "dockerfile.network_host" | "dockerfile.onbuild_forbidden" | "dockerfile.root_user" | "dockerfile.secret_mount";
         /** SparkFit */
         SparkFit: {
             /** Allowed */
@@ -7893,6 +8140,18 @@ export interface components {
          * @enum {string}
          */
         StopOutcome: "confirmed" | "unconfirmed";
+        /**
+         * StopPlanCode
+         * @description Why a stop plan is stale or cannot be taken.
+         * @enum {string}
+         */
+        StopPlanCode: "stop.capacity_release_deferred" | "stop.rank_membership_changed" | "stop.reservation_membership_changed" | "stop.run_not_stoppable" | "stop.target_scope_changed";
+        /**
+         * StorageDemandCode
+         * @description Storage demand outcomes of an admission.
+         * @enum {string}
+         */
+        StorageDemandCode: "storage.evicting" | "storage.insufficient_after_eviction";
         /** StringParameter */
         StringParameter: {
             /** Allowed Values */
@@ -7913,6 +8172,12 @@ export interface components {
              */
             type: "string";
         };
+        /**
+         * SupersedeCode
+         * @description Why a fleet profile application was superseded by newer intent.
+         * @enum {string}
+         */
+        SupersedeCode: "superseded-by-intent" | "superseded-by-retry" | "effects-changed-during-admission";
         /**
          * TargetAssetState
          * @description Staging and verification state for one immutable asset on one Spark.
@@ -7995,6 +8260,18 @@ export interface components {
             freshness: "live" | "delayed" | "stale";
             sample: components["schemas"]["TelemetryPoint"];
         };
+        /**
+         * TopologyCode
+         * @description Topology planning refusals.
+         * @enum {string}
+         */
+        TopologyCode: "topology.fabric_insufficient" | "topology.invalid" | "topology.placement_invalid" | "topology.role_mismatch" | "topology.runtime_capability_missing";
+        /**
+         * UninstallPlanCode
+         * @description Why an uninstall plan is blocked or incomplete.
+         * @enum {string}
+         */
+        UninstallPlanCode: "uninstall.abandon-never-installed" | "uninstall.active_run" | "uninstall.active_runs_truncated" | "uninstall.bytes_unknown" | "uninstall.installation_not_uninstallable" | "uninstall.operation_active" | "uninstall.rank_membership_changed";
         /**
          * UnknownError
          * @description Anything else: observed and reconciled, never parked.

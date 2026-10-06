@@ -11,13 +11,22 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
+    RecipeBuildCode,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
+    canonical_message,
+)
 from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
@@ -38,6 +47,8 @@ from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
+from .categorized_errors import InvalidType, MissingRecord
+from .categorized_faults import security_reason
 from .content_identity import reusable_build
 from .disk_reservations import outstanding_disk_reservation_bytes
 from .inventory_repository import InventoryRepository, InventorySnapshotView
@@ -170,7 +181,11 @@ def _resolved_adapter(projected: RecipeRevisionProjection) -> RuntimeAdapter:
             projected.runtime_engine, projected.topology.model_dump(mode="json")
         )
     except RuntimeAdapterError as error:
-        raise RecipeBuildError("build.adapter_unavailable", str(error)) from error
+        raise RecipeBuildInvalid(
+            RecipeBuildCode.ADAPTER_UNAVAILABLE,
+            str(error),
+            reason=InvalidRequestReason.NOT_FOUND,
+        ) from error
 
 
 def _build_effective_settings(value: object | None) -> dict[str, object] | None:
@@ -201,11 +216,13 @@ def _build_effective_settings(value: object | None) -> dict[str, object] | None:
 def _canonical_recipe_document(value: object) -> dict[str, object]:
     try:
         if not isinstance(value, Mapping):
-            raise TypeError("stored recipe is not a JSON object")
+            raise InvalidType("stored recipe is not a JSON object")
         read_recipe(value)
     except (TypeError, ValueError) as error:
-        raise RecipeBuildError(
-            "build.contract_invalid", "stored recipe does not satisfy RecipeDefinition"
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.CONTRACT_INVALID,
+            "stored recipe does not satisfy RecipeDefinition",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
     return dict(value)
 
@@ -239,7 +256,7 @@ def _canonical_model_build_inputs(
             or not isinstance(size, int)
             or isinstance(size, bool)
         ):
-            raise TypeError(
+            raise InvalidType(
                 "model build inputs require canonical path, sha256, and size"
             )
         projected.append({"path": path, "sha256": digest, "download_bytes": size})
@@ -268,8 +285,10 @@ def canonical_build(
     execution = document.get("execution")
     build = execution.get("build") if isinstance(execution, Mapping) else None
     if not isinstance(build, Mapping):
-        raise RecipeBuildError(
-            "build.contract_invalid", "canonical execution.build is unavailable"
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.CONTRACT_INVALID,
+            "canonical execution.build is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     compiled = {**build, "dockerfile": _bundle_dockerfile_path(build)}
     if compile_policy:
@@ -311,8 +330,10 @@ def _source_bundle_handle(projected: RecipeRevisionProjection) -> str:
     """
     candidate = projected.source_bundle_sha256
     if candidate is None or _SHA256.fullmatch(candidate) is None:
-        raise RecipeBuildError(
-            "build.source_unavailable", "catalog package handle is unavailable"
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.SOURCE_UNAVAILABLE,
+            "catalog package handle is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     return candidate
 
@@ -324,18 +345,18 @@ def _canonical_build_resources(
     resources = projected.build_resources
     security = projected.build_security
     if resources is None:
-        raise RecipeBuildError(
-            "build.resources_invalid",
+        raise RecipeBuildInvalid(
+            RecipeBuildCode.RESOURCES_INVALID,
             "canonical runtime compiler did not publish a build resource envelope",
         )
     if security is None:
-        raise RecipeBuildError(
-            "build.security_invalid",
+        raise RecipeBuildInvalid(
+            RecipeBuildCode.SECURITY_INVALID,
             "canonical runtime compiler did not publish a build security envelope",
         )
     if any(not isinstance(item, str) or not item for item in security.capabilities):
-        raise RecipeBuildError(
-            "build.security_invalid", "canonical build capabilities are invalid"
+        raise RecipeBuildInvalid(
+            RecipeBuildCode.SECURITY_INVALID, "canonical build capabilities are invalid"
         )
     return resources, security
 
@@ -349,8 +370,8 @@ def _source_policy_document(
     context = build.get("context")
     context_path = context.get("path") if isinstance(context, Mapping) else None
     if not isinstance(context_path, str):
-        raise RecipeBuildError(
-            "build.source_invalid", "canonical build context path is invalid"
+        raise RecipeBuildInvalid(
+            RecipeBuildCode.SOURCE_INVALID, "canonical build context path is invalid"
         )
     normalized_build = {
         "context": {"path": context_path, "sha256": source_sha256},
@@ -410,7 +431,50 @@ class RecipeBuildError(ValueError):
         super().__init__(detail)
 
 
-class RecipeSourcePolicyError(RecipeBuildError):
+class RecipeBuildRefused(SecurityRefusalError, RecipeBuildError):
+    """A refusal at a security boundary: build evidence or dependencies that do not match the authorized build."""
+
+    def __init__(
+        self,
+        *args: Any,
+        reason: SecurityRefusalReason | None = None,
+        **fields: Any,
+    ) -> None:
+        RecipeBuildError.__init__(self, *args, **fields)
+        self.typed_reason = (
+            reason if reason is not None else security_reason(args[0] if args else None)
+        )
+
+
+class RecipeBuildInvalid(InvalidRequestError, RecipeBuildError):
+    """A malformed or out-of-contract build request, source or resource declaration."""
+
+    def __init__(
+        self,
+        *args: Any,
+        reason: InvalidRequestReason | None = InvalidRequestReason.MALFORMED,
+        field: str | None = None,
+        **fields: Any,
+    ) -> None:
+        RecipeBuildError.__init__(self, *args, **fields)
+        self.typed_reason = reason
+        self.typed_field = field
+
+
+class RecipeBuildUnknown(UnknownOutcomeError, RecipeBuildError):
+    """Missing or stale inventory, capacity or bookkeeping: the owner observes it again; never a refusal."""
+
+    def __init__(
+        self,
+        *args: Any,
+        reason: WaitReason | None = None,
+        **fields: Any,
+    ) -> None:
+        RecipeBuildError.__init__(self, *args, **fields)
+        self.typed_reason = reason
+
+
+class RecipeSourcePolicyError(InvalidRequestError, RecipeBuildError):
     """The recipe's stored build source violates the Controller's source policy.
 
     Retrying cannot change the answer: only a different source bundle can.  The
@@ -424,8 +488,8 @@ class RecipeSourcePolicyError(RecipeBuildError):
         self.report = report
 
 
-class RecipeBuildAdmissionBusy(RecipeBuildError):
-    code = "build.capacity_busy"
+class RecipeBuildAdmissionBusy(UnknownOutcomeError, RecipeBuildError):
+    code = RecipeBuildCode.CAPACITY_BUSY
 
     def __init__(self) -> None:
         super().__init__(self.code, "builder capacity writer is busy")
@@ -437,14 +501,16 @@ def _read_recipe_projection(
     try:
         projected = read_catalog_projection(revision)
     except CatalogRevisionContractError as error:
-        raise RecipeBuildError(
-            "build.contract_invalid",
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.CONTRACT_INVALID,
             "stored recipe catalog projection is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
     if not isinstance(projected, RecipeRevisionProjection):
-        raise RecipeBuildError(
-            "build.contract_invalid",
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.CONTRACT_INVALID,
             "stored recipe catalog projection is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     return projected
 
@@ -500,8 +566,10 @@ class RecipeBuildResolution:
     def build_input_for_builder(self, binary_digest: str) -> str:
         """Bind canonical executable intent to an accepted builder identity."""
         if _SHA256.fullmatch(binary_digest) is None:
-            raise RecipeBuildError(
-                "build.plan_invalid", "recorded builder identity is invalid"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.PLAN_INVALID,
+                "recorded builder identity is invalid",
+                reason=WaitReason.STALE_PLAN,
             )
         return _digest(self.input_intent | {"builder_binary_digest": binary_digest})
 
@@ -601,23 +669,26 @@ class RecipeBuildService:
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
             if revision is None:
-                raise KeyError(recipe_revision_id)
+                raise MissingRecord(recipe_revision_id)
             if revision.kind != "recipe" or revision.state != "active":
-                raise RecipeBuildError(
-                    "build.recipe_unresolved", "only a resolved recipe can be checked"
+                raise RecipeBuildInvalid(
+                    RecipeBuildCode.RECIPE_UNRESOLVED,
+                    "only a resolved recipe can be checked",
                 )
             projected = _read_recipe_projection(revision)
             document = _canonical_recipe_document(revision.document)
             build = _canonical_build(document, projected)
             source_sha256 = _source_bundle_handle(projected)
             if session.get(RecipeSourceBundle, source_sha256) is None:
-                raise RecipeBuildError(
-                    "build.source_unavailable", "verified source bundle is unavailable"
+                raise RecipeBuildUnknown(
+                    RecipeBuildCode.SOURCE_UNAVAILABLE,
+                    "verified source bundle is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
         try:
             bundle = self._bundles.get(source_sha256)
         except SourceBundleError as error:
-            raise RecipeBuildError(error.code, str(error)) from error
+            raise RecipeBuildUnknown(error.code, str(error)) from error
         return inspect_build_source_policy(
             _source_policy_document(document, build, source_sha256), bundle
         )
@@ -634,10 +705,11 @@ class RecipeBuildService:
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
             if revision is None:
-                raise KeyError(recipe_revision_id)
+                raise MissingRecord(recipe_revision_id)
             if revision.kind != "recipe" or revision.state != "active":
-                raise RecipeBuildError(
-                    "build.recipe_unresolved", "only a resolved recipe can be built"
+                raise RecipeBuildInvalid(
+                    RecipeBuildCode.RECIPE_UNRESOLVED,
+                    "only a resolved recipe can be built",
                 )
             projected = _read_recipe_projection(revision)
             document = _canonical_recipe_document(revision.document)
@@ -645,8 +717,10 @@ class RecipeBuildService:
             adapter = _resolved_adapter(projected)
             source_sha256 = _source_bundle_handle(projected)
             if session.get(RecipeSourceBundle, source_sha256) is None:
-                raise RecipeBuildError(
-                    "build.source_unavailable", "verified source bundle is unavailable"
+                raise RecipeBuildUnknown(
+                    RecipeBuildCode.SOURCE_UNAVAILABLE,
+                    "verified source bundle is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
 
         try:
@@ -655,7 +729,7 @@ class RecipeBuildService:
                 _source_policy_document(document, build, source_sha256), bundle
             )
         except SourceBundleError as error:
-            raise RecipeBuildError(error.code, str(error)) from error
+            raise RecipeBuildUnknown(error.code, str(error)) from error
         except SourcePolicyError as error:
             raise RecipeSourcePolicyError(error.report) from error
 
@@ -666,8 +740,9 @@ class RecipeBuildService:
             else None
         )
         if dockerfile_payload is None:
-            raise RecipeBuildError(
-                "build.source_invalid", "recipe Dockerfile authority is unavailable"
+            raise RecipeBuildInvalid(
+                RecipeBuildCode.SOURCE_INVALID,
+                "recipe Dockerfile authority is unavailable",
             )
         base_images = list(dockerfile_base_images(dockerfile_payload))
         _canonical_build_resources(projected)
@@ -841,25 +916,31 @@ class RecipeBuildService:
                 builder_node_id, now=now, maximum_age=self._inventory_max_age
             )
         except KeyError as error:
-            raise RecipeBuildError(
-                "build.inventory_missing", "fresh builder inventory is unavailable"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.INVENTORY_MISSING,
+                "fresh builder inventory is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         if snapshot.stale:
-            raise RecipeBuildError(
-                "build.inventory_stale", "builder inventory is stale"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.INVENTORY_STALE,
+                "builder inventory is stale",
+                reason=WaitReason.STALE_PLAN,
             )
         if "recipe.build.v1" not in snapshot.capabilities:
-            raise RecipeBuildError(
-                "build.capability_missing",
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.CAPABILITY_MISSING,
                 "builder does not support typed recipe builds",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         if (
             public_network
             and "recipe.build.egress-proxy.v1" not in snapshot.capabilities
         ):
-            raise RecipeBuildError(
-                "build.network_capability_missing",
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.NETWORK_CAPABILITY_MISSING,
                 "fresh builder inventory does not prove the hostname-aware build egress boundary",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         with self._sessions() as session:
             disk_reserved = outstanding_disk_reservation_bytes(
@@ -876,14 +957,16 @@ class RecipeBuildService:
                     disk_reserved + disk_needed,
                     source="build",
                     subject=builder_node_id,
-                    reason="build.insufficient_disk",
+                    reason=RecipeBuildCode.INSUFFICIENT_DISK,
                 )
-            raise RecipeBuildError(
-                "build.insufficient_disk", "builder lacks temporary disk capacity"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.INSUFFICIENT_DISK,
+                "builder lacks temporary disk capacity",
             )
         if memory_available < memory_bytes:
-            raise RecipeBuildError(
-                "build.insufficient_memory", "builder lacks build memory capacity"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.INSUFFICIENT_MEMORY,
+                "builder lacks build memory capacity",
             )
 
     def _usable_prebuilt(
@@ -961,16 +1044,19 @@ class RecipeBuildService:
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
             if revision is None:
-                raise KeyError(recipe_revision_id)
+                raise MissingRecord(recipe_revision_id)
             if revision.kind != "recipe" or revision.state != "active":
-                raise RecipeBuildError(
-                    "build.recipe_unresolved", "only a resolved recipe can be built"
+                raise RecipeBuildInvalid(
+                    RecipeBuildCode.RECIPE_UNRESOLVED,
+                    "only a resolved recipe can be built",
                 )
             projected = _read_recipe_projection(revision)
             node = session.get(AgentNode, builder_node_id)
             if node is None:
-                raise RecipeBuildError(
-                    "build.node_unknown", "builder GPU node is unknown"
+                raise RecipeBuildUnknown(
+                    RecipeBuildCode.NODE_UNKNOWN,
+                    "builder GPU node is unknown",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             _validate_builder(node)
             document = _canonical_recipe_document(revision.document)
@@ -984,8 +1070,10 @@ class RecipeBuildService:
             builder_binary_digest = node.binary_digest
             stored = session.get(RecipeSourceBundle, source_sha256)
             if stored is None:
-                raise RecipeBuildError(
-                    "build.source_unavailable", "verified source bundle is unavailable"
+                raise RecipeBuildUnknown(
+                    RecipeBuildCode.SOURCE_UNAVAILABLE,
+                    "verified source bundle is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
         try:
             bundle = self._bundles.get(source_sha256)
@@ -993,7 +1081,7 @@ class RecipeBuildService:
                 _source_policy_document(document, build, source_sha256), bundle
             )
         except SourceBundleError as error:
-            raise RecipeBuildError(error.code, str(error)) from error
+            raise RecipeBuildUnknown(error.code, str(error)) from error
         except SourcePolicyError as error:
             raise RecipeSourcePolicyError(error.report) from error
         dockerfile_path = build.get("dockerfile") if isinstance(build, dict) else None
@@ -1003,8 +1091,9 @@ class RecipeBuildService:
             else None
         )
         if dockerfile_payload is None:
-            raise RecipeBuildError(
-                "build.source_invalid", "recipe Dockerfile authority is unavailable"
+            raise RecipeBuildInvalid(
+                RecipeBuildCode.SOURCE_INVALID,
+                "recipe Dockerfile authority is unavailable",
             )
         base_images = list(dockerfile_base_images(dockerfile_payload))
         prebuilt, prebuilt_decision = self._usable_prebuilt(
@@ -1083,8 +1172,8 @@ class RecipeBuildService:
                 or resolution.source_bundle_sha256 != source_sha256
                 or resolution.input_intent_sha256 != _digest(intent)
             ):
-                raise RecipeBuildError(
-                    "build.resolution_stale",
+                raise RecipeBuildRefused(
+                    RecipeBuildCode.RESOLUTION_STALE,
                     "immutable build resolution no longer matches the recipe",
                 )
         proposed_build_id = str(uuid.uuid4())
@@ -1136,8 +1225,10 @@ class RecipeBuildService:
             payload = build_plan_document(payload)
             policy_document = build_policy_document(policy_document)
         except RecipeExecutionContractError as error:
-            raise RecipeBuildError(
-                "build.contract_invalid", "source build envelope is invalid"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.CONTRACT_INVALID,
+                "source build envelope is invalid",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         return RecipeBuildPlan(
             build_id=proposed_build_id,
@@ -1212,26 +1303,35 @@ class RecipeBuildService:
         except AdmissionLockBusy as error:
             raise RecipeBuildAdmissionBusy() from error
         if node is None:
-            raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.NODE_UNKNOWN,
+                "builder GPU node is unknown",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         _validate_builder(node)
         policy_document = plan.policy_report
         if not isinstance(policy_document, dict):
-            raise RecipeBuildError(
-                "build.plan_invalid", "prepared source build policy is unavailable"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.PLAN_INVALID,
+                "prepared source build policy is unavailable",
+                reason=WaitReason.STALE_PLAN,
             )
         try:
             policy = parse_stored_build_policy(policy_document)
         except RecipeExecutionContractError as error:
-            raise RecipeBuildError(
-                "build.plan_invalid",
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.PLAN_INVALID,
                 "prepared source build policy is invalid" + error.detail,
+                reason=WaitReason.STALE_PLAN,
             ) from error
         if (
             policy.prebuilt_image is None
             and policy.builder_binary_digest != node.binary_digest
         ):
-            raise RecipeBuildError(
-                "build.runtime_changed", "builder runtime identity changed"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.RUNTIME_CHANGED,
+                "builder runtime identity changed",
+                reason=WaitReason.SCOPE_CHANGED,
             )
         existing = session.scalar(
             select(RecipeBuild).where(
@@ -1293,9 +1393,10 @@ class RecipeBuildService:
                     # An in-flight attempt owns this row, so its stored
                     # envelope is not stale metadata this planner may rewrite
                     # underneath it.  Fail closed and name the bad field.
-                    raise RecipeBuildError(
-                        "build.plan_invalid",
+                    raise RecipeBuildUnknown(
+                        RecipeBuildCode.PLAN_INVALID,
                         "stored source build envelope is invalid" + error.detail,
+                        reason=WaitReason.STALE_PLAN,
                     ) from error
                 # The stored envelope no longer satisfies the current contract
                 # (an engine marker an older removal path wrote, or a field an
@@ -1323,9 +1424,10 @@ class RecipeBuildService:
         try:
             payload = build_plan_document(payload)
         except RecipeExecutionContractError as error:
-            raise RecipeBuildError(
-                "build.plan_invalid",
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.PLAN_INVALID,
                 "stored source build plan is invalid" + error.detail,
+                reason=WaitReason.STALE_PLAN,
             ) from error
         return RecipeBuildPlan(
             build_id=existing.id,
@@ -1356,16 +1458,17 @@ class RecipeBuildService:
             or isinstance(image_bytes, bool)
             or image_bytes < 1
         ):
-            raise RecipeBuildError(
-                "build.evidence_invalid", "build result evidence is invalid"
+            raise RecipeBuildRefused(
+                RecipeBuildCode.EVIDENCE_INVALID, "build result evidence is invalid"
             )
         with self._sessions.begin() as session:
             build = session.get(RecipeBuild, build_id, with_for_update=True)
             if build is None:
-                raise KeyError(build_id)
+                raise MissingRecord(build_id)
             if build.build_input_sha256 != build_input_sha256:
-                raise RecipeBuildError(
-                    "build.input_mismatch", "build result does not match its inputs"
+                raise RecipeBuildRefused(
+                    RecipeBuildCode.INPUT_MISMATCH,
+                    "build result does not match its inputs",
                 )
             if build.state == "succeeded":
                 if (
@@ -1373,12 +1476,13 @@ class RecipeBuildService:
                     or build.oci_layout_sha256 != oci_layout_sha256
                     or build.image_bytes != image_bytes
                 ):
-                    raise RecipeBuildError(
-                        "build.result_conflict", "build already has different evidence"
+                    raise RecipeBuildRefused(
+                        RecipeBuildCode.RESULT_CONFLICT,
+                        "build already has different evidence",
                     )
             elif build.state not in {"planned", "building"}:
-                raise RecipeBuildError(
-                    "build.state", "failed build cannot accept success evidence"
+                raise RecipeBuildRefused(
+                    RecipeBuildCode.STATE, "failed build cannot accept success evidence"
                 )
             else:
                 build.state = "succeeded"
@@ -1411,8 +1515,8 @@ class RecipeBuildService:
         except RecipeBuildError:
             raise
         except ValueError as error:
-            raise RecipeBuildError(
-                "build.capacity_contract_invalid", str(error)
+            raise RecipeBuildInvalid(
+                RecipeBuildCode.CAPACITY_CONTRACT_INVALID, str(error)
             ) from error
         except OperationalError as error:
             code = getattr(error.orig, "sqlstate", None) or getattr(
@@ -1461,21 +1565,24 @@ class RecipeBuildService:
             or revision.state != "active"
             or revision.content_digest != plan.recipe_content_sha256
         ):
-            raise RecipeBuildError(
-                "build.dependencies_stale", "exact recipe dependencies changed"
+            raise RecipeBuildRefused(
+                RecipeBuildCode.DEPENDENCIES_STALE, "exact recipe dependencies changed"
             )
         if build is None:
-            raise RecipeBuildError(
-                "build.plan_invalid", "stored build identity is invalid"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.PLAN_INVALID,
+                "stored build identity is invalid",
+                reason=WaitReason.STALE_PLAN,
             )
         try:
             stored_policy = parse_stored_build_policy(build.policy_report)
             parse_stored_build_plan(build.plan)
             requested_plan = parse_stored_build_plan(plan.agent_payload)
         except RecipeExecutionContractError as error:
-            raise RecipeBuildError(
-                "build.plan_invalid",
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.PLAN_INVALID,
                 "stored source build envelope is invalid" + error.detail,
+                reason=WaitReason.STALE_PLAN,
             ) from error
         expected_binary_digest = stored_policy.builder_binary_digest
         expected_format = stored_policy.artifact_format
@@ -1486,33 +1593,49 @@ class RecipeBuildService:
             or requested_plan.build_id != plan.build_id
             or requested_plan.build_input_sha256 != plan.build_input_sha256
         ):
-            raise RecipeBuildError(
-                "build.plan_invalid", "stored build identity is invalid"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.PLAN_INVALID,
+                "stored build identity is invalid",
+                reason=WaitReason.STALE_PLAN,
             )
         try:
             snapshot = self._inventory.latest(
                 plan.builder_node_id, now=now, maximum_age=self._inventory_max_age
             )
         except KeyError as error:
-            raise RecipeBuildError(
-                "build.inventory_missing", "fresh builder inventory is unavailable"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.INVENTORY_MISSING,
+                "fresh builder inventory is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         if node is None:
-            raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.NODE_UNKNOWN,
+                "builder GPU node is unknown",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         _validate_builder(node)
         if node.binary_digest != expected_binary_digest:
-            raise RecipeBuildError(
-                "build.runtime_changed", "builder runtime identity changed"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.RUNTIME_CHANGED,
+                "builder runtime identity changed",
+                reason=WaitReason.SCOPE_CHANGED,
             )
         if snapshot.stale:
-            raise RecipeBuildError(
-                "build.inventory_stale", "builder inventory is stale"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.INVENTORY_STALE,
+                "builder inventory is stale",
+                reason=WaitReason.STALE_PLAN,
             )
         plan_payload = build_plan_document(requested_plan)
         limits = plan_payload.get("limits")
         source_bytes = plan_payload.get("source_bundle_bytes")
         if not isinstance(limits, dict) or not isinstance(source_bytes, int):
-            raise RecipeBuildError("build.plan_invalid", "build plan is invalid")
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.PLAN_INVALID,
+                "build plan is invalid",
+                reason=WaitReason.STALE_PLAN,
+            )
         temporary_bytes = limits.get("temporary_bytes")
         memory_bytes = limits.get("memory_bytes")
         output_bytes = limits.get("output_bytes")
@@ -1523,7 +1646,11 @@ class RecipeBuildService:
             or not isinstance(output_bytes, int)
             or not isinstance(base_image_storage_bytes, int)
         ):
-            raise RecipeBuildError("build.plan_invalid", "build plan is invalid")
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.PLAN_INVALID,
+                "build plan is invalid",
+                reason=WaitReason.STALE_PLAN,
+            )
         disk_bytes = _build_disk_envelope(
             base_image_bytes=base_image_storage_bytes,
             temporary_bytes=temporary_bytes,
@@ -1533,8 +1660,8 @@ class RecipeBuildService:
         if snapshot.disk_free_bytes - outstanding_disk_reservation_bytes(
             session, plan.builder_node_id, inventory_observed_at=snapshot.observed_at
         ) < disk_bytes + _build_disk_reserve(snapshot.disk_total_bytes):
-            raise RecipeBuildError(
-                "build.insufficient_disk", "builder disk capacity changed"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.INSUFFICIENT_DISK, "builder disk capacity changed"
             )
         if (
             _available_build_memory(
@@ -1542,8 +1669,8 @@ class RecipeBuildService:
             )
             < memory_bytes
         ):
-            raise RecipeBuildError(
-                "build.insufficient_memory", "builder memory capacity changed"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.INSUFFICIENT_MEMORY, "builder memory capacity changed"
             )
         session.add_all(
             (
@@ -1581,8 +1708,9 @@ def _validate_builder(node: AgentNode) -> None:
         or not isinstance(node.binary_digest, str)
         or _SHA256.fullmatch(node.binary_digest) is None
     ):
-        raise RecipeBuildError(
-            "build.node_incompatible", "builder GPU node is inactive or incompatible"
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.NODE_INCOMPATIBLE,
+            "builder GPU node is inactive or incompatible",
         )
 
 
@@ -1601,8 +1729,8 @@ def _declared_image_bytes(document: dict[str, object]) -> int:
     except RecipeRuntimeSpecError:
         values = []
     if not values or min(values) < 1 or max(values) > 16 * 1024**4:
-        raise RecipeBuildError(
-            "build.image_size_invalid",
+        raise RecipeBuildInvalid(
+            RecipeBuildCode.IMAGE_SIZE_INVALID,
             "recipe topology must declare a positive per-node image size",
         )
     return max(values)

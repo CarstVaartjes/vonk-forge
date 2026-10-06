@@ -3882,3 +3882,30 @@ def test_a_prompt_start_keeps_its_queued_deadline(service) -> None:
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     assert claim.payload["start_deadline"] == payload["start_deadline"]
+
+
+def test_agent_job_refusals_carry_their_category() -> None:
+    from vonk_agent_protocol import (
+        InvalidRequestError,
+        InvalidRequestReason,
+        SecurityRefusalError,
+        UnknownOutcomeError,
+    )
+    from vonk_control.agent_jobs import (
+        OperatorRetirementRefused,
+        StaleAgentAttempt,
+        StaleAgentFence,
+        StaleAgentLease,
+        StaleAgentRequest,
+    )
+
+    retired = OperatorRetirementRefused("op_1", "a live attempt still holds its lease")
+    assert isinstance(retired, InvalidRequestError)
+    assert isinstance(retired, ValueError)
+    assert retired.typed_reason is InvalidRequestReason.NOT_READY
+    assert retired.operation_id == "op_1"
+    assert isinstance(StaleAgentFence("x"), SecurityRefusalError)
+    assert isinstance(StaleAgentLease("x"), UnknownOutcomeError)
+    assert isinstance(StaleAgentRequest("x"), InvalidRequestError)
+    for stale in (StaleAgentFence, StaleAgentLease, StaleAgentRequest):
+        assert issubclass(stale, StaleAgentAttempt)
