@@ -54,6 +54,7 @@ from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeOperationConflict,
 )
+from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .runtime_identity_support import claim_agent
@@ -751,12 +752,14 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         planned_floor = planned_node.memory_floor_bytes
         # The recipe's 107-byte reserve is informational; the platform floor applies.
         assert planned_floor == 50
-        assert placement["memory_floor_bytes"] == planned_floor
+        # The compiled launch carries the platform floor, not the admission
+        # service's test override.
+        assert placement["memory_floor_bytes"] == PLATFORM_MEMORY_FLOOR_BYTES
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256
         compiled_plan = _mapping(operation.payload["compiled_execution_plan"])
         plan_runtime = _mapping(compiled_plan["runtime"])
         plan_placement = _mapping(plan_runtime["placement"])
-        assert plan_placement["memory_floor_bytes"] == planned_floor
+        assert plan_placement["memory_floor_bytes"] == PLATFORM_MEMORY_FLOOR_BYTES
         assert "fox / meadow" in _sequence(plan_runtime["argv"])
         assert operation.payload["output_mappings"] == [
             {

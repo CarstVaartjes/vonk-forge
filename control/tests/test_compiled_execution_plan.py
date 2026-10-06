@@ -45,6 +45,7 @@ from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
     _bind_compiled_execution_plan,
 )
+from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptWire,
@@ -652,6 +653,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     entrypoint = _mapping(roles[0])
     resources = _mapping(entrypoint["resources"])
     memory = _mapping(resources["memory"])
+    # The recipe reserve is informational; the compiled floor is the platform floor.
     memory["reserve_bytes"] = 32_000_007
     model_document = canonical_example("model-definition.json")
     model_digest = document_sha256(model_document)
@@ -774,7 +776,9 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     validate_compiled_launch_payload(payload)
     payload_wire = WireCompiledExecutionPlan.parse(payload)
     assert payload_wire.identity.model_artifact_set_sha256 == artifact_set_digest
-    assert payload_wire.runtime.placement.memory_floor_bytes == 32_000_007
+    assert (
+        payload_wire.runtime.placement.memory_floor_bytes == PLATFORM_MEMORY_FLOOR_BYTES
+    )
     assert payload_wire.artifacts[0].path == "model.safetensors"
     assert payload_wire.runtime_image.build_id == "build-1"
     assert "repository" not in json.dumps(payload, sort_keys=True)

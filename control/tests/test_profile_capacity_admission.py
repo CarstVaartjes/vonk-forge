@@ -64,10 +64,21 @@ def _occupying_ports(
     return tuple(str(port) for port in ENDPOINT_HOST_PORTS)
 
 
-def _capacity_profile(tmp_path, engine, *, node_count: int = 1):
+def _capacity_profile(
+    tmp_path, engine, *, node_count: int = 1, ample_memory: bool = False
+):
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=engine, nodes=node_count
     )
+    if ample_memory:
+        # The platform floor is 2 GB beyond the recipe's declared peak; a test
+        # about disk must not also be a test about the Spark's memory.
+        with sessions.begin() as session:
+            for snapshot in session.scalars(select(NodeInventorySnapshot)):
+                snapshot.host_memory_total_bytes = 64_000_000_000
+                snapshot.host_memory_free_bytes = 64_000_000_000
+                snapshot.gpu_memory_total_bytes = 64_000_000_000
+                snapshot.gpu_memory_free_bytes = 64_000_000_000
     profiles, planner = _profile_service(sessions, lifecycle)
     with sessions() as session:
         revision = session.scalar(
@@ -1177,7 +1188,7 @@ def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief):
     """A load whose Spark loses its free disk after the review accepted it."""
 
     sessions, profiles, _, profile, api, headers, _review, nodes = _capacity_profile(
-        tmp_path, None
+        tmp_path, None, ample_memory=True
     )
     profiles.bind_storage_relief(relief)
     original_queue = FleetProfileService._queue_application
