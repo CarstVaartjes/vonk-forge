@@ -72,7 +72,7 @@ DONE = {"kind": "done", "result": {"installed_bytes": 3}}
         ("succeeded", DONE, OutcomeDone),
         ("failed", FAILED, OutcomeFailed),
         ("cancelled", CANCELLED, OutcomeFailed),
-        ("waiting-for-operator", UNKNOWN, OutcomeUnknown),
+        ("observing", UNKNOWN, OutcomeUnknown),
     ],
 )
 def test_every_outcome_arm_round_trips_through_the_wire_result(
@@ -301,3 +301,9 @@ def test_an_existing_error_type_joins_a_category_without_changing_its_handlers()
     assert str(error) == "x.bad: nope" and error.code == "x.bad"
     with pytest.raises(ValueError, match="x.bad"):
         raise error
+
+
+def test_retired_unknown_spelling_is_adopted_on_read_only() -> None:
+    message = AgentResult.parse(_report("waiting-for-operator", UNKNOWN))
+    assert message.state == "observing"
+    assert '"state":"observing"' in message.model_dump_json()

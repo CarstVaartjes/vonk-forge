@@ -185,9 +185,7 @@ fn interrupted_mutation_is_not_executed_twice_after_restart() {
     let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
     restarted.recover_interrupted().unwrap();
     let decision = restarted.begin(&claim, Utc::now()).unwrap();
-    assert!(
-        matches!(decision, BeginDecision::Replay(ref result) if result.state == "waiting-for-operator")
-    );
+    assert!(matches!(decision, BeginDecision::Replay(ref result) if result.state == "observing"));
     let BeginDecision::Replay(result) = decision else {
         panic!("an interrupted attempt must not execute without fresh Controller authority");
     };

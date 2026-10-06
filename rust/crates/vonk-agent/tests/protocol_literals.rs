@@ -103,7 +103,7 @@ fn vocabulary() -> BTreeSet<String> {
             }
         }
     }
-    assert!(words.contains("waiting-for-operator") && words.contains("operation_cancelled"));
+    assert!(words.contains("observing") && words.contains("operation_cancelled"));
     words
 }
 
@@ -465,10 +465,10 @@ fn the_guard_finds_what_it_forbids() {
     let seeded = r#"
 #[cfg(test)]
 mod early_tests {
-    fn fixture() { let _ = "waiting-for-operator"; let _ = serde_json::json!({}); }
+    fn fixture() { let _ = "observing"; let _ = serde_json::json!({}); }
 }
 fn wait() {
-    let state = "waiting-for-operator"; // "stop-unconfirmed" in a comment is prose
+    let state = "observing"; // "stop-unconfirmed" in a comment is prose
     let body = serde_json::json!({"reason": state});
     let code = "operation_cancelled";
     let plain = "failed";
@@ -481,7 +481,7 @@ pub struct Finding {}
 impl Finding {}
 #[cfg(test)]
 mod tests {
-    fn fixture() { let _ = "waiting-for-operator"; let _ = serde_json::json!({}); }
+    fn fixture() { let _ = "observing"; let _ = serde_json::json!({}); }
 }
 "#;
     let code = production_code(seeded);
@@ -490,7 +490,7 @@ mod tests {
     assert_eq!(finding_literal_sites(&code), 2);
     assert_eq!(
         vocabulary_literals(&code, &vocabulary),
-        ["waiting-for-operator", "operation_cancelled", "failed"]
+        ["observing", "operation_cancelled", "failed"]
     );
     // The phase, stage and helper-status words are guarded plain as well.
     let seeded = r#"let a = "downloading"; let b = "reconciling-installation"; let c = "rejected"; let d = "package-installed"; let e = "nothing";"#;
