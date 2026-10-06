@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from sqlalchemy import Engine, select
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_control.models import Base, Job, JobAttempt
+from vonk_control.terminal_history_collection import TerminalHistoryCollector
+
+
+@pytest.fixture
+def history_sessions(postgres_engine: Engine) -> sessionmaker[Session]:
+    Base.metadata.create_all(postgres_engine)
+    return sessionmaker(postgres_engine, expire_on_commit=False)
+
+
+def _job(
+    now: datetime, *, state: str = "succeeded", payload: dict | None = None
+) -> Job:
+    return Job(
+        id=str(uuid.uuid4()),
+        request_id=str(uuid.uuid4()),
+        kind="recipe.start.v1",
+        state=state,
+        actor="operator",
+        authority_revision="revision",
+        targets=[],
+        payload_digest="a" * 64,
+        payload=payload or {},
+        current_attempt=0,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_references(
+    history_sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    removable = _job(old)
+    referenced = _job(old)
+    recent = _job(now)
+    live = _job(old, state="running", payload={"operation_id": referenced.id})
+    with history_sessions.begin() as session:
+        session.add_all((removable, referenced, recent, live))
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    counts = collector.collect()
+    assert counts["jobs"] == 1
+    with history_sessions() as session:
+        assert session.get(Job, removable.id) is None
+        assert set(session.scalars(select(Job.id))) == {
+            referenced.id,
+            recent.id,
+            live.id,
+        }
+
+
+def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
+    history_sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    job = _job(old, state="failed")
+    attempt_id = str(uuid.uuid4())
+    with history_sessions.begin() as session:
+        session.add(job)
+        session.flush()
+        session.add(
+            JobAttempt(
+                id=attempt_id,
+                job_id=job.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                worker_id="worker",
+                lease_deadline=old,
+                state="running",
+            )
+        )
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    assert not collector.collect()
+    with history_sessions.begin() as session:
+        attempt = session.get(JobAttempt, attempt_id)
+        assert attempt is not None
+        attempt.state = "failed"
+    assert collector.collect()["jobs"] == 1
+    with history_sessions() as session:
+        assert session.get(Job, job.id) is None
+        assert session.get(JobAttempt, attempt_id) is None

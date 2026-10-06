@@ -2094,3 +2094,67 @@ def test_a_review_counts_every_unused_installation_and_names_what_stays(
         f"evicting {70 * GIB} bytes from saved profile Coding"
     )
     assert lifecycle.removed == []
+
+
+def test_unidentified_model_set_is_evicted_through_exact_fenced_scope(
+    world: Catalog, cached
+) -> None:
+    service, set_digest = cached
+    with world.sessions.begin() as session:
+        model_set = session.get(ModelCacheSet, set_digest)
+        assert model_set is not None
+        model_set.model_content_sha256 = None
+    result = _models(world, service).collect()
+    assert result.models == 1, result.kept
+    _settle(service)
+    assert not _set_exists(world, set_digest)
+
+
+def test_zero_verified_counter_does_not_hide_present_model_bytes(
+    world: Catalog, cached
+) -> None:
+    service, set_digest = cached
+    with world.sessions.begin() as session:
+        model_set = session.get(ModelCacheSet, set_digest)
+        assert model_set is not None
+        model_set.verified_bytes = 0
+    result = _models(world, service).collect()
+    assert result.models == 1, result.kept
+    _settle(service)
+    assert not _set_exists(world, set_digest)
+
+
+def test_failed_removal_releases_gate_and_fresh_download_reuses_model(
+    world: Catalog,
+    cached,
+    tmp_path: Path,
+) -> None:
+    service, set_digest = cached
+    removal = service.accept_unused_removal(
+        A_MODEL,
+        actor=ACTOR,
+        request_key=str(uuid.uuid4()),
+        verify=lambda _session, _sets: None,
+    )
+    with world.sessions.begin() as session:
+        owner = session.get(ModelCacheOperation, removal.id)
+        assert owner is not None
+        owner.state = "failed"
+    # An in-flight filesystem step must finish before its gate can be released.
+    with service._model_storage_lock(set_digest, model_set=True):
+        service.reconcile_removal_gates()
+        with world.sessions() as session:
+            gate = session.get(
+                ArtifactLifecycleGate,
+                {"artifact_kind": "model-set", "artifact_sha256": set_digest},
+            )
+            assert gate is not None and gate.removal_owner_id == removal.id
+    service.reconcile_removal_gates()
+    downloaded = _download(
+        service,
+        [_artifact(tmp_path, b"weights", model_content_sha256=A_MODEL)],
+        model_content_sha256=A_MODEL,
+        request_key=str(uuid.uuid4()),
+    )
+    assert downloaded.state == "succeeded"
+    assert downloaded.artifact_set_sha256 == set_digest

@@ -404,6 +404,7 @@ def assemble_production_worker(
         TelemetryMaintenance,
         TelemetryMaintenanceCadence,
     )
+    from .terminal_history_collection import TerminalHistoryCollector
     from .unused_storage_collection import UnusedStorageCollector
 
     if model_cache is not None:
@@ -592,6 +593,7 @@ def assemble_production_worker(
     worker_background_services += (
         storage_collector.tick,
         CatalogRevisionCollector(sessions, clock=clock).tick,
+        TerminalHistoryCollector(sessions, clock=clock).tick,
     )
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
     artifact_jobs = ArtifactJobService(

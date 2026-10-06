@@ -61,7 +61,9 @@ from .artifact_lifecycle import (
     RemovalOwnerKind,
     check_removal_fence_nowait,
     clear_removal,
+    dead_removal_identities,
     lock_removal_fences,
+    release_dead_removal_nowait,
     require_reference_open,
     reserve_removal_owners,
     retryable_artifact_database_error,
@@ -95,6 +97,7 @@ from .lifecycle.core import STOP_BUDGET
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .lifecycle.image_availability import ImageAvailabilityAdapter
 from .lifecycle.types import State
+from .logging import log_event
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
@@ -2112,6 +2115,51 @@ class RecipeImageAvailabilityService:
             intent = self._read_removal_intent(operation)
             return self._read_removal_result(operation, intent)
 
+    def reconcile_removal_gates(self, *, limit: int = 64) -> int:
+        with self._sessions() as session:
+            identities = dead_removal_identities(
+                session, owner_kind="recipe-image-job", limit=limit
+            )
+        released = 0
+        for identity in identities:
+            if identity.kind != "runtime-image":
+                continue
+            try:
+                with (
+                    self._storage.publication_lock(identity.sha256),
+                    self._sessions.begin() as session,
+                ):
+                    changed = release_dead_removal_nowait(
+                        session,
+                        identity,
+                        owner_kind="recipe-image-job",
+                        now=self._clock(),
+                    )
+                if changed:
+                    released += 1
+                    log_event(
+                        _LOGGER,
+                        "artifact.removal_gate_reconciled",
+                        service="controller",
+                        artifact_kind=identity.kind,
+                        artifact_sha256=identity.sha256,
+                    )
+            except (
+                RuntimeImagePreparationError,
+                ArtifactLifecycleError,
+                OSError,
+            ) as error:
+                log_event(
+                    _LOGGER,
+                    "artifact.removal_gate_deferred",
+                    service="controller",
+                    artifact_kind=identity.kind,
+                    artifact_sha256=identity.sha256,
+                    code=getattr(error, "code", type(error).__name__),
+                )
+                continue
+        return released
+
     def advance_removals(self, *, limit: int = 1) -> int:
         """Advance bounded, durable cache removals without claiming image slots."""
 
@@ -2120,6 +2168,7 @@ class RecipeImageAvailabilityService:
                 "recipe removal batch limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
+        self.reconcile_removal_gates()
         advanced = 0
         boundary: tuple[datetime, str] | None = None
         while advanced < limit:
@@ -2156,9 +2205,31 @@ class RecipeImageAvailabilityService:
             for operation_id, _updated_at in rows:
                 try:
                     advanced += int(self._advance_recipe_removal(operation_id))
-                except RecipeImageAvailabilityError:
-                    # A malformed owner is isolated to its own request. It
-                    # remains fail-closed and cannot hold up later rows.
+                except RecipeImageAvailabilityError as error:
+                    if error.code == RecipeImageCode.OPERATION_INVALID:
+                        # Preserve damaged intent and fence the executor by ending
+                        # the owner. The storage-lock reconciler releases its gates.
+                        with self._sessions.begin() as session:
+                            damaged = session.scalar(
+                                select(Job)
+                                .where(Job.id == operation_id)
+                                .with_for_update(skip_locked=True)
+                            )
+                            if (
+                                damaged is not None
+                                and damaged.state
+                                in job_states.words(
+                                    LifecycleState.QUEUED,
+                                    LifecycleState.RUNNING,
+                                    LifecycleState.BACKOFF,
+                                )
+                            ):
+                                self._lifecycle.fail(
+                                    damaged,
+                                    self._clock(),
+                                    retryable=False,
+                                    reason=f"{error.code}: {error.detail}",
+                                )
                     continue
                 if advanced >= limit:
                     break

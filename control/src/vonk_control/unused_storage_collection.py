@@ -194,6 +194,17 @@ class UnusedModelRemoval(Protocol):
         verify: Callable[[Session, tuple[str, ...]], None],
     ) -> object: ...
 
+    def accept_unused_set_removal(
+        self,
+        set_digest: str,
+        *,
+        actor: str,
+        request_key: str,
+        verify: Callable[[Session, tuple[str, ...]], None],
+    ) -> object: ...
+
+    def unused_set_bytes(self, set_digest: str) -> int | None: ...
+
 
 class InstallationRemoval(Protocol):
     """The recipe lifecycle's uninstall, as the collector uses it."""
@@ -1096,6 +1107,8 @@ class UnusedStorageCollector:
                     self._remove_receipt(
                         member, self._image_cache / f"{member}{_RECEIPT_SUFFIX}"
                     )
+                elif item.kind == "model-set":
+                    self._remove_model_set(member)
                 else:
                     self._remove_model(member)
             except _Kept as why:
@@ -1123,7 +1136,7 @@ class UnusedStorageCollector:
                 )
                 break
             done += 1
-            outcome.removed[item.kind] += 1
+            outcome.removed["model" if item.kind == "model-set" else item.kind] += 1
             log_event(
                 _LOGGER,
                 "unused_storage.removing",
@@ -1388,17 +1401,38 @@ class UnusedStorageCollector:
         by_model: dict[str, list[tuple[str, int, datetime, datetime]]] = defaultdict(
             list
         )
-        unidentified = 0
+        items: list[_Item] = []
         for set_digest, model_digest, verified, accessed, updated in rows:
             if model_digest is None:
-                unidentified += 1
+                if (
+                    evidence.pointers is None
+                    or set_digest in evidence.operations
+                    or model_set_reference_findings(session, (set_digest,)).get(
+                        set_digest
+                    )
+                ):
+                    kept["model: referenced or unreadable"] += 1
+                    continue
+                measured = self._model_cache.unused_set_bytes(set_digest)
+                if measured is None:
+                    kept["model: bytes unknown"] += 1
+                    continue
+                if measured > 0:
+                    last_used = max(_utc(accessed), _utc(updated))
+                    items.append(
+                        _Item(
+                            "model-set",
+                            set_digest,
+                            (set_digest,),
+                            last_used,
+                            last_used > evidence.cutoff,
+                            measured,
+                        )
+                    )
             else:
                 by_model[model_digest].append(
                     (set_digest, verified, _utc(accessed), _utc(updated))
                 )
-        if unidentified:
-            kept["model: no model identity"] += unidentified
-        items: list[_Item] = []
         for digest, sets in sorted(by_model.items()):
             reason = _model_kept(session, digest, evidence)
             if reason is not None:
@@ -1406,8 +1440,15 @@ class UnusedStorageCollector:
                 continue
             size = sum(verified for _set, verified, _a, _u in sets)
             if size <= 0:
-                kept["model: holds no bytes"] += 1
-                continue
+                counts = [
+                    self._model_cache.unused_set_bytes(value[0]) for value in sets
+                ]
+                if any(value is None for value in counts):
+                    kept["model: bytes unknown"] += 1
+                    continue
+                size = sum(value for value in counts if value is not None)
+                if size <= 0:
+                    continue
             last_used = max(
                 max(accessed, updated) for _set, _v, accessed, updated in sets
             )
@@ -1425,6 +1466,22 @@ class UnusedStorageCollector:
                 )
             )
         return items
+
+    def _remove_model_set(self, digest: str) -> None:
+        assert self._model_cache is not None
+
+        def verify(session: Session, sets: tuple[str, ...]) -> None:
+            evidence = _Evidence.read(session, self._clock())
+            if evidence.pointers is None or any(
+                value in evidence.operations for value in sets
+            ):
+                raise _Kept("references unavailable or active")
+            if any(model_set_reference_findings(session, sets).values()):
+                raise _Kept("referenced")
+
+        self._model_cache.accept_unused_set_removal(
+            digest, actor=ACTOR, request_key=str(uuid.uuid4()), verify=verify
+        )
 
     def _remove_model(self, digest: str) -> None:
         assert self._model_cache is not None
