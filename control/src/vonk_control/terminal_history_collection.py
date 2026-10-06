@@ -163,6 +163,10 @@ class TerminalHistoryCollector:
             elif len(candidates) >= self._batch:
                 self._due_at = now
             for identity, observed_at in candidates:
+                if observed_at is None:
+                    # Nullable completion timestamps cannot prove the grace
+                    # period elapsed or establish a continuation boundary.
+                    continue
                 if time.monotonic() >= deadline:
                     self._due_at = now
                     return +removed
