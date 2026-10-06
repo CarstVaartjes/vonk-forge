@@ -7808,12 +7808,14 @@ class RunSwitchOperationService:
                         return True
                     if checkpoint.pending_job_id:
                         current.operation = _observe_progress(
-                            _progress_mapping(current.operation),
-                            {
-                                "phase": "runtime-preflight",
-                                "completed_bytes": 0,
-                                "total_bytes_known": False,
-                            },
+                            current.operation,
+                            OperationProgress.model_validate(
+                                {
+                                    "phase": "runtime-preflight",
+                                    "completed_bytes": 0,
+                                    "total_bytes_known": False,
+                                }
+                            ),
                             now,
                         )
                     job.result = _persisted_result(current)
@@ -8531,13 +8533,15 @@ class RunSwitchOperationService:
             progress.retry_reason = _INSTALL_PREFLIGHT_REFRESH_REASON
             progress.operation_phase_index = phase_index
             progress.operation = _observe_progress(
-                _progress_mapping(progress.operation),
-                {
-                    "phase": "install-preflight-refresh",
-                    "completed_items": attempt,
-                    "completed_bytes": 0,
-                    "total_bytes_known": False,
-                },
+                progress.operation,
+                OperationProgress.model_validate(
+                    {
+                        "phase": "install-preflight-refresh",
+                        "completed_items": attempt,
+                        "completed_bytes": 0,
+                        "total_bytes_known": False,
+                    }
+                ),
                 now,
             )
             self._schedule_checkpoint_retry(
@@ -8842,6 +8846,7 @@ class RunSwitchOperationService:
                 progress,
                 projected_state,
                 job.status_reason,
+                node_ids=job.targets,
             ),
             status_reason=job.status_reason
             if plan is not None or job.status_reason is not None
