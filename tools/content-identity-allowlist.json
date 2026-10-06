@@ -240,20 +240,6 @@
       "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
     },
     {
-      "path": "control/src/vonk_control/distributed_recovery.py",
-      "function": "_validate_multi_start_payload",
-      "kind": "provenance_comparison",
-      "expression": "stored_installation.recipe_revision_id != installation.recipe_revision_id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
-      "path": "control/src/vonk_control/distributed_recovery.py",
-      "function": "_validate_multi_start_payload",
-      "kind": "provenance_comparison",
-      "expression": "stored_run.recipe_revision_id != installation.recipe_revision_id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
       "path": "control/src/vonk_control/distribution_executor.py",
       "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
       "kind": "provenance_comparison",

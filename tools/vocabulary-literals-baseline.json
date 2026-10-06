@@ -40,7 +40,7 @@
     "control/src/vonk_control/catalog_revision_collection.py": 6,
     "control/src/vonk_control/catalog_sync.py": 19,
     "control/src/vonk_control/catalog_sync_contract.py": 1,
-    "control/src/vonk_control/distributed_recovery.py": 18,
+    "control/src/vonk_control/distributed_recovery.py": 17,
     "control/src/vonk_control/distribution.py": 2,
     "control/src/vonk_control/distribution_executor.py": 28,
     "control/src/vonk_control/enrollment.py": 4,
