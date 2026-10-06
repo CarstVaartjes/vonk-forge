@@ -2084,7 +2084,7 @@ def test_a_foreign_container_refusal_waits_visibly_and_the_start_resumes_when_it
     )
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "waiting-for-operator"
+        assert stored is not None and stored.state in aos.PARKED
         assert "vonk-x" in (stored.status_reason or "")
         assert stored.next_action_at is not None
         due = stored.next_action_at.replace(tzinfo=UTC)

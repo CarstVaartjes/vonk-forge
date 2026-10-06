@@ -19,11 +19,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentProtocolError,
+    InvalidRequestError,
     RecipeJobFile,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
+    UnknownOutcomeError,
     canonical_message,
     recipe_job_manifest_sha256,
 )
@@ -82,6 +84,14 @@ _UUID_ID_ADAPTER = TypeAdapter(UuidId)
 
 class ArtifactJobError(ValueError):
     pass
+
+
+class ArtifactJobUnavailableError(UnknownOutcomeError, ArtifactJobError):
+    """Stored job state cannot be read now; the lifecycle core observes and retries."""
+
+
+class ArtifactJobTransferClosedError(InvalidRequestError, ArtifactJobError):
+    """A request against a transfer that is already closed."""
 
 
 def _active_recipe_revision(
@@ -1203,10 +1213,14 @@ class ArtifactJobService:
             floor = placement.get("memory_floor_bytes")
             if type(floor) is not int:
                 _record_unservable_run(run.id, "installed plan has no memory floor")
-                raise ArtifactJobError("installed job execution plan is invalid")
+                raise ArtifactJobUnavailableError(
+                    "installed job execution plan is invalid"
+                )
             stored_contract = self._stored_contract(session, artifact_job)
             if isinstance(stored_contract, Residue):
-                raise ArtifactJobError("artifact job contract is unavailable")
+                raise ArtifactJobUnavailableError(
+                    "artifact job contract is unavailable"
+                )
             contract = stored_contract
             try:
                 parameters = _canonical_declared_parameters(
@@ -1476,7 +1490,7 @@ class ArtifactJobService:
             if isinstance(contract, Residue):
                 # The job's contract is unreadable and nothing re-derives it:
                 # its transfers close and the job ends through its own lifecycle.
-                raise ArtifactJobError("artifact job transfer is closed")
+                raise ArtifactJobTransferClosedError("artifact job transfer is closed")
             _validate_outputs_against_contract(contract, projected, terminal=False)
             if parsed.media_type not in limits.allowed_media_types:
                 raise ArtifactJobError("artifact output media type is not allowed")
@@ -1526,7 +1540,7 @@ class ArtifactJobService:
             if isinstance(contract, Residue):
                 # The job's contract is unreadable and nothing re-derives it:
                 # its transfers close and the job ends through its own lifecycle.
-                raise ArtifactJobError("artifact job transfer is closed")
+                raise ArtifactJobTransferClosedError("artifact job transfer is closed")
             _validate_outputs_against_contract(contract, projected, terminal=False)
             if len(existing) + 1 > limits.max_files:
                 raise ArtifactJobError("artifact output file count exceeds the limit")
@@ -1771,7 +1785,7 @@ class ArtifactJobService:
         if job.state not in {"queued", "running"} or order not in {"queued", "running"}:
             # A job that ended, or whose attempt lapsed (its order is only being
             # observed), is fenced: its bytes are no longer accepted.
-            raise ArtifactJobError("artifact job transfer is closed")
+            raise ArtifactJobTransferClosedError("artifact job transfer is closed")
         return job
 
     @staticmethod
