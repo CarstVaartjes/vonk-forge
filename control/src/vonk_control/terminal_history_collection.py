@@ -175,7 +175,18 @@ class TerminalHistoryCollector:
                             .where(model.id == identity, stamp <= cutoff, ended)
                             .with_for_update(skip_locked=True)
                         )
-                        if row is None or not self._unused(session, row, now):
+                        if row is None:
+                            continue
+                        unused = self._unused(session, row, now)
+                        if unused is None:
+                            # Unknown reference evidence defers the pass itself;
+                            # recovery resumes this batch, rather than skipping it.
+                            if boundary is None:
+                                self._after.pop(model.__tablename__, None)
+                            else:
+                                self._after[model.__tablename__] = boundary
+                            return +removed
+                        if not unused:
                             continue
                         if model is Job:
                             session.execute(
@@ -260,10 +271,10 @@ class TerminalHistoryCollector:
         | NodeArtifact
         | RecipeRun,
         now: datetime,
-    ) -> bool:
+    ) -> bool | None:
         protected = _protected_tokens(session, now)
         if protected is None:
-            return False
+            return None
         identity = row.id
         if identity in protected:
             return False
