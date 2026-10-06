@@ -389,7 +389,7 @@ fn handle(
                 // Why a requested tail is missing; never an empty tail that
                 // reads like a workload with nothing to say.
                 diagnostic: inspected.log_error.map(str::to_owned),
-                process_logs: inspected.logs,
+                process_logs: inspected.logs.map(|logs| *logs),
                 schema_version: 1,
                 request_id: Some(inspection.request_id),
                 status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
@@ -428,7 +428,7 @@ fn handle(
         })?;
     let response = HelperResponse {
         diagnostic: outcome.diagnostic.clone(),
-        process_logs: outcome.process_logs.clone().map(Box::new),
+        process_logs: outcome.process_logs.clone(),
         schema_version: 1,
         request_id: Some(request.claims.request_id),
         status: outcome.status,
