@@ -170,7 +170,7 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         draft = json.loads(created.stdout)
         job_id = draft.get("id")
         assert isinstance(job_id, str)
-        assert draft["state"] == "ready"
+        assert draft["preparation"] == "ready"
         uploaded_inputs = draft.get("input_files")
         assert isinstance(uploaded_inputs, list) and len(uploaded_inputs) == 1
         assert uploaded_inputs[0]["name"] == "input.png"
