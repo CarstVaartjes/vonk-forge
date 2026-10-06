@@ -10,11 +10,21 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ContainerRuntimeAction, canonical_message
+from vonk_agent_protocol import (
+    ContainerRuntimeAction,
+    InvalidRequestError,
+    InvalidRequestReason,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
+    canonical_message,
+)
 from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
+from .categorized_errors import BookkeepingUnknown, InvalidType
 from .distributed_recovery import DistributedLifecycleError, recovery_start_plan
 from .models import (
     AgentOperation,
@@ -42,6 +52,18 @@ from .strict_json import read_stored_model
 
 class RuntimePlanAuthorityError(ValueError):
     """Durable operation state cannot authorize the requested lifecycle plan."""
+
+
+class RuntimePlanAuthorityRefused(SecurityRefusalError, RuntimePlanAuthorityError):
+    """The requested plan is not the one this durable owner and digest bind."""
+
+
+class RuntimePlanAuthorityStale(InvalidRequestError, RuntimePlanAuthorityError):
+    """Durable state moved on: the plan is stale and the caller must refresh it."""
+
+
+class RuntimePlanEvidenceUnavailable(UnknownOutcomeError, RuntimePlanAuthorityError):
+    """The durable evidence that would authorize the plan is missing or unreadable."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +166,10 @@ def derive_runtime_plan_binding(
             )
         return binding
     if action is not ContainerRuntimeAction.STOP or operation.kind != "recipe.stop":
-        raise RuntimePlanAuthorityError("lifecycle plan owner does not match action")
+        raise RuntimePlanAuthorityRefused(
+            "lifecycle plan owner does not match action",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
 
     stop = _parse_stop(operation.payload)
     _service_stop_authority(
@@ -174,7 +199,10 @@ def _service_run_authority(
     action: ContainerRuntimeAction,
 ) -> _RunAuthority:
     if parent.kind != "recipe.start" or parent.payload.get("owner_kind") != "run":
-        raise RuntimePlanAuthorityError("service Start owner is invalid")
+        raise RuntimePlanAuthorityRefused(
+            "service Start owner is invalid",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
     run = session.get(RecipeRun, start.run_id)
     authority = _load_run_authority(session, run)
     run = authority.run
@@ -191,11 +219,17 @@ def _service_run_authority(
         or parent.authority_revision
         != authority.revision.content_digest.removeprefix("sha256:")
     ):
-        raise RuntimePlanAuthorityError("service Start identity is stale")
+        raise RuntimePlanAuthorityStale(
+            "service Start identity is stale",
+            reason=InvalidRequestReason.SUPERSEDED,
+        )
     try:
         stored = parse_stored_run_plan(run.plan)
     except RecipeExecutionContractError as error:
-        raise RuntimePlanAuthorityError("service run plan is invalid") from error
+        raise RuntimePlanEvidenceUnavailable(
+            "service run plan is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
     if (
         stored.run_generation != run.run_generation
         or stored.plan_digest != run.plan_digest
@@ -211,7 +245,10 @@ def _service_run_authority(
             or authority.revision.state != "active"
         )
     ):
-        raise RuntimePlanAuthorityError("service Start is no longer authorized")
+        raise RuntimePlanAuthorityStale(
+            "service Start is no longer authorized",
+            reason=InvalidRequestReason.NOT_READY,
+        )
     return authority
 
 
@@ -229,7 +266,10 @@ def _job_run_authority(
         or parent.payload.get("owner_kind") != "artifact-job"
         or parent.payload.get("owner_id") != request.job_id
     ):
-        raise RuntimePlanAuthorityError("artifact JobRun owner is invalid")
+        raise RuntimePlanAuthorityRefused(
+            "artifact JobRun owner is invalid",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
     artifact_job = session.get(ArtifactJob, request.job_id)
     run = session.get(RecipeRun, request.run_id)
     authority = _load_run_authority(session, run)
@@ -247,7 +287,10 @@ def _job_run_authority(
         or parent.authority_revision
         != authority.revision.content_digest.removeprefix("sha256:")
     ):
-        raise RuntimePlanAuthorityError("artifact JobRun identity is stale")
+        raise RuntimePlanAuthorityStale(
+            "artifact JobRun identity is stale",
+            reason=InvalidRequestReason.SUPERSEDED,
+        )
     if action is ContainerRuntimeAction.START and (
         request.run_generation != run.run_generation
         or run.state != "running"
@@ -255,7 +298,10 @@ def _job_run_authority(
         or authority.mapping.state != "ready"
         or authority.revision.state != "active"
     ):
-        raise RuntimePlanAuthorityError("artifact JobRun start is no longer authorized")
+        raise RuntimePlanAuthorityStale(
+            "artifact JobRun start is no longer authorized",
+            reason=InvalidRequestReason.NOT_READY,
+        )
     # JobRun cleanup keeps its immutable request generation. The distinct
     # artifact job ID is the runtime target, so an old job cleanup cannot stop
     # the service container created by a newer RecipeRun generation.
@@ -272,7 +318,10 @@ def _service_stop_authority(
     now: datetime,
 ) -> None:
     if parent.kind != "recipe.stop" or parent.payload.get("owner_kind") != "run":
-        raise RuntimePlanAuthorityError("service Stop owner is invalid")
+        raise RuntimePlanAuthorityRefused(
+            "service Stop owner is invalid",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
     run = session.get(RecipeRun, stop.run_id)
     authority = _load_run_authority(session, run)
     run = authority.run
@@ -285,7 +334,10 @@ def _service_stop_authority(
         or parent.payload.get("owner_id") != run.id
         or parent.authority_revision != run.plan_digest.removeprefix("sha256:")
     ):
-        raise RuntimePlanAuthorityError("service Stop identity is stale")
+        raise RuntimePlanAuthorityStale(
+            "service Stop identity is stale",
+            reason=InvalidRequestReason.SUPERSEDED,
+        )
     try:
         stored = parse_stored_run_plan(run.plan)
         exact = durable_run_stop_payloads(
@@ -297,13 +349,17 @@ def _service_stop_authority(
             allow_missing_nodes=False,
         )
     except (RecipeExecutionContractError, RecipeStopAuthorityError) as error:
-        raise RuntimePlanAuthorityError(
-            "durable prior Start authority is unavailable"
+        raise RuntimePlanEvidenceUnavailable(
+            "durable prior Start authority is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
     recovery_marker = parent.payload.get("recovery")
     if isinstance(recovery_marker, Mapping):
         if stop.run_generation + 1 != run.run_generation:
-            raise RuntimePlanAuthorityError("recovery Stop generation is stale")
+            raise RuntimePlanAuthorityStale(
+                "recovery Stop generation is stale",
+                reason=InvalidRequestReason.SUPERSEDED,
+            )
         _validate_recovery_start_generation(
             parent=parent,
             authority=authority,
@@ -311,7 +367,10 @@ def _service_stop_authority(
             now=now,
         )
     elif stop.run_generation != run.run_generation:
-        raise RuntimePlanAuthorityError("service Stop generation is stale")
+        raise RuntimePlanAuthorityStale(
+            "service Stop generation is stale",
+            reason=InvalidRequestReason.SUPERSEDED,
+        )
     expected = exact.get(node_id)
     if (
         expected is None
@@ -319,7 +378,10 @@ def _service_stop_authority(
         or stored.run_generation != run.run_generation
         or operation.kind != "recipe.stop"
     ):
-        raise RuntimePlanAuthorityError("service Stop differs from exact prior Start")
+        raise RuntimePlanAuthorityRefused(
+            "service Stop differs from exact prior Start",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
 
 
 def _validate_recovery_start_generation(
@@ -335,9 +397,15 @@ def _validate_recovery_start_generation(
         )
         stored = parse_stored_run_plan(authority.run.plan)
     except (DistributedLifecycleError, RecipeExecutionContractError) as error:
-        raise RuntimePlanAuthorityError("recovery Start plan is invalid") from error
+        raise RuntimePlanEvidenceUnavailable(
+            "recovery Start plan is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
     if recovered is None or stored.run_generation != current_generation:
-        raise RuntimePlanAuthorityError("recovery Start generation is unavailable")
+        raise RuntimePlanEvidenceUnavailable(
+            "recovery Start generation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     phases, marker = recovered
     expected_nodes = {node.node_id: node for node in authority.nodes}
     if (
@@ -345,7 +413,10 @@ def _validate_recovery_start_generation(
         or parent.payload.get("owner_id") != authority.run.id
         or parent.targets != sorted(expected_nodes)
     ):
-        raise RuntimePlanAuthorityError("recovery Stop owner is stale")
+        raise RuntimePlanAuthorityStale(
+            "recovery Stop owner is stale",
+            reason=InvalidRequestReason.SUPERSEDED,
+        )
 
     if parent.actor == "system:singleton-recovery":
         expected_request_id = str(
@@ -362,7 +433,10 @@ def _validate_recovery_start_generation(
             or len(phases) != 1
             or len(phases[0]) != 1
         ):
-            raise RuntimePlanAuthorityError("singleton recovery Stop is invalid")
+            raise RuntimePlanAuthorityRefused(
+                "singleton recovery Stop is invalid",
+                reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+            )
         topology = "singleton"
     elif parent.actor == "system:distributed-recovery":
         failed_rank = marker["failed_rank"]
@@ -381,10 +455,16 @@ def _validate_recovery_start_generation(
             or not phases[0]
             or not phases[1]
         ):
-            raise RuntimePlanAuthorityError("distributed recovery Stop is invalid")
+            raise RuntimePlanAuthorityRefused(
+                "distributed recovery Stop is invalid",
+                reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+            )
         topology = "distributed"
     else:
-        raise RuntimePlanAuthorityError("recovery Stop actor is invalid")
+        raise RuntimePlanAuthorityRefused(
+            "recovery Stop actor is invalid",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
 
     rank_launches: dict[str, RecipeStartPayload] = {}
     readiness: list[tuple[str, RecipeStartPayload]] = []
@@ -408,10 +488,16 @@ def _validate_recovery_start_generation(
                         for node in stored.nodes
                     )
                 ):
-                    raise ValueError("recovery Start identity is inconsistent")
+                    raise BookkeepingUnknown(
+                        "recovery Start identity is inconsistent",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    )
                 if topology == "singleton" and phase_index == 0 and start.phase is None:
                     if node_id in rank_launches:
-                        raise ValueError("singleton recovery target is duplicated")
+                        raise BookkeepingUnknown(
+                            "singleton recovery target is duplicated",
+                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                        )
                     rank_launches[node_id] = start
                 elif (
                     topology == "distributed"
@@ -419,7 +505,10 @@ def _validate_recovery_start_generation(
                     and start.phase == "rank-launch"
                 ):
                     if node_id in rank_launches:
-                        raise ValueError("recovery Start target is duplicated")
+                        raise BookkeepingUnknown(
+                            "recovery Start target is duplicated",
+                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                        )
                     rank_launches[node_id] = start
                 elif (
                     topology == "distributed"
@@ -428,11 +517,20 @@ def _validate_recovery_start_generation(
                 ):
                     readiness.append((node_id, start))
                 else:
-                    raise ValueError("recovery Start phase is invalid")
+                    raise BookkeepingUnknown(
+                        "recovery Start phase is invalid",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    )
     except (TypeError, ValueError) as error:
-        raise RuntimePlanAuthorityError("recovery Start plan is invalid") from error
+        raise RuntimePlanEvidenceUnavailable(
+            "recovery Start plan is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
     if set(rank_launches) != set(expected_nodes):
-        raise RuntimePlanAuthorityError("recovery Start target set is invalid")
+        raise RuntimePlanEvidenceUnavailable(
+            "recovery Start target set is invalid",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     if topology == "singleton":
         node = next(iter(expected_nodes.values()))
         stored_node = next(
@@ -445,14 +543,18 @@ def _validate_recovery_start_generation(
             or not stored_node.endpoint_owner
             or _placement_key(start) != (0, "entrypoint", 1)
         ):
-            raise RuntimePlanAuthorityError(
-                "singleton recovery Start placement is invalid"
+            raise RuntimePlanEvidenceUnavailable(
+                "singleton recovery Start placement is invalid",
+                reason=WaitReason.SCOPE_CHANGED,
             )
         return
 
     owners = [node for node in stored.nodes if node.endpoint_owner]
     if len(readiness) != 1 or len(owners) != 1 or readiness[0][0] != owners[0].node_id:
-        raise RuntimePlanAuthorityError("recovery Start target set is invalid")
+        raise RuntimePlanEvidenceUnavailable(
+            "recovery Start target set is invalid",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     for node_id, start in rank_launches.items():
         node = expected_nodes[node_id]
         if _placement_key(start) != (
@@ -460,7 +562,10 @@ def _validate_recovery_start_generation(
             node.role,
             len(expected_nodes),
         ):
-            raise RuntimePlanAuthorityError("recovery Start placement is invalid")
+            raise RuntimePlanEvidenceUnavailable(
+                "recovery Start placement is invalid",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
     readiness_node = expected_nodes[readiness[0][0]]
     readiness_start = readiness[0][1]
     if _placement_key(readiness_start) != (
@@ -468,7 +573,10 @@ def _validate_recovery_start_generation(
         readiness_node.role,
         len(expected_nodes),
     ):
-        raise RuntimePlanAuthorityError("recovery readiness placement is invalid")
+        raise RuntimePlanEvidenceUnavailable(
+            "recovery readiness placement is invalid",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
 
 
 def _placement(start: RecipeStartPayload) -> CompiledPlacement:
@@ -482,7 +590,10 @@ def _placement_key(start: RecipeStartPayload) -> tuple[int, str, int]:
 
 def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthority:
     if run is None:
-        raise RuntimePlanAuthorityError("recipe run is unavailable")
+        raise RuntimePlanEvidenceUnavailable(
+            "recipe run is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     installation = session.get(RecipeInstallation, run.installation_id)
     revision = (
         session.get(CatalogDocumentRevision, installation.recipe_revision_id)
@@ -511,7 +622,10 @@ def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthorit
     try:
         stored = parse_stored_run_plan(run.plan)
     except RecipeExecutionContractError as error:
-        raise RuntimePlanAuthorityError("recipe run plan is invalid") from error
+        raise RuntimePlanEvidenceUnavailable(
+            "recipe run plan is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
     if (
         installation is None
         or revision is None
@@ -535,7 +649,10 @@ def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthorit
         or {(node.node_id, node.rank, node.role) for node in nodes}
         != {(node.node_id, node.rank, node.role) for node in mapping_nodes}
     ):
-        raise RuntimePlanAuthorityError("recipe run authority is stale")
+        raise RuntimePlanAuthorityStale(
+            "recipe run authority is stale",
+            reason=InvalidRequestReason.SUPERSEDED,
+        )
     return _RunAuthority(run, installation, revision, mapping, nodes)
 
 
@@ -555,7 +672,10 @@ def _check_operation_target(
         or payload.compiled_execution_plan.runtime.placement.world_size
         != len(authority.nodes)
     ):
-        raise RuntimePlanAuthorityError("lifecycle plan node identity differs")
+        raise RuntimePlanAuthorityRefused(
+            "lifecycle plan node identity differs",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
 
 
 def _validate_child_record(
@@ -570,10 +690,16 @@ def _validate_child_record(
         != operation.payload_digest
         or operation.authority_revision != parent.authority_revision
     ):
-        raise RuntimePlanAuthorityError("lifecycle operation record is inconsistent")
+        raise RuntimePlanAuthorityRefused(
+            "lifecycle operation record is inconsistent",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
     phases = parent.payload.get("phases")
     if not isinstance(phases, list):
-        raise RuntimePlanAuthorityError("lifecycle operation manifest is missing")
+        raise RuntimePlanEvidenceUnavailable(
+            "lifecycle operation manifest is missing",
+            reason=WaitReason.RECEIPT_MISSING,
+        )
     matches = [
         item
         for phase in phases
@@ -588,40 +714,58 @@ def _validate_child_record(
         or canonical_message(matches[0]["payload"])
         != canonical_message(operation.payload)
     ):
-        raise RuntimePlanAuthorityError("lifecycle operation manifest differs")
+        raise RuntimePlanAuthorityRefused(
+            "lifecycle operation manifest differs",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
 
 
 def _parse_start(value: object) -> RecipeStartPayload:
     try:
         if not isinstance(value, Mapping):
-            raise TypeError("Start payload is not an object")
+            raise InvalidType(
+                "Start payload is not an object", reason=InvalidRequestReason.MALFORMED
+            )
         return read_stored_model(
             RecipeStartPayload, canonical_message(value), from_json=True
         )
     except (TypeError, ValueError) as error:
-        raise RuntimePlanAuthorityError("durable Start plan is invalid") from error
+        raise RuntimePlanEvidenceUnavailable(
+            "durable Start plan is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
 
 
 def _parse_job_run(value: object) -> RecipeJobRunRequest:
     try:
         if not isinstance(value, Mapping):
-            raise TypeError("JobRun payload is not an object")
+            raise InvalidType(
+                "JobRun payload is not an object", reason=InvalidRequestReason.MALFORMED
+            )
         return read_stored_model(
             RecipeJobRunRequest, canonical_message(value), from_json=True
         )
     except (TypeError, ValueError) as error:
-        raise RuntimePlanAuthorityError("durable JobRun plan is invalid") from error
+        raise RuntimePlanEvidenceUnavailable(
+            "durable JobRun plan is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
 
 
 def _parse_stop(value: object) -> RecipeStopPayload:
     try:
         if not isinstance(value, Mapping):
-            raise TypeError("Stop payload is not an object")
+            raise InvalidType(
+                "Stop payload is not an object", reason=InvalidRequestReason.MALFORMED
+            )
         return read_stored_model(
             RecipeStopPayload, canonical_message(value), from_json=True
         )
     except (TypeError, ValueError) as error:
-        raise RuntimePlanAuthorityError("durable Stop plan is invalid") from error
+        raise RuntimePlanEvidenceUnavailable(
+            "durable Stop plan is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
 
 
 def _payload_sha256(payload: object) -> str:

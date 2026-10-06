@@ -12,6 +12,12 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
+    UnknownOutcomeError,
+    WaitReason,
+)
 
 from .admission_locking import (
     AdmissionLockBusy,
@@ -20,6 +26,12 @@ from .admission_locking import (
     is_admission_contention,
     lock_admission_rows,
     node_admission_key,
+)
+from .categorized_errors import (
+    BookkeepingUnknown,
+    InvalidType,
+    InvalidValue,
+    MissingRecord,
 )
 from .cluster_mappings import validate_mapping_parameters
 from .compiled_execution_plan import (
@@ -130,10 +142,29 @@ class InstallPlanConflict(RuntimeError):
     code = "install.plan_invalid"
 
 
-class InstallAdmissionBusy(InstallPlanConflict):
+class InstallPlanStale(InvalidRequestError, InstallPlanConflict):
+    """The plan no longer fits the request or the recipe: the caller re-plans."""
+
+
+class InstallEvidenceChanged(UnknownOutcomeError, InstallPlanConflict):
+    """Evidence the plan rested on moved or is unavailable: observe and retry."""
+
+
+class StoredInstallIdentityDamaged(UnknownOutcomeError, ValueError, TypeError):
+    """A stored installation identity that does not parse: unknown, to rebuild."""
+
+
+class InstallAdmissionBusy(UnknownOutcomeError, InstallPlanConflict):
     """A capacity writer owns the row; retry only after releasing this transaction."""
 
     code = "install.capacity_busy"
+
+    def __init__(
+        self,
+        *args: object,
+        reason: WaitReason | None = WaitReason.OBSERVATION_UNAVAILABLE,
+    ) -> None:
+        super().__init__(*args, reason=reason)
 
 
 class InstallPreflightExpired(InstallAdmissionBusy):
@@ -142,11 +173,15 @@ class InstallPreflightExpired(InstallAdmissionBusy):
     code = "runtime_preflight.stale"
 
     def __init__(
-        self, code: str = "runtime_preflight.stale", detail: str | None = None
+        self,
+        code: str = "runtime_preflight.stale",
+        detail: str | None = None,
+        *,
+        reason: WaitReason | None = WaitReason.STALE_PLAN,
     ):
         self.code = code
         self.detail = detail
-        super().__init__(f"{code}: {detail}" if detail else code)
+        super().__init__(f"{code}: {detail}" if detail else code, reason=reason)
 
 
 _RETRYABLE_INSTALL_BLOCKERS = {
@@ -178,7 +213,9 @@ def require_admissible(plan: InstallPlan) -> None:
             for reason in node.blockers
             if reason.code in _REFRESHABLE_PREFLIGHT_BLOCKERS
         )
-        raise InstallPreflightExpired(blocker.code, blocker.detail)
+        raise InstallPreflightExpired(
+            blocker.code, blocker.detail, reason=WaitReason.STALE_PLAN
+        )
     if codes and codes <= _RETRYABLE_INSTALL_BLOCKERS:
         causes = "; ".join(
             f"{node.node_id} {reason.code}: {reason.detail}"[:160]
@@ -186,10 +223,12 @@ def require_admissible(plan: InstallPlan) -> None:
             for reason in node.blockers
         )[:600]
         raise InstallAdmissionBusy(
-            f"install is waiting for inventory or capacity ({causes})"
+            f"install is waiting for inventory or capacity ({causes})",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
-    raise InstallPlanConflict(
-        "install.plan_invalid: install plan is blocked by current admission evidence"
+    raise InstallPlanStale(
+        "install.plan_invalid: install plan is blocked by current admission evidence",
+        reason=InvalidRequestReason.CONFLICT,
     )
 
 
@@ -249,18 +288,26 @@ class InstallAdmissionService:
                 else None
             )
             if mapping is None:
-                raise KeyError(mapping_id)
+                raise MissingRecord(mapping_id, reason=InvalidRequestReason.NOT_FOUND)
             if recipe_build_id is not None and build is None:
-                raise KeyError(recipe_build_id)
+                raise MissingRecord(
+                    recipe_build_id, reason=InvalidRequestReason.NOT_FOUND
+                )
             if mapping.state != "ready":
-                raise ValueError("cluster mapping is not ready")
+                raise InvalidValue(
+                    "cluster mapping is not ready",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             revision = _active_recipe_revision(session, mapping.recipe_revision_id)
             if (
                 revision is None
                 or revision.state != "active"
                 or revision.content_digest is None
             ):
-                raise ValueError("recipe revision is not resolved")
+                raise InvalidValue(
+                    "recipe revision is not resolved",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             if (
                 build is None
                 or build.state != "succeeded"
@@ -268,7 +315,10 @@ class InstallAdmissionService:
                 or build.image_bytes is None
                 or build.oci_layout_sha256 is None
             ):
-                raise ValueError("successful recipe build does not match the mapping")
+                raise InvalidValue(
+                    "successful recipe build does not match the mapping",
+                    reason=InvalidRequestReason.NOT_READY,
+                )
             mapping_nodes = tuple(
                 session.scalars(
                     select(ClusterMappingNode)
@@ -323,7 +373,10 @@ class InstallAdmissionService:
             try:
                 resolved_entities = resolve_recipe_entities(session, document)
             except RecipeRuntimeSpecError as error:
-                raise ValueError("exact recipe dependencies are unavailable") from error
+                raise BookkeepingUnknown(
+                    "exact recipe dependencies are unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
             models = resolved_entities.get("models")
             model_document = (
                 getattr(models[0], "document", None)
@@ -331,8 +384,9 @@ class InstallAdmissionService:
                 else None
             )
             if not isinstance(model_document, Mapping):
-                raise ValueError(  # noqa: TRY004
-                    "exact model license authority is unavailable"
+                raise BookkeepingUnknown(
+                    "exact model license authority is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             compiled_plan_error: str | None = None
             # The snapshot is complete. Production compilation consults managed
@@ -359,7 +413,10 @@ class InstallAdmissionService:
             if compiled_execution_plans is not None:
                 try:
                     if not isinstance(compiled_execution_plans, Mapping):
-                        raise TypeError("compiled execution plan mapping is invalid")
+                        raise InvalidType(
+                            "compiled execution plan mapping is invalid",
+                            reason=InvalidRequestReason.MALFORMED,
+                        )
                     compiled_execution_plans = {
                         str(node_id): validate_compiled_launch_payload(value)
                         for node_id, value in compiled_execution_plans.items()
@@ -457,7 +514,10 @@ class InstallAdmissionService:
                 )
             role = role_by_name.get(mapping_node.role)
             if role is None:
-                raise TypeError("mapping role is absent from recipe topology")
+                raise InvalidType(
+                    "mapping role is absent from recipe topology",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
             disk = role.resources.disk
             compiled_plan = compiled_plan_by_node.get(mapping_node.node_id)
             compiled_artifacts = (
@@ -731,10 +791,14 @@ class InstallAdmissionService:
                 workload_intent_ordinal=workload_intent_ordinal,
             )
         except AdmissionLockBusy as error:
-            raise InstallAdmissionBusy("install.capacity_busy") from error
+            raise InstallAdmissionBusy(
+                "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+            ) from error
         except OperationalError as error:
             if is_admission_contention(error):
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise InstallAdmissionBusy(
+                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                ) from error
             raise
 
     def _accept_install_in_session(
@@ -821,7 +885,10 @@ class InstallAdmissionService:
             or build.state != "succeeded"
             or build.image_digest != plan.image_digest
         ):
-            raise InstallPlanConflict("mapping or build changed while reserving")
+            raise InstallPlanStale(
+                "mapping or build changed while reserving",
+                reason=InvalidRequestReason.SUPERSEDED,
+            )
         mapping_nodes = tuple(
             session.scalars(
                 select(ClusterMappingNode)
@@ -852,7 +919,8 @@ class InstallAdmissionService:
         require_admissible(fresh)
         if {node.node_id for node in fresh.nodes} != set(node_ids):
             raise InstallAdmissionBusy(
-                "install target membership changed during admission"
+                "install target membership changed during admission",
+                reason=WaitReason.SCOPE_CHANGED,
             )
         plan = fresh
         if (
@@ -862,13 +930,19 @@ class InstallAdmissionService:
             or tuple((node.node_id, node.rank, node.role) for node in mapping_nodes)
             != tuple((node.node_id, node.rank, node.role) for node in plan.nodes)
         ):
-            raise InstallPlanConflict("install.plan_stale")
+            raise InstallPlanStale(
+                "install.plan_stale", reason=InvalidRequestReason.SUPERSEDED
+            )
         try:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
-            raise InstallPlanConflict("install.dependencies_stale") from error
+            raise InstallPlanStale(
+                "install.dependencies_stale", reason=InvalidRequestReason.SUPERSEDED
+            ) from error
         except (TypeError, ValueError) as error:
-            raise InstallPlanConflict("install.dependencies_stale") from error
+            raise InstallPlanStale(
+                "install.dependencies_stale", reason=InvalidRequestReason.SUPERSEDED
+            ) from error
         try:
             persisted_plan = installation_plan_document(
                 {
@@ -886,7 +960,9 @@ class InstallAdmissionService:
                 }
             )
         except RecipeExecutionContractError as error:
-            raise InstallPlanConflict("install.plan_invalid") from error
+            raise InstallPlanStale(
+                "install.plan_invalid", reason=InvalidRequestReason.MALFORMED
+            ) from error
         installation = RecipeInstallation(
             recipe_revision_id=plan.recipe_revision_id,
             model_content_sha256=_primary_model_sha256(revision.document),
@@ -903,7 +979,9 @@ class InstallAdmissionService:
         )
         for node in sorted(fresh.nodes, key=lambda item: item.node_id):
             if session.get(AgentNode, node.node_id) is None:
-                raise InstallPlanConflict("installation node disappeared")
+                raise InstallEvidenceChanged(
+                    "installation node disappeared", reason=WaitReason.SCOPE_CHANGED
+                )
             active = outstanding_disk_reservation_bytes(
                 session,
                 node.node_id,
@@ -917,14 +995,18 @@ class InstallAdmissionService:
                 or node.free_bytes - active - node.required_bytes
                 < node.disk_floor_bytes
             ):
-                raise InstallPlanConflict("disk capacity changed while reserving")
+                raise InstallEvidenceChanged(
+                    "disk capacity changed while reserving",
+                    reason=WaitReason.SCOPE_CHANGED,
+                )
         session.add(installation)
         session.flush()
         for node in plan.nodes:
             inherited = claims.get(node.node_id)
             if inherited is not None and node.required_bytes > inherited.amount_bytes:
-                raise InstallPlanConflict(
-                    "installation exceeds its reviewed disk claim"
+                raise InstallPlanStale(
+                    "installation exceeds its reviewed disk claim",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
             session.add(
                 InstallationNode(
@@ -980,7 +1062,10 @@ def _primary_model_sha256(document: Mapping[str, object]) -> str:
         or len(digest) != 64
         or any(character not in "0123456789abcdef" for character in digest)
     ):
-        raise InstallPlanConflict("install.model_identity_unavailable")
+        raise InstallEvidenceChanged(
+            "install.model_identity_unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     return digest
 
 
@@ -1027,7 +1112,10 @@ def _node_digest_document(
 
     if isinstance(node, Mapping):
         if any(key not in node for key in _INSTALL_NODE_DIGEST_FIELDS):
-            raise ValueError("stored installation node identity is incomplete")
+            raise StoredInstallIdentityDamaged(
+                "stored installation node identity is incomplete",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         return {key: node[key] for key in _INSTALL_NODE_DIGEST_FIELDS}
     return {key: getattr(node, key) for key in _INSTALL_NODE_DIGEST_FIELDS}
 
@@ -1076,7 +1164,10 @@ def installation_plan_digest_from_stored_document(value: object) -> str:
     """
 
     if not isinstance(value, Mapping):
-        raise TypeError("stored installation identity is invalid")
+        raise StoredInstallIdentityDamaged(
+            "stored installation identity is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     nodes = value.get("nodes")
     compiled = value.get("compiled_execution_plans")
     if (
@@ -1088,7 +1179,10 @@ def installation_plan_digest_from_stored_document(value: object) -> str:
         or any(not isinstance(item, Mapping) for item in nodes)
         or any(not isinstance(item, Mapping) for item in compiled.values())
     ):
-        raise ValueError("stored installation identity is invalid")
+        raise StoredInstallIdentityDamaged(
+            "stored installation identity is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     node_documents: list[dict[str, object]] = []
     for item in nodes:
         assert isinstance(item, Mapping)
@@ -1106,12 +1200,21 @@ def installation_plan_digest_from_stored_document(value: object) -> str:
                 )
             )
         ):
-            raise ValueError("stored installation node identity is invalid")
+            raise StoredInstallIdentityDamaged(
+                "stored installation node identity is invalid",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         node_documents.append(_node_digest_document(item))
     if len({item["node_id"] for item in node_documents}) != len(node_documents):
-        raise ValueError("stored installation node identities are duplicated")
+        raise StoredInstallIdentityDamaged(
+            "stored installation node identities are duplicated",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     if set(compiled) != {item["node_id"] for item in node_documents}:
-        raise ValueError("stored compiled plans do not match installation nodes")
+        raise StoredInstallIdentityDamaged(
+            "stored compiled plans do not match installation nodes",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     identity = _installation_plan_identity(
         mapping_id=value["mapping_id"],
         mapping_generation=value["mapping_generation"],

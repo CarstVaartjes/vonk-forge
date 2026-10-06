@@ -1077,3 +1077,31 @@ def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_p
     assert "runtime_preflight.host_changed" in {
         reason.code for reason in blocked.nodes[0].blockers
     }
+
+
+def test_install_admission_errors_carry_their_category() -> None:
+    from vonk_agent_protocol import (
+        InvalidRequestError,
+        UnknownOutcomeError,
+        WaitReason,
+    )
+    from vonk_control.install_admission import (
+        InstallAdmissionBusy,
+        InstallPlanConflict,
+        InstallPlanStale,
+        InstallPreflightExpired,
+        installation_plan_digest_from_stored_document,
+    )
+
+    busy = InstallAdmissionBusy("install.capacity_busy")
+    assert isinstance(busy, UnknownOutcomeError)
+    assert isinstance(busy, InstallPlanConflict)
+    assert busy.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
+    expired = InstallPreflightExpired("runtime_preflight.stale", "old")
+    assert isinstance(expired, UnknownOutcomeError)
+    assert expired.typed_reason is WaitReason.STALE_PLAN
+    assert isinstance(InstallPlanStale("x"), InvalidRequestError)
+    with pytest.raises(UnknownOutcomeError):
+        installation_plan_digest_from_stored_document("not a document")
+    with pytest.raises(TypeError):
+        installation_plan_digest_from_stored_document("not a document")
