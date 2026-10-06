@@ -191,6 +191,11 @@ class MemoryReservationTotals:
     unknown_run_residuals_by_kind: Mapping[
         str, tuple[UnknownRunMemoryResidual, ...]
     ] = field(default_factory=dict)
+    #: Claims of runs whose Stop receipts the Controller confirmed after the
+    #: inventory sample was taken. The sample still counts those runs' memory as
+    #: used, so the freed bytes are credited back, never more than the sample
+    #: reports as occupied.
+    released_unobserved_bytes_by_kind: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,11 +311,23 @@ def memory_capacity_snapshot(
             else ()
         )
         total, free = values if values is not None else (None, None)
+        credit = (
+            sum(
+                reservations.released_unobserved_bytes_by_kind.get(item, 0)
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+            )
+            if memory_pool is not None
+            else 0
+        )
         return CapacitySnapshot(
             node_id,
             kind,
             total,
-            total - free if total is not None and free is not None else None,
+            max(0, total - free - credit)
+            if total is not None and free is not None
+            else None,
             reserved,
             evidence_state if total is not None else "unknown",
             evidence_digest,

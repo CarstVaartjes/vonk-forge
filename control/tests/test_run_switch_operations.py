@@ -6122,3 +6122,91 @@ def test_missing_per_node_evidence_means_missing_here_never_an_error(
     )
     _total, per_node = _planned_transfer_bytes(uneven)
     assert per_node == {SPARK_A: 0, SPARK_B: 1024 + 1025}
+
+
+@pytest.mark.parametrize(
+    ("run_state", "released_after_sample", "admitted"),
+    [
+        ("stopped", True, True),
+        # Wrong implementation: a run that failed without a Stop receipt may
+        # still hold its memory, so its released claim is never credited.
+        ("failed", True, False),
+        # Wrong implementation: a release the sample already includes was
+        # credited a second time.
+        ("stopped", False, False),
+    ],
+)
+def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
+    tmp_path: Path, run_state: str, released_after_sample: bool, admitted: bool
+) -> None:
+    """The inventory sample can predate the Stop that freed the memory.
+
+    The load after a failed one was refused ("Observed free capacity less
+    definite claims ... leaves N bytes before the required reserve") because the
+    sample, up to five minutes old, still counted the memory of a run the
+    Controller had since stopped and released.
+    """
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    node_id = nodes[0]
+    installation_operation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    installation_id = installation_operation.owner_id
+    run_plan = lifecycle._run_admission.plan_run(
+        installation_id, "old", now=lifecycle._clock()
+    )
+    run_id = lifecycle._run_admission.accept_run(
+        run_plan, actor="admin", now=lifecycle._clock()
+    )
+    request = _request(sessions, node_id, action="switch")
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.state = run_state
+        run.route_state = "withdrawn"
+        for item in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            item.state = "stopped"
+        for reservation in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+            )
+        ):
+            reservation.state = "released"
+            reservation.released_at = lifecycle._clock() - timedelta(
+                seconds=10 if released_after_sample else 120
+            )
+    baseline = service.preview(request, actor="admin")
+    required = baseline.fit_current.nodes[0].memory_required_bytes
+    floor = baseline.fit_current.nodes[0].memory_floor_bytes
+    assert required is not None and floor is not None
+    # The sample still shows the stopped run's memory in use: free is short of
+    # the demand plus the reserve, while the total is ample.
+    free = required + floor - 52
+    total = free + 1_000_000
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.observed_at = lifecycle._clock() - timedelta(seconds=60)
+        snapshot.host_memory_total_bytes = total
+        snapshot.host_memory_free_bytes = free
+        snapshot.gpu_memory_total_bytes = total
+        snapshot.gpu_memory_free_bytes = free
+    plan = service.preview(request, actor="admin")
+
+    codes = {reason.code for reason in plan.blockers}
+    if admitted:
+        assert "run-switch.resource.insufficient_capacity" not in codes, plan.blockers
+    else:
+        assert "run-switch.resource.insufficient_capacity" in codes, plan.blockers

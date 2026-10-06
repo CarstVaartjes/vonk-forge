@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -85,7 +86,15 @@ def memory_reservations(
     excluded_profile_application_ids: Sequence[str] = (),
     excluded_profile_claim_ids: Sequence[str] = (),
     excluded_run_ids: Sequence[str] = (),
+    observed_at: datetime | None = None,
 ) -> MemoryReservationTotals:
+    """The ledger's memory commitments on one node.
+
+    ``observed_at`` is the time of the inventory sample the caller compares them
+    with; claims released by a confirmed Stop after that time are reported so
+    the sample's still-occupied bytes are not charged to the next load.
+    """
+    released = _released_since_observation(session, node_id, observed_at)
     claims = tuple(
         session.scalars(
             select(ResourceReservation)
@@ -128,6 +137,7 @@ def memory_reservations(
             {kind: amount for kind, amount in committed.items() if amount},
             {kind: amount for kind, amount in unmaterialized.items() if amount},
             {kind: value for kind, value in unknown.items() if value},
+            released,
         )
     active = [claim for claim in claims if claim.state == "active"]
     future: dict[str, list[ResourceReservation]] = {}
@@ -215,8 +225,41 @@ def memory_reservations(
         if unknown:
             unknown_totals[pool_kind] = unknown
     return MemoryReservationTotals(
-        committed_totals, unmaterialized_totals, unknown_totals
+        committed_totals, unmaterialized_totals, unknown_totals, released
     )
+
+
+def _released_since_observation(
+    session: Session, node_id: str, observed_at: datetime | None
+) -> dict[str, int]:
+    """Memory of runs stopped (receipt proven) after the inventory sample."""
+
+    if observed_at is None:
+        return {}
+    since = observed_at if observed_at.tzinfo else observed_at.replace(tzinfo=UTC)
+    totals: dict[str, int] = {}
+    for claim in session.scalars(
+        select(ResourceReservation)
+        .join(RecipeRun, RecipeRun.id == ResourceReservation.owner_id)
+        .where(
+            ResourceReservation.node_id == node_id,
+            ResourceReservation.owner_kind == "run",
+            ResourceReservation.kind.in_(MEMORY_RESERVATION_KINDS),
+            ResourceReservation.state == "released",
+            ResourceReservation.released_at.is_not(None),
+            # A run that failed or was retired without a Stop receipt may still
+            # hold its memory; only a stopped (or stopping) run is credited.
+            RecipeRun.state.in_(("stopped", "stopping")),
+        )
+    ):
+        released_at = claim.released_at
+        if released_at is None:
+            continue
+        if released_at.tzinfo is None:
+            released_at = released_at.replace(tzinfo=UTC)
+        if released_at > since:
+            totals[claim.kind] = totals.get(claim.kind, 0) + claim.amount_bytes
+    return totals
 
 
 @dataclass(frozen=True, slots=True)

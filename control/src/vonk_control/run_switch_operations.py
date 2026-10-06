@@ -5837,6 +5837,7 @@ class RunSwitchOperationService:
                             memory_pool=snapshot.memory_pool if snapshot else None,
                             excluded_profile_application_ids=excluded_profile_application_ids,
                             excluded_run_ids=excluded_run_ids,
+                            observed_at=snapshot.observed_at if snapshot else None,
                         )
                         capacity = memory_capacity_snapshot(
                             item.node_id,

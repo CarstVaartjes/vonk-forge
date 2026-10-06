@@ -624,6 +624,7 @@ class RunAdmissionService:
                         *excluded_profile_application_ids,
                         *((profile_application_id,) if profile_application_id else ()),
                     ),
+                    observed_at=snapshot.observed_at if snapshot else None,
                 )
                 port_exclusions = {
                     "excluded_run_ids": released,
