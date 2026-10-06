@@ -186,7 +186,12 @@ from .run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationService,
 )
-from .storage_demands import STORAGE_INSUFFICIENT, StorageRelief
+from .settings import STORAGE_ADMISSION_RETRY_SECONDS, STORAGE_ADMISSION_WAIT_SECONDS
+from .storage_demands import (
+    STORAGE_EVICTION_TIMED_OUT,
+    STORAGE_INSUFFICIENT,
+    StorageRelief,
+)
 from .strict_json import (
     read_stored_document,
     read_stored_model,
@@ -816,6 +821,23 @@ class FleetProfileAdmissionEffectBusy(FleetProfileConflict):
     retry_disposition = RETRY_WAIT
 
 
+class FleetProfileAdmissionStorageWait(FleetProfileAdmissionEffectBusy):
+    """Admission is short of disk on named Sparks that eviction may free.
+
+    ``shortfalls`` holds ``(node_id, free_bytes_needed)`` per refused Spark: the
+    parked load asks the storage collector for exactly that, so the wait ends
+    by itself, or in a typed refusal when nothing more can be freed.
+    """
+
+    code = "profile.storage_wait"
+
+    def __init__(
+        self, message: str, *, shortfalls: tuple[tuple[str, int], ...]
+    ) -> None:
+        super().__init__(message)
+        self.shortfalls = shortfalls
+
+
 class FleetProfileResourceRecheckUnavailable(FleetProfileAdmissionEffectBusy):
     """The resource recheck under the admission fence failed for a named cause."""
 
@@ -1032,6 +1054,45 @@ def _profile_preview_is_waitable(preview: FleetProfilePreview) -> bool:
     """Any blocker except a security boundary parks the intent for re-planning."""
     return not any(
         is_security_failure(code) for code in _preview_blocker_codes(preview)
+    )
+
+
+_DISK_REFUSALS = frozenset(
+    {"run-switch.insufficient-disk", "run-switch.disk-eviction-planned"}
+)
+
+
+def _disk_shortfalls(assessment: Any) -> tuple[tuple[str, int], ...]:
+    """``(node_id, free_bytes_needed)`` for every Spark an assessment refuses
+    (or plans an eviction) for lack of disk."""
+
+    refused = {
+        node_id
+        for reason in (*assessment.blockers, *assessment.warnings)
+        if reason.code in _DISK_REFUSALS
+        for node_id in reason.node_ids
+    }
+    fit = assessment.fit_after_stop or assessment.fit_current
+    return tuple(
+        (node.node_id, node.disk_free_bytes - node.disk_free_after_bytes)
+        for node in fit.nodes
+        if node.node_id in refused
+        and node.disk_free_bytes is not None
+        and node.disk_free_after_bytes is not None
+        and node.disk_free_after_bytes < 0
+    )
+
+
+def _storage_wait_of(error: BaseException) -> FleetProfileAdmissionStorageWait | None:
+    return error if isinstance(error, FleetProfileAdmissionStorageWait) else None
+
+
+def _relief_blocker(node_id: str, found: StorageRelief) -> OperationBlocker:
+    return make_blocker(
+        found.code,
+        found.detail,
+        severity="error" if found.code == STORAGE_INSUFFICIENT else "warning",
+        node_ids=(node_id,),
     )
 
 
@@ -1633,10 +1694,15 @@ class RunSwitchFleetProfileAdapter:
             )
             if not current.allowed:
                 reasons = ", ".join(reason.code for reason in current.blockers[:4])
-                raise FleetProfileAdmissionEffectBusy(
-                    "Profile resource admission is waiting for capacity"
-                    + (f": {reasons}" if reasons else "")
+                message = "Profile resource admission is waiting for capacity" + (
+                    f": {reasons}" if reasons else ""
                 )
+                shortfalls = _disk_shortfalls(fresh)
+                if shortfalls:
+                    raise FleetProfileAdmissionStorageWait(
+                        message, shortfalls=shortfalls
+                    )
+                raise FleetProfileAdmissionEffectBusy(message)
 
     def _advance(
         self,
@@ -5386,10 +5452,30 @@ class FleetProfileService:
         retry_delay: timedelta | None = None,
         blockers: Sequence[OperationBlocker] | None = None,
         code: str = "profile.admission_busy",
+        storage: FleetProfileAdmissionStorageWait | None = None,
     ) -> FleetProfileApplicationView:
-        """Record bounded retry state after a nonblocking admission refusal."""
+        """Record bounded retry state after a nonblocking admission refusal.
+
+        A refusal for disk (``storage``) asks the storage collector to free it
+        and records what that can do: the wait is bounded and ends in a typed
+        refusal when nothing more can be freed or the space does not come.
+        """
 
         now = _aware(self._clock())
+        relieved: list[tuple[str, StorageRelief]] = []
+        if storage is not None:
+            with self._sessions() as session:
+                row = session.get(FleetProfileApplication, application_id)
+                profile_id = row.profile_id if row is not None else application_id
+            for node_id, needed in storage.shortfalls:
+                found = self._ask_storage_relief(node_id, needed, profile_id)
+                if found is not None:
+                    relieved.append((node_id, found))
+            if relieved:
+                blockers = [
+                    _relief_blocker(node_id, item) for node_id, item in relieved
+                ]
+            retry_delay = timedelta(seconds=STORAGE_ADMISSION_RETRY_SECONDS)
         with self._sessions.begin() as session:
             row = session.get(
                 FleetProfileApplication, application_id, with_for_update=True
@@ -5399,6 +5485,66 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             if not _owns_pending_admission(row, progress):
                 return self._application_view(row)
+            if storage is not None:
+                since = _aware(progress.storage_wait_since or now)
+                final = next(
+                    (
+                        (node_id, item)
+                        for node_id, item in relieved
+                        if item.code == STORAGE_INSUFFICIENT and not item.paused
+                    ),
+                    None,
+                )
+                expired = now - since > timedelta(
+                    seconds=STORAGE_ADMISSION_WAIT_SECONDS
+                )
+                if final is not None or expired:
+                    # Nothing more can be freed (or the space did not come in
+                    # time): end with the reason, not another silent retry.
+                    node_id, item = final or (
+                        storage.shortfalls[0][0],
+                        relieved[0][1] if relieved else None,
+                    )
+                    waited = (
+                        f"Disk did not free within {STORAGE_ADMISSION_WAIT_SECONDS}s"
+                        " of waiting for eviction. "
+                    )
+                    detail = (
+                        item.detail
+                        if final is not None and item is not None
+                        else waited
+                        + (item.detail if item is not None else str(storage))
+                    )
+                    refusal = make_blocker(
+                        STORAGE_INSUFFICIENT
+                        if final is not None
+                        else STORAGE_EVICTION_TIMED_OUT,
+                        detail,
+                        severity="error",
+                        node_ids=(node_id,),
+                    )
+                    row.progress = _progress_with_blockers(
+                        progress,
+                        [refusal],
+                        admission_pending=False,
+                        admission_retry_at=None,
+                        storage_wait_since=since.isoformat(),
+                    )
+                    _LOGGER.warning(
+                        "profile application %s refused for disk: %s: %s",
+                        application_id,
+                        refusal.code,
+                        refusal.detail,
+                    )
+                    self._lifecycle.fail(
+                        row, f"{refusal.code}: {refusal.detail}", now, session=session
+                    )
+                    return self._application_view(row)
+                wait_changes: dict[str, object] = {
+                    "storage_wait_since": since.isoformat()
+                }
+            else:
+                wait_changes = {"storage_wait_since": None}
             attempt = progress.admission_attempt + 1
             next_retry = (
                 FleetProfileAdapter.next_retry(application_id, attempt, now)
@@ -5414,6 +5560,7 @@ class FleetProfileService:
                 admission_pending=True,
                 admission_attempt=attempt,
                 admission_retry_at=next_retry.isoformat(),
+                **wait_changes,
             )
             if {(item.code, tuple(item.node_ids)) for item in current_blockers} != {
                 (item.code, tuple(item.node_ids)) for item in progress.blockers
@@ -5730,6 +5877,7 @@ class FleetProfileService:
                         if isinstance(error, FleetProfileAdmissionStorageError)
                         else timedelta(0),
                         code=_deferral_code(error),
+                        storage=_storage_wait_of(error),
                     )
             raise FleetProfileAdmissionBusy(
                 "Profile admission retry schedule was exhausted"
@@ -6765,51 +6913,35 @@ class FleetProfileService:
         shown names the bytes needed and the bytes that can be freed.
         """
 
-        relief = self._storage_relief
-        if relief is None:
+        if self._storage_relief is None:
             return []
         blockers: list[OperationBlocker] = []
         for item in preview.assessments:
-            assessment = item.assessment
-            refused = {
-                node_id
-                for reason in (*assessment.blockers, *assessment.warnings)
-                if reason.code
-                in {"run-switch.insufficient-disk", "run-switch.disk-eviction-planned"}
-                for node_id in reason.node_ids
-            }
-            fit = assessment.fit_after_stop or assessment.fit_current
-            for node in fit.nodes:
-                if (
-                    node.node_id not in refused
-                    or node.disk_free_bytes is None
-                    or node.disk_free_after_bytes is None
-                    or node.disk_free_after_bytes >= 0
-                ):
-                    continue
-                try:
-                    found = relief(
-                        node.node_id,
-                        node.disk_free_bytes - node.disk_free_after_bytes,
-                        source="profile-load",
-                        subject=preview.profile_id,
-                        reason="run-switch.insufficient-disk",
-                    )
-                except Exception:  # a load never fails on this
-                    _LOGGER.warning("storage relief failed", exc_info=True)
-                    continue
+            for node_id, needed in _disk_shortfalls(item.assessment):
+                found = self._ask_storage_relief(node_id, needed, preview.profile_id)
                 if found is not None:
-                    blockers.append(
-                        make_blocker(
-                            found.code,
-                            found.detail,
-                            severity="error"
-                            if found.code == STORAGE_INSUFFICIENT
-                            else "warning",
-                            node_ids=(node.node_id,),
-                        )
-                    )
+                    blockers.append(_relief_blocker(node_id, found))
         return blockers
+
+    def _ask_storage_relief(
+        self, node_id: str, required_free_bytes: int, profile_id: str
+    ) -> StorageRelief | None:
+        """Register the demand on one Spark and read what eviction can do."""
+
+        relief = self._storage_relief
+        if relief is None:
+            return None
+        try:
+            return relief(
+                node_id,
+                required_free_bytes,
+                source="profile-load",
+                subject=profile_id,
+                reason="run-switch.insufficient-disk",
+            )
+        except Exception:  # a load never fails on this
+            _LOGGER.warning("storage relief failed", exc_info=True)
+            return None
 
     def _park_for_retry(
         self,
@@ -7797,7 +7929,10 @@ class FleetProfileService:
             if pending is None:
                 raise
             self._defer_pending_application(
-                pending.id, str(error), code=_deferral_code(error)
+                pending.id,
+                str(error),
+                code=_deferral_code(error),
+                storage=_storage_wait_of(error),
             )
         except FleetProfileAdmissionStorageError as error:
             if pending is None:
@@ -8643,7 +8778,10 @@ class FleetProfileService:
             FleetProfileAdmissionStorageError,
         ) as error:
             self._defer_pending_application(
-                application_id, str(error), code=_deferral_code(error)
+                application_id,
+                str(error),
+                code=_deferral_code(error),
+                storage=_storage_wait_of(error),
             )
             return True
         except FleetProfileStalePlanConflict as error:

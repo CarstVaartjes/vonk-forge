@@ -48,10 +48,14 @@ class StorageRelief:
     needed_bytes: int
     freeable_bytes: int
     detail: str
+    #: Eviction is paused after removals that freed far less than promised: a
+    #: wait that ends by itself, not a final answer.
+    paused: bool = False
 
 
 STORAGE_EVICTING = "storage.evicting"
 STORAGE_INSUFFICIENT = "storage.insufficient_after_eviction"
+STORAGE_EVICTION_TIMED_OUT = "storage.eviction_timed_out"
 
 
 class StorageDemands:
@@ -122,6 +126,7 @@ __all__ = [
     "NAS_IMAGES",
     "NAS_MODELS",
     "STORAGE_EVICTING",
+    "STORAGE_EVICTION_TIMED_OUT",
     "STORAGE_INSUFFICIENT",
     "StorageDemand",
     "StorageDemands",

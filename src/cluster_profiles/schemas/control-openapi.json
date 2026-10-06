@@ -4601,6 +4601,18 @@
             "title": "Step Results",
             "type": "object"
           },
+          "storage_wait_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Wait Since"
+          },
           "supersede_code": {
             "anyOf": [
               {

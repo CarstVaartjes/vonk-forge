@@ -67,6 +67,11 @@ STORAGE_SCAN_INTERVAL_SECONDS = 30
 # Removals that free far less than they promised (files another installation
 # still links) pause eviction on that Spark or the NAS for this long.
 STORAGE_INEFFECTIVE_COOLDOWN_SECONDS = 900
+# A profile load waits at most this long for the disk it asked the collector to
+# free (a scan, the uninstalls, a fresh inventory, one ineffective cooldown);
+# then it ends with a typed refusal naming what is still in the way.
+STORAGE_ADMISSION_WAIT_SECONDS = 1800
+STORAGE_ADMISSION_RETRY_SECONDS = 60
 # File transfers in flight across all models. Live HTTP streams (a file, or one
 # of the four ranges of a large file) are bounded separately and adaptively:
 # the Controller climbs toward the stream cap while aggregate throughput grows

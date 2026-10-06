@@ -2504,6 +2504,8 @@ export interface components {
             step_results?: {
                 [key: string]: components["schemas"]["FleetProfileStepResult"];
             };
+            /** Storage Wait Since */
+            storage_wait_since?: string | null;
             /** Supersede Code */
             supersede_code?: ("superseded-by-retry" | "superseded-by-intent" | "effects-changed-during-admission") | null;
             /** Superseded By */

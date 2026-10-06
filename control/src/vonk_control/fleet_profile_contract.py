@@ -954,6 +954,9 @@ class FleetProfileApplicationProgress(_StrictModel):
     admission_pending: bool = False
     admission_attempt: int = Field(default=0, ge=0)
     admission_retry_at: datetime | None = None
+    #: When the admission began waiting for disk it asked the collector to free;
+    #: the wait is bounded, then the load ends with a typed refusal.
+    storage_wait_since: datetime | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
     workload_intent_ordinal: int | None = Field(default=None, ge=1)
     operation_kind: FleetProfileOperationKind | None = None

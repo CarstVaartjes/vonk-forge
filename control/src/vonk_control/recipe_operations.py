@@ -3306,9 +3306,16 @@ class RecipeOperationService:
         session.flush()
         return job
 
-    def preview_uninstall(self, installation_id: str) -> UninstallPlan:
+    def preview_uninstall(
+        self, installation_id: str, *, also_removing: Collection[str] = ()
+    ) -> UninstallPlan:
+        """The uninstall plan; ``also_removing`` names installations removed in
+        the same sweep, which do not count as users of the shared model files."""
+
         with self._sessions() as session:
-            return self._uninstall_plan_in_session(session, installation_id, lock=False)
+            return self._uninstall_plan_in_session(
+                session, installation_id, lock=False, also_removing=also_removing
+            )
 
     def preview_reconciliation_authority(
         self,
@@ -4094,8 +4101,12 @@ class RecipeOperationService:
         request_id: str,
         workload_intent_ordinal: int | None = None,
         unattended_guard: Callable[[Session], None] | None = None,
+        also_removing: Collection[str] = (),
     ) -> RecipeOperationView:
         """Queue the removal of one installation from its Sparks.
+
+        ``also_removing`` names installations removed in the same sweep: they do
+        not keep the shared model files, so the last of them to go frees them.
 
         ``unattended_guard`` marks a removal nobody asked for (the storage
         sweep). It takes no new workload intent, so it supersedes no order and
@@ -4134,7 +4145,7 @@ class RecipeOperationService:
                 if existing is not None:
                     return existing
                 plan = self._uninstall_plan_in_session(
-                    session, installation_id, lock=True
+                    session, installation_id, lock=True, also_removing=also_removing
                 )
                 if not plan.allowed:
                     raise RecipeOperationConflict(
@@ -7599,7 +7610,12 @@ class RecipeOperationService:
         )
 
     def _uninstall_plan_in_session(
-        self, session: Session, installation_id: str, *, lock: bool
+        self,
+        session: Session,
+        installation_id: str,
+        *,
+        lock: bool,
+        also_removing: Collection[str] = (),
     ) -> UninstallPlan:
         installation_statement = select(RecipeInstallation).where(
             RecipeInstallation.id == installation_id
@@ -7736,7 +7752,7 @@ class RecipeOperationService:
                 session,
                 model_content_sha256,
                 node_ids,
-                exclude_installation_id=installation.id,
+                exclude_installation_ids={installation.id, *also_removing},
                 lock=lock,
             )
         else:
@@ -7798,15 +7814,15 @@ class RecipeOperationService:
         model_content_sha256: str,
         node_ids: set[str],
         *,
-        exclude_installation_id: str | None,
+        exclude_installation_ids: Collection[str],
         lock: bool,
     ) -> dict[str, tuple[str, ...]]:
         statement = select(RecipeInstallation).where(
             RecipeInstallation.state != "uninstalled"
         )
-        if exclude_installation_id is not None:
+        if exclude_installation_ids:
             statement = statement.where(
-                RecipeInstallation.id != exclude_installation_id
+                RecipeInstallation.id.not_in(tuple(exclude_installation_ids))
             )
         if lock:
             statement = statement.with_for_update(of=RecipeInstallation)
