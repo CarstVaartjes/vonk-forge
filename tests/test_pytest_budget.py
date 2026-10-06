@@ -139,3 +139,16 @@ def test_only_the_overrun_that_reproduces_fails_among_several(tmp_path: Path) ->
     assert "FAILED test_sleep.py::test_slow" in result.stdout
     assert "::warning::test_sleep.py::test_noisy" in result.stdout
     assert "FAILED test_sleep.py::test_noisy" not in result.stdout
+
+
+def test_the_rerun_keeps_the_session_calibration() -> None:
+    """Catches a rerun that calibrates again on a quieter host and so judges the
+    overrun against a tighter budget than the session used (batch 7a release:
+    12.4 s alone against a 17.7 s session budget, reported as reproduced)."""
+
+    from types import SimpleNamespace
+
+    config = SimpleNamespace(stash=pytest.Stash())
+    config.stash[pytest_budget._CALIBRATION] = 1.77
+    env = pytest_budget._rerun_environment(config)  # type: ignore[arg-type]
+    assert float(env[pytest_budget.CALIBRATION_ENV]) == pytest.approx(1.77)
