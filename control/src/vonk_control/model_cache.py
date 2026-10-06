@@ -798,6 +798,12 @@ class ArtifactSetManifest:
                 else "cache manifest shape is invalid"
             )
             raise ModelCacheResolutionInvalid(code, detail) from failure
+        return cls.from_contract(wire)
+
+    @classmethod
+    def from_contract(cls, wire: CacheManifest) -> ArtifactSetManifest:
+        """Build the validated storage identity from the canonical manifest."""
+
         result = cls(
             model_content_sha256=_optional_digest(wire.model_content_sha256),
             recipe_revision_sha256=_optional_digest(wire.recipe_revision_sha256),
@@ -977,7 +983,7 @@ def _derived_result(
 def _manifest_of(payload: ModelCacheDownloadPayload) -> ArtifactSetManifest:
     """The artifact-set manifest a download or repair payload carries."""
 
-    return ArtifactSetManifest.from_document(serialize_json_value(payload.manifest))
+    return ArtifactSetManifest.from_contract(payload.manifest)
 
 
 def _updated[P: ModelCacheOperationPayload](payload: P, **changes: object) -> P:
@@ -4205,9 +4211,14 @@ class ModelCacheService:
                 observed_request = True
                 self._removal_request_after = operation.id
                 payload = self._payload_or_none(operation)
-                if payload is None or payload.get("cancellation") is not None:
+                if (
+                    not isinstance(
+                        payload, (ModelCacheDownloadPayload, ModelCacheRepairPayload)
+                    )
+                    or payload.cancellation is not None
+                ):
                     continue
-                manifest = ArtifactSetManifest.from_document(payload["manifest"])
+                manifest = _manifest_of(payload)
                 identities = (
                     ArtifactIdentity("model-set", manifest.digest),
                     *(
@@ -4270,16 +4281,18 @@ class ModelCacheService:
                 payload = self._payload_or_none(requester)
                 removal = _operation_removal(remover)
                 if (
-                    payload is None
-                    or payload.get("cancellation") is not None
+                    not isinstance(
+                        payload, (ModelCacheDownloadPayload, ModelCacheRepairPayload)
+                    )
+                    or payload.cancellation is not None
                     or isinstance(removal, Residue)
                 ):
                     return False
-                manifest = ArtifactSetManifest.from_document(payload["manifest"])
+                manifest = _manifest_of(payload)
                 if (
                     requester.artifact_set_sha256 != manifest.digest
-                    or payload.get("artifact_set_sha256") != manifest.digest
-                    or requester.plan_digest != payload.get("plan_digest")
+                    or payload.artifact_set_sha256 != manifest.digest
+                    or requester.plan_digest != payload.plan_digest
                 ):
                     return False
                 wanted = (
@@ -9000,8 +9013,9 @@ class ModelCacheService:
         self._renew_background_claims()
         finished = 0
         for operation_id, record in list(self._background_operations.items()):
-            futures = record.futures
+            futures: list[Future[None]] = record.futures
             first_error = record.failure
+            future: Future[None]
             for future in [future for future in futures if future.done()]:
                 futures.remove(future)
                 failed_artifact_key = record.future_specs.pop(future, None)
@@ -9017,12 +9031,14 @@ class ModelCacheService:
                         first_error = error
                         record.failure = error
                         record.failure_artifact_key = failed_artifact_key
+                    sibling: Future[None]
                     for sibling in futures:
                         sibling.cancel()
                 except Exception as error:  # noqa: BLE001 - settle failed background transfers durably
                     if record.failure is None:
                         record.failure = error
                         record.failure_artifact_key = failed_artifact_key
+                    other: Future[None]
                     for other in futures:
                         other.cancel()
             first_error = record.failure
@@ -9231,7 +9247,7 @@ class ModelCacheService:
                         and self._payload_has_huggingface_source(payload)
                     ):
                         continue
-                manifest = ArtifactSetManifest.from_document(payload["manifest"])
+                manifest = _manifest_of(payload)
                 if has_pending_removal(
                     session,
                     (
