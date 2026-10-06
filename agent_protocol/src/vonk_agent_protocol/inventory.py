@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from .wire_model import WireModel
+from .wire_model import WireModel, strict_json_datetime
 
 Capability = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")]
 MemoryPool = Literal["shared", "separate"]
@@ -19,15 +19,6 @@ InterfaceName = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}
 RuntimeVersion = Annotated[
     str, Field(min_length=1, max_length=256, pattern=r"^[\x00-\x7f]+$")
 ]
-
-
-def _strict_json_datetime(value: object) -> object:
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError as error:
-            raise ValueError("inventory observed_at is invalid") from error
-    return value
 
 
 class NetworkInterface(WireModel):
@@ -77,7 +68,7 @@ class InventoryRequest(WireModel):
     @field_validator("observed_at", mode="before")
     @classmethod
     def parse_observed_at(cls, value: object) -> object:
-        return _strict_json_datetime(value)
+        return strict_json_datetime(value)
 
     @model_validator(mode="after")
     def internally_consistent(self) -> InventoryRequest:

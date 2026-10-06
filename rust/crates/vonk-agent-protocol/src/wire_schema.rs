@@ -185,6 +185,16 @@ fn materialize(schema: &Value, value: &mut Value) {
 
 pub(crate) fn validate_and_materialize(name: &str, value: &mut Value) -> Result<(), String> {
     let pointer = format!("#/$defs/{name}");
+    // A model declared tolerant (`extra="ignore"`) drops keys it does not know
+    // before validation, so a record written by another release stays readable.
+    if SCHEMA["$defs"][name]["x-vonk-ignore-unknown"] == true
+        && let (Some(properties), Some(object)) = (
+            SCHEMA["$defs"][name]["properties"].as_object(),
+            value.as_object_mut(),
+        )
+    {
+        object.retain(|key, _| properties.contains_key(key));
+    }
     let validator = validator(&pointer)?;
     if let Err(error) = validator.validate(&*value) {
         // Only the model and structural path are exposed, never the instance

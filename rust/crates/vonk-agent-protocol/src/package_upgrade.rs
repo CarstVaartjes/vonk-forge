@@ -1,6 +1,6 @@
 pub use crate::generated::{
-    PackageActivationReceipt, PackageActivationReceiptPhase as PackageActivationPhase,
-    PackageRollbackAuthority, PackageRollbackSource,
+    PackageActivationPhase, PackageActivationReceipt, PackageRollbackAuthority,
+    PackageRollbackSource,
 };
 
 impl PackageRollbackAuthority {

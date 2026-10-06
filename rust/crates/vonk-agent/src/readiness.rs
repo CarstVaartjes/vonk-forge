@@ -7,7 +7,6 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::runtime_identity::AgentRuntimeIdentity;
@@ -26,40 +25,36 @@ pub enum ReadinessError {
     Json(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ReadinessReceipt {
-    schema_version: u8,
+pub use vonk_agent_protocol::generated::AgentReadinessReceipt as ReadinessReceipt;
+
+/// Bind Controller acceptance to this exact process and runtime identity.
+pub fn readiness_receipt(
+    mut runtime_identity: AgentRuntimeIdentity,
     pid: u32,
     process_start_ticks: u64,
     boot_id: String,
     accepted_at: DateTime<Utc>,
-    runtime_identity: AgentRuntimeIdentity,
+) -> ReadinessReceipt {
+    // Readiness binds the direct self-test of the running executable.
+    // Activation history belongs to Controller reports and may describe
+    // an earlier package; it is not part of that local self-test.
+    runtime_identity.package_activation = None;
+    ReadinessReceipt {
+        schema_version: 1,
+        pid,
+        process_start_ticks,
+        boot_id,
+        accepted_at: accepted_at.fixed_offset(),
+        runtime_identity,
+    }
 }
 
-impl ReadinessReceipt {
-    pub fn new(
-        mut runtime_identity: AgentRuntimeIdentity,
-        pid: u32,
-        process_start_ticks: u64,
-        boot_id: String,
-        accepted_at: DateTime<Utc>,
-    ) -> Self {
-        // Readiness binds the direct self-test of the running executable.
-        // Activation history belongs to Controller reports and may describe
-        // an earlier package; it is not part of that local self-test.
-        runtime_identity.package_activation = None;
-        Self {
-            schema_version: 1,
-            pid,
-            process_start_ticks,
-            boot_id,
-            accepted_at,
-            runtime_identity,
-        }
-    }
+pub trait WriteSecure {
+    fn write_secure(&self, path: &Path) -> Result<(), ReadinessError>;
+}
 
-    pub fn write_secure(&self, path: &Path) -> Result<(), ReadinessError> {
+impl WriteSecure for ReadinessReceipt {
+    fn write_secure(&self, path: &Path) -> Result<(), ReadinessError> {
         let parent = path.parent().ok_or(ReadinessError::Unsafe)?;
         let temporary = parent.join(format!(".readiness.{}.new", std::process::id()));
         let raw = serde_json::to_vec(self)?;
@@ -112,7 +107,7 @@ pub fn verify_readiness_at(
     }
     let receipt: ReadinessReceipt = serde_json::from_slice(&raw)?;
     let age = now
-        .signed_duration_since(receipt.accepted_at)
+        .signed_duration_since(receipt.accepted_at.with_timezone(&Utc))
         .to_std()
         .map_err(|_| ReadinessError::Mismatch)?;
     if receipt.schema_version != 1
@@ -132,7 +127,7 @@ pub fn publish_current(
     runtime_identity: &AgentRuntimeIdentity,
 ) -> Result<(), ReadinessError> {
     let pid = std::process::id();
-    ReadinessReceipt::new(
+    readiness_receipt(
         runtime_identity.clone(),
         pid,
         process_start_ticks(pid)?,

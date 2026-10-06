@@ -10,7 +10,7 @@ use std::path::Path;
 use tempfile::tempdir;
 use vonk_nas_setup::{
     CanonicalTemplatePayload, PromptIo, SecretGenerationError, SecretGenerator, SetupRequest,
-    prepare,
+    parse_template_payload, prepare,
 };
 
 struct Generator;
@@ -35,7 +35,7 @@ fn payload(gid: u32) -> CanonicalTemplatePayload {
           "group_readable_secrets": {{"gid": {gid}, "files": ["tailscale-token", "absent-token"]}}
         }}"#
     );
-    CanonicalTemplatePayload::from_json(json.as_bytes()).expect("valid payload")
+    parse_template_payload(json.as_bytes()).expect("valid payload")
 }
 
 fn run(payload: &CanonicalTemplatePayload, request: SetupRequest) -> String {
@@ -131,9 +131,6 @@ fn payload_rejects_a_root_group_and_duplicate_files() {
         let json = format!(
             r#"{{"schema_version": 2, "docker_compose_yaml": "services: {{}}\n", "group_readable_secrets": {group}}}"#
         );
-        assert!(
-            CanonicalTemplatePayload::from_json(json.as_bytes()).is_err(),
-            "{group}"
-        );
+        assert!(parse_template_payload(json.as_bytes()).is_err(), "{group}");
     }
 }

@@ -21,7 +21,8 @@ T = TypeVar("T", bound="FleetProfileNode")
 
 @_attrs_define
 class FleetProfileNode:
-    """
+    """ One rank of a profile assignment, the same shape a Spark group names it.
+
         Attributes:
             node_id (str):
             rank (int):

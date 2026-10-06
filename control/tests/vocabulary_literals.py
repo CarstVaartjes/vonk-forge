@@ -97,14 +97,13 @@ ALLOWED_FILES = frozenset(
         "agent_protocol/src/vonk_agent_protocol/reason_codes.py",
         "agent_protocol/src/vonk_agent_protocol/outcome.py",
         "agent_protocol/src/vonk_agent_protocol/state_machines.py",
-        # Loaded on its own by the LiteLLM supervisor (no package around it), so it
-        # keeps its own two words; test_vocabulary_literals keeps them equal to
-        # ``GatewayRouteState``.
-        "agent_protocol/src/vonk_agent_protocol/route_activation.py",
+        # Generated from ``GatewayRouteState`` for the LiteLLM supervisor, which
+        # loads route_activation.py with no package around it.
+        "agent_protocol/src/vonk_agent_protocol/route_activation_words.py",
         "control/src/vonk_control/agent_outcome.py",
-        # The CLI ships without the contract package; this is its one copy of the
-        # words, and test_vocabulary_literals keeps it equal to the contract.
-        "src/cluster_profiles/cli_states.py",
+        # The CLI ships without the contract package; its words are generated
+        # from the contract by scripts/generate-python-vocabulary.
+        "src/cluster_profiles/cli_states_generated.py",
     }
 )
 

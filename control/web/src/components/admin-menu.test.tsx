@@ -6,7 +6,7 @@ import {ToastProvider} from "./toast";
 
 function renderMenu(overrides: Partial<React.ComponentProps<typeof AdminMenu>> = {}) {
   const props: React.ComponentProps<typeof AdminMenu> = {
-    onDownloadCliToken: vi.fn(async () => ({expiresAt: "2026-09-12T09:30:00Z"})),
+    onDownloadCliToken: vi.fn(async () => ({expires_at: "2026-09-12T09:30:00Z"})),
     loggingOut: false,
     logoutError: "",
     onLogout: vi.fn(),
@@ -73,7 +73,7 @@ test("closes on outside interaction", async () => {
   const onNavigate = vi.fn(event => event.preventDefault());
   render(<div>
     <button type="button">Outside</button>
-    <AdminMenu loggingOut={false} logoutError="" onDownloadCliToken={async () => ({expiresAt: ""})} onLogout={() => undefined} onNavigate={onNavigate} role="Administrator" subject="admin"/>
+    <AdminMenu loggingOut={false} logoutError="" onDownloadCliToken={async () => ({expires_at: ""})} onLogout={() => undefined} onNavigate={onNavigate} role="Administrator" subject="admin"/>
   </div>);
 
   await user.click(screen.getByRole("button", {name: /admin/i}));
@@ -85,7 +85,7 @@ test("closes and disables all operator actions while global navigation is locked
   const user = userEvent.setup();
   const onLogout = vi.fn();
   const onNavigate = vi.fn(event => event.preventDefault());
-  const props = {loggingOut: false, logoutError: "", onDownloadCliToken: vi.fn(async () => ({expiresAt: ""})), onLogout, onNavigate, role: "Administrator", subject: "admin"};
+  const props = {loggingOut: false, logoutError: "", onDownloadCliToken: vi.fn(async () => ({expires_at: ""})), onLogout, onNavigate, role: "Administrator", subject: "admin"};
   const view = render(<AdminMenu {...props}/>);
 
   const trigger = screen.getByRole("button", {name: /admin/i});
@@ -103,7 +103,7 @@ test("closes and disables all operator actions while global navigation is locked
 
 test("downloads a CLI token from the account menu and reports the result", async () => {
   const user = userEvent.setup();
-  const onDownloadCliToken = vi.fn(async () => ({expiresAt: "2026-09-12T09:30:00Z"}));
+  const onDownloadCliToken = vi.fn(async () => ({expires_at: "2026-09-12T09:30:00Z"}));
   renderMenu({onDownloadCliToken});
 
   await user.click(screen.getByRole("button", {name: /admin/i}));

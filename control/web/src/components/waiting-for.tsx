@@ -1,6 +1,7 @@
+import type {OperationBlocker} from "../api/types";
 import {Time} from "./time";
 
-type Blocker = {code: string; detail: string; severity?: string; node_ids?: readonly string[]};
+type Blocker = Pick<OperationBlocker, "code" | "detail"> & Partial<Pick<OperationBlocker, "severity" | "node_ids">>;
 
 /** What a queued or blocked operation is waiting for, and when it is checked again. */
 export function WaitingFor({blockers, nextAttemptAt}: {blockers?: readonly Blocker[] | null; nextAttemptAt?: string | null}) {

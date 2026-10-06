@@ -138,7 +138,7 @@ test("keeps administrative actions behind the account menu", async () => {
     role: "Administrator",
     loggingOut: false,
     logoutError: "",
-    onDownloadCliToken: vi.fn(async () => ({expiresAt: ""})),
+    onDownloadCliToken: vi.fn(async () => ({expires_at: ""})),
     onLogout: vi.fn(),
   }}>{null}</AppShell>);
 

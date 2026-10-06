@@ -20,10 +20,10 @@ from vonk_agent_protocol import (
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
-    CompiledExecutionPlan,
     CompiledExecutionPlanError,
     CompiledModelArtifact,
     DistributionObjectReceipt,
+    VerifiedExecutionPlan,
     compile_verified_execution_plan,
     execution_identity_sha256,
     materialized_model_path,
@@ -208,7 +208,7 @@ def _compile(
     spec: dict[str, object] | None = None,
     *,
     image: dict[str, object] | None = None,
-) -> CompiledExecutionPlan:
+) -> VerifiedExecutionPlan:
     selected_image = _image() if image is None else image
     selected_spec = _spec() if spec is None else spec
     return compile_verified_execution_plan(
@@ -1069,7 +1069,7 @@ def test_plan_rejects_two_files_materializing_to_one_selection_path() -> None:
     duplicate["file_id"] = "duplicate"
     document["artifacts"].append(duplicate)
     with pytest.raises(ValidationError, match="physical identity"):
-        CompiledExecutionPlan.model_validate(document)
+        VerifiedExecutionPlan.model_validate(document)
 
 
 def test_plan_rejects_duplicate_final_projection_target() -> None:
@@ -1078,7 +1078,7 @@ def test_plan_rejects_duplicate_final_projection_target() -> None:
     duplicate["id"] = "duplicate-projection"
     document["artifacts"].append(duplicate)
     with pytest.raises(ValidationError, match="mount target"):
-        CompiledExecutionPlan.model_validate(document)
+        VerifiedExecutionPlan.model_validate(document)
 
 
 def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None:
@@ -1087,7 +1087,7 @@ def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None
     duplicate["id"] = "second-projection"
     duplicate["mount"]["target"] = "/models/target"
     document["artifacts"].append(duplicate)
-    plan = CompiledExecutionPlan.model_validate(document)
+    plan = VerifiedExecutionPlan.model_validate(document)
     assert [(artifact.mount.target, artifact.path) for artifact in plan.artifacts] == [
         ("/models", "model.safetensors"),
         ("/models/target", "model.safetensors"),

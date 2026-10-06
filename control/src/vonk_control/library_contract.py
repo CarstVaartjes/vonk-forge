@@ -32,7 +32,7 @@ from .machine_states import (
 )
 from .model_cache_contract import ModelCacheOperationState
 from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
-from .strict_json import StrictJSONModel
+from .strict_json import StrictModel
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -74,11 +74,7 @@ DisplayScalar = (
 )
 
 
-class _StrictModel(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-
-
-class ProjectionReason(_StrictModel):
+class LibraryProjectionReason(StrictModel):
     model_config = ConfigDict(title="LibraryProjectionReason")
 
     code: Text80
@@ -86,13 +82,13 @@ class ProjectionReason(_StrictModel):
     severity: Literal["info", "warning", "error"]
 
 
-class FreshnessPolicy(_StrictModel):
+class FreshnessPolicy(StrictModel):
     inventory_fresh_seconds: int = Field(default=300, ge=1, le=3_600)
     telemetry_live_seconds: int = Field(default=6, ge=1, le=60)
     telemetry_delayed_seconds: int = Field(default=20, ge=1, le=300)
 
 
-class LibraryRelease(_StrictModel):
+class LibraryRelease(StrictModel):
     """The recipe library release this Controller last synchronized."""
 
     version: Text64
@@ -100,7 +96,7 @@ class LibraryRelease(_StrictModel):
     commit: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 
 
-class LibraryRecipeIdentity(_StrictModel):
+class LibraryRecipeIdentity(StrictModel):
     recipe_id: UuidId
     recipe_revision_id: UuidId
     publisher: Text128
@@ -131,7 +127,7 @@ _LiveRunState = Annotated[
 ]
 
 
-class LibraryInstallationSummary(_StrictModel):
+class LibraryInstallationSummary(StrictModel):
     installation_id: UuidId
     recipe_revision_id: UuidId
     state: _ActiveInstallationState
@@ -140,7 +136,7 @@ class LibraryInstallationSummary(_StrictModel):
     complete: bool
 
 
-class LibraryRunSummary(_StrictModel):
+class LibraryRunSummary(StrictModel):
     run_id: UuidId
     installation_id: UuidId
     recipe_revision_id: UuidId
@@ -151,7 +147,7 @@ class LibraryRunSummary(_StrictModel):
     healthy: bool
 
 
-class LibraryModelIdentity(_StrictModel):
+class LibraryModelIdentity(StrictModel):
     """Content-addressed identity for a canonical Model document."""
 
     kind: Literal["model"] = "model"
@@ -172,10 +168,10 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     run_total_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     run_returned_count: int = Field(ge=0, le=64)
     runs_truncated: bool
-    reasons: list[ProjectionReason] = Field(max_length=16)
+    reasons: list[LibraryProjectionReason] = Field(max_length=16)
 
 
-class LibraryLocalProgress(_StrictModel):
+class LibraryLocalProgress(StrictModel):
     """Observable progress for a Controller-local preparation operation."""
 
     operation_id: UuidId | None = None
@@ -185,7 +181,7 @@ class LibraryLocalProgress(_StrictModel):
     total_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
 
 
-class LibraryLocalState(_StrictModel):
+class LibraryLocalState(StrictModel):
     """Controller cache and Spark-local runtime evidence kept separate."""
 
     controller: Literal["cached", "preparing", "not_cached", "failed", "unknown"]
@@ -193,7 +189,7 @@ class LibraryLocalState(_StrictModel):
     preparation: LibraryLocalProgress | None = None
 
 
-class LibraryResourceProjection(_StrictModel):
+class LibraryResourceProjection(StrictModel):
     """Declared resource facts; unknown values remain null."""
 
     memory_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
@@ -202,7 +198,7 @@ class LibraryResourceProjection(_StrictModel):
     image_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
 
 
-class LibraryModelProjection(_StrictModel):
+class LibraryModelProjection(StrictModel):
     """One exact canonical model variant with operator-facing projections."""
 
     selector: Text256
@@ -221,7 +217,7 @@ class LibraryModelProjection(_StrictModel):
     alignment: list[Text64] = Field(default_factory=list, max_length=8)
 
 
-class LibraryFacetValues(_StrictModel):
+class LibraryFacetValues(StrictModel):
     usage: list[Text64] = Field(max_length=64)
     family: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
     version: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
@@ -236,7 +232,7 @@ class LibraryFacetValues(_StrictModel):
     creator: list[Text128] = Field(default_factory=list, max_length=_MAX_PAGE_RECIPES)
 
 
-class LibraryFilterValues(_StrictModel):
+class LibraryFilterValues(StrictModel):
     """The filters that produced a Library page, echoed to the client.
 
     This is a typed echo rather than a free-form map so the request and the
@@ -262,7 +258,7 @@ class LibraryFilterValues(_StrictModel):
     fits_fleet: bool | None = None
 
 
-class ModelLibraryResponse(_StrictModel):
+class ModelLibraryResponse(StrictModel):
     generated_at: datetime
     library: LibraryRelease | None = None
     models: list[LibraryModelProjection] = Field(max_length=_MAX_PAGE_RECIPES)
@@ -276,7 +272,7 @@ class ModelDetailResponse(LibraryModelProjection):
     pass
 
 
-class RecipeReadinessCheck(_StrictModel):
+class RecipeReadinessCheck(StrictModel):
     state: Literal["ready", "blocked", "unavailable"]
     reasons: list[RunSwitchReason] = Field(default_factory=list)
 
@@ -291,7 +287,7 @@ class RecipeReadinessCheck(_StrictModel):
         return self
 
 
-class RecipeReadiness(_StrictModel):
+class RecipeReadiness(StrictModel):
     observed_at: datetime
     fleet_fit: RecipeReadinessCheck
     cache: RecipeReadinessCheck
@@ -300,7 +296,7 @@ class RecipeReadiness(_StrictModel):
     fit: SparkFit | None = None
 
 
-class LibraryRecipeProjection(_StrictModel):
+class LibraryRecipeProjection(StrictModel):
     """One exact canonical recipe and its model/resource/local projections."""
 
     selector: Text256
@@ -319,7 +315,7 @@ class LibraryRecipeProjection(_StrictModel):
     assessment: RecipeReadiness | None = None
 
 
-class RecipeLibraryResponse(_StrictModel):
+class RecipeLibraryResponse(StrictModel):
     generated_at: datetime
     library: LibraryRelease | None = None
     recipes: list[LibraryRecipeProjection] = Field(max_length=_MAX_PAGE_RECIPES)
@@ -329,7 +325,7 @@ class RecipeLibraryResponse(_StrictModel):
     freshness_policy: FreshnessPolicy
 
 
-class OperationalBuild(_StrictModel):
+class OperationalBuild(StrictModel):
     recipe_build_id: UuidId
     recipe_revision_id: UuidId
     state: Literal["planned", "building", "succeeded", "failed"]
@@ -337,14 +333,14 @@ class OperationalBuild(_StrictModel):
     image_bytes: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
 
 
-class OperationalMappingNode(_StrictModel):
+class OperationalMappingNode(StrictModel):
     node_id: NodeId
     rank: int = Field(ge=0, le=_MAX_CANDIDATE_NODES - 1)
     role: Text64
     endpoint_owner: bool
 
 
-class OperationalMapping(_StrictModel):
+class OperationalMapping(StrictModel):
     mapping_id: UuidId
     recipe_revision_id: UuidId
     topology_name: Text64
@@ -353,7 +349,7 @@ class OperationalMapping(_StrictModel):
     nodes: list[OperationalMappingNode] = Field(max_length=32)
 
 
-class OperationalInstallation(_StrictModel):
+class OperationalInstallation(StrictModel):
     installation_id: UuidId
     recipe_revision_id: UuidId
     mapping_id: UuidId
@@ -362,7 +358,7 @@ class OperationalInstallation(_StrictModel):
     node_ids: list[NodeId] = Field(max_length=32)
 
 
-class OperationalRun(_StrictModel):
+class OperationalRun(StrictModel):
     run_id: UuidId
     installation_id: UuidId
     mapping_id: UuidId
@@ -372,7 +368,7 @@ class OperationalRun(_StrictModel):
     node_ids: list[NodeId] = Field(max_length=32)
 
 
-class OperationalState(_StrictModel):
+class OperationalState(StrictModel):
     builds: list[OperationalBuild] = Field(max_length=_MAX_OPERATIONAL_ROWS)
     mappings: list[OperationalMapping] = Field(max_length=_MAX_OPERATIONAL_ROWS)
     installations: list[OperationalInstallation] = Field(
@@ -381,42 +377,42 @@ class OperationalState(_StrictModel):
     runs: list[OperationalRun] = Field(max_length=_MAX_OPERATIONAL_ROWS)
 
 
-class MappingPreviewInput(_StrictModel):
+class MappingPreviewInput(StrictModel):
     recipe_revision_id: UuidId
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     parameters: dict[Text64, Scalar] = Field(max_length=128)
 
 
-class BuildPreviewInput(_StrictModel):
+class BuildPreviewInput(StrictModel):
     recipe_revision_id: UuidId
     builder_node_id: NodeId
 
 
-class InstallPreviewInput(_StrictModel):
+class InstallPreviewInput(StrictModel):
     mapping_id: UuidId
     recipe_build_id: UuidId
 
 
-class RunPreviewInput(_StrictModel):
+class RunPreviewInput(StrictModel):
     installation_id: UuidId
 
 
-class MappingPreviewTarget(_StrictModel):
+class MappingPreviewTarget(StrictModel):
     kind: Literal["mapping"] = "mapping"
     input: MappingPreviewInput
 
 
-class BuildPreviewTarget(_StrictModel):
+class BuildPreviewTarget(StrictModel):
     kind: Literal["build"] = "build"
     input: BuildPreviewInput
 
 
-class InstallPreviewTarget(_StrictModel):
+class InstallPreviewTarget(StrictModel):
     kind: Literal["install"] = "install"
     input: InstallPreviewInput
 
 
-class RunPreviewTarget(_StrictModel):
+class RunPreviewTarget(StrictModel):
     kind: Literal["run"] = "run"
     input: RunPreviewInput
 
@@ -427,7 +423,7 @@ PreviewTarget = Annotated[
 ]
 
 
-class PlacementLimits(_StrictModel):
+class PlacementLimits(StrictModel):
     candidate_node_limit: Literal[32] = _MAX_CANDIDATE_NODES
     examined_group_limit: Literal[512] = _MAX_EXAMINED_GROUPS
     recommendation_limit: Literal[16] = _MAX_RECOMMENDATIONS
@@ -449,7 +445,7 @@ EvidenceCollection = Literal[
 ]
 
 
-class PlacementEvidenceCounts(_StrictModel):
+class PlacementEvidenceCounts(StrictModel):
     builds: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
     mappings: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
     mapping_members: int = Field(ge=0, le=_MAX_OPERATIONAL_MEMBERS + 1)
@@ -460,7 +456,7 @@ class PlacementEvidenceCounts(_StrictModel):
     truncated_collections: list[EvidenceCollection] = Field(max_length=7)
 
 
-class PlacementNode(_StrictModel):
+class PlacementNode(StrictModel):
     node_id: NodeId
     rank: int = Field(ge=0, le=_MAX_CANDIDATE_NODES - 1)
     role: Text64
@@ -483,7 +479,7 @@ class PlacementNode(_StrictModel):
     fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
 
 
-class PlacementScore(_StrictModel):
+class PlacementScore(StrictModel):
     exact_install_complete: bool
     exact_install_partial: bool
     active_run_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
@@ -497,7 +493,7 @@ class PlacementScore(_StrictModel):
     maximum_telemetry_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
 
 
-class PlacementRecommendation(_StrictModel):
+class PlacementRecommendation(StrictModel):
     recipe_revision_id: UuidId
     topology_name: Text64
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
@@ -513,15 +509,15 @@ class PlacementRecommendation(_StrictModel):
     installation_ids: list[UuidId] = Field(max_length=16)
     run_ids: list[UuidId] = Field(max_length=16)
     preview_targets: list[PreviewTarget] = Field(max_length=5)
-    reasons: list[ProjectionReason] = Field(max_length=64)
+    reasons: list[LibraryProjectionReason] = Field(max_length=64)
 
 
-class RejectedNode(_StrictModel):
+class RejectedNode(StrictModel):
     node_id: NodeId
-    reasons: list[ProjectionReason] = Field(min_length=1, max_length=16)
+    reasons: list[LibraryProjectionReason] = Field(min_length=1, max_length=16)
 
 
-class TopologyPlacement(_StrictModel):
+class TopologyPlacement(StrictModel):
     topology_name: Text64
     node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
     candidate_node_ids: list[NodeId] = Field(max_length=32)
@@ -533,15 +529,15 @@ class TopologyPlacement(_StrictModel):
     rejected_evidence_truncated: bool
     limits: PlacementLimits
     evidence_counts: PlacementEvidenceCounts
-    reasons: list[ProjectionReason] = Field(max_length=16)
+    reasons: list[LibraryProjectionReason] = Field(max_length=16)
 
 
-class LibraryRecipeModel(_StrictModel):
+class LibraryRecipeModel(StrictModel):
     selection: RecipeModelSelection
     model_document: ModelDefinition
 
 
-class RecipeAlternative(_StrictModel):
+class RecipeAlternative(StrictModel):
     """One other recipe serving the same model, for a one-line comparison."""
 
     selector: Text256
@@ -561,7 +557,7 @@ class RecipeDetailResponse(LibraryRecipeProjection):
     )
 
 
-class LibraryRecipeAuthoringDetail(_StrictModel):
+class LibraryRecipeAuthoringDetail(StrictModel):
     schema_version: Literal[2] = 2
     generated_at: datetime
     recipe: LibraryRecipeIdentity
@@ -569,7 +565,7 @@ class LibraryRecipeAuthoringDetail(_StrictModel):
     topology: RecipeTopology | None
     operational_state: OperationalState
     placement: list[TopologyPlacement] = Field(max_length=1)
-    reasons: list[ProjectionReason] = Field(max_length=16)
+    reasons: list[LibraryProjectionReason] = Field(max_length=16)
     model_documents: list[LibraryRecipeModel] = Field(max_length=32)
 
 
@@ -655,15 +651,15 @@ def _bounded_display_scalar(value: Scalar | None) -> DisplayScalar:
 
 def _reason(
     code: str, detail: str, severity: Literal["info", "warning", "error"] = "warning"
-) -> ProjectionReason:
-    return ProjectionReason(
+) -> LibraryProjectionReason:
+    return LibraryProjectionReason(
         code=code, detail=_bounded_detail(detail), severity=severity
     )
 
 
 def _bounded_reasons(
-    reasons: Sequence[ProjectionReason], maximum: int
-) -> list[ProjectionReason]:
+    reasons: Sequence[LibraryProjectionReason], maximum: int
+) -> list[LibraryProjectionReason]:
     """Dedupe, severity-sort, and cap evidence with an observable marker."""
 
     severity_order = {"error": 0, "warning": 1, "info": 2}
@@ -686,7 +682,7 @@ def _bounded_reasons(
         "warning",
     )
     available = maximum - 1
-    representatives: dict[tuple[str, str], ProjectionReason] = {}
+    representatives: dict[tuple[str, str], LibraryProjectionReason] = {}
     for reason in ordered:
         representatives.setdefault((reason.severity, reason.code), reason)
     selected = list(representatives.values())[:available]

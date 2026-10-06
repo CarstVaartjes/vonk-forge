@@ -1,33 +1,65 @@
 """The state words the CLI recognises, in the core vocabulary.
 
 The CLI ships on its own and does not import the Controller's contract package, so
-this is its one copy of the words (a test keeps it equal to the contract).  The
+the words come from ``cli_states_generated``, generated from the contract by
+``scripts/generate-python-vocabulary``; this module only composes them.  The
 Controller names a wait for a person ``needs-operator``; a Controller older than the
 rename still sends ``waiting-for-operator``, which the CLI accepts for one release.
 """
 
 from __future__ import annotations
 
-NEEDS_OPERATOR = "needs-operator"
-LEGACY_NEEDS_OPERATOR = "waiting-for-operator"
+from .cli_states_generated import (
+    BACKOFF,
+    CANCELLED,
+    DRAFT,
+    ENDPOINT_EXPIRED,
+    ENDPOINT_INSTALLED_ONLY,
+    ENDPOINT_NOT_PUBLISHED_YET,
+    ENDPOINT_UNAVAILABLE,
+    ENDPOINT_WITHDRAWN,
+    EXPIRED,
+    FAILED,
+    LEGACY_CANCELLING,
+    LEGACY_NEEDS_OPERATOR,
+    LEGACY_PARTIAL,
+    NEEDS_OPERATOR,
+    OBSERVING,
+    PUBLISHED,
+    QUEUED,
+    READY,
+    RUNNING,
+    SUCCEEDED,
+)
+
+__all__ = [
+    "ENDPOINT_EXPIRED",
+    "ENDPOINT_INSTALLED_ONLY",
+    "ENDPOINT_NOT_PUBLISHED_YET",
+    "ENDPOINT_UNAVAILABLE",
+    "ENDPOINT_WITHDRAWN",
+    "LEGACY_CANCELLING",
+    "LEGACY_NEEDS_OPERATOR",
+    "LEGACY_PARTIAL",
+    "NEEDS_OPERATOR",
+    "PUBLISHED",
+]
+
 #: A wait for a person, under either spelling.
 OPERATOR_WAIT_STATES = frozenset({NEEDS_OPERATOR, LEGACY_NEEDS_OPERATOR})
 
 # -- artifact jobs ---------------------------------------------------------------
 
 #: The preparation stages of an artifact job that has not been submitted.
-DRAFT = "draft"
-READY = "ready"
 #: The old spelling of "a cancel is under way" (now ``cancel_requested_at``).
-LEGACY_CANCELLING = "cancelling"
-ENDED_STATES = frozenset({"succeeded", "failed", "cancelled"})
+ENDED_STATES = frozenset({SUCCEEDED, FAILED, CANCELLED})
 #: Every lifecycle state an artifact job may report, and the old ones.
 ARTIFACT_JOB_STATES = frozenset(
     {
-        "queued",
-        "running",
-        "backoff",
-        "observing",
+        QUEUED,
+        RUNNING,
+        BACKOFF,
+        OBSERVING,
         NEEDS_OPERATOR,
         LEGACY_NEEDS_OPERATOR,
         LEGACY_CANCELLING,
@@ -63,7 +95,7 @@ def lifecycle_state(job: dict[str, object]) -> object:
 
 #: Artifact-job states a CLI user reconnects to (the job is still in flight).
 ARTIFACT_JOB_IN_FLIGHT = frozenset(
-    {"queued", "running", "backoff", "observing", LEGACY_CANCELLING}
+    {QUEUED, RUNNING, BACKOFF, OBSERVING, LEGACY_CANCELLING}
 )
 
 # -- operations ------------------------------------------------------------------
@@ -71,22 +103,15 @@ ARTIFACT_JOB_IN_FLIGHT = frozenset(
 #: What an older Controller called an update batch that ended with some children
 #: done (now ``failed`` with ``partial`` set) and a cache operation that retries
 #: (now ``backoff``).
-LEGACY_PARTIAL = "partial"
 #: The field of an operation that says some of it was done (a failed update).
 PARTIAL_FIELD = "partial"
 #: The states of a job a CLI user is told has failed (an expired job is over).
-FAILED_JOB_STATES = frozenset({"failed", "expired"})
+FAILED_JOB_STATES = frozenset({FAILED, EXPIRED})
 #: An accepted cancel: still being driven (``observing``, or the old
 #: ``cancelling``) or already ended.
-CANCEL_ACCEPTED_STATES = frozenset({"observing", LEGACY_CANCELLING, "cancelled"})
+CANCEL_ACCEPTED_STATES = frozenset({OBSERVING, LEGACY_CANCELLING, CANCELLED})
 
 #: The word of a route (and of an endpoint) that is published to the gateway.  The
 #: CLI compares it with what the Controller sends; the contract's ``RouteState`` and
 #: ``EndpointState`` spell it, and a test keeps this copy equal to them.
-PUBLISHED = "published"
 #: The two endpoint words the CLI explains (see the contract's ``EndpointState``).
-ENDPOINT_INSTALLED_ONLY = "installed-only"
-ENDPOINT_NOT_PUBLISHED_YET = "not-published-yet"
-ENDPOINT_EXPIRED = "expired"
-ENDPOINT_WITHDRAWN = "withdrawn"
-ENDPOINT_UNAVAILABLE = "unavailable"

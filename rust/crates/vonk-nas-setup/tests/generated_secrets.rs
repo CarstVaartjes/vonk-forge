@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use tempfile::{TempDir, tempdir};
 use vonk_nas_setup::{
     CanonicalTemplatePayload, PromptIo, SecretGenerationError, SecretGenerator, SetupRequest,
-    prepare,
+    parse_template_payload, prepare,
 };
 
 struct SequenceGenerator {
@@ -42,7 +42,7 @@ impl SecretGenerator for SequenceGenerator {
 
 #[test]
 fn generated_text_ed25519_keys_and_postgres_urls_are_valid_and_related() {
-    let payload = CanonicalTemplatePayload::from_json(
+    let payload = parse_template_payload(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
@@ -167,7 +167,7 @@ const PKI_FILES: [&str; 9] = [
 ];
 
 fn pki_payload() -> CanonicalTemplatePayload {
-    CanonicalTemplatePayload::from_json(PKI_PAYLOAD).expect("valid PKI payload")
+    parse_template_payload(PKI_PAYLOAD).expect("valid PKI payload")
 }
 
 /// The controller SANs: the control hostname plus the names derived from it.
