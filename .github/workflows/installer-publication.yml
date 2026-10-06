@@ -505,7 +505,8 @@ jobs:
           test "${#compose_paths[@]}" = 1
           compose=${compose_paths[0]}
           payload=$RUNNER_TEMP/payload.json
-          scripts/build-nas-compose-bundle \
+          scripts/build-control-wheel
+          uv run --project control --frozen python scripts/build-nas-compose-bundle \
             --compose "$compose" \
             --channel "$CHANNEL" \
             --output "$payload"
@@ -533,7 +534,6 @@ jobs:
           mapfile -t cli_wheels < <(find "$RUNNER_TEMP/cli-wheel" -maxdepth 1 -type f -name 'vonk_cluster_profiles-*-py3-none-any.whl')
           test "${#cli_wheels[@]}" = 1
           output=$RUNNER_TEMP/installer-publication
-          scripts/build-control-wheel
           assemble=(
             uv run --project control --frozen python scripts/install-release-publication assemble
             --channel "$CHANNEL"
@@ -611,7 +611,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
-          scripts/install-release-publication publish-candidate \
+          uv run --project control --frozen python scripts/install-release-publication publish-candidate \
             --bundle "$RUNNER_TEMP/installer-publication" \
             --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
             | tee "$RUNNER_TEMP/candidate-receipt.jsonl"
