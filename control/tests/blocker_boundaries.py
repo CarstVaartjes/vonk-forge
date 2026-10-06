@@ -62,7 +62,6 @@ import sys
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import cache
 from pathlib import Path
 
 from vonk_agent_protocol import (
@@ -81,6 +80,8 @@ from vonk_agent_protocol import (
     WaitReason,
     WaitVerdict,
 )
+
+from .parsed_sources import memoized_scan, parsed_tree
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
@@ -334,14 +335,10 @@ def scan_python_waits(source: str, *, path: str) -> list[WaitSite]:
     return _scan_tree_waits(ast.parse(source), path=path)
 
 
-@cache
 def parsed_modules(root: Path) -> Mapping[Path, ast.Module]:
     """Every module under ``root``, parsed once: the wait and raise scans share it."""
 
-    return {
-        module: ast.parse(module.read_text(encoding="utf-8"))
-        for module in sorted(root.rglob("*.py"))
-    }
+    return {module: parsed.tree for module, parsed in parsed_tree(root)}
 
 
 _RUST_FN = re.compile(r"^\s*(?:pub(?:\([a-z]+\))?\s+)?(?:async\s+)?fn\s+(\w+)")
@@ -385,10 +382,14 @@ def scan_rust_waits(source: str, *, path: str) -> list[WaitSite]:
 def scan_waits(
     control_root: Path = CONTROL_SOURCE_ROOT, rust_root: Path = RUST_SOURCE_ROOT
 ) -> list[WaitSite]:
-    sites: list[WaitSite] = []
-    for module, tree in parsed_modules(control_root).items():
-        relative = module.relative_to(REPO_ROOT).as_posix()
-        sites.extend(_scan_tree_waits(tree, path=relative))
+    def python_waits() -> list[WaitSite]:
+        found: list[WaitSite] = []
+        for module, tree in parsed_modules(control_root).items():
+            relative = module.relative_to(REPO_ROOT).as_posix()
+            found.extend(_scan_tree_waits(tree, path=relative))
+        return found
+
+    sites = memoized_scan(("python-waits", control_root), [control_root], python_waits)
     for module in sorted(rust_root.rglob("*.rs")):
         relative = module.relative_to(REPO_ROOT).as_posix()
         sites.extend(scan_rust_waits(module.read_text(encoding="utf-8"), path=relative))
@@ -579,14 +580,19 @@ class _RaiseCollector(ast.NodeVisitor):
 def scan_raises(root: Path = CONTROL_SOURCE_ROOT) -> list[RaiseSite]:
     """Raises of the error classes defined anywhere under ``root``, in every module."""
 
-    trees = parsed_modules(root)
-    classes = exception_classes(list(trees.values()))
-    sites: list[RaiseSite] = []
-    for module, tree in trees.items():
-        collector = _RaiseCollector(module.relative_to(REPO_ROOT).as_posix(), classes)
-        collector.visit(tree)
-        sites.extend(collector.sites)
-    return sorted(sites, key=lambda site: (site.path, site.line))
+    def compute() -> list[RaiseSite]:
+        trees = parsed_modules(root)
+        classes = exception_classes(list(trees.values()))
+        sites: list[RaiseSite] = []
+        for module, tree in trees.items():
+            collector = _RaiseCollector(
+                module.relative_to(REPO_ROOT).as_posix(), classes
+            )
+            collector.visit(tree)
+            sites.extend(collector.sites)
+        return sorted(sites, key=lambda site: (site.path, site.line))
+
+    return memoized_scan(("raises", root), [root], compute)
 
 
 def scan_raise_source(
@@ -702,16 +708,19 @@ def scan_guard_raises(
 ) -> list[UncategorizedRaise]:
     """Raises in ``paths`` whose class is not of the three error categories."""
 
-    trees = parsed_modules(root)
-    categorized = categorized_classes(list(trees.values()))
-    sites: list[UncategorizedRaise] = []
-    for module, tree in trees.items():
-        relative = module.relative_to(REPO_ROOT).as_posix()
-        if _in_guard_scope(relative, paths):
-            collector = _GuardCollector(relative, categorized)
-            collector.visit(tree)
-            sites.extend(collector.sites)
-    return sorted(sites, key=lambda site: (site.path, site.line))
+    def compute() -> list[UncategorizedRaise]:
+        trees = parsed_modules(root)
+        categorized = categorized_classes(list(trees.values()))
+        sites: list[UncategorizedRaise] = []
+        for module, tree in trees.items():
+            relative = module.relative_to(REPO_ROOT).as_posix()
+            if _in_guard_scope(relative, paths):
+                collector = _GuardCollector(relative, categorized)
+                collector.visit(tree)
+                sites.extend(collector.sites)
+        return sorted(sites, key=lambda site: (site.path, site.line))
+
+    return memoized_scan(("guard-raises", root, tuple(paths)), [root], compute)
 
 
 def scan_guard_source(
