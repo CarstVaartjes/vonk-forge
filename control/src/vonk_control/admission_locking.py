@@ -185,6 +185,29 @@ def is_admission_contention(error: DBAPIError) -> bool:
     return sqlstate in _BUSY_SQLSTATES
 
 
+def admission_wait_exhausted(error: BaseException) -> bool:
+    """Whether this request already spent a PostgreSQL wait budget.
+
+    Implicit index/FK lock timeouts and statement timeouts have already waited;
+    repeating them in the request multiplies the admission latency. Immediate
+    advisory/NOWAIT refusals are normalized as AdmissionLockBusy and can still
+    retry. Patient admission waits have their own explicit finite budget.
+    """
+
+    seen: set[int] = set()
+    cursor: BaseException | None = error
+    while cursor is not None and id(cursor) not in seen:
+        seen.add(id(cursor))
+        if isinstance(cursor, AdmissionLockBusy):
+            return cursor.sqlstate == "57014" or (
+                _patient() and cursor.sqlstate == "55P03"
+            )
+        if isinstance(cursor, DBAPIError):
+            return _sqlstate(cursor) in {"55P03", "57014"}
+        cursor = cursor.__cause__ or cursor.__context__
+    return False
+
+
 def acquire_admission_keys(
     session: Session,
     keys: Collection[AdmissionLockKey],

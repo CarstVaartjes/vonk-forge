@@ -58,6 +58,7 @@ from .admission_locking import (
     AdmissionRowLock,
     acquire_admission_keys,
     admission_attempts,
+    admission_wait_exhausted,
     is_admission_contention,
     job_request_key,
     lock_admission_rows,
@@ -1416,6 +1417,8 @@ class RecipeOperationService:
                 )
             except RecipeBuildAdmissionBusy as error:
                 refused = error
+                if admission_wait_exhausted(error):
+                    break
         assert refused is not None
         raise refused
 
@@ -2265,6 +2268,8 @@ class RecipeOperationService:
                 )
             except UnknownOutcomeError as error:
                 refused = error
+                if admission_wait_exhausted(error):
+                    break
         assert refused is not None
         raise refused
 
@@ -2521,6 +2526,8 @@ class RecipeOperationService:
                 )
             except UnknownOutcomeError as error:
                 refused = error
+                if admission_wait_exhausted(error):
+                    break
         assert refused is not None
         raise refused
 
@@ -2731,6 +2738,8 @@ class RecipeOperationService:
                 )
             except UnknownOutcomeError as error:
                 refused = error
+                if admission_wait_exhausted(error):
+                    break
         assert refused is not None
         raise refused
 
@@ -4083,6 +4092,8 @@ class RecipeOperationService:
                 )
             except InstallAdmissionBusy as error:
                 refused = error
+                if admission_wait_exhausted(error):
+                    break
         assert refused is not None
         raise refused
 
@@ -4499,6 +4510,8 @@ class RecipeOperationService:
                 )
             except UnknownOutcomeError as error:
                 refused = error
+                if admission_wait_exhausted(error):
+                    break
         assert refused is not None
         raise refused
 
@@ -6349,6 +6362,8 @@ class RecipeOperationService:
                 )
             except RecipeBuildOwnershipBusy as error:
                 refused = error
+                if admission_wait_exhausted(error):
+                    break
         assert refused is not None
         raise refused
 
