@@ -175,13 +175,17 @@ def python_models(root: Path = ROOT) -> dict[tuple[str, str], tuple[str, ...]]:
             continue
         fields = tuple(
             f"{stmt.target.id}:{ast.unparse(stmt.annotation)}"
+            + (f"={ast.unparse(stmt.value)}" if stmt.value is not None else "")
             for stmt in node.body
             if isinstance(stmt, ast.AnnAssign)
             and isinstance(stmt.target, ast.Name)
             and not stmt.target.id.startswith("_")
             and stmt.target.id != "model_config"
         )
-        models[(file, name)] = tuple(sorted(fields))
+        # The base is part of the shape: two models with the same own fields
+        # over different bases are different documents.
+        base_names = tuple(sorted(f"base:{_base_name(b)}" for b in node.bases))
+        models[(file, name)] = (*base_names, *sorted(fields))
     return models
 
 
@@ -211,7 +215,7 @@ def python_registry_problems(
         if file not in modules:
             continue
         by_name[name].append(f"{file}:{name}")
-        if fields:
+        if any(not item.startswith("base:") for item in fields):
             by_fields[fields].append(f"{file}:{name}")
     seen: set[tuple[str, ...]] = set()
     for group in [*by_name.values(), *by_fields.values()]:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import ConfigDict, Field
+from pydantic import Field
 from starlette.responses import JSONResponse
 from vonk_agent_protocol import CatalogSyncCode
 
@@ -21,7 +21,7 @@ from .catalog_sync_contract import (
 )
 from .library_contract import UuidId
 from .machine_states import CatalogSyncStateField
-from .strict_json import StrictJSONModel
+from .strict_json import StrictModel
 
 CATALOG_OPERATION_IDS = {
     (
@@ -33,13 +33,6 @@ CATALOG_OPERATION_IDS = {
 
 class ManagedRecipeCatalogSync(Protocol):
     def latest(self) -> CatalogSyncView | None: ...
-
-
-class StrictModel(StrictJSONModel):
-    # API JSON is a typed boundary.  Pydantic's default lax mode would turn
-    # values such as ``1`` into ``"1"`` and accept integer flags as booleans,
-    # which makes malformed requests indistinguishable from canonical ones.
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class CatalogProblem(StrictModel):

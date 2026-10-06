@@ -18,7 +18,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, read_recipe
 from .catalog_revision_contract import read_model_set
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
-    CompiledRuntimeImage,
+    VerifiedRuntimeImage,
     compile_verified_execution_plan,
     execution_identity_sha256,
 )
@@ -307,7 +307,7 @@ class ControllerExecutionPlanService:
         document: Mapping[str, object],
         build: RecipeBuild | None,
         runtime_spec: Mapping[str, object],
-    ) -> CompiledRuntimeImage:
+    ) -> VerifiedRuntimeImage:
         runtime = runtime_spec.get("runtime")
         runtime_image = runtime.get("image") if isinstance(runtime, Mapping) else None
         image_digest = _image_digest(runtime_image)
@@ -322,7 +322,7 @@ class ControllerExecutionPlanService:
                 "verified OCI archive receipt is unavailable for the selected runtime image"
             )
         try:
-            image = CompiledRuntimeImage.model_validate(value)
+            image = VerifiedRuntimeImage.model_validate(value)
         except Exception as error:
             raise ExecutionPlanCompilationError(
                 "verified runtime image receipt is invalid"

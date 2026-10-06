@@ -1132,7 +1132,10 @@ def upgrade_payload():
 
 def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity():
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+    from vonk_agent_protocol.package_upgrade import (
+        PackageActivationPhase,
+        PackageActivationReceipt,
+    )
 
     payload = upgrade_payload()
     service = runtime_service(
@@ -1148,7 +1151,7 @@ def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity()
         candidate_version="0.1.2",
         candidate_binary_sha256="c" * 64,
         attempt_nonce="e" * 64,
-        phase="armed",
+        phase=PackageActivationPhase.ARMED,
         created_at=int(NOW.timestamp()),
         updated_at=int(NOW.timestamp()),
         outcome="watchdog_armed",

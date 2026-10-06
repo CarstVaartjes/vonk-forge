@@ -14,6 +14,9 @@ legacy compatibility.
 
 ## Ownership
 
+The complete inventory of data classes, their source models and their generated
+artifacts is [data-contracts.md](data-contracts.md).
+
 | Document | Authoritative definition | Consumers |
 | --- | --- | --- |
 | Published Model and Recipe | `vonk_forge_contracts.ModelDefinition` and `RecipeDefinition`, in `vonk-forge-recipes/contracts/src` | Catalog importer, Controller, compiler, authoring tools |

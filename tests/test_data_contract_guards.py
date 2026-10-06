@@ -47,6 +47,24 @@ def test_python_models_live_in_the_registry_once() -> None:
     assert scans.python_registry_problems() == []
 
 
+def test_the_inventory_document_names_every_registered_module_and_exception() -> None:
+    document = (ROOT / "docs/data-contracts.md").read_text(encoding="utf-8")
+    registry = json.loads(scans.PY_REGISTRY.read_text(encoding="utf-8"))
+    missing = [
+        item
+        for item in [
+            *(entry["module"] for entry in registry["modules"]),
+            *(
+                f"`{entry['file']}` | `{entry['type']}`"
+                for path in (scans.RUST_ALLOWLIST, scans.TS_ALLOWLIST)
+                for entry in _entries(path)
+            ),
+        ]
+        if item not in document
+    ]
+    assert not missing, f"docs/data-contracts.md does not list: {missing}"
+
+
 # -- the scanners catch what they claim to --------------------------------------
 
 

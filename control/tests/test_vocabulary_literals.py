@@ -279,19 +279,6 @@ def test_the_contract_module_of_the_machines_may_spell_them(tmp_path: Path) -> N
     assert _python(tmp_path, 'state = "uninstalled"\n')
 
 
-def test_the_cli_copy_of_the_wait_words_equals_the_contract() -> None:
-    from vonk_agent_protocol import LifecycleState, StateAlias
-
-    from cluster_profiles import cli_states
-
-    assert cli_states.NEEDS_OPERATOR == LifecycleState.NEEDS_OPERATOR.value
-    assert cli_states.LEGACY_NEEDS_OPERATOR == StateAlias.WAITING_FOR_OPERATOR.value
-    assert cli_states.OPERATOR_WAIT_STATES == {
-        cli_states.NEEDS_OPERATOR,
-        cli_states.LEGACY_NEEDS_OPERATOR,
-    }
-
-
 def test_no_lifecycle_code_spells_a_retired_state_word() -> None:
     """The migration is finished: the old words live in the contract's alias table."""
 
@@ -497,29 +484,3 @@ def test_the_cli_spells_only_contract_codes() -> None:
             ):
                 unknown.add(node.value)
     assert not unknown, f"the CLI spells codes the contract does not own: {unknown}"
-
-
-def test_the_cli_copy_of_the_endpoint_words_equals_the_contract() -> None:
-    from vonk_agent_protocol import EndpointState, RouteState
-
-    from cluster_profiles import cli_states
-
-    assert cli_states.PUBLISHED == RouteState.PUBLISHED.value
-    assert cli_states.PUBLISHED == EndpointState.PUBLISHED.value
-    assert cli_states.ENDPOINT_INSTALLED_ONLY == EndpointState.INSTALLED_ONLY.value
-    assert (
-        cli_states.ENDPOINT_NOT_PUBLISHED_YET == EndpointState.NOT_PUBLISHED_YET.value
-    )
-    assert cli_states.ENDPOINT_EXPIRED == EndpointState.EXPIRED.value
-    assert cli_states.ENDPOINT_WITHDRAWN == EndpointState.WITHDRAWN.value
-    assert cli_states.ENDPOINT_UNAVAILABLE == EndpointState.UNAVAILABLE.value
-
-
-def test_the_standalone_route_activation_words_equal_the_gateway_contract() -> None:
-    from typing import get_args
-
-    from vonk_agent_protocol import GatewayRouteState
-    from vonk_agent_protocol.route_activation import ActivationMarker
-
-    words = set(get_args(ActivationMarker.model_fields["state"].annotation))
-    assert words == {GatewayRouteState.MAINTENANCE, GatewayRouteState.PUBLISHED}

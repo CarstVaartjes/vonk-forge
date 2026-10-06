@@ -73,11 +73,11 @@ ModelCacheEntryState = Literal[
 ModelCacheCoverage = Literal["complete", "incomplete"]
 
 
-class StrictModel(StrictJSONModel):
+class StrippedStrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
 
-class CacheManifestArtifactPart(StrictModel):
+class CacheManifestArtifactPart(StrippedStrictModel):
     """One source-published piece of a split artifact (joined in list order)."""
 
     path: str
@@ -86,7 +86,7 @@ class CacheManifestArtifactPart(StrictModel):
     download_bytes: int
 
 
-class CacheManifestArtifact(StrictModel):
+class CacheManifestArtifact(StrippedStrictModel):
     key: str
     id: str
     path: str
@@ -103,7 +103,7 @@ class CacheManifestArtifact(StrictModel):
     parts: list[CacheManifestArtifactPart] | None = None
 
 
-class CacheManifest(StrictModel):
+class CacheManifest(StrippedStrictModel):
     schema_version: Literal[2]
     source_policy: Literal["nas-first"]
     model_content_sha256: str | None
@@ -113,7 +113,7 @@ class CacheManifest(StrictModel):
     artifacts: list[CacheManifestArtifact]
 
 
-class ModelCacheObjectReceipt(StrictModel):
+class ModelCacheObjectReceipt(StrippedStrictModel):
     """Managed-storage ownership record for one verified cache object.
 
     The bytes and this receipt live together under the trusted cache root, and
@@ -136,24 +136,24 @@ class ModelCacheObjectReceipt(StrictModel):
         return self
 
 
-class ModelCacheRepairCheckpoint(StrictModel):
+class ModelCacheRepairCheckpoint(StrippedStrictModel):
     transfer_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     completed_objects: list[Digest]
 
 
-class ModelCacheTransferArtifact(StrictModel):
+class ModelCacheTransferArtifact(StrippedStrictModel):
     baseline_bytes: int = Field(ge=0)
     received_bytes: int = Field(ge=0)
     started_at: str
 
 
-class ModelCacheTransfer(StrictModel):
+class ModelCacheTransfer(StrippedStrictModel):
     schema_version: Literal[2] = 2
     total_bytes: int = Field(ge=0)
     artifacts: dict[Digest, ModelCacheTransferArtifact]
 
 
-class ModelCacheRetry(StrictModel):
+class ModelCacheRetry(StrippedStrictModel):
     automatic_attempts: int = Field(ge=1)
     operator_retries: int = Field(ge=0)
     next_retry_at: str | None = None
@@ -163,31 +163,31 @@ class ModelCacheRetry(StrictModel):
     credential_fingerprint: str | None = Field(default=None, max_length=128)
 
 
-class ModelCacheClaim(StrictModel):
+class ModelCacheClaim(StrippedStrictModel):
     owner: str = Field(min_length=1)
     expires_at: str
 
 
-class ModelCacheAccessRecheck(StrictModel):
+class ModelCacheAccessRecheck(StrippedStrictModel):
     request_key: str = Field(pattern=UUID_PATTERN)
     checked_at: str
     authorized: bool
 
 
-class ModelCacheDownloadResult(StrictModel):
+class ModelCacheDownloadResult(StrippedStrictModel):
     schema_version: Literal[2]
     artifact_set_sha256: Digest
     coverage: Literal["complete"]
 
 
-class ModelCacheRemovalResult(StrictModel):
+class ModelCacheRemovalResult(StrippedStrictModel):
     schema_version: Literal[2]
     removed_entries: list[Digest]
     reclaimed_bytes: int = Field(ge=0)
     cancelled_operations: list[str] = Field(default_factory=list, max_length=32)
 
 
-class ModelCacheCancellation(StrictModel):
+class ModelCacheCancellation(StrippedStrictModel):
     """Durable record of the one accepted cancellation request."""
 
     request_key: str = Field(pattern=UUID_PATTERN)
@@ -196,7 +196,7 @@ class ModelCacheCancellation(StrictModel):
     requested_at: str = Field(min_length=1, max_length=64)
 
 
-class _ModelCacheOperationPayload(StrictModel):
+class _ModelCacheOperationPayload(StrippedStrictModel):
     schema_version: Literal[2]
     source_policy: Literal["nas-first"]
     claim: ModelCacheClaim | None = None
@@ -306,7 +306,7 @@ def parse_model_cache_payload(
         raise ValueError(f"invalid {kind} model cache operation payload") from error
 
 
-class ModelCacheDownloadRequest(StrictModel):
+class ModelCacheDownloadRequest(StrippedStrictModel):
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
     plan_digest: Digest
@@ -326,7 +326,7 @@ class ModelCacheDownloadRequest(StrictModel):
         return self
 
 
-class ModelCacheDownloadPreviewRequest(StrictModel):
+class ModelCacheDownloadPreviewRequest(StrippedStrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest | None = None
     model_content_sha256: Digest | None = None
@@ -344,12 +344,12 @@ class ModelCacheDownloadPreviewRequest(StrictModel):
         return self
 
 
-class ModelCacheRepairPreviewRequest(StrictModel):
+class ModelCacheRepairPreviewRequest(StrippedStrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest
 
 
-class ModelCacheRepairRequest(StrictModel):
+class ModelCacheRepairRequest(StrippedStrictModel):
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
     artifact_set_sha256: Digest
@@ -357,38 +357,36 @@ class ModelCacheRepairRequest(StrictModel):
     source_policy: Literal["nas-first"] = "nas-first"
 
 
-class ModelCacheRetryRequest(StrictModel):
+class ModelCacheRetryRequest(StrippedStrictModel):
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
 
 
-class ModelCacheAccessResumeRequest(StrictModel):
+class ModelCacheAccessResumeRequest(StrippedStrictModel):
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
     artifact_set_sha256: Digest
     plan_digest: Digest
 
 
-class ModelCacheOperatorRequest(StrictModel):
+class ModelCacheOperatorRequest(StrippedStrictModel):
     """Body shared by the singular operator model actions."""
 
     request_key: str = Field(pattern=UUID_PATTERN)
 
 
-class ModelCacheRemovalRequest(StrictModel):
+class ModelCacheRemovalRequest(ModelCacheOperatorRequest):
     """Request key for removing the named model against current state."""
 
-    request_key: str = Field(pattern=UUID_PATTERN)
 
-
-class ModelCacheCancellationRequest(StrictModel):
+class ModelCacheCancellationRequest(StrippedStrictModel):
     """Stable identity and operator explanation for one cancellation request."""
 
     request_key: str = Field(pattern=UUID_PATTERN)
     reason: str = Field(min_length=1, max_length=512)
 
 
-class ModelCacheOperatorResponse(StrictModel):
+class ModelCacheOperatorResponse(StrippedStrictModel):
     """CLI-shaped result without exposing an internal plan/digest workflow."""
 
     action: ModelCacheOperatorAction
@@ -424,7 +422,7 @@ class ModelCacheOperatorResponse(StrictModel):
         return self
 
 
-class CacheStorageResponse(StrictModel):
+class CacheStorageResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     total_bytes: int = Field(ge=0)
     free_bytes: int = Field(ge=0)
@@ -436,7 +434,7 @@ class CacheStorageResponse(StrictModel):
     reclaimable_bytes: int = Field(ge=0)
 
 
-class CacheArtifactResponse(StrictModel):
+class CacheArtifactResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     key: str = Field(pattern=ARTIFACT_KEY_PATTERN)
     id: str = Field(pattern=ARTIFACT_KEY_PATTERN)
@@ -461,7 +459,7 @@ class CacheArtifactResponse(StrictModel):
         return value
 
 
-class CacheEntryResponse(StrictModel):
+class CacheEntryResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest
     model_content_sha256: Digest | None
@@ -482,7 +480,7 @@ class CacheEntryResponse(StrictModel):
     last_error: str | None = Field(default=None, max_length=512)
 
 
-class ModelCacheInventoryResponse(StrictModel):
+class ModelCacheInventoryResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     source_policy: Literal["nas-first"] = "nas-first"
     entries: list[CacheEntryResponse] = Field(max_length=100)
@@ -491,7 +489,7 @@ class ModelCacheInventoryResponse(StrictModel):
     next_cursor: str | None = Field(default=None, max_length=1024)
 
 
-class ModelCacheOperationProgress(StrictModel):
+class ModelCacheOperationProgress(StrippedStrictModel):
     schema_version: Literal[2] = 2
     phase: ModelCacheOperationPhase
     completed_artifacts: int = Field(ge=0)
@@ -536,7 +534,7 @@ def parse_model_cache_result(kind: str, value: object) -> ModelCacheOperationRes
     raise ValueError(f"unknown model cache operation kind: {kind}")
 
 
-class ModelCacheOperationResponse(StrictModel):
+class ModelCacheOperationResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     id: str = Field(pattern=UUID_PATTERN)
     request_key: str = Field(pattern=UUID_PATTERN)
@@ -579,14 +577,14 @@ class ModelCacheOperationResponse(StrictModel):
         return self
 
 
-class ModelCacheOperationsResponse(StrictModel):
+class ModelCacheOperationsResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     operations: list[ModelCacheOperationResponse] = Field(max_length=100)
     total: int = Field(ge=0)
     next_cursor: str | None = Field(default=None, max_length=1024)
 
 
-class ModelCacheRepairPreviewResponse(StrictModel):
+class ModelCacheRepairPreviewResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest
     plan_digest: Digest
@@ -597,7 +595,7 @@ class ModelCacheRepairPreviewResponse(StrictModel):
     verified_bytes: int = Field(ge=0)
 
 
-class ModelCacheDownloadPreviewResponse(StrictModel):
+class ModelCacheDownloadPreviewResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest
     plan_digest: Digest
@@ -610,7 +608,7 @@ class ModelCacheDownloadPreviewResponse(StrictModel):
     warnings: list[str] = Field(max_length=32)
 
 
-class ModelCacheUpstreamRevision(StrictModel):
+class ModelCacheUpstreamRevision(StrippedStrictModel):
     repository: str
     pinned_revision: str = Field(pattern=REVISION_PATTERN)
     latest_revision: str | None = Field(default=None, pattern=REVISION_PATTERN)
@@ -619,7 +617,7 @@ class ModelCacheUpstreamRevision(StrictModel):
     error_code: str | None = None
 
 
-class ModelCacheUpdateResponse(StrictModel):
+class ModelCacheUpdateResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest
     model_content_sha256: Digest | None
@@ -638,7 +636,7 @@ class ModelCacheUpdateResponse(StrictModel):
     updated_at: str | None = None
 
 
-class ModelCacheUpdatesResponse(StrictModel):
+class ModelCacheUpdatesResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     source_policy: Literal["nas-first"] = "nas-first"
     updates: list[ModelCacheUpdateResponse] = Field(max_length=100)

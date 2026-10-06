@@ -2,16 +2,11 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, ConfigDict, Field
+from pydantic import BeforeValidator, Field
 from vonk_agent_protocol import CatalogSyncState, machine_adopter
 
 from .library_contract import UuidId
-from .strict_json import StrictJSONModel
-
-
-class StrictModel(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
+from .strict_json import StrictModel
 
 SEMVER_PATTERN = (
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"

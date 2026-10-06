@@ -3,6 +3,10 @@
   "note": "Modules allowed to define Pydantic data models; one model per name and field set across them.",
   "modules": [
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/agent_state.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/build_import.py",
       "kind": "agent-protocol"
     },
@@ -40,6 +44,10 @@
     },
     {
       "module": "agent_protocol/src/vonk_agent_protocol/installer_release.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/installer_setup.py",
       "kind": "agent-protocol"
     },
     {
@@ -291,103 +299,14 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/strict_json.py",
+      "kind": "declared",
+      "reason": "base class of the Controller contract models, shared by every *_contract module"
+    },
+    {
       "module": "control/src/vonk_control/worker_memory_contract.py",
       "kind": "controller-contract"
     }
   ],
-  "allowed_duplicates": [
-    {
-      "models": [
-        "agent_protocol/src/vonk_agent_protocol/compiled_execution_plan.py:CompiledRuntimeImage",
-        "control/src/vonk_control/compiled_execution_plan.py:CompiledRuntimeImage"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "agent_protocol/src/vonk_agent_protocol/compiled_execution_plan.py:CompiledExecutionPlan",
-        "control/src/vonk_control/compiled_execution_plan.py:CompiledExecutionPlan"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "control/src/vonk_control/artifact_job_api.py:StrictModel",
-        "control/src/vonk_control/catalog_api.py:StrictModel",
-        "control/src/vonk_control/catalog_sync_contract.py:StrictModel",
-        "control/src/vonk_control/model_cache_contract.py:StrictModel",
-        "control/src/vonk_control/operation_api.py:StrictModel"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "control/src/vonk_control/compiled_execution_plan.py:_StrictModel",
-        "control/src/vonk_control/fleet_profile_contract.py:_StrictModel",
-        "control/src/vonk_control/fleet_projection.py:_StrictModel",
-        "control/src/vonk_control/library_contract.py:_StrictModel",
-        "control/src/vonk_control/preparation_contract.py:_StrictModel",
-        "control/src/vonk_control/run_switch_contract.py:_StrictModel"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "control/src/vonk_control/fleet_projection.py:ProjectionReason",
-        "control/src/vonk_control/library_contract.py:ProjectionReason"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "agent_protocol/src/vonk_agent_protocol/compiled_execution_plan.py:CompiledEnvironmentEntry",
-        "agent_protocol/src/vonk_agent_protocol/failure_evidence.py:FailureProperty"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "control/src/vonk_control/artifact_job_api.py:CancelRequest",
-        "control/src/vonk_control/recipe_image_availability_api.py:RecipeCancellationRequest"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "control/src/vonk_control/fleet_profile_contract.py:FleetProfileNode",
-        "control/src/vonk_control/run_switch_contract.py:SparkGroupNode"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "control/src/vonk_control/model_cache_contract.py:ModelCacheOperatorRequest",
-        "control/src/vonk_control/model_cache_contract.py:ModelCacheRemovalRequest",
-        "control/src/vonk_control/recipe_image_availability_api.py:RecipeDownloadRequest"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "control/src/vonk_control/operation_api.py:JobResponse",
-        "control/src/vonk_control/operation_api.py:JobResumeResponse"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "control/src/vonk_control/recipe_execution_contract.py:StoredAdmissionReason",
-        "control/src/vonk_control/recipe_execution_contract.py:StoredPrebuiltDecision"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    },
-    {
-      "models": [
-        "control/src/vonk_control/run_switch_contract.py:RunSwitchApplyRequest",
-        "control/src/vonk_control/run_switch_contract.py:RunSwitchCleanupApplyRequest",
-        "control/src/vonk_control/run_switch_contract.py:RunSwitchStopApplyRequest"
-      ],
-      "reason": "pending: unified on b7/single-source-python"
-    }
-  ]
+  "allowed_duplicates": []
 }

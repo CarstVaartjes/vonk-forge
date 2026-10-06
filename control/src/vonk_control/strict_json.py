@@ -14,7 +14,7 @@ from fastapi import Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.datastructures import DefaultPlaceholder
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, RootModel, ValidationError
+from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
 
 
@@ -71,6 +71,17 @@ def apply_optional_none_policy(
 
 class StrictJSONModel(ProtocolStrictJSONModel):
     """Controller model using the shared protocol validation boundary."""
+
+
+class StrictModel(StrictJSONModel):
+    """The one Controller contract base: exact structure, exact scalar types.
+
+    API JSON is a typed boundary.  Pydantic's default lax mode would turn values
+    such as ``1`` into ``"1"`` and accept integer flags as booleans, which makes
+    malformed requests indistinguishable from canonical ones.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 @overload
@@ -207,6 +218,7 @@ def route_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
 __all__ = [
     "ControllerAPIRoute",
     "StrictJSONModel",
+    "StrictModel",
     "apply_optional_none_policy",
     "read_stored_document",
     "read_stored_model",

@@ -31,11 +31,11 @@ _NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _MEDIA_TYPE = r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
 
 
-class StrictModel(BaseModel):
+class ArtifactJobModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
-class ArtifactJobCreate(StrictModel):
+class ArtifactJobCreate(ArtifactJobModel):
     interface: str = Field(
         pattern=r"^(audio-job|video-job|image-job|mesh-job|artifact-job)$"
     )
@@ -45,7 +45,7 @@ class ArtifactJobCreate(StrictModel):
     timeout_seconds: int = Field(ge=1, le=3_600)
 
 
-class CancelRequest(StrictModel):
+class CancelRequest(ArtifactJobModel):
     reason: str = Field(min_length=1, max_length=512)
 
 
