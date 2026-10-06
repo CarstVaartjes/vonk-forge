@@ -38,7 +38,11 @@ remain inventory debt until reviewed. Dynamically dispatched calls and bounds
 implemented in a different helper need behavioral coverage.
 
 The read inventory detects explicit error statuses in decorated GET handlers and reachable helpers within the same module;
-authentication and not-found statuses are excluded. It is a syntax inventory; dynamic dispatch and cross-module helpers remain outside its call graph. The remedy inventory flags imperative string literals
+authentication and not-found statuses are excluded. Actual service-absent
+responses, query validation and stream integrity failures remain legitimate
+reviewed exceptions; a shared helper may serve both reads and mutations. An
+unavailable authoritative database cannot be projected as an empty successful
+list. Stored-row damage and an unavailable dependency are different classes. It is a syntax inventory; dynamic dispatch and cross-module helpers remain outside its call graph. The remedy inventory flags imperative string literals
 in source, including tooling, so descriptive uses can also need review.
 Retention inventories mapped tables without linked ORM/bulk/SQL deletion; a
 found delete is not proof of age-based pruning or bounded growth.
