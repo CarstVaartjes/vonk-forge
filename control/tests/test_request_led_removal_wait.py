@@ -91,7 +91,7 @@ def test_accepted_image_request_waits_for_exact_lock_and_recovers_after_restart(
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     recipe = _recipe("recipe-source-build.json")
-    revision_id = "revision-request-led-removal"
+    revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
         _add_head(session, revision)

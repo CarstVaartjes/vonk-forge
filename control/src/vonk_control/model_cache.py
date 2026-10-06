@@ -4093,7 +4093,7 @@ class ModelCacheService:
         if isinstance(self._sessions, Session):
             return 0  # a borrowed SQL transaction cannot precede a storage lock
         with self._session() as session:
-            requests = []
+            accepted_requests = []
             observed_request = False
             for operation in session.scalars(
                 select(ModelCacheOperation)
@@ -4145,7 +4145,7 @@ class ModelCacheService:
                         ),
                     )
                 ):
-                    requests.append(
+                    accepted_requests.append(
                         (
                             operation.id,
                             identity_map[(gate.artifact_kind, gate.artifact_sha256)],
@@ -4155,7 +4155,7 @@ class ModelCacheService:
                 self._removal_request_after = None
         changed = 0
         deadline = time.monotonic() + 0.25
-        for request_id, identity in requests[:limit]:
+        for request_id, identity in accepted_requests[:limit]:
             if time.monotonic() >= deadline:
                 break
 

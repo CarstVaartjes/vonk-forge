@@ -2128,7 +2128,7 @@ class RecipeImageAvailabilityService:
         from .job_documents import AvailabilityJobPayload
 
         with self._sessions() as session:
-            requests = []
+            accepted_requests = []
             observed_request = False
             for operation in session.scalars(
                 select(Job)
@@ -2166,7 +2166,7 @@ class RecipeImageAvailabilityService:
                         ArtifactLifecycleGate.removal_owner_id.is_not(None),
                     )
                 ):
-                    requests.append(
+                    accepted_requests.append(
                         (
                             operation.id,
                             ArtifactIdentity("runtime-image", gate.artifact_sha256),
@@ -2176,7 +2176,7 @@ class RecipeImageAvailabilityService:
                 self._removal_request_after = None
         changed = 0
         deadline = time.monotonic() + 0.25
-        for request_id, identity in requests[:limit]:
+        for request_id, identity in accepted_requests[:limit]:
             if time.monotonic() >= deadline:
                 break
 
