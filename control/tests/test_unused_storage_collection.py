@@ -711,6 +711,7 @@ def test_shared_model_files_free_only_with_the_last_installation_that_links_them
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_shared_file_a_staying_installation_links_is_not_counted_as_freed(
     world: Catalog,
 ) -> None:
@@ -746,6 +747,7 @@ def test_a_shared_file_a_staying_installation_links_is_not_counted_as_freed(
     assert _scope(result, spark_scope(NODE))["outcome"] == "insufficient_after_eviction"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_model_that_only_shares_files_with_one_that_stays_is_not_offered(
     world: Catalog,
 ) -> None:

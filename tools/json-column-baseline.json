@@ -10,21 +10,14 @@
     "artifact_jobs.output_limits",
     "artifact_jobs.parameters",
     "artifact_jobs.result_evidence",
-    "catalog_document_revisions.document",
-    "catalog_document_revisions.projected",
     "cluster_mappings.parameters",
     "fleet_stream_events.payload",
     "jobs.payload",
     "jobs.result",
-    "model_cache_operations.payload",
-    "model_cache_operations.progress",
-    "model_cache_sets.manifest",
     "recipe_builds.plan",
     "recipe_builds.policy_report",
     "recipe_installations.plan",
-    "recipe_library_sync_runs.result",
-    "recipe_runs.plan",
-    "recipe_source_bundles.manifest"
+    "recipe_runs.plan"
   ],
   "untyped": []
 }

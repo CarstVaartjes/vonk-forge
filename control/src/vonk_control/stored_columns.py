@@ -15,7 +15,15 @@ from pydantic import Field
 from vonk_agent_protocol import CacheReferenceReason
 from vonk_agent_protocol.inventory import Capability, NetworkInterface
 from vonk_agent_protocol.route_activation import ActivationMarker
+from vonk_agent_protocol.source_bundles import SourceBundleManifest
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
+from .catalog_revision_contract import (
+    ModelRevisionProjection,
+    RecipeRevisionProjection,
+    UnprojectedRevision,
+)
+from .catalog_sync_contract import ManagedCatalogSyncResult
 from .fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -23,6 +31,13 @@ from .fleet_profile_contract import (
     FleetProfilePreview,
     LabelName,
     LabelValue,
+)
+from .model_cache_contract import (
+    CacheManifest,
+    ModelCacheDownloadPayload,
+    ModelCacheOperationProgress,
+    ModelCacheRemovalPayload,
+    ModelCacheRepairPayload,
 )
 from .recipe_execution_contract import StoredRunEndpoint
 from .stored_documents import RouteClaimMarker
@@ -57,4 +72,38 @@ bind(
     "result",
     FleetProfileApplicationResult,
     nullable=True,
+)
+
+bind(
+    "catalog_document_revisions",
+    "document",
+    {"model": ModelDefinition, "recipe": RecipeDefinition},
+    discriminator="kind",
+)
+bind(
+    "catalog_document_revisions",
+    "projected",
+    {
+        "model": ModelRevisionProjection | UnprojectedRevision,
+        "recipe": RecipeRevisionProjection | UnprojectedRevision,
+    },
+    discriminator="kind",
+)
+bind("recipe_library_sync_runs", "result", ManagedCatalogSyncResult)
+bind("recipe_source_bundles", "manifest", SourceBundleManifest)
+bind("model_cache_sets", "manifest", CacheManifest)
+bind(
+    "model_cache_operations",
+    "payload",
+    {
+        "download": ModelCacheDownloadPayload,
+        "repair": ModelCacheRepairPayload,
+        "remove": ModelCacheRemovalPayload,
+    },
+    discriminator="kind",
+)
+bind(
+    "model_cache_operations",
+    "progress",
+    ModelCacheOperationProgress,
 )

@@ -681,6 +681,7 @@ def test_one_refused_removal_does_not_stop_the_rest(catalog: Catalog) -> None:
     assert result.revisions == 3
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_source_bundles_nothing_names_are_removed_after_the_grace_period(
     catalog: Catalog,
 ) -> None:

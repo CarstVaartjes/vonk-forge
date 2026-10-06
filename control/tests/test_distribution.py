@@ -54,6 +54,7 @@ def _assignment(
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) -> None:
     client, services, _, clock = agent_system
     source = MemoryObjectSource()

@@ -1247,6 +1247,13 @@ export interface components {
             /** Slots */
             slots: components["schemas"]["ArtifactSlotContract"][];
         };
+        /** ArtifactInputProjection */
+        ArtifactInputProjection: {
+            /** Artifact Key */
+            artifact_key: string;
+            /** Selection Id */
+            selection_id: string;
+        };
         /** ArtifactJobCapabilitiesResponse */
         ArtifactJobCapabilitiesResponse: {
             storage: components["schemas"]["ArtifactJobStorageCapabilities"];
@@ -1647,6 +1654,15 @@ export interface components {
             /** Path */
             path: string;
         };
+        /** BuildModelArtifactProjection */
+        BuildModelArtifactProjection: {
+            /** Path */
+            path: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
         /** BuildNetwork */
         BuildNetwork: {
             /** Hosts */
@@ -1656,6 +1672,26 @@ export interface components {
         BuildPatch: {
             /** Path */
             path: string;
+        };
+        /** BuildResourcesProjection */
+        BuildResourcesProjection: {
+            /** Cpu Cores */
+            cpu_cores: number;
+            /** Download Bytes */
+            download_bytes: number;
+            /** Memory Bytes */
+            memory_bytes: number;
+            /** Processes */
+            processes: number;
+            /** Temporary Bytes */
+            temporary_bytes: number;
+            /** Timeout Seconds */
+            timeout_seconds: number;
+        };
+        /** BuildSecurityProjection */
+        BuildSecurityProjection: {
+            /** Capabilities */
+            capabilities: string[];
         };
         /** BuildSourceEvidence */
         BuildSourceEvidence: {
@@ -1668,6 +1704,72 @@ export interface components {
              * @enum {string}
              */
             state: "available" | "missing" | "unknown";
+        };
+        /** CacheManifest */
+        CacheManifest: {
+            /** Artifacts */
+            artifacts: components["schemas"]["CacheManifestArtifact"][];
+            /** Model Content Digests */
+            model_content_digests: string[];
+            /** Model Content Sha256 */
+            model_content_sha256: string | null;
+            model_definition_ref: components["schemas"]["ModelReference"] | null;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256: string | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source Policy
+             * @constant
+             */
+            source_policy: "nas-first";
+        };
+        /** CacheManifestArtifact */
+        CacheManifestArtifact: {
+            /** Download Bytes */
+            download_bytes: number;
+            /** Id */
+            id: string;
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Model Content Sha256 */
+            model_content_sha256: string | null;
+            /**
+             * Parts
+             * @default null
+             */
+            parts: components["schemas"]["CacheManifestArtifactPart"][] | null;
+            /** Path */
+            path: string;
+            /** Repository */
+            repository: string | null;
+            /** Revision */
+            revision: string | null;
+            /** Roles */
+            roles: string[];
+            /** Sha256 */
+            sha256: string;
+            /** Source */
+            source: string;
+        };
+        /**
+         * CacheManifestArtifactPart
+         * @description One source-published piece of a split artifact (joined in list order).
+         */
+        CacheManifestArtifactPart: {
+            /** Download Bytes */
+            download_bytes: number;
+            /** Path */
+            path: string;
+            /** Sha256 */
+            sha256: string;
+            /** Source */
+            source: string;
         };
         /**
          * CacheReferenceReason
@@ -4476,6 +4578,35 @@ export interface components {
             /** Withdrawn Recipes */
             withdrawn_recipes: components["schemas"]["ManagedCatalogWithdrawnRecipe"][];
         };
+        /** ManagedCatalogSyncResult */
+        ManagedCatalogSyncResult: {
+            /** Imported Count */
+            imported_count: number;
+            /** Problems */
+            problems: components["schemas"]["ManagedCatalogSyncProblem"][];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Skipped Count */
+            skipped_count: number;
+            /** Stale Recipes */
+            stale_recipes: components["schemas"]["ManagedCatalogStaleRecipe"][];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "current" | "partial" | "failed";
+            /** Unchanged Count */
+            unchanged_count: number;
+            /** Updated Count */
+            updated_count: number;
+            /** Withdrawn Count */
+            withdrawn_count: number;
+            /** Withdrawn Recipes */
+            withdrawn_recipes: components["schemas"]["ManagedCatalogWithdrawnRecipe"][];
+        };
         /** ManagedCatalogWithdrawnRecipe */
         ManagedCatalogWithdrawnRecipe: {
             /** Recipe Id */
@@ -4581,6 +4712,15 @@ export interface components {
             /** Targets */
             targets: components["schemas"]["TargetAssetState"][];
         };
+        /** ModelCacheAccessRecheck */
+        ModelCacheAccessRecheck: {
+            /** Authorized */
+            authorized: boolean;
+            /** Checked At */
+            checked_at: string;
+            /** Request Key */
+            request_key: string;
+        };
         /**
          * ModelCacheBlockerCode
          * @description Why a model download plan is blocked or waiting.
@@ -4611,12 +4751,86 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** ModelCacheClaim */
+        ModelCacheClaim: {
+            /** Expires At */
+            expires_at: string;
+            /** Owner */
+            owner: string;
+        };
         /**
          * ModelCacheCode
          * @description Model cache resolution, storage, removal and operation problems.
          * @enum {string}
          */
         ModelCacheCode: "model_cache.access_recheck_unavailable" | "model_cache.artifact_count" | "model_cache.artifact_duplicate" | "model_cache.artifact_invalid" | "model_cache.artifact_missing" | "model_cache.artifact_unverified" | "model_cache.cancellation_invalid" | "model_cache.cancellation_key_reused" | "model_cache.capacity" | "model_cache.coverage_incomplete" | "model_cache.credentials_missing" | "model_cache.cursor_invalid" | "model_cache.dependency_count" | "model_cache.digest_invalid" | "model_cache.digest_mismatch" | "model_cache.digest_size_conflict" | "model_cache.document_unreadable" | "model_cache.download_blocked" | "model_cache.entry_missing" | "model_cache.fixture_sources_forbidden" | "model_cache.identity_conflict" | "model_cache.identity_mismatch" | "model_cache.interrupted" | "model_cache.lock_unavailable" | "model_cache.manifest_identity_mismatch" | "model_cache.manifest_invalid" | "model_cache.manifest_too_large" | "model_cache.model_content_digests_invalid" | "model_cache.model_definition_invalid" | "model_cache.model_definition_missing" | "model_cache.model_dependency_cycle" | "model_cache.model_pin_invalid" | "model_cache.model_variant_invalid" | "model_cache.not_cancellable" | "model_cache.object_busy" | "model_cache.operation_failed" | "model_cache.operation_missing" | "model_cache.operation_not_observable" | "model_cache.operation_not_retryable" | "model_cache.operation_unreadable" | "model_cache.payload_invalid" | "model_cache.pin_mismatch" | "model_cache.pin_required" | "model_cache.plan_invalid" | "model_cache.range_invalid" | "model_cache.rate_limited" | "model_cache.recipe_identity_ambiguous" | "model_cache.recipe_identity_invalid" | "model_cache.recipe_identity_missing" | "model_cache.recipe_invalid" | "model_cache.recipe_model_missing" | "model_cache.recipe_revision_invalid" | "model_cache.recipe_revision_missing" | "model_cache.redirect_forbidden" | "model_cache.release_asset_identity_conflict" | "model_cache.release_metadata_invalid" | "model_cache.removal_child_failed" | "model_cache.removal_child_invalid" | "model_cache.removal_child_mismatch" | "model_cache.removal_child_missing" | "model_cache.removal_child_pending" | "model_cache.removal_invalid" | "model_cache.removal_path_unsafe" | "model_cache.removal_plan_invalid" | "model_cache.removal_referenced" | "model_cache.removal_scope_changed" | "model_cache.removal_scope_invalid" | "model_cache.removal_scope_unavailable" | "model_cache.removal_wait" | "model_cache.request_key_invalid" | "model_cache.request_key_reused" | "model_cache.review_invalid" | "model_cache.review_unavailable" | "model_cache.revision_invalid" | "model_cache.revision_missing" | "model_cache.schema_unsupported" | "model_cache.selector_ambiguous" | "model_cache.selector_invalid" | "model_cache.selector_missing" | "model_cache.source_invalid" | "model_cache.source_size_mismatch" | "model_cache.source_truncated" | "model_cache.source_unavailable" | "model_cache.source_unsupported" | "model_cache.source_untrusted" | "model_cache.stale_plan" | "model_cache.unavailable" | "model_cache.upstream_check_budget_exhausted" | "model_cache.upstream_check_failed" | "model_cache.upstream_revision_invalid";
+        /** ModelCacheDownloadPayload */
+        ModelCacheDownloadPayload: {
+            /** @default null */
+            access_recheck: components["schemas"]["ModelCacheAccessRecheck"] | null;
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
+            /** @default null */
+            cancellation: components["schemas"]["ModelCacheCancellation"] | null;
+            /** @default null */
+            claim: components["schemas"]["ModelCacheClaim"] | null;
+            /** @default null */
+            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /**
+             * Force Refresh
+             * @default false
+             */
+            force_refresh: boolean;
+            manifest: components["schemas"]["CacheManifest"];
+            /**
+             * Operator Action
+             * @default null
+             */
+            operator_action: string | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Removal Fence
+             * @default null
+             */
+            removal_fence: string | null;
+            /** @default null */
+            result: components["schemas"]["ModelCacheDownloadResult"] | null;
+            /**
+             * Resume Of
+             * @default null
+             */
+            resume_of: string | null;
+            retry: components["schemas"]["ModelCacheRetry"];
+            /**
+             * Retry Of
+             * @default null
+             */
+            retry_of: string | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Selector
+             * @default null
+             */
+            selector: string | null;
+            /**
+             * Source Policy
+             * @constant
+             */
+            source_policy: "nas-first";
+            transfer: components["schemas"]["ModelCacheTransfer"];
+            /**
+             * With Model
+             * @default null
+             */
+            with_model: boolean | null;
+        };
         /** ModelCacheDownloadResult */
         ModelCacheDownloadResult: {
             /** Artifact Set Sha256 */
@@ -4631,6 +4845,42 @@ export interface components {
              * @constant
              */
             schema_version: 2;
+        };
+        /** ModelCacheOperationProgress */
+        ModelCacheOperationProgress: {
+            /** Completed Artifacts */
+            completed_artifacts: number;
+            /**
+             * Current Artifact Key
+             * @default null
+             */
+            current_artifact_key: string | null;
+            /** Downloaded Bytes */
+            downloaded_bytes: number;
+            /**
+             * Expected Bytes
+             * @default null
+             */
+            expected_bytes: number | null;
+            measurement: components["schemas"]["OperationProgress"];
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "queued" | "downloading" | "verifying" | "reclaiming" | "cancelling" | "completed" | "failed";
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Total Artifacts */
+            total_artifacts: number;
+            /**
+             * Total Bytes Known
+             * @default true
+             */
+            total_bytes_known: boolean;
         };
         /**
          * ModelCacheOperatorRequest
@@ -4695,6 +4945,84 @@ export interface components {
          */
         ModelCacheOperatorStatus: "accepted";
         /**
+         * ModelCacheRemovalPayload
+         * @description Exact, restartable removal plan and its durable effect checkpoint.
+         */
+        ModelCacheRemovalPayload: {
+            /** @default null */
+            access_recheck: components["schemas"]["ModelCacheAccessRecheck"] | null;
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
+            /** @default null */
+            cancellation: components["schemas"]["ModelCacheCancellation"] | null;
+            /** @default null */
+            claim: components["schemas"]["ModelCacheClaim"] | null;
+            /** Delete Objects */
+            delete_objects: string[];
+            /** @default null */
+            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /**
+             * Force Refresh
+             * @default false
+             */
+            force_refresh: boolean;
+            /**
+             * Model Content Sha256
+             * @default null
+             */
+            model_content_sha256: string | null;
+            /** Object Index */
+            object_index: number;
+            /** Object Pending Bytes */
+            object_pending_bytes: number | null;
+            /**
+             * Operator Action
+             * @default null
+             */
+            operator_action: string | null;
+            /** Reclaimed Bytes */
+            reclaimed_bytes: number;
+            /** Removal Fence */
+            removal_fence: string;
+            result: components["schemas"]["ModelCacheRemovalResult"] | null;
+            /**
+             * Resume Of
+             * @default null
+             */
+            resume_of: string | null;
+            retry: components["schemas"]["ModelCacheRetry"];
+            /**
+             * Retry Of
+             * @default null
+             */
+            retry_of: string | null;
+            /** Review Digest */
+            review_digest: string | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /** Selected */
+            selected: string[];
+            /** Selected Objects */
+            selected_objects: string[];
+            /** Selector */
+            selector: string;
+            /** Set Index */
+            set_index: number;
+            /**
+             * Source Policy
+             * @constant
+             */
+            source_policy: "nas-first";
+            /**
+             * With Model
+             * @default null
+             */
+            with_model: boolean | null;
+        };
+        /**
          * ModelCacheRemovalRequest
          * @description Request key for removing the named model against current state.
          */
@@ -4715,6 +5043,127 @@ export interface components {
              * @constant
              */
             schema_version: 2;
+        };
+        /** ModelCacheRepairCheckpoint */
+        ModelCacheRepairCheckpoint: {
+            /** Completed Objects */
+            completed_objects: string[];
+            /** Transfer Id */
+            transfer_id: string;
+        };
+        /** ModelCacheRepairPayload */
+        ModelCacheRepairPayload: {
+            /** @default null */
+            access_recheck: components["schemas"]["ModelCacheAccessRecheck"] | null;
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
+            /** @default null */
+            cancellation: components["schemas"]["ModelCacheCancellation"] | null;
+            /** @default null */
+            claim: components["schemas"]["ModelCacheClaim"] | null;
+            /** @default null */
+            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /**
+             * Force Refresh
+             * @default false
+             */
+            force_refresh: boolean;
+            manifest: components["schemas"]["CacheManifest"];
+            /**
+             * Operator Action
+             * @default null
+             */
+            operator_action: string | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Removal Fence
+             * @default null
+             */
+            removal_fence: string | null;
+            repair_checkpoint: components["schemas"]["ModelCacheRepairCheckpoint"];
+            /** @default null */
+            result: components["schemas"]["ModelCacheDownloadResult"] | null;
+            /**
+             * Resume Of
+             * @default null
+             */
+            resume_of: string | null;
+            retry: components["schemas"]["ModelCacheRetry"];
+            /**
+             * Retry Of
+             * @default null
+             */
+            retry_of: string | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Selector
+             * @default null
+             */
+            selector: string | null;
+            /**
+             * Source Policy
+             * @constant
+             */
+            source_policy: "nas-first";
+            transfer: components["schemas"]["ModelCacheTransfer"];
+            /**
+             * With Model
+             * @default null
+             */
+            with_model: boolean | null;
+        };
+        /** ModelCacheRetry */
+        ModelCacheRetry: {
+            /** Automatic Attempts */
+            automatic_attempts: number;
+            /**
+             * Credential Fingerprint
+             * @default null
+             */
+            credential_fingerprint: string | null;
+            /**
+             * Next Retry At
+             * @default null
+             */
+            next_retry_at: string | null;
+            /** Operator Retries */
+            operator_retries: number;
+            /**
+             * Retry After Seconds
+             * @default null
+             */
+            retry_after_seconds: number | null;
+        };
+        /** ModelCacheTransfer */
+        ModelCacheTransfer: {
+            /** Artifacts */
+            artifacts: {
+                [key: string]: components["schemas"]["ModelCacheTransferArtifact"];
+            };
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Total Bytes */
+            total_bytes: number;
+        };
+        /** ModelCacheTransferArtifact */
+        ModelCacheTransferArtifact: {
+            /** Baseline Bytes */
+            baseline_bytes: number;
+            /** Received Bytes */
+            received_bytes: number;
+            /** Started At */
+            started_at: string;
         };
         /**
          * ModelDefinition
@@ -4904,6 +5353,55 @@ export interface components {
             publisher: string;
             /** Slug */
             slug: string;
+        };
+        /** ModelRevisionProjection */
+        ModelRevisionProjection: {
+            /** Artifact Count */
+            artifact_count: number;
+            /** Download Bytes */
+            download_bytes: number;
+            /**
+             * Failure Reason
+             * @default null
+             */
+            failure_reason: string | null;
+            identity: components["schemas"]["ModelIdentity"];
+            /** Installed Bytes */
+            installed_bytes: number;
+            /** Modalities */
+            modalities: ("text" | "image" | "audio" | "video" | "3d" | "embeddings")[];
+            /** @default null */
+            package_handle: components["schemas"]["RecipePackageHandleProjection"] | null;
+            /**
+             * Package Sha256
+             * @default null
+             */
+            package_sha256: string | null;
+            /**
+             * Publication Commit
+             * @default null
+             */
+            publication_commit: string | null;
+            /**
+             * Release Released At
+             * @default null
+             */
+            release_released_at: string | null;
+            /**
+             * Release Version
+             * @default null
+             */
+            release_version: string | null;
+            /**
+             * Source Bundle Sha256
+             * @default null
+             */
+            source_bundle_sha256: string | null;
+            /**
+             * Source Path
+             * @default null
+             */
+            source_path: string | null;
         };
         /** ModelSource */
         ModelSource: {
@@ -5359,6 +5857,16 @@ export interface components {
          */
         PlacementLoadState: "loaded" | "not_loaded" | "unknown";
         /**
+         * PrebuiltImage
+         * @description One catalog-pinned prebuilt runtime image for a recipe revision.
+         */
+        PrebuiltImage: {
+            /** Build Key */
+            build_key: string;
+            /** Reference */
+            reference: string;
+        };
+        /**
          * PrebuiltImageCode
          * @description Why a prebuilt runtime image is, or is not, used.
          * @enum {string}
@@ -5490,6 +5998,13 @@ export interface components {
             /** Version */
             version: string;
         };
+        /** RecipeBuildAdditionalContext */
+        RecipeBuildAdditionalContext: {
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+        };
         /**
          * RecipeBuildCleanupEvidence
          * @description The build service is stopped; the fenced attempt is the whole answer.
@@ -5511,6 +6026,13 @@ export interface components {
             /** Patches */
             patches: components["schemas"]["BuildPatch"][];
         };
+        /** RecipeBuildEnvironmentArgument */
+        RecipeBuildEnvironmentArgument: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string | number | boolean;
+        };
         /** RecipeBuildEvidence */
         RecipeBuildEvidence: {
             /** Image Bytes */
@@ -5519,6 +6041,78 @@ export interface components {
             image_digest: string;
             /** Oci Layout Sha256 */
             oci_layout_sha256: string;
+        };
+        /** RecipeBuildMetadata */
+        RecipeBuildMetadata: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+        };
+        /** RecipeBuildOptions */
+        RecipeBuildOptions: {
+            /** Additional Contexts */
+            additional_contexts: components["schemas"]["RecipeBuildAdditionalContext"][];
+            /** Annotations */
+            annotations: components["schemas"]["RecipeBuildMetadata"][];
+            /** Environment */
+            environment: components["schemas"]["RecipeBuildEnvironmentArgument"][];
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "oci" | "docker";
+            /** Identity Label */
+            identity_label: boolean;
+            /**
+             * Ignorefile
+             * @default null
+             */
+            ignorefile: string | null;
+            /** Jobs */
+            jobs: number;
+            /** Labels */
+            labels: components["schemas"]["RecipeBuildMetadata"][];
+            /**
+             * Layer Compression
+             * @enum {string}
+             */
+            layer_compression: "disabled" | "gzip";
+            /** Layer Labels */
+            layer_labels: components["schemas"]["RecipeBuildMetadata"][];
+            /** Layers */
+            layers: boolean;
+            /** No Hostname */
+            no_hostname: boolean;
+            /** No Hosts */
+            no_hosts: boolean;
+            /** Omit History */
+            omit_history: boolean;
+            /** Os Features */
+            os_features: string[];
+            /**
+             * Os Version
+             * @default null
+             */
+            os_version: string | null;
+            /** Shm Bytes */
+            shm_bytes: number;
+            /** Skip Unused Stages */
+            skip_unused_stages: boolean;
+            /**
+             * Squash
+             * @enum {string}
+             */
+            squash: "none" | "new" | "all";
+            /**
+             * Timestamp
+             * @default null
+             */
+            timestamp: number | null;
+            /** Unset Environment */
+            unset_environment: string[];
+            /** Unset Labels */
+            unset_labels: string[];
         };
         /** RecipeCancellationRequest */
         RecipeCancellationRequest: {
@@ -6165,6 +6759,25 @@ export interface components {
          * @enum {string}
          */
         RecipePackageCode: "recipe_package.cache_unavailable" | "recipe_package.digest_mismatch" | "recipe_package.document_incompatible" | "recipe_package.extract_invalid" | "recipe_package.not_found" | "recipe_package.package_invalid" | "recipe_package.release_incomplete" | "recipe_package.release_invalid" | "recipe_package.response_invalid" | "recipe_package.schema_incompatible" | "recipe_package.snapshot_changed" | "recipe_package.unavailable" | "recipe_package.uri_invalid" | "recipe_package.url_insecure" | "recipe_package.url_invalid";
+        /** RecipePackageHandleProjection */
+        RecipePackageHandleProjection: {
+            /** Archive Path */
+            archive_path: string;
+            /** Closure Path */
+            closure_path: string;
+            /** Package Path */
+            package_path: string;
+            /** Package Sha256 */
+            package_sha256: string;
+            /** Package Size */
+            package_size: number;
+            /** Publication Commit */
+            publication_commit: string;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Source Commit */
+            source_commit: string;
+        };
         /** RecipeParallelism */
         RecipeParallelism: {
             /** Backend */
@@ -6295,6 +6908,73 @@ export interface components {
             model_digest?: string | null;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+        };
+        /** RecipeRevisionProjection */
+        RecipeRevisionProjection: {
+            /**
+             * Artifact Inputs
+             * @default null
+             */
+            artifact_inputs: components["schemas"]["ArtifactInputProjection"][] | null;
+            /**
+             * Build Model Artifacts
+             * @default null
+             */
+            build_model_artifacts: components["schemas"]["BuildModelArtifactProjection"][] | null;
+            /** @default null */
+            build_options: components["schemas"]["RecipeBuildOptions"] | null;
+            /** @default null */
+            build_resources: components["schemas"]["BuildResourcesProjection"] | null;
+            /** @default null */
+            build_security: components["schemas"]["BuildSecurityProjection"] | null;
+            /** Description */
+            description: string;
+            /**
+             * Failure Reason
+             * @default null
+             */
+            failure_reason: string | null;
+            /** @default null */
+            package_handle: components["schemas"]["RecipePackageHandleProjection"] | null;
+            /**
+             * Package Sha256
+             * @default null
+             */
+            package_sha256: string | null;
+            /** @default null */
+            prebuilt_image: components["schemas"]["PrebuiltImage"] | null;
+            /**
+             * Publication Commit
+             * @default null
+             */
+            publication_commit: string | null;
+            /**
+             * Release Released At
+             * @default null
+             */
+            release_released_at: string | null;
+            /**
+             * Release Version
+             * @default null
+             */
+            release_version: string | null;
+            /** Runtime Engine */
+            runtime_engine: string;
+            /**
+             * Source Bundle Sha256
+             * @default null
+             */
+            source_bundle_sha256: string | null;
+            /**
+             * Source Path
+             * @default null
+             */
+            source_path: string | null;
+            /** Tags */
+            tags: string[];
+            /** Title */
+            title: string;
+            topology: components["schemas"]["RecipeTopology"];
         };
         /** RecipeRoleResources */
         RecipeRoleResources: {
@@ -8185,6 +8865,34 @@ export interface components {
          * @enum {string}
          */
         SourceBundleCode: "bundle.archive_too_large" | "bundle.digest_invalid" | "bundle.digest_mismatch" | "bundle.duplicate_path" | "bundle.empty" | "bundle.entry_forbidden" | "bundle.expanded_too_large" | "bundle.file_invalid" | "bundle.file_too_large" | "bundle.invalid_archive" | "bundle.manifest_invalid" | "bundle.metadata_mismatch" | "bundle.not_found" | "bundle.path_forbidden" | "bundle.path_too_long" | "bundle.read_failed" | "bundle.size_mismatch" | "bundle.storage_collision" | "bundle.storage_conflict" | "bundle.storage_unavailable" | "bundle.too_many_files" | "source.digest_mismatch";
+        /** SourceBundleFile */
+        SourceBundleFile: {
+            /**
+             * Mode
+             * @enum {integer}
+             */
+            mode: 420 | 493;
+            /** Path */
+            path: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size */
+            size: number;
+        };
+        /** SourceBundleManifest */
+        SourceBundleManifest: {
+            /** Files */
+            files: components["schemas"]["SourceBundleFile"][];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Sha256 */
+            sha256: string;
+            /** Total Bytes */
+            total_bytes: number;
+        };
         /**
          * SourcePolicyCode
          * @description Findings of the build source policy (Dockerfile and Compose rules).
@@ -8451,6 +9159,54 @@ export interface components {
              */
             category: "unknown";
             reason: components["schemas"]["WaitReason"];
+        };
+        /**
+         * UnprojectedRevision
+         * @description The column's own default: a revision whose projection is not derived yet.
+         *
+         *     ``catalog_document_revisions.projected`` defaults to ``{}``.  The importer
+         *     always writes the derived projection; a row that still holds the default is
+         *     read as unknown by :func:`read_catalog_projection` and re-derived by the
+         *     catalog's own repair path.
+         */
+        UnprojectedRevision: {
+            /**
+             * Failure Reason
+             * @default null
+             */
+            failure_reason: string | null;
+            /** @default null */
+            package_handle: components["schemas"]["RecipePackageHandleProjection"] | null;
+            /**
+             * Package Sha256
+             * @default null
+             */
+            package_sha256: string | null;
+            /**
+             * Publication Commit
+             * @default null
+             */
+            publication_commit: string | null;
+            /**
+             * Release Released At
+             * @default null
+             */
+            release_released_at: string | null;
+            /**
+             * Release Version
+             * @default null
+             */
+            release_version: string | null;
+            /**
+             * Source Bundle Sha256
+             * @default null
+             */
+            source_bundle_sha256: string | null;
+            /**
+             * Source Path
+             * @default null
+             */
+            source_path: string | null;
         };
         /**
          * WaitReason

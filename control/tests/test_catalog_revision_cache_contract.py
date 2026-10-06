@@ -49,6 +49,7 @@ def test_catalog_revision_projection_is_persisted_and_read_as_canonical_model(
             read_catalog_projection(stored)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_model_cache_operation_payload_round_trips_through_database_and_reads_malformed_state_as_unknown(
     tmp_path: Path,
 ) -> None:

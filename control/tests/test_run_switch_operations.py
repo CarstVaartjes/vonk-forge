@@ -2315,6 +2315,7 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
     assert switch.executor.events.count("runtime-install") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     tmp_path: Path,
 ) -> None:
@@ -2486,6 +2487,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert executor.receipts == [receipt]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_first_profile_preparation_preview_replans_a_missing_build_archive(
     tmp_path: Path,
 ) -> None:
@@ -2579,6 +2581,7 @@ def test_first_profile_preparation_preview_replans_a_missing_build_archive(
     ]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) -> None:
     """A notes-only successor reuses the identical prepared build.
 
@@ -2943,6 +2946,7 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     }
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_container_phase_delegates_to_existing_recipe_build_child(
     tmp_path: Path,
 ) -> None:

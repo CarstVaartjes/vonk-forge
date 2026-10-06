@@ -663,6 +663,25 @@
         "title": "ArtifactInputContract",
         "type": "object"
       },
+      "ArtifactInputProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_key": {
+            "title": "Artifact Key",
+            "type": "string"
+          },
+          "selection_id": {
+            "title": "Selection Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selection_id",
+          "artifact_key"
+        ],
+        "title": "ArtifactInputProjection",
+        "type": "object"
+      },
       "ArtifactJobCapabilitiesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1899,6 +1918,32 @@
         "title": "BuildContext",
         "type": "object"
       },
+      "BuildModelArtifactProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "minimum": 0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "size_bytes"
+        ],
+        "title": "BuildModelArtifactProjection",
+        "type": "object"
+      },
       "BuildNetwork": {
         "additionalProperties": false,
         "properties": {
@@ -1931,6 +1976,68 @@
           "path"
         ],
         "title": "BuildPatch",
+        "type": "object"
+      },
+      "BuildResourcesProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu_cores": {
+            "minimum": 0,
+            "title": "Cpu Cores",
+            "type": "integer"
+          },
+          "download_bytes": {
+            "minimum": 0,
+            "title": "Download Bytes",
+            "type": "integer"
+          },
+          "memory_bytes": {
+            "minimum": 0,
+            "title": "Memory Bytes",
+            "type": "integer"
+          },
+          "processes": {
+            "minimum": 0,
+            "title": "Processes",
+            "type": "integer"
+          },
+          "temporary_bytes": {
+            "minimum": 0,
+            "title": "Temporary Bytes",
+            "type": "integer"
+          },
+          "timeout_seconds": {
+            "minimum": 0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu_cores",
+          "download_bytes",
+          "temporary_bytes",
+          "memory_bytes",
+          "processes",
+          "timeout_seconds"
+        ],
+        "title": "BuildResourcesProjection",
+        "type": "object"
+      },
+      "BuildSecurityProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capabilities"
+        ],
+        "title": "BuildSecurityProjection",
         "type": "object"
       },
       "BuildSourceEvidence": {
@@ -1974,6 +2081,211 @@
           "state"
         ],
         "title": "BuildSourceEvidence",
+        "type": "object"
+      },
+      "CacheManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/CacheManifestArtifact"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "model_content_digests": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Model Content Digests",
+            "type": "array"
+          },
+          "model_content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Content Sha256"
+          },
+          "model_definition_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipe_revision_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Revision Sha256"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source_policy": {
+            "const": "nas-first",
+            "title": "Source Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "source_policy",
+          "model_content_sha256",
+          "recipe_revision_sha256",
+          "model_definition_ref",
+          "model_content_digests",
+          "artifacts"
+        ],
+        "title": "CacheManifest",
+        "type": "object"
+      },
+      "CacheManifestArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "download_bytes": {
+            "title": "Download Bytes",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "model_content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Content Sha256"
+          },
+          "parts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CacheManifestArtifactPart"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parts"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "id",
+          "path",
+          "kind",
+          "repository",
+          "source",
+          "revision",
+          "sha256",
+          "download_bytes",
+          "roles",
+          "model_content_sha256"
+        ],
+        "title": "CacheManifestArtifact",
+        "type": "object"
+      },
+      "CacheManifestArtifactPart": {
+        "additionalProperties": false,
+        "description": "One source-published piece of a split artifact (joined in list order).",
+        "properties": {
+          "download_bytes": {
+            "title": "Download Bytes",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "source",
+          "sha256",
+          "download_bytes"
+        ],
+        "title": "CacheManifestArtifactPart",
         "type": "object"
       },
       "CacheReferenceReason": {
@@ -10827,6 +11139,85 @@
         "title": "ManagedCatalogSyncResponse",
         "type": "object"
       },
+      "ManagedCatalogSyncResult": {
+        "additionalProperties": false,
+        "properties": {
+          "imported_count": {
+            "minimum": 0,
+            "title": "Imported Count",
+            "type": "integer"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedCatalogSyncProblem"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "skipped_count": {
+            "minimum": 0,
+            "title": "Skipped Count",
+            "type": "integer"
+          },
+          "stale_recipes": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedCatalogStaleRecipe"
+            },
+            "title": "Stale Recipes",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "current",
+              "partial",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "unchanged_count": {
+            "minimum": 0,
+            "title": "Unchanged Count",
+            "type": "integer"
+          },
+          "updated_count": {
+            "minimum": 0,
+            "title": "Updated Count",
+            "type": "integer"
+          },
+          "withdrawn_count": {
+            "minimum": 0,
+            "title": "Withdrawn Count",
+            "type": "integer"
+          },
+          "withdrawn_recipes": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedCatalogWithdrawnRecipe"
+            },
+            "title": "Withdrawn Recipes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "state",
+          "imported_count",
+          "updated_count",
+          "unchanged_count",
+          "skipped_count",
+          "withdrawn_count",
+          "withdrawn_recipes",
+          "stale_recipes",
+          "problems"
+        ],
+        "title": "ManagedCatalogSyncResult",
+        "type": "object"
+      },
       "ManagedCatalogWithdrawnRecipe": {
         "additionalProperties": false,
         "properties": {
@@ -11151,6 +11542,31 @@
         "title": "ModelArtifactPreparation",
         "type": "object"
       },
+      "ModelCacheAccessRecheck": {
+        "additionalProperties": false,
+        "properties": {
+          "authorized": {
+            "title": "Authorized",
+            "type": "boolean"
+          },
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_key",
+          "checked_at",
+          "authorized"
+        ],
+        "title": "ModelCacheAccessRecheck",
+        "type": "object"
+      },
       "ModelCacheBlockerCode": {
         "description": "Why a model download plan is blocked or waiting.",
         "enum": [
@@ -11219,6 +11635,26 @@
           "reason"
         ],
         "title": "ModelCacheCancellationRequest",
+        "type": "object"
+      },
+      "ModelCacheClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "owner": {
+            "minLength": 1,
+            "title": "Owner",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "expires_at"
+        ],
+        "title": "ModelCacheClaim",
         "type": "object"
       },
       "ModelCacheCode": {
@@ -11318,6 +11754,197 @@
         "title": "ModelCacheCode",
         "type": "string"
       },
+      "ModelCacheDownloadPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "access_recheck": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheAccessRecheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "artifact_set_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Artifact Set Sha256",
+            "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheClaim"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "force_refresh": {
+            "default": false,
+            "title": "Force Refresh",
+            "type": "boolean"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/CacheManifest"
+          },
+          "operator_action": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator Action"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "removal_fence": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Removal Fence"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheDownloadResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "resume_of": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resume Of"
+          },
+          "retry": {
+            "$ref": "#/components/schemas/ModelCacheRetry"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry Of"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Selector"
+          },
+          "source_policy": {
+            "const": "nas-first",
+            "title": "Source Policy",
+            "type": "string"
+          },
+          "transfer": {
+            "$ref": "#/components/schemas/ModelCacheTransfer"
+          },
+          "with_model": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "With Model"
+          }
+        },
+        "required": [
+          "schema_version",
+          "source_policy",
+          "artifact_set_sha256",
+          "manifest",
+          "plan_digest",
+          "transfer",
+          "retry"
+        ],
+        "title": "ModelCacheDownloadPayload",
+        "type": "object"
+      },
       "ModelCacheDownloadResult": {
         "additionalProperties": false,
         "properties": {
@@ -11343,6 +11970,88 @@
           "coverage"
         ],
         "title": "ModelCacheDownloadResult",
+        "type": "object"
+      },
+      "ModelCacheOperationProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_artifacts": {
+            "minimum": 0,
+            "title": "Completed Artifacts",
+            "type": "integer"
+          },
+          "current_artifact_key": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_.:-]{0,255}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Current Artifact Key"
+          },
+          "downloaded_bytes": {
+            "minimum": 0,
+            "title": "Downloaded Bytes",
+            "type": "integer"
+          },
+          "expected_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Bytes"
+          },
+          "measurement": {
+            "$ref": "#/components/schemas/OperationProgress"
+          },
+          "phase": {
+            "enum": [
+              "queued",
+              "downloading",
+              "verifying",
+              "reclaiming",
+              "cancelling",
+              "completed",
+              "failed"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "total_artifacts": {
+            "minimum": 0,
+            "title": "Total Artifacts",
+            "type": "integer"
+          },
+          "total_bytes_known": {
+            "default": true,
+            "title": "Total Bytes Known",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "phase",
+          "completed_artifacts",
+          "total_artifacts",
+          "downloaded_bytes",
+          "measurement"
+        ],
+        "title": "ModelCacheOperationProgress",
         "type": "object"
       },
       "ModelCacheOperatorRequest": {
@@ -11566,6 +12275,248 @@
         "title": "ModelCacheOperatorStatus",
         "type": "string"
       },
+      "ModelCacheRemovalPayload": {
+        "additionalProperties": false,
+        "description": "Exact, restartable removal plan and its durable effect checkpoint.",
+        "properties": {
+          "access_recheck": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheAccessRecheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheClaim"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "delete_objects": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "title": "Delete Objects",
+            "type": "array"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "force_refresh": {
+            "default": false,
+            "title": "Force Refresh",
+            "type": "boolean"
+          },
+          "model_content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Content Sha256"
+          },
+          "object_index": {
+            "minimum": 0,
+            "title": "Object Index",
+            "type": "integer"
+          },
+          "object_pending_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Pending Bytes"
+          },
+          "operator_action": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator Action"
+          },
+          "reclaimed_bytes": {
+            "minimum": 0,
+            "title": "Reclaimed Bytes",
+            "type": "integer"
+          },
+          "removal_fence": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Removal Fence",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheRemovalResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resume_of": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resume Of"
+          },
+          "retry": {
+            "$ref": "#/components/schemas/ModelCacheRetry"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry Of"
+          },
+          "review_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Digest"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selected": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "title": "Selected",
+            "type": "array"
+          },
+          "selected_objects": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "title": "Selected Objects",
+            "type": "array"
+          },
+          "selector": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "set_index": {
+            "minimum": 0,
+            "title": "Set Index",
+            "type": "integer"
+          },
+          "source_policy": {
+            "const": "nas-first",
+            "title": "Source Policy",
+            "type": "string"
+          },
+          "with_model": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "With Model"
+          }
+        },
+        "required": [
+          "schema_version",
+          "source_policy",
+          "selector",
+          "review_digest",
+          "removal_fence",
+          "selected",
+          "selected_objects",
+          "delete_objects",
+          "object_index",
+          "object_pending_bytes",
+          "reclaimed_bytes",
+          "set_index",
+          "retry",
+          "result"
+        ],
+        "title": "ModelCacheRemovalPayload",
+        "type": "object"
+      },
       "ModelCacheRemovalRequest": {
         "additionalProperties": false,
         "description": "Request key for removing the named model against current state.",
@@ -11618,6 +12569,341 @@
           "reclaimed_bytes"
         ],
         "title": "ModelCacheRemovalResult",
+        "type": "object"
+      },
+      "ModelCacheRepairCheckpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_objects": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "title": "Completed Objects",
+            "type": "array"
+          },
+          "transfer_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Transfer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id",
+          "completed_objects"
+        ],
+        "title": "ModelCacheRepairCheckpoint",
+        "type": "object"
+      },
+      "ModelCacheRepairPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "access_recheck": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheAccessRecheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "artifact_set_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Artifact Set Sha256",
+            "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/OperationBlocker"
+            },
+            "maxItems": 16,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheClaim"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "force_refresh": {
+            "default": false,
+            "title": "Force Refresh",
+            "type": "boolean"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/CacheManifest"
+          },
+          "operator_action": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_.:-]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator Action"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "removal_fence": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Removal Fence"
+          },
+          "repair_checkpoint": {
+            "$ref": "#/components/schemas/ModelCacheRepairCheckpoint"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheDownloadResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "resume_of": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resume Of"
+          },
+          "retry": {
+            "$ref": "#/components/schemas/ModelCacheRetry"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry Of"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Selector"
+          },
+          "source_policy": {
+            "const": "nas-first",
+            "title": "Source Policy",
+            "type": "string"
+          },
+          "transfer": {
+            "$ref": "#/components/schemas/ModelCacheTransfer"
+          },
+          "with_model": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "With Model"
+          }
+        },
+        "required": [
+          "schema_version",
+          "source_policy",
+          "artifact_set_sha256",
+          "manifest",
+          "plan_digest",
+          "transfer",
+          "retry",
+          "repair_checkpoint"
+        ],
+        "title": "ModelCacheRepairPayload",
+        "type": "object"
+      },
+      "ModelCacheRetry": {
+        "additionalProperties": false,
+        "properties": {
+          "automatic_attempts": {
+            "minimum": 1,
+            "title": "Automatic Attempts",
+            "type": "integer"
+          },
+          "credential_fingerprint": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Credential Fingerprint"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Next Retry At"
+          },
+          "operator_retries": {
+            "minimum": 0,
+            "title": "Operator Retries",
+            "type": "integer"
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry After Seconds"
+          }
+        },
+        "required": [
+          "automatic_attempts",
+          "operator_retries"
+        ],
+        "title": "ModelCacheRetry",
+        "type": "object"
+      },
+      "ModelCacheTransfer": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "patternProperties": {
+              "^[0-9a-f]{64}$": {
+                "$ref": "#/components/schemas/ModelCacheTransferArtifact"
+              }
+            },
+            "title": "Artifacts",
+            "type": "object"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "total_bytes": {
+            "minimum": 0,
+            "title": "Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_bytes",
+          "artifacts"
+        ],
+        "title": "ModelCacheTransfer",
+        "type": "object"
+      },
+      "ModelCacheTransferArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_bytes": {
+            "minimum": 0,
+            "title": "Baseline Bytes",
+            "type": "integer"
+          },
+          "received_bytes": {
+            "minimum": 0,
+            "title": "Received Bytes",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "baseline_bytes",
+          "received_bytes",
+          "started_at"
+        ],
+        "title": "ModelCacheTransferArtifact",
         "type": "object"
       },
       "ModelDefinition": {
@@ -12205,6 +13491,150 @@
           "content_sha256"
         ],
         "title": "ModelReference",
+        "type": "object"
+      },
+      "ModelRevisionProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_count": {
+            "minimum": 0,
+            "title": "Artifact Count",
+            "type": "integer"
+          },
+          "download_bytes": {
+            "minimum": 0,
+            "title": "Download Bytes",
+            "type": "integer"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failure Reason"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/ModelIdentity"
+          },
+          "installed_bytes": {
+            "minimum": 0,
+            "title": "Installed Bytes",
+            "type": "integer"
+          },
+          "modalities": {
+            "items": {
+              "enum": [
+                "text",
+                "image",
+                "audio",
+                "video",
+                "3d",
+                "embeddings"
+              ],
+              "type": "string"
+            },
+            "title": "Modalities",
+            "type": "array"
+          },
+          "package_handle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipePackageHandleProjection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "package_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Package Sha256"
+          },
+          "publication_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Publication Commit"
+          },
+          "release_released_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Released At"
+          },
+          "release_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Version"
+          },
+          "source_bundle_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Bundle Sha256"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Path"
+          }
+        },
+        "required": [
+          "identity",
+          "modalities",
+          "artifact_count",
+          "download_bytes",
+          "installed_bytes"
+        ],
+        "title": "ModelRevisionProjection",
         "type": "object"
       },
       "ModelSource": {
@@ -13639,6 +15069,29 @@
         "title": "PlacementLoadState",
         "type": "string"
       },
+      "PrebuiltImage": {
+        "additionalProperties": false,
+        "description": "One catalog-pinned prebuilt runtime image for a recipe revision.",
+        "properties": {
+          "build_key": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Build Key",
+            "type": "string"
+          },
+          "reference": {
+            "maxLength": 512,
+            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]{1,5})?(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+@sha256:[0-9a-f]{64}$",
+            "title": "Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference",
+          "build_key"
+        ],
+        "title": "PrebuiltImage",
+        "type": "object"
+      },
       "PrebuiltImageCode": {
         "description": "Why a prebuilt runtime image is, or is not, used.",
         "enum": [
@@ -14095,6 +15548,30 @@
         "title": "RecipeAlternative",
         "type": "object"
       },
+      "RecipeBuildAdditionalContext": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9._-]{0,63}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "title": "RecipeBuildAdditionalContext",
+        "type": "object"
+      },
       "RecipeBuildCleanupEvidence": {
         "additionalProperties": false,
         "description": "The build service is stopped; the fenced attempt is the whole answer.",
@@ -14177,6 +15654,41 @@
         "title": "RecipeBuildDefinition",
         "type": "object"
       },
+      "RecipeBuildEnvironmentArgument": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Z][A-Z0-9_]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "maximum": 9223372036854775807,
+                "minimum": -9223372036854775808,
+                "type": "integer"
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "RecipeBuildEnvironmentArgument",
+        "type": "object"
+      },
       "RecipeBuildEvidence": {
         "additionalProperties": false,
         "properties": {
@@ -14203,6 +15715,234 @@
           "oci_layout_sha256"
         ],
         "title": "RecipeBuildEvidence",
+        "type": "object"
+      },
+      "RecipeBuildMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 1024,
+            "pattern": "^[^\\x00]*$",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "RecipeBuildMetadata",
+        "type": "object"
+      },
+      "RecipeBuildOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "additional_contexts": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeBuildAdditionalContext"
+            },
+            "maxItems": 16,
+            "title": "Additional Contexts",
+            "type": "array"
+          },
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeBuildMetadata"
+            },
+            "maxItems": 64,
+            "title": "Annotations",
+            "type": "array"
+          },
+          "environment": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeBuildEnvironmentArgument"
+            },
+            "maxItems": 64,
+            "title": "Environment",
+            "type": "array"
+          },
+          "format": {
+            "enum": [
+              "oci",
+              "docker"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "identity_label": {
+            "title": "Identity Label",
+            "type": "boolean"
+          },
+          "ignorefile": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ignorefile"
+          },
+          "jobs": {
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Jobs",
+            "type": "integer"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeBuildMetadata"
+            },
+            "maxItems": 64,
+            "title": "Labels",
+            "type": "array"
+          },
+          "layer_compression": {
+            "enum": [
+              "disabled",
+              "gzip"
+            ],
+            "title": "Layer Compression",
+            "type": "string"
+          },
+          "layer_labels": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeBuildMetadata"
+            },
+            "maxItems": 64,
+            "title": "Layer Labels",
+            "type": "array"
+          },
+          "layers": {
+            "title": "Layers",
+            "type": "boolean"
+          },
+          "no_hostname": {
+            "title": "No Hostname",
+            "type": "boolean"
+          },
+          "no_hosts": {
+            "title": "No Hosts",
+            "type": "boolean"
+          },
+          "omit_history": {
+            "title": "Omit History",
+            "type": "boolean"
+          },
+          "os_features": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Os Features",
+            "type": "array"
+          },
+          "os_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._+-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Os Version"
+          },
+          "shm_bytes": {
+            "maximum": 17592186044416,
+            "minimum": 65536,
+            "title": "Shm Bytes",
+            "type": "integer"
+          },
+          "skip_unused_stages": {
+            "title": "Skip Unused Stages",
+            "type": "boolean"
+          },
+          "squash": {
+            "enum": [
+              "none",
+              "new",
+              "all"
+            ],
+            "title": "Squash",
+            "type": "string"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "maximum": 4102444800,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Timestamp"
+          },
+          "unset_environment": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Z][A-Z0-9_]{0,127}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Unset Environment",
+            "type": "array"
+          },
+          "unset_labels": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Unset Labels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "additional_contexts",
+          "annotations",
+          "environment",
+          "format",
+          "identity_label",
+          "jobs",
+          "labels",
+          "layer_compression",
+          "layer_labels",
+          "layers",
+          "no_hostname",
+          "no_hosts",
+          "omit_history",
+          "os_features",
+          "shm_bytes",
+          "skip_unused_stages",
+          "squash",
+          "unset_environment",
+          "unset_labels"
+        ],
+        "title": "RecipeBuildOptions",
         "type": "object"
       },
       "RecipeCancellationRequest": {
@@ -16448,6 +18188,58 @@
         "title": "RecipePackageCode",
         "type": "string"
       },
+      "RecipePackageHandleProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_path": {
+            "title": "Archive Path",
+            "type": "string"
+          },
+          "closure_path": {
+            "title": "Closure Path",
+            "type": "string"
+          },
+          "package_path": {
+            "title": "Package Path",
+            "type": "string"
+          },
+          "package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Package Sha256",
+            "type": "string"
+          },
+          "package_size": {
+            "exclusiveMinimum": 0,
+            "title": "Package Size",
+            "type": "integer"
+          },
+          "publication_commit": {
+            "title": "Publication Commit",
+            "type": "string"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "source_commit": {
+            "title": "Source Commit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publication_commit",
+          "source_commit",
+          "package_sha256",
+          "package_size",
+          "package_path",
+          "recipe_content_sha256",
+          "archive_path",
+          "closure_path"
+        ],
+        "title": "RecipePackageHandleProjection",
+        "type": "object"
+      },
       "RecipeParallelism": {
         "additionalProperties": false,
         "properties": {
@@ -16849,6 +18641,213 @@
           "recipe_revision_id"
         ],
         "title": "RecipeRevisionIntent",
+        "type": "object"
+      },
+      "RecipeRevisionProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_inputs": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ArtifactInputProjection"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Inputs"
+          },
+          "build_model_artifacts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BuildModelArtifactProjection"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Build Model Artifacts"
+          },
+          "build_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeBuildOptions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "build_resources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BuildResourcesProjection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "build_security": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BuildSecurityProjection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failure Reason"
+          },
+          "package_handle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipePackageHandleProjection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "package_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Package Sha256"
+          },
+          "prebuilt_image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrebuiltImage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "publication_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Publication Commit"
+          },
+          "release_released_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Released At"
+          },
+          "release_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Version"
+          },
+          "runtime_engine": {
+            "title": "Runtime Engine",
+            "type": "string"
+          },
+          "source_bundle_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Bundle Sha256"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Path"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "topology": {
+            "$ref": "#/components/schemas/RecipeTopology"
+          }
+        },
+        "required": [
+          "title",
+          "description",
+          "tags",
+          "runtime_engine",
+          "topology"
+        ],
+        "title": "RecipeRevisionProjection",
         "type": "object"
       },
       "RecipeRoleResources": {
@@ -22976,6 +24975,81 @@
         "title": "SourceBundleCode",
         "type": "string"
       },
+      "SourceBundleFile": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              420,
+              493
+            ],
+            "title": "Mode",
+            "type": "integer"
+          },
+          "path": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size": {
+            "maximum": 33554432,
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "mode",
+          "size",
+          "sha256"
+        ],
+        "title": "SourceBundleFile",
+        "type": "object"
+      },
+      "SourceBundleManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SourceBundleFile"
+            },
+            "maxItems": 4096,
+            "title": "Files",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "total_bytes": {
+            "maximum": 268435456,
+            "minimum": 0,
+            "title": "Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "files",
+          "total_bytes",
+          "sha256"
+        ],
+        "title": "SourceBundleManifest",
+        "type": "object"
+      },
       "SourcePolicyCode": {
         "description": "Findings of the build source policy (Dockerfile and Compose rules).",
         "enum": [
@@ -23868,6 +25942,111 @@
           "reason"
         ],
         "title": "UnknownError",
+        "type": "object"
+      },
+      "UnprojectedRevision": {
+        "additionalProperties": false,
+        "description": "The column's own default: a revision whose projection is not derived yet.\n\n``catalog_document_revisions.projected`` defaults to ``{}``.  The importer\nalways writes the derived projection; a row that still holds the default is\nread as unknown by :func:`read_catalog_projection` and re-derived by the\ncatalog's own repair path.",
+        "properties": {
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failure Reason"
+          },
+          "package_handle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipePackageHandleProjection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "package_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Package Sha256"
+          },
+          "publication_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Publication Commit"
+          },
+          "release_released_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Released At"
+          },
+          "release_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Version"
+          },
+          "source_bundle_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Bundle Sha256"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Path"
+          }
+        },
+        "title": "UnprojectedRevision",
         "type": "object"
       },
       "WaitReason": {
@@ -30374,6 +32553,11 @@
     }
   },
   "x-vonk-json-columns": {
+    "catalog_document_revisions.projected": [
+      "ModelRevisionProjection",
+      "RecipeRevisionProjection",
+      "UnprojectedRevision"
+    ],
     "fleet_profile_applications.plan": [
       "FleetProfilePreview"
     ],
@@ -30386,8 +32570,25 @@
     "fleet_profiles.assignments": [
       "FleetProfileAssignmentInput"
     ],
+    "model_cache_operations.payload": [
+      "ModelCacheDownloadPayload",
+      "ModelCacheRemovalPayload",
+      "ModelCacheRepairPayload"
+    ],
+    "model_cache_operations.progress": [
+      "ModelCacheOperationProgress"
+    ],
+    "model_cache_sets.manifest": [
+      "CacheManifest"
+    ],
     "node_inventory_snapshots.network_interfaces": [
       "NetworkInterface"
+    ],
+    "recipe_library_sync_runs.result": [
+      "ManagedCatalogSyncResult"
+    ],
+    "recipe_source_bundles.manifest": [
+      "SourceBundleManifest"
     ],
     "route_publications.activation_marker": [
       "ActivationMarker",

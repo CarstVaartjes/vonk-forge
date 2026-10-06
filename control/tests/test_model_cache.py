@@ -1411,6 +1411,7 @@ def test_upstream_revision_downloads_only_new_files_and_reuses_the_rest(
         "not a result document",
     ],
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cache_operation_reads_rebuild_malformed_or_wrong_kind_results(
     cache,
     tmp_path: Path,

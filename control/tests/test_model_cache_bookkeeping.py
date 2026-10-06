@@ -131,6 +131,7 @@ def test_a_stale_removal_scope_waits_instead_of_raising(cache, tmp_path: Path):
 # ------------------------------- 2. damaged persisted state rebuilds or retires
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_one_unreadable_download_never_stops_the_claim_loop(cache, tmp_path: Path):
     service, sessions = cache
     broken, _ = _queue(service, tmp_path, "00000000-0000-4000-8000-00000000b010", b"a")
@@ -155,6 +156,7 @@ def test_one_unreadable_download_never_stops_the_claim_loop(cache, tmp_path: Pat
     assert retired.failure is not None
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_running_operation_under_a_live_lease_is_never_retired(cache, tmp_path: Path):
     """Fail open: another process's running workload survives an unreadable document."""
 
@@ -176,6 +178,7 @@ def test_a_running_operation_under_a_live_lease_is_never_retired(cache, tmp_path
         assert stored.state == "running" and stored.fence == "another-process"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_damaged_envelope_is_rebuilt_from_its_set_row(cache, tmp_path: Path):
     service, sessions = cache
     operation, _artifact_document = _queue(
@@ -194,6 +197,7 @@ def test_a_damaged_envelope_is_rebuilt_from_its_set_row(cache, tmp_path: Path):
     assert service.get_operation(operation.id).state == "succeeded"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_damaged_set_manifest_does_not_block_reconcile_or_listing(
     cache, tmp_path: Path
 ):

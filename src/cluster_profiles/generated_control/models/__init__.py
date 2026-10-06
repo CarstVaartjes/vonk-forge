@@ -15,6 +15,7 @@ from .agent_upgrade_identity_response import AgentUpgradeIdentityResponse
 from .agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
 from .artifact_file_declaration import ArtifactFileDeclaration
 from .artifact_input_contract import ArtifactInputContract
+from .artifact_input_projection import ArtifactInputProjection
 from .artifact_job_capabilities_response import ArtifactJobCapabilitiesResponse
 from .artifact_job_create import ArtifactJobCreate
 from .artifact_job_create_parameters import ArtifactJobCreateParameters
@@ -48,10 +49,16 @@ from .bounded_error_response import BoundedErrorResponse
 from .build_compatibility_evidence import BuildCompatibilityEvidence
 from .build_compatibility_evidence_state import BuildCompatibilityEvidenceState
 from .build_context import BuildContext
+from .build_model_artifact_projection import BuildModelArtifactProjection
 from .build_network import BuildNetwork
 from .build_patch import BuildPatch
+from .build_resources_projection import BuildResourcesProjection
+from .build_security_projection import BuildSecurityProjection
 from .build_source_evidence import BuildSourceEvidence
 from .build_source_evidence_state import BuildSourceEvidenceState
+from .cache_manifest import CacheManifest
+from .cache_manifest_artifact import CacheManifestArtifact
+from .cache_manifest_artifact_part import CacheManifestArtifactPart
 from .cache_reference_reason import CacheReferenceReason
 from .cache_removal_asset import CacheRemovalAsset
 from .cache_removal_asset_disposition import CacheRemovalAssetDisposition
@@ -295,6 +302,8 @@ from .managed_catalog_sync_failure import ManagedCatalogSyncFailure
 from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
 from .managed_catalog_sync_response import ManagedCatalogSyncResponse
 from .managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
+from .managed_catalog_sync_result import ManagedCatalogSyncResult
+from .managed_catalog_sync_result_state import ManagedCatalogSyncResultState
 from .managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
 from .mapping_selection import MappingSelection
 from .mapping_selection_action import MappingSelectionAction
@@ -305,18 +314,30 @@ from .migration_step import MigrationStep
 from .model_artifact_identity import ModelArtifactIdentity
 from .model_artifact_preparation import ModelArtifactPreparation
 from .model_artifact_preparation_completeness import ModelArtifactPreparationCompleteness
+from .model_cache_access_recheck import ModelCacheAccessRecheck
 from .model_cache_blocker_code import ModelCacheBlockerCode
 from .model_cache_cancellation import ModelCacheCancellation
 from .model_cache_cancellation_request import ModelCacheCancellationRequest
+from .model_cache_claim import ModelCacheClaim
 from .model_cache_code import ModelCacheCode
+from .model_cache_download_payload import ModelCacheDownloadPayload
 from .model_cache_download_result import ModelCacheDownloadResult
+from .model_cache_operation_progress import ModelCacheOperationProgress
+from .model_cache_operation_progress_phase import ModelCacheOperationProgressPhase
 from .model_cache_operator_request import ModelCacheOperatorRequest
 from .model_cache_operator_response import ModelCacheOperatorResponse
 from .model_cache_operator_response_action import ModelCacheOperatorResponseAction
 from .model_cache_operator_response_state_type_1 import ModelCacheOperatorResponseStateType1
 from .model_cache_operator_status import ModelCacheOperatorStatus
+from .model_cache_removal_payload import ModelCacheRemovalPayload
 from .model_cache_removal_request import ModelCacheRemovalRequest
 from .model_cache_removal_result import ModelCacheRemovalResult
+from .model_cache_repair_checkpoint import ModelCacheRepairCheckpoint
+from .model_cache_repair_payload import ModelCacheRepairPayload
+from .model_cache_retry import ModelCacheRetry
+from .model_cache_transfer import ModelCacheTransfer
+from .model_cache_transfer_artifact import ModelCacheTransferArtifact
+from .model_cache_transfer_artifacts import ModelCacheTransferArtifacts
 from .model_definition import ModelDefinition
 from .model_definition_modalities_item import ModelDefinitionModalitiesItem
 from .model_detail_response import ModelDetailResponse
@@ -331,6 +352,8 @@ from .model_license import ModelLicense
 from .model_metadata import ModelMetadata
 from .model_record import ModelRecord
 from .model_reference import ModelReference
+from .model_revision_projection import ModelRevisionProjection
+from .model_revision_projection_modalities_item import ModelRevisionProjectionModalitiesItem
 from .model_source import ModelSource
 from .model_territorial_restrictions import ModelTerritorialRestrictions
 from .network_interface import NetworkInterface
@@ -367,6 +390,7 @@ from .package_activation_receipt import PackageActivationReceipt
 from .package_activation_receipt_phase import PackageActivationReceiptPhase
 from .placement_install_state import PlacementInstallState
 from .placement_load_state import PlacementLoadState
+from .prebuilt_image import PrebuiltImage
 from .prebuilt_image_code import PrebuiltImageCode
 from .preparation_reason import PreparationReason
 from .preparation_reason_severity import PreparationReasonSeverity
@@ -379,10 +403,17 @@ from .reason_code_vocabulary import ReasonCodeVocabulary
 from .recipe_alternative import RecipeAlternative
 from .recipe_alternative_cache import RecipeAlternativeCache
 from .recipe_alternative_fits_fleet import RecipeAlternativeFitsFleet
+from .recipe_build_additional_context import RecipeBuildAdditionalContext
 from .recipe_build_cleanup_evidence import RecipeBuildCleanupEvidence
 from .recipe_build_code import RecipeBuildCode
 from .recipe_build_definition import RecipeBuildDefinition
+from .recipe_build_environment_argument import RecipeBuildEnvironmentArgument
 from .recipe_build_evidence import RecipeBuildEvidence
+from .recipe_build_metadata import RecipeBuildMetadata
+from .recipe_build_options import RecipeBuildOptions
+from .recipe_build_options_format import RecipeBuildOptionsFormat
+from .recipe_build_options_layer_compression import RecipeBuildOptionsLayerCompression
+from .recipe_build_options_squash import RecipeBuildOptionsSquash
 from .recipe_cancellation_request import RecipeCancellationRequest
 from .recipe_definition import RecipeDefinition
 from .recipe_detail_response import RecipeDetailResponse
@@ -441,6 +472,7 @@ from .recipe_option_choice import RecipeOptionChoice
 from .recipe_option_choice_env import RecipeOptionChoiceEnv
 from .recipe_output_slot import RecipeOutputSlot
 from .recipe_package_code import RecipePackageCode
+from .recipe_package_handle_projection import RecipePackageHandleProjection
 from .recipe_parallelism import RecipeParallelism
 from .recipe_presence import RecipePresence
 from .recipe_provenance import RecipeProvenance
@@ -451,6 +483,7 @@ from .recipe_reconcile_result import RecipeReconcileResult
 from .recipe_release import RecipeRelease
 from .recipe_retry_intent import RecipeRetryIntent
 from .recipe_revision_intent import RecipeRevisionIntent
+from .recipe_revision_projection import RecipeRevisionProjection
 from .recipe_role_resources import RecipeRoleResources
 from .recipe_run_change import RecipeRunChange
 from .recipe_run_payload import RecipeRunPayload
@@ -599,6 +632,9 @@ from .runtime_preflight_result import RuntimePreflightResult
 from .security_refusal import SecurityRefusal
 from .security_refusal_reason import SecurityRefusalReason
 from .source_bundle_code import SourceBundleCode
+from .source_bundle_file import SourceBundleFile
+from .source_bundle_file_mode import SourceBundleFileMode
+from .source_bundle_manifest import SourceBundleManifest
 from .source_policy_code import SourcePolicyCode
 from .spark_fit import SparkFit
 from .spark_fit_node import SparkFitNode
@@ -623,6 +659,7 @@ from .telemetry_state_freshness import TelemetryStateFreshness
 from .topology_code import TopologyCode
 from .uninstall_plan_code import UninstallPlanCode
 from .unknown_error import UnknownError
+from .unprojected_revision import UnprojectedRevision
 from .wait_reason import WaitReason
 from .wait_verdict import WaitVerdict
 
@@ -642,6 +679,7 @@ __all__ = (
     "AgentUpgradeTargetDiagnosticsResponse",
     "ArtifactFileDeclaration",
     "ArtifactInputContract",
+    "ArtifactInputProjection",
     "ArtifactJobCapabilitiesResponse",
     "ArtifactJobCreate",
     "ArtifactJobCreateParameters",
@@ -675,10 +713,16 @@ __all__ = (
     "BuildCompatibilityEvidence",
     "BuildCompatibilityEvidenceState",
     "BuildContext",
+    "BuildModelArtifactProjection",
     "BuildNetwork",
     "BuildPatch",
+    "BuildResourcesProjection",
+    "BuildSecurityProjection",
     "BuildSourceEvidence",
     "BuildSourceEvidenceState",
+    "CacheManifest",
+    "CacheManifestArtifact",
+    "CacheManifestArtifactPart",
     "CacheReferenceReason",
     "CacheRemovalAsset",
     "CacheRemovalAssetDisposition",
@@ -922,6 +966,8 @@ __all__ = (
     "ManagedCatalogSyncProblem",
     "ManagedCatalogSyncResponse",
     "ManagedCatalogSyncResponseTrigger",
+    "ManagedCatalogSyncResult",
+    "ManagedCatalogSyncResultState",
     "ManagedCatalogWithdrawnRecipe",
     "MappingSelection",
     "MappingSelectionAction",
@@ -932,18 +978,30 @@ __all__ = (
     "ModelArtifactIdentity",
     "ModelArtifactPreparation",
     "ModelArtifactPreparationCompleteness",
+    "ModelCacheAccessRecheck",
     "ModelCacheBlockerCode",
     "ModelCacheCancellation",
     "ModelCacheCancellationRequest",
+    "ModelCacheClaim",
     "ModelCacheCode",
+    "ModelCacheDownloadPayload",
     "ModelCacheDownloadResult",
+    "ModelCacheOperationProgress",
+    "ModelCacheOperationProgressPhase",
     "ModelCacheOperatorRequest",
     "ModelCacheOperatorResponse",
     "ModelCacheOperatorResponseAction",
     "ModelCacheOperatorResponseStateType1",
     "ModelCacheOperatorStatus",
+    "ModelCacheRemovalPayload",
     "ModelCacheRemovalRequest",
     "ModelCacheRemovalResult",
+    "ModelCacheRepairCheckpoint",
+    "ModelCacheRepairPayload",
+    "ModelCacheRetry",
+    "ModelCacheTransfer",
+    "ModelCacheTransferArtifact",
+    "ModelCacheTransferArtifacts",
     "ModelDefinition",
     "ModelDefinitionModalitiesItem",
     "ModelDetailResponse",
@@ -958,6 +1016,8 @@ __all__ = (
     "ModelMetadata",
     "ModelRecord",
     "ModelReference",
+    "ModelRevisionProjection",
+    "ModelRevisionProjectionModalitiesItem",
     "ModelSource",
     "ModelTerritorialRestrictions",
     "NetworkInterface",
@@ -994,6 +1054,7 @@ __all__ = (
     "PackageActivationReceiptPhase",
     "PlacementInstallState",
     "PlacementLoadState",
+    "PrebuiltImage",
     "PrebuiltImageCode",
     "PreparationReason",
     "PreparationReasonSeverity",
@@ -1006,10 +1067,17 @@ __all__ = (
     "RecipeAlternative",
     "RecipeAlternativeCache",
     "RecipeAlternativeFitsFleet",
+    "RecipeBuildAdditionalContext",
     "RecipeBuildCleanupEvidence",
     "RecipeBuildCode",
     "RecipeBuildDefinition",
+    "RecipeBuildEnvironmentArgument",
     "RecipeBuildEvidence",
+    "RecipeBuildMetadata",
+    "RecipeBuildOptions",
+    "RecipeBuildOptionsFormat",
+    "RecipeBuildOptionsLayerCompression",
+    "RecipeBuildOptionsSquash",
     "RecipeCancellationRequest",
     "RecipeDefinition",
     "RecipeDetailResponse",
@@ -1068,6 +1136,7 @@ __all__ = (
     "RecipeOptionChoiceEnv",
     "RecipeOutputSlot",
     "RecipePackageCode",
+    "RecipePackageHandleProjection",
     "RecipeParallelism",
     "RecipePresence",
     "RecipeProvenance",
@@ -1078,6 +1147,7 @@ __all__ = (
     "RecipeRelease",
     "RecipeRetryIntent",
     "RecipeRevisionIntent",
+    "RecipeRevisionProjection",
     "RecipeRoleResources",
     "RecipeRunChange",
     "RecipeRunPayload",
@@ -1226,6 +1296,9 @@ __all__ = (
     "SecurityRefusal",
     "SecurityRefusalReason",
     "SourceBundleCode",
+    "SourceBundleFile",
+    "SourceBundleFileMode",
+    "SourceBundleManifest",
     "SourcePolicyCode",
     "SparkFit",
     "SparkFitNode",
@@ -1250,6 +1323,7 @@ __all__ = (
     "TopologyCode",
     "UninstallPlanCode",
     "UnknownError",
+    "UnprojectedRevision",
     "WaitReason",
     "WaitVerdict",
 )

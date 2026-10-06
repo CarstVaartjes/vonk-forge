@@ -210,6 +210,7 @@ def test_cache_recovery_refuses_access_and_integrity_failures(tmp_path: Path) ->
 @pytest.mark.parametrize(
     "recovery_blocker", [None, "contract", "capacity", "model-drift"]
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cache_recovery_replans_an_actually_missing_build_archive(
     tmp_path: Path,
     recovery_blocker: str | None,

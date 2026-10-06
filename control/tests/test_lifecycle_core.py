@@ -173,6 +173,7 @@ def test_transition_is_total_and_keeps_identity() -> None:
     assert cases > 50_000
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_terminal_rows_never_move_and_a_cancel_flag_never_clears() -> None:
     for row, event, adapter, decision in _table():
         where = _describe(row, event, adapter)

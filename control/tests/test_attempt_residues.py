@@ -449,6 +449,7 @@ def test_a_plan_where_a_rank_shows_an_effect_is_not_abandoned(tmp_path: Path) ->
         assert installation is not None and installation.state == "planned"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_plan_a_newer_revision_of_the_recipe_replaced_is_released(
     tmp_path: Path,
 ) -> None:

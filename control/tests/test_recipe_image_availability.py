@@ -2492,6 +2492,7 @@ def test_same_work_identity_keeps_distinct_authorization_operations(
     assert transport.calls == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_model_child_and_image_complete_through_one_sql_operation(
     tmp_path: Path,
 ) -> None:
@@ -2604,6 +2605,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(
     assert response.children[0].model_content_digests == ["d" * 64]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_model_and_image_children_advance_independently_and_reuse_image(
     tmp_path: Path,
 ) -> None:
