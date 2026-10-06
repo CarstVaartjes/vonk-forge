@@ -24,7 +24,7 @@ if [[ -e "$env" || -L "$env" ]]; then
     built_by=$("$env/bin/python" "$helper" stamp 2>/dev/null || true)
     if [[ "$found" != "$built_by" || "$built_by" != "$key "* ]]; then
         echo "sync-cli-dependencies: rebuilding $env (built for: ${found:-unknown})" >&2
-        rm -rf "$env"
+        rm -rf "${env:?}"
     fi
 fi
 

@@ -19,7 +19,7 @@ sha=$(git -C "$root" rev-parse --verify "$ref^{commit}")
 # /private/tmp is shared with the VM (/opt is not).
 base=${VONK_VM_LANE_BASE:-/private/tmp}
 work=$(mktemp -d "$base/vonk-vm-lane.XXXXXX")
-cleanup() { [[ -n ${work:-} && -d $work ]] && rm -rf -- "$work"; }
+cleanup() { [[ -n ${work:-} && -d $work ]] && rm -rf -- "${work:?}"; }
 trap cleanup EXIT
 
 git clone --quiet --no-hardlinks "$root" "$work/repo"
@@ -38,7 +38,7 @@ orb -m vonk-ci bash -lc "
         VONK_CLI_DEPENDENCY_ENV=\"\$HOME/cli-deps-$tag\" \
         VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") \
         CARGO_TARGET_DIR=\"\$HOME/target-vonk-vm-lane\"
-    trap 'rm -rf \"\$HOME/venv-$tag\" \"\$HOME/cli-deps-$tag\"' EXIT
+    trap 'rm -rf \"\${HOME:?}/venv-${tag:?}\" \"\${HOME:?}/cli-deps-${tag:?}\"' EXIT
     scripts/build-control-wheel
     uv sync --project control --frozen --quiet
     scripts/sync-cli-dependencies
