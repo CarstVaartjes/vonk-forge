@@ -1855,6 +1855,40 @@
       "title": "ControllerErrorCode",
       "type": "string"
     },
+    "ControllerRefusalBody": {
+      "additionalProperties": false,
+      "description": "The refusal body an older Controller returned: a bare code and/or detail.\n\nA current Controller answers with its bounded error response; an agent that\nmeets an older Controller still has to recognise its refusal, so this shape\nstays declared (and generated) instead of being read as an untyped document.",
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        }
+      },
+      "title": "ControllerRefusalBody",
+      "type": "object"
+    },
     "DesiredAssignmentState": {
       "description": "What a fleet-profile assignment is asked to become on its Sparks.",
       "enum": [
@@ -8741,6 +8775,7 @@
     "CompiledSecurityMount": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurityMount",
     "CompiledTopology": "vonk_agent_protocol.compiled_execution_plan.CompiledTopology",
     "ConfirmPackageActivationOperation": "vonk_agent_protocol.host_helper.ConfirmPackageActivationOperation",
+    "ControllerRefusalBody": "vonk_agent_protocol.enrollment.ControllerRefusalBody",
     "DistributionAssignment": "vonk_agent_protocol.distribution.DistributionAssignment",
     "DistributionObject": "vonk_agent_protocol.distribution.DistributionObject",
     "EnrollmentBootstrapResponse": "vonk_agent_protocol.enrollment.EnrollmentBootstrapResponse",
@@ -8876,6 +8911,7 @@
     "CompiledSecurityMount": "#/$defs/CompiledSecurityMount",
     "CompiledTopology": "#/$defs/CompiledTopology",
     "ConfirmPackageActivationOperation": "#/$defs/ConfirmPackageActivationOperation",
+    "ControllerRefusalBody": "#/$defs/ControllerRefusalBody",
     "DistributionAssignment": "#/$defs/DistributionAssignment",
     "DistributionObject": "#/$defs/DistributionObject",
     "EnrollmentBootstrapResponse": "#/$defs/EnrollmentBootstrapResponse",

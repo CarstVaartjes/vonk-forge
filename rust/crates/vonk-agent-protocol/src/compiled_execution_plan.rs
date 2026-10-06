@@ -102,9 +102,7 @@ impl CompiledExecutionPlan {
     /// without admitting its runtime for execution. Teardown needs this storage
     /// authority even when saved launch settings can no longer run.
     pub fn validate_storage(&self) -> Result<(), WorkloadError> {
-        let mut value = serde_json::to_value(self)
-            .map_err(|_| WorkloadError::Invalid("compiled wire document"))?;
-        crate::wire_schema::validate_and_materialize("CompiledExecutionPlan", &mut value)
+        crate::passthrough::validate_generated("CompiledExecutionPlan", self)
             .map_err(|_| WorkloadError::Invalid("compiled wire document"))?;
         let placement = &self.runtime.placement;
         if !lower_hex(&self.identity.recipe_revision_sha256, 64)
@@ -646,9 +644,7 @@ fn numeric_non_root_user(value: &str) -> bool {
 fn validate_distribution_object(
     value: &crate::generated::DistributionObject,
 ) -> Result<(), WorkloadError> {
-    let mut document = serde_json::to_value(value)
-        .map_err(|_| WorkloadError::Invalid("compiled distribution object"))?;
-    crate::wire_schema::validate_and_materialize("DistributionObject", &mut document)
+    crate::passthrough::validate_generated("DistributionObject", value)
         .map_err(|_| WorkloadError::Invalid("compiled distribution object"))
 }
 

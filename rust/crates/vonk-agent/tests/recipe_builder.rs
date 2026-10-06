@@ -517,7 +517,10 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
             environment: vec![
                 vonk_agent_protocol::generated::RecipeBuildEnvironmentArgument {
                     name: "BUILD_MODE".to_owned(),
-                    value: serde_json::json!("release"),
+                    value:
+                        vonk_agent_protocol::generated::RecipeBuildEnvironmentArgumentValue::String(
+                            "release".to_owned(),
+                        ),
                 },
             ],
             format: "oci".parse().unwrap(),

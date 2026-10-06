@@ -260,9 +260,8 @@ impl StateStore {
         // The wire schema is the contract: a message that its own generated
         // deserializer refuses (a bound, a pattern, an empty reason) never
         // becomes a durable result.
-        let document = serde_json::to_value(&result).map_err(|_| StateError::ResultState)?;
         let result: AgentResult =
-            serde_json::from_value(document).map_err(|_| StateError::ResultState)?;
+            vonk_agent_protocol::revalidate(&result).map_err(|_| StateError::ResultState)?;
         result.validate_for_operation(&claim.operation)?;
         let body = canonical_json(&result)?;
         let changed = transaction.execute(

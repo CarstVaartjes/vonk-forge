@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::compose_document::ComposeDocument;
 use serde::Serialize;
-use serde_yaml::{Mapping, Value};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SourceFinding {
@@ -258,7 +258,7 @@ fn inspect_copy(
 }
 
 fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>) {
-    let Ok(document) = serde_yaml::from_slice::<Value>(payload) else {
+    let Some(document) = ComposeDocument::parse(payload) else {
         findings.push(finding(
             "compose.invalid",
             path,
@@ -267,8 +267,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
         ));
         return;
     };
-    let Some(services) = mapping_get(document.as_mapping(), "services").and_then(Value::as_mapping)
-    else {
+    let Some(services) = document.services() else {
         findings.push(finding(
             "compose.invalid",
             path,
@@ -277,8 +276,8 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
         ));
         return;
     };
-    for service in services.values() {
-        let Some(service) = service.as_mapping() else {
+    for service in services {
+        if !service.is_mapping() {
             findings.push(finding(
                 "compose.service_invalid",
                 path,
@@ -286,8 +285,8 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
                 "Compose service must be a mapping",
             ));
             continue;
-        };
-        if mapping_get(Some(service), "privileged").and_then(Value::as_bool) == Some(true) {
+        }
+        if service.privileged() {
             findings.push(finding(
                 "compose.privileged",
                 path,
@@ -295,17 +294,15 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
                 "privileged Compose services are forbidden",
             ));
         }
-        for key in ["network_mode", "pid", "ipc", "uts", "userns_mode"] {
-            if mapping_get(Some(service), key).and_then(Value::as_str) == Some("host") {
-                findings.push(finding(
-                    "compose.host_namespace",
-                    path,
-                    None,
-                    "host namespaces are forbidden",
-                ));
-            }
+        for _ in 0..service.host_namespaces() {
+            findings.push(finding(
+                "compose.host_namespace",
+                path,
+                None,
+                "host namespaces are forbidden",
+            ));
         }
-        if nonempty_sequence(mapping_get(Some(service), "cap_add")) {
+        if service.adds_capabilities() {
             findings.push(finding(
                 "compose.capabilities",
                 path,
@@ -313,7 +310,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
                 "added Linux capabilities are forbidden",
             ));
         }
-        if nonempty_sequence(mapping_get(Some(service), "devices")) {
+        if service.requests_devices() {
             findings.push(finding(
                 "compose.devices",
                 path,
@@ -321,10 +318,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
                 "Compose build metadata may not request host devices",
             ));
         }
-        if sequence_strings(mapping_get(Some(service), "security_opt"))
-            .iter()
-            .any(|value| value.to_ascii_lowercase().contains("unconfined"))
-        {
+        if service.unconfined_security_option() {
             findings.push(finding(
                 "compose.unconfined",
                 path,
@@ -332,8 +326,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
                 "unconfined security profiles are forbidden",
             ));
         }
-        let volumes = mapping_get(Some(service), "volumes");
-        if volumes.is_some_and(|value| !value.is_sequence()) {
+        if service.volumes_malformed() {
             findings.push(finding(
                 "compose.volumes_invalid",
                 path,
@@ -341,7 +334,8 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
                 "Compose volumes must be a sequence",
             ));
         }
-        for (source, explicit_bind) in volume_sources(volumes) {
+        for volume in service.volumes() {
+            let source = volume.source;
             if source.contains("docker.sock") || source.contains("podman.sock") {
                 findings.push(finding(
                     "compose.container_socket",
@@ -350,7 +344,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
                     "container runtime sockets are forbidden",
                 ));
             }
-            if explicit_bind
+            if volume.explicit_bind
                 || source.starts_with('/')
                 || source.starts_with("./")
                 || source.starts_with("../")
@@ -367,49 +361,6 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
             }
         }
     }
-}
-
-fn mapping_get<'a>(mapping: Option<&'a Mapping>, key: &str) -> Option<&'a Value> {
-    mapping?.get(Value::String(key.to_owned()))
-}
-
-fn nonempty_sequence(value: Option<&Value>) -> bool {
-    value
-        .and_then(Value::as_sequence)
-        .is_some_and(|items| !items.is_empty())
-}
-
-fn sequence_strings(value: Option<&Value>) -> Vec<&str> {
-    value
-        .and_then(Value::as_sequence)
-        .map(|items| items.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default()
-}
-
-fn volume_sources(value: Option<&Value>) -> Vec<(String, bool)> {
-    value
-        .and_then(Value::as_sequence)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| match item {
-                    Value::String(short) => short
-                        .split(':')
-                        .next()
-                        .map(|source| (source.to_owned(), false)),
-                    Value::Mapping(long) => mapping_get(Some(long), "source")
-                        .and_then(Value::as_str)
-                        .map(|source| {
-                            let explicit_bind = mapping_get(Some(long), "type")
-                                .and_then(Value::as_str)
-                                == Some("bind");
-                            (source.to_owned(), explicit_bind)
-                        }),
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn dockerfile_instructions(text: &str) -> Vec<(usize, String, String)> {

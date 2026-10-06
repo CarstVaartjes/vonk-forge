@@ -200,10 +200,7 @@ const PROTOCOL_CRATES: [&str; 2] = ["vonk-agent-helper", "vonk-agent-protocol"];
 
 /// `json!` that remains in a protocol crate's non-test code, with a ceiling that
 /// only falls. Each entry builds a document that is not a protocol message.
-const JSON_RESIDUE: [(&str, usize); 1] = [
-    // The exported JSON Schema document itself, assembled once at build time.
-    ("vonk-agent-protocol/src/wire_schema.rs", 1),
-];
+const JSON_RESIDUE: [(&str, usize); 0] = [];
 
 fn protocol_crate_sources() -> Vec<(String, String)> {
     fn walk(directory: &Path, found: &mut Vec<PathBuf>) {

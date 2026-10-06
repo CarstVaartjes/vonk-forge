@@ -190,40 +190,6 @@ fn prepare(value: &mut Value) {
     }
 }
 
-fn scalar_conversions(schema: &Value, settings: &mut typify::TypeSpaceSettings) {
-    match schema {
-        Value::Object(object) => {
-            if let Some(variants) = object.get("anyOf").and_then(Value::as_array) {
-                let types: Vec<_> = variants
-                    .iter()
-                    .filter_map(|schema| schema.get("type").and_then(Value::as_str))
-                    .collect();
-                if types.len() == variants.len()
-                    && types.iter().filter(|kind| **kind != "null").count() > 1
-                    && types.iter().all(|kind| {
-                        ["integer", "number", "boolean", "string", "null"].contains(kind)
-                    })
-                {
-                    settings.with_conversion(
-                        serde_json::from_value(schema.clone()).unwrap(),
-                        "::serde_json::Value",
-                        [].into_iter(),
-                    );
-                }
-            }
-            for child in object.values() {
-                scalar_conversions(child, settings);
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                scalar_conversions(value, settings);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn strip_docs(item: &mut Item) {
     let attrs = match item {
         Item::Struct(item) => &mut item.attrs,
@@ -662,7 +628,6 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut settings = typify::TypeSpaceSettings::default();
     settings.with_derive("PartialEq".into());
     settings.with_map_type("::std::collections::BTreeMap");
-    scalar_conversions(&serde_json::from_str::<Value>(&defs_text)?, &mut settings);
     settings.with_conversion(
         serde_json::from_value(json!({"type":"string", "format":"date-time"}))?,
         "::chrono::DateTime<::chrono::FixedOffset>",

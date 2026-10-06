@@ -1826,6 +1826,15 @@ impl ::std::convert::TryFrom<::std::string::String> for ControllerErrorCode {
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct ControllerRefusalBody {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub code: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub detail: ::std::option::Option<::std::string::String>,
+}
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DesiredAssignmentState {
     #[serde(rename = "installed")]
@@ -6934,7 +6943,35 @@ impl ::std::convert::TryFrom<::std::string::String> for RecipeBuildCode {
 #[derive(Eq)]
 pub struct RecipeBuildEnvironmentArgument {
     pub name: ::std::string::String,
-    pub value: ::serde_json::Value,
+    pub value: RecipeBuildEnvironmentArgumentValue,
+}
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+#[derive(Eq)]
+pub enum RecipeBuildEnvironmentArgumentValue {
+    String(::std::string::String),
+    Int64(i64),
+    Boolean(bool),
+}
+impl ::std::fmt::Display for RecipeBuildEnvironmentArgumentValue {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match self {
+            Self::String(x) => x.fmt(f),
+            Self::Int64(x) => x.fmt(f),
+            Self::Boolean(x) => x.fmt(f),
+        }
+    }
+}
+impl ::std::convert::From<i64> for RecipeBuildEnvironmentArgumentValue {
+    fn from(value: i64) -> Self {
+        Self::Int64(value)
+    }
+}
+impl ::std::convert::From<bool> for RecipeBuildEnvironmentArgumentValue {
+    fn from(value: bool) -> Self {
+        Self::Boolean(value)
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -8031,10 +8068,31 @@ pub struct RenewRequest {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RequestValidationIssue {
-    pub loc: ::std::vec::Vec<::serde_json::Value>,
+    pub loc: ::std::vec::Vec<RequestValidationIssueLocItem>,
     pub msg: ::std::string::String,
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
+}
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+#[derive(Eq)]
+pub enum RequestValidationIssueLocItem {
+    String(::std::string::String),
+    Int64(i64),
+}
+impl ::std::fmt::Display for RequestValidationIssueLocItem {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match self {
+            Self::String(x) => x.fmt(f),
+            Self::Int64(x) => x.fmt(f),
+        }
+    }
+}
+impl ::std::convert::From<i64> for RequestValidationIssueLocItem {
+    fn from(value: i64) -> Self {
+        Self::Int64(value)
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -14811,6 +14869,28 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for ControllerRefusalBody {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ControllerRefusalBody", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub code: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub detail: ::std::option::Option<::std::string::String>,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            code: raw.code,
+            detail: raw.detail,
+        })
+    }
+}
 impl DesiredAssignmentState {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -20671,7 +20751,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildEnvironmentArgument {
         #[derive(Eq)]
         struct Raw {
             pub name: ::std::string::String,
-            pub value: ::serde_json::Value,
+            pub value: RecipeBuildEnvironmentArgumentValue,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -22157,7 +22237,7 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationIssue {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub loc: ::std::vec::Vec<::serde_json::Value>,
+            pub loc: ::std::vec::Vec<RequestValidationIssueLocItem>,
             pub msg: ::std::string::String,
             #[serde(rename = "type")]
             pub type_: ::std::string::String,

@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         let value: serde_json::Value = serde_json::from_str(&line)?;
-        let plan = parse_compiled_execution_plan(&value)
+        let plan = parse_compiled_execution_plan(value.to_string().as_bytes())
             .map_err(|error| io::Error::other(error.to_string()))?;
         serde_json::to_writer(&mut output, &plan)?;
         output.write_all(b"\n")?;
