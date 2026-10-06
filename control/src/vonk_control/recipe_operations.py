@@ -6224,6 +6224,7 @@ class RecipeOperationService:
 
         completed = False
         progressed = False
+        denied = False
         with self._sessions() as session:
             existing = self._idempotent_in_session(
                 session,
@@ -6247,6 +6248,35 @@ class RecipeOperationService:
                 )
                 if latest is not None:
                     existing = self._view(latest, session=session)
+                for child, attempt in session.execute(
+                    select(AgentOperation, AgentOperationAttempt)
+                    .join(
+                        AgentOperationAttempt,
+                        AgentOperationAttempt.operation_id == AgentOperation.id,
+                    )
+                    .where(
+                        AgentOperation.parent_job_id == existing.id,
+                        AgentOperationAttempt.attempt == AgentOperation.current_attempt,
+                        AgentOperationAttempt.state == "failed",
+                    )
+                ):
+                    if attempt.result is None:
+                        continue
+                    try:
+                        evidence = validate_result_for_operation(
+                            child.kind, attempt.result, state="failed"
+                        )
+                    except (TypeError, ValueError):
+                        # Unreadable evidence does not establish a security denial.
+                        continue
+                    if isinstance(
+                        evidence, AgentFailureResult
+                    ) and evidence.failure_kind in {
+                        AgentFailureKind.INVALID_AUTHORITY,
+                        AgentFailureKind.INVALID_CONTRACT,
+                        AgentFailureKind.INTEGRITY_FAILURE,
+                    }:
+                        denied = True
             current = _intent_is_current(session, ordinal, job.targets)
             owner = session.get(
                 RecipeRun if kind == "recipe.stop" else RecipeInstallation,
@@ -6276,6 +6306,10 @@ class RecipeOperationService:
             reason = "exact cleanup confirmed; capacity released"
         elif not current:
             reason = "newer workload intent owns cleanup; uncertain capacity remains reserved"
+        elif denied:
+            reason = (
+                "exact cleanup denied; inspect/correct the blocker; capacity retained"
+            )
         elif existing is not None and existing.state not in job_states.words(
             LifecycleState.FAILED,
             LifecycleState.CANCELLED,
