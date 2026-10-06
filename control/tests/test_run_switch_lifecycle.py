@@ -43,6 +43,7 @@ from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import (
     PhaseExecution,
     RunSwitchOperationConflict,
+    _phase_result,
 )
 
 from .test_recipe_operations import NOW, installed_recipe, setup_services
@@ -148,7 +149,7 @@ class _ScriptedExecutor(RecordingArtifactExecutor):
             raise fault
         if fault is not None:
             self.calls.append(phase.kind)
-            return fault
+            return fault(phase) if callable(fault) else fault
         return super().execute(plan, phase, **kwargs)
 
 
@@ -397,7 +398,9 @@ def test_a_receipt_that_does_not_validate_is_retried_not_failed(tmp_path: Path) 
     """Audit top-10 #2: a mismatched receipt ends no load whose bytes are fine."""
 
     executor = _ScriptedExecutor()
-    executor.faults["verify"] = PhaseExecution(result={"verified": False})
+    executor.faults["verify"] = lambda phase: PhaseExecution(
+        result=_phase_result({"verified": False}, phase=phase)
+    )
     harness = _Harness(tmp_path, executor)
     for _ in range(8):
         harness.service.tick()
