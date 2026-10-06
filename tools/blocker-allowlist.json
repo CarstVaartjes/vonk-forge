@@ -53,7 +53,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 4,
-    "unaudited": 347,
+    "unaudited": 345,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -1942,8 +1942,6 @@
       "sites": [
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "current_build_consumers", "build.consumer_invalid", 2],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_availability_build_dependency", "build.consumer_invalid", 2],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.cancellation_pending", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_busy", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_invalid", 2],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_profile_build_dependencies", "build.consumer_invalid", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "read_build_intent", "build.producer_invalid", 1]
@@ -3344,6 +3342,15 @@
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-run-generation-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-run-membership-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-workload-intent-changed", 1]
+      ]
+    },
+    {
+      "family": "recipe_build_cancellation.retry-handoff",
+      "category": "already-retried",
+      "reason": "A busy or cancelling build is a retry handoff: both raises carry retryable=True. Availability preparation and the Fleet profile admission turn it into a retryable wait that their owners retry (FleetProfileAdmissionEffectBusy, a retryable availability error), and a cancel or retry request surfaces the same wait as a request-led retry once the build settles.",
+      "sites": [
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.cancellation_pending", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_busy", 1]
       ]
     }
   ]
