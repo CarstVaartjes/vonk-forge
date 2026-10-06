@@ -349,6 +349,11 @@ def _app() -> FastAPI:
                 "recipe_selector": item.recipe_selector,
                 "spark_ids": list(item.spark_ids),
                 "assigned_sparks": len(item.spark_ids),
+                "model": {"state": "Not loaded"},
+                "recipe": {
+                    "selector": item.recipe_selector,
+                    "state": "Not loaded",
+                },
             }
             for item in body.assignments
         ]

@@ -286,6 +286,7 @@ def _read_object(
         opened.stream.close()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentials(
     controller, tmp_path: Path
 ) -> None:

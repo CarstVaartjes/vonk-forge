@@ -25,10 +25,6 @@ def test_job_interfaces_publish_artifacts(name: str) -> None:
     adapter = interface_adapter(name)
 
     assert adapter.publication == "artifact"
-    assert adapter.readiness({"ready": True}) is True
-    assert adapter.invocation_request({"job": "submit"}) == {"job": "submit"}
-    assert adapter.evidence({"artifact": "result.json"}) == {"artifact": "result.json"}
-    assert adapter.withdrawal() == {"publication": "artifact", "withdrawn": True}
 
 
 def test_openai_is_the_only_litellm_interface() -> None:

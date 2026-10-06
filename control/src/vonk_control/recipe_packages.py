@@ -29,13 +29,14 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.resolver import validate_recipe_models
 
-from .bounded_json import integer, require_integer
 from .catalog_revision_contract import read_prebuilt_image
+from .catalog_sync_contract import ManagedCatalogSyncProblem
 from .recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibraryRelease,
     RecipeLibrarySnapshot,
+    RecipePackageEntry,
 )
 from .recipe_release import (
     MAX_BUNDLE_BYTES,
@@ -308,8 +309,8 @@ class RecipePackageClient:
         )
         self._snapshot: RecipeLibrarySnapshot | None = None
         self._previous_snapshot: RecipeLibrarySnapshot | None = None
-        self._previous_packages: dict[str, dict[str, object]] = {}
-        self._packages: dict[str, dict[str, object]] = {}
+        self._previous_packages: dict[str, RecipePackageEntry] = {}
+        self._packages: dict[str, RecipePackageEntry] = {}
         self._prepared: dict[str, RecipeLibraryItem] = {}
         self._snapshot_path = self._cache_root / "snapshot.json"
         self._candidate_path = self._cache_root / "snapshot.candidate.json"
@@ -618,7 +619,7 @@ class RecipePackageClient:
 
     def _parse_index(
         self, raw: bytes, *, publication_commit: str
-    ) -> tuple[RecipeLibrarySnapshot, dict[str, dict[str, object]]]:
+    ) -> tuple[RecipeLibrarySnapshot, dict[str, RecipePackageEntry]]:
         try:
             index = _json(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -663,7 +664,7 @@ class RecipePackageClient:
         # this Controller's contract cannot read (for example from a newer
         # release) is skipped and reported, and the rest of the signed index
         # still applies. Only the index envelope itself is all-or-nothing.
-        problems: list[dict[str, object]] = []
+        problems: list[ManagedCatalogSyncProblem] = []
         for entry in raw_entities:
             if not isinstance(entry, Mapping) or not isinstance(
                 entry.get("document"), Mapping
@@ -695,7 +696,8 @@ class RecipePackageClient:
                 )
             identities.add(identity)
             catalog_entities.append(dict(entry["document"]))
-        raw_packages: list[Mapping[str, object]] = []
+        packages: dict[str, RecipePackageEntry] = {}
+        items: list[RecipeLibraryItem] = []
         for recipe in raw_recipes:
             if (
                 not isinstance(recipe, Mapping)
@@ -741,69 +743,38 @@ class RecipePackageClient:
                     )
                 )
                 continue
-            raw_packages.append(
-                {
-                    "publisher": document.identity.publisher,
-                    "slug": document.identity.slug,
-                    "source_path": recipe.get("source_path"),
-                    "recipe_content_sha256": recipe.get("content_sha256"),
-                    "package_sha256": package.get("sha256"),
-                    "size": package.get("expected_bytes"),
-                    "location": package.get("path"),
-                    "title": document.metadata.title,
-                    "description": document.metadata.description,
-                    "tags": document.metadata.tags,
-                    "document": dict(recipe["document"]),
-                    "prebuilt_image": recipe.get("prebuilt_image"),
-                }
-            )
-        packages: dict[str, dict[str, object]] = {}
-        items: list[RecipeLibraryItem] = []
-        for package_entry in raw_packages:
-            if not isinstance(package_entry, Mapping):
+            publisher = document.identity.publisher
+            slug = document.identity.slug
+            digest = recipe.get("content_sha256")
+            package_digest = package.get("sha256")
+            size = package.get("expected_bytes")
+            location = package.get("path")
+            source_path = recipe.get("source_path")
+            if (
+                not isinstance(digest, str)
+                or not isinstance(package_digest, str)
+                or not isinstance(location, str)
+                or not isinstance(source_path, str)
+                or not isinstance(size, int)
+                or isinstance(size, bool)
+            ):
                 raise RecipePackageError(
                     RecipePackageCode.RESPONSE_INVALID,
-                    "recipe package entry is invalid",
+                    "recipe package entry identity is invalid",
                 )
-            publisher, slug, digest = (
-                package_entry.get("publisher"),
-                package_entry.get("slug"),
-                package_entry.get("recipe_content_sha256"),
-            )
-            package_digest, location, size, source_path = (
-                package_entry.get("package_sha256"),
-                package_entry.get("location"),
-                package_entry.get("size"),
-                package_entry.get("source_path"),
-            )
-            document = package_entry.get("document")
-            location_url = urlsplit(str(location))
+            location_url = urlsplit(location)
             if (
-                not isinstance(document, Mapping)
-                or not all(
-                    isinstance(value, str)
-                    for value in (
-                        publisher,
-                        slug,
-                        digest,
-                        package_digest,
-                        location,
-                        source_path,
-                    )
-                )
-                or not _safe_path(str(source_path))
-                or not _SLUG.fullmatch(str(publisher))
-                or not _SLUG.fullmatch(str(slug))
-                or not _SHA256.fullmatch(str(digest))
-                or not _SHA256.fullmatch(str(package_digest))
-                or not _safe_path(str(location))
-                or str(location).startswith("/")
+                not _safe_path(source_path)
+                or not _SLUG.fullmatch(publisher)
+                or not _SLUG.fullmatch(slug)
+                or not _SHA256.fullmatch(digest)
+                or not _SHA256.fullmatch(package_digest)
+                or not _safe_path(location)
+                or location.startswith("/")
                 or location_url.scheme
                 or location_url.netloc
                 or location_url.query
                 or location_url.fragment
-                or not isinstance(size, int)
-                or isinstance(size, bool)
                 or not 1 <= size <= MAX_PACKAGE_BYTES
             ):
                 raise RecipePackageError(
@@ -816,28 +787,37 @@ class RecipePackageClient:
                     RecipePackageCode.RESPONSE_INVALID,
                     "recipe package identity is duplicated",
                 )
-            packages[key] = dict(package_entry)
-            packages[key]["publication_commit"] = publication_commit
-            tags = package_entry.get("tags", [])
+            # Optional; an unreadable entry only means no prebuilt image.
+            prebuilt_image = read_prebuilt_image(recipe.get("prebuilt_image"))
+            packages[key] = RecipePackageEntry(
+                publisher=publisher,
+                slug=slug,
+                source_path=source_path,
+                recipe_content_sha256=digest,
+                package_sha256=package_digest,
+                size=size,
+                location=location,
+                title=document.metadata.title,
+                description=document.metadata.description,
+                tags=tuple(document.metadata.tags),
+                document=dict(recipe["document"]),
+                prebuilt_image=prebuilt_image,
+                publication_commit=publication_commit,
+            )
             items.append(
                 RecipeLibraryItem(
                     library_commit=commit,
-                    source_path=str(source_path),
-                    publisher=str(publisher),
-                    slug=str(slug),
-                    title=str(package_entry.get("title", "")),
-                    description=str(package_entry.get("description", "")),
-                    tags=tuple(str(tag) for tag in tags)
-                    if isinstance(tags, list)
-                    else (),
-                    content_sha256=str(digest),
+                    source_path=source_path,
+                    publisher=publisher,
+                    slug=slug,
+                    title=document.metadata.title,
+                    description=document.metadata.description,
+                    tags=tuple(document.metadata.tags),
+                    content_sha256=digest,
                     uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}",
-                    document=dict(document),
-                    package_sha256=str(package_digest),
-                    # Optional; an unreadable entry only means no prebuilt image.
-                    prebuilt_image=read_prebuilt_image(
-                        package_entry.get("prebuilt_image")
-                    ),
+                    document=dict(recipe["document"]),
+                    package_sha256=package_digest,
+                    prebuilt_image=prebuilt_image,
                 )
             )
         if [(item.publisher, item.slug) for item in items] != sorted(
@@ -904,9 +884,7 @@ class RecipePackageClient:
         # process must still compare against this generation, rather than the
         # unvalidated candidate it replaced.
         self._previous_snapshot = self._snapshot
-        self._previous_packages = {
-            key: dict(value) for key, value in self._packages.items()
-        }
+        self._previous_packages = dict(self._packages)
         self._candidate_active = False
 
     def _persisted_library_digest(self) -> str | None:
@@ -966,7 +944,7 @@ class RecipePackageClient:
         self._packages = packages
         self._snapshot = snapshot
         self._previous_snapshot = snapshot
-        self._previous_packages = {key: dict(value) for key, value in packages.items()}
+        self._previous_packages = dict(packages)
         return snapshot
 
     def prepare(self, snapshot: RecipeLibrarySnapshot) -> None:
@@ -1007,9 +985,16 @@ class RecipePackageClient:
         previous = self._previous_packages.get(f"{item.publisher}/{item.slug}")
         if current is None or previous is None:
             return False
-        return all(
-            current.get(field) == previous.get(field)
-            for field in ("package_sha256", "size", "location", "recipe_content_sha256")
+        return (
+            current.package_sha256,
+            current.size,
+            current.location,
+            current.recipe_content_sha256,
+        ) == (
+            previous.package_sha256,
+            previous.size,
+            previous.location,
+            previous.recipe_content_sha256,
         )
 
     def fetch(self, uri: str) -> RecipeLibraryItem:
@@ -1039,10 +1024,8 @@ class RecipePackageClient:
         if uri in self._prepared:
             return self._prepared[uri]
         package = self._packages[f"{publisher}/{slug}"]
-        package_digest = str(package["package_sha256"])
-        archive, archive_path = self._cached_package(
-            package_digest, require_integer(package["size"], "package size")
-        )
+        package_digest = package.package_sha256
+        archive, archive_path = self._cached_package(package_digest, package.size)
         return self._decode_package(
             archive, item, package=package, archive_path=archive_path
         )
@@ -1075,7 +1058,7 @@ class RecipePackageClient:
         archive: bytes,
         item: RecipeLibraryItem,
         *,
-        package: Mapping[str, object] | None = None,
+        package: RecipePackageEntry | None = None,
         archive_path: Path | None = None,
     ) -> RecipeLibraryItem:
         files: dict[str, bytes] = {}
@@ -1203,20 +1186,12 @@ class RecipePackageClient:
             ) from error
         metadata = recipe.metadata
         package_digest = (
-            str(package.get("package_sha256"))
-            if package is not None
-            else _sha256(archive)
+            package.package_sha256 if package is not None else _sha256(archive)
         )
-        package_size = len(archive)
-        if package is not None:
-            declared_size = integer(package.get("size"), default=package_size)
-            if declared_size is not None:
-                package_size = declared_size
-        package_path = str(package.get("location", "")) if package is not None else ""
+        package_size = package.size if package is not None else len(archive)
+        package_path = package.location if package is not None else ""
         publication_commit = (
-            str(package.get("publication_commit", item.library_commit))
-            if package is not None
-            else item.library_commit
+            package.publication_commit if package is not None else item.library_commit
         )
         if archive_path is None:
             archive_path = (
@@ -1362,7 +1337,7 @@ def _index_problem(
     detail: str,
     entry: object,
     error: Exception | None = None,
-) -> dict[str, object]:
+) -> ManagedCatalogSyncProblem:
     """Describe one skipped index document without echoing untrusted values."""
     name = ""
     if isinstance(entry, Mapping):
@@ -1377,13 +1352,13 @@ def _index_problem(
                 and _SLUG.fullmatch(slug)
             ):
                 name = f" {publisher}/{slug}"
-    return {
-        "recipe_uri": uri,
-        "code": RecipePackageCode.DOCUMENT_INCOMPATIBLE
+    return ManagedCatalogSyncProblem(
+        recipe_uri=uri,
+        code=RecipePackageCode.DOCUMENT_INCOMPATIBLE
         if error is not None
         else RecipePackageCode.RESPONSE_INVALID,
-        "detail": _incompatible_detail(f"{detail}{name}", error),
-    }
+        detail=_incompatible_detail(f"{detail}{name}", error),
+    )
 
 
 def _incompatible_detail(detail: str, error: Exception | None) -> str:
@@ -1398,9 +1373,9 @@ def _incompatible_detail(detail: str, error: Exception | None) -> str:
 
 def _bind_release(
     snapshot: RecipeLibrarySnapshot,
-    packages: Mapping[str, Mapping[str, object]],
+    packages: Mapping[str, RecipePackageEntry],
     release: _VerifiedRelease,
-) -> tuple[RecipeLibrarySnapshot, dict[str, dict[str, object]]]:
+) -> tuple[RecipeLibrarySnapshot, dict[str, RecipePackageEntry]]:
     """Keep only recipes whose package is the signed, verified one.
 
     The index must come from the signed commit. A recipe whose package path,
@@ -1412,15 +1387,15 @@ def _bind_release(
             RecipePackageCode.RESPONSE_INVALID,
             "recipe index was not built from the signed release commit",
         )
-    kept: dict[str, dict[str, object]] = {}
+    kept: dict[str, RecipePackageEntry] = {}
     problems = list(snapshot.problems)
     skipped: set[str] = set()
     for key, package in packages.items():
-        location = str(package.get("location"))
+        location = package.location
         name = PurePosixPath(location).name
         if location != f"packages/{name}":
             reason = "catalog-index.json package.path is not packages/<asset>"
-        elif release.checksums.get(name) != package.get("package_sha256"):
+        elif release.checksums.get(name) != package.package_sha256:
             reason = "catalog-index.json package.sha256 differs from SHA256SUMS"
         elif name not in release.assets:
             reason = (
@@ -1428,20 +1403,20 @@ def _bind_release(
                 f"{_asset_label(name)} or its bytes differ"
             )
         else:
-            kept[key] = dict(package)
+            kept[key] = package
             continue
         skipped.add(key)
         problems.append(
-            {
-                "recipe_uri": _entry_uri(
+            ManagedCatalogSyncProblem(
+                recipe_uri=_entry_uri(
                     {
-                        "document": package.get("document"),
-                        "content_sha256": package.get("recipe_content_sha256"),
+                        "document": package.document,
+                        "content_sha256": package.recipe_content_sha256,
                     }
                 ),
-                "code": RecipePackageCode.RELEASE_INCOMPLETE,
-                "detail": f"{reason} for {key}"[:256],
-            }
+                code=RecipePackageCode.RELEASE_INCOMPLETE,
+                detail=f"{reason} for {key}"[:256],
+            )
         )
     if not skipped:
         return snapshot, kept
@@ -1538,11 +1513,21 @@ def load_recipe_package(
     return decoder._decode_package(
         archive,
         item,
-        package={
-            "package_sha256": package_sha256,
-            "size": len(archive),
-            "location": str(path),
-        },
+        package=RecipePackageEntry(
+            publisher=publisher,
+            slug=slug,
+            source_path=source_path,
+            recipe_content_sha256=recipe_content_sha256,
+            package_sha256=package_sha256,
+            size=len(archive),
+            location=str(path),
+            title="",
+            description="",
+            tags=(),
+            document={},
+            prebuilt_image=None,
+            publication_commit=library_commit,
+        ),
         archive_path=path,
     )
 

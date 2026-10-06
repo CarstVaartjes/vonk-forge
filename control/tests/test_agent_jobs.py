@@ -795,6 +795,7 @@ def test_package_operation_is_not_a_control_plane_queue_operation(service) -> No
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
     service,
 ) -> None:
@@ -932,6 +933,7 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         assert reservation is not None and reservation.state == "released"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) -> None:
     jobs, sessions, clock = service
     build_id = "00000000-0000-4000-8000-000000000019"

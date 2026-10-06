@@ -176,6 +176,7 @@ def test_a_failed_install_releases_its_claim_but_a_live_one_keeps_it(
 
 
 @pytest.mark.parametrize("ended_as", ["cancelled", "retired"])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_cancelled_or_retired_install_keeps_its_claim_until_cleanup(
     tmp_path: Path, ended_as: str
 ) -> None:

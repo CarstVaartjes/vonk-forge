@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import (
     BeforeValidator,
@@ -19,6 +19,9 @@ from .compiled_execution_plan import CompiledExecutionPlan
 from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
 from .wire_model import WireModel
+
+if TYPE_CHECKING:
+    from .job_inputs import RecipeJobInputManifest
 
 MAX_INPUT_FILES = 32
 MAX_INPUT_FILE_BYTES = 512 * 1024**2
@@ -122,7 +125,7 @@ class RecipeJobInputFile(_RecipeJobModel):
 
 def _manifest_document(
     files: Sequence[RecipeJobFile | RecipeJobInputFile],
-) -> dict[str, object]:
+) -> RecipeJobInputManifest | RecipeJobOutputManifestContent:
     from .job_inputs import RecipeJobInputManifest
 
     model = (
@@ -134,19 +137,20 @@ def _manifest_document(
         schema_version=1,
         total_bytes=sum(item.size_bytes for item in files),
         files=list(files),
-    ).model_dump(mode="json")
+    )
 
 
 def manifest_document(
     files: tuple[RecipeJobFile, ...] | tuple[RecipeJobInputFile, ...],
 ) -> dict[str, object]:
-    return _manifest_document(files)
+    return _manifest_document(files).model_dump(mode="json")
 
 
 def manifest_sha256(
     files: tuple[RecipeJobFile, ...] | tuple[RecipeJobInputFile, ...],
 ) -> str:
-    return hashlib.sha256(canonical_message(_manifest_document(files))).hexdigest()
+    document = _manifest_document(files).model_dump(mode="json")
+    return hashlib.sha256(canonical_message(document)).hexdigest()
 
 
 class RecipeJobOutputLimits(_RecipeJobModel):

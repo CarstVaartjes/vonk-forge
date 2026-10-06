@@ -36,6 +36,7 @@ def _site(exception_class: str, function: str) -> RaiseSite:
     return RaiseSite(PATH, exception_class, function, "x.y", 1, "message")
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_the_registered_loops_exist_and_name_what_they_retry(
     retry_proof_graph: object,
 ) -> None:

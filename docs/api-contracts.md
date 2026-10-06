@@ -30,6 +30,7 @@ artifacts is [data-contracts.md](data-contracts.md).
 | Route activation marker | `vonk_agent_protocol.route_activation.ActivationMarker` | Controller publisher and the exact shared model packaged in LiteLLM |
 | Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
 | Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
+| Documents stored in JSON columns | The contract bound to each `JSON` column in `control/src/vonk_control/stored_columns.py` (read and written through `stored_json`) | Every Controller reader and writer of that column, the published OpenAPI (`x-vonk-json-columns`) and the generated clients |
 | Global container-runtime policy and problem schemas | `vonk-forge-web` `schemas/`, copied into `schemas/global/` at the commit in `schemas/global/contract.lock.json` | Rust agent OCI policy (`vonk-agent/src/oci.rs`) |
 
 To take a newer `vonk-forge-web` revision of the global schemas, run
@@ -41,6 +42,24 @@ review and commit both.
 Model and Recipe are the two **authoring** contracts. Operations, progress,
 telemetry, and device messages also need wire contracts; they do not become
 additional recipe documents for users to maintain.
+
+### JSON columns
+
+Every `JSON` column in `models.py` has exactly one contract in
+`stored_columns.py`, typed at every level: no `Any`, `object`, `JsonValue`,
+bare `dict`/`list` or mapping of those. A level that is genuinely someone
+else's document is a named `ExternalPassthrough` subclass whose written reason
+says whose it is; nothing else may be untyped. A table that stores several
+document families (a job's `kind`) binds one contract per kind.
+
+Writers store `model_dump(mode="json")` of the contract model; the ORM write
+guard checks every changed JSON column against its contract (the test suite
+refuses a violation, the Controller reports it once and stores it, because
+bookkeeping never blocks work). Readers go through `stored_json.read_column`:
+a document written by an older build is adopted (retired fields dropped), and
+a damaged one is a typed unknown (`Residue`) naming the column and row, never
+an exception. `control/tests/test_json_column_contracts.py` fails when a column
+has no contract or a contract has an untyped level.
 
 Storage ownership is separate from schema ownership. Follow the
 [architecture boundary](architecture-overview.md#state-ownership): canonical

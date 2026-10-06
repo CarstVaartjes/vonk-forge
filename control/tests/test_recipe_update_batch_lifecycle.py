@@ -210,6 +210,7 @@ def test_a_cancel_that_a_child_will_not_confirm_completes(update_env) -> None:  
     assert service.get(child.id).id == child.id
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_an_unreadable_cancel_document_still_completes(update_env) -> None:  # noqa: F811
     sessions, recipes, _now, fresh = update_env
     service = fresh()

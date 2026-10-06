@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 
@@ -36,6 +36,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+from vonk_control.recipe_runtime_specs import ResolvedRecipe
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -44,6 +45,7 @@ from vonk_forge_contracts import (
 )
 
 from .preflight_fixtures import record_passing_preflight
+from .stored_documents_support import valid_policy_report
 
 MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
@@ -239,7 +241,7 @@ def _compiled_plan(
     recipe_digest: str,
     build_id: str,
     memory_floor_bytes: int,
-) -> dict[str, object]:
+) -> CompiledExecutionPlan:
     artifact_digest = "3" * 64
     image_digest = "sha256:" + "1" * 64
     layout_digest = "2" * 64
@@ -304,7 +306,7 @@ def _compiled_plan(
         },
         "job": None,
     }
-    return CompiledExecutionPlan.model_validate(payload).model_dump(mode="json")
+    return CompiledExecutionPlan.model_validate(payload)
 
 
 def _compiled_plan_provider(
@@ -312,11 +314,11 @@ def _compiled_plan_provider(
     mapping_nodes: Sequence[ClusterMappingNode],
     revision: CatalogDocumentRevision,
     build: RecipeBuild,
-    resolved_entities: Mapping[str, object],
+    resolved_entities: ResolvedRecipe,
     **_unused: object,
-) -> dict[str, dict[str, object]]:
-    raw_models = resolved_entities.get("models")
-    assert isinstance(raw_models, Sequence) and raw_models
+) -> dict[str, CompiledExecutionPlan]:
+    raw_models = resolved_entities.model_revisions
+    assert raw_models
     model_revision = raw_models[0]
     assert isinstance(model_revision, CatalogDocumentRevision)
     recipe = read_recipe(revision.document)
@@ -421,7 +423,7 @@ def setup(
             source_bundle_sha256="c" * 64,
             build_input_sha256="b" * 64,
             state="succeeded",
-            policy_report={"passed": True},
+            policy_report=valid_policy_report(),
             plan={},
             image_digest="sha256:" + "1" * 64,
             oci_layout_sha256="2" * 64,
@@ -474,10 +476,10 @@ def test_install_admission_reads_mapping_parameters_through_typed_boundary(
         mapping_nodes: Sequence[ClusterMappingNode],
         revision: CatalogDocumentRevision,
         build: RecipeBuild | None,
-        resolved_entities: Mapping[str, object],
+        resolved_entities: ResolvedRecipe,
         parameters: object,
         **_unused: object,
-    ) -> dict[str, dict[str, object]]:
+    ) -> dict[str, CompiledExecutionPlan]:
         captured["parameters"] = parameters
         assert build is not None
         return _compiled_plan_provider(

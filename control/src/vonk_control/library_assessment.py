@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from itertools import combinations
 
@@ -147,29 +147,16 @@ class LibraryAssessment:
                 recipe_identity=recipe.identity.recipe_id,
                 exact_revision_id=recipe.identity.recipe_revision_id,
             )
-            image = resolved.get("recipe")
-            model = resolved.get("model")
-            blockers = resolved.get("blockers")
+            image = resolved.recipe
+            model = resolved.model
+            blockers = [reason.value for reason in resolved.blockers]
             if (
-                not isinstance(image, Mapping)
-                or not isinstance(model, Mapping)
-                or not isinstance(blockers, list)
-            ):
-                raise TypeError("cache resolution is invalid")
-            if (
-                image.get("recipe_revision_id") != recipe.identity.recipe_revision_id
-                or image.get("content_sha256") != recipe.identity.content_sha256
-                or model.get("content_sha256")
+                image.recipe_revision_id != recipe.identity.recipe_revision_id
+                or image.content_sha256 != recipe.identity.content_sha256
+                or model.content_sha256
                 != recipe.document.models[0].model.content_sha256
             ):
                 raise ValueError("cache resolution changed an exact identity")
-            if (
-                type(image.get("cached")) is not bool
-                or type(model.get("cached")) is not bool
-            ):
-                raise TypeError("cache availability is invalid")
-            if not all(isinstance(reason, str) for reason in blockers):
-                raise TypeError("cache blockers are invalid")
             # The profile resolver supplies revision/image authority. Its
             # primary-model cache set alone cannot prove that every selected
             # file and companion dependency in this recipe is present.
@@ -186,12 +173,8 @@ class LibraryAssessment:
                     f"{missing_bytes} exact model artifact bytes are missing",
                 ]
             if not blockers:
-                digest = image.get("image_digest")
-                if (
-                    not image["cached"]
-                    or not model["cached"]
-                    or not isinstance(digest, str)
-                ):
+                digest = image.image_digest
+                if not image.cached or not model.cached or digest is None:
                     raise ValueError("cache availability contradicts its blockers")
                 return RecipeReadinessCheck(state="ready"), digest
             return RecipeReadinessCheck(

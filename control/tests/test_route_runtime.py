@@ -90,7 +90,7 @@ def test_actual_publisher_bytes_are_accepted_by_reader_and_supervisor(
     assert request.activation_sha256 == marker.digest
     assert request.marker == marker.model_dump()
     manifest = (root / "generations" / marker.directory / "manifest.json").read_bytes()
-    assert manifest == _encoded(marker.manifest_document())
+    assert manifest == marker.manifest_document().canonical_bytes()
     assert hashlib.sha256(manifest).hexdigest() == marker.manifest_sha256
 
 

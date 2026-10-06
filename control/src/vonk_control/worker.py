@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy.exc import DBAPIError, OperationalError
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
 
 from .jobs import JobService
 from .logging import log_event, redact_text
@@ -367,7 +370,7 @@ def assemble_production_worker(
     agent_artifact_root: Path | None = None,
     recipe_image_artifact_root: Path | None = None,
     recipe_image_parallel_preparations: int = 4,
-    compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]]
+    compiled_plan_provider: Callable[..., Mapping[str, WireCompiledExecutionPlan]]
     | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,

@@ -212,7 +212,7 @@ def _projection(
         models=models,
         recipe_digest=document_sha256(raw),
         package_handle=package_handle,
-        parameters=settings,
+        parameters=settings,  # type: ignore[arg-type]
         role=role,
         rank=rank,
     )

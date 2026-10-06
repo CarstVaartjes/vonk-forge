@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import cast
 from uuid import uuid4
 
+import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -275,6 +276,7 @@ def test_refused_request_bound_is_retrievable_through_the_operator_log(tmp_path)
     ), messages
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_lease_expiry_is_retrievable_through_the_operator_log_path(tmp_path):
     # Wrong implementation: the projection selected attempt states
     # ("failed", "waiting-for-operator"), but a lease lapse parks the operation
@@ -311,6 +313,7 @@ def test_lease_expiry_is_retrievable_through_the_operator_log_path(tmp_path):
     } == {"warning"}
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_resumed_operation_does_not_report_a_stale_expiry_instant(tmp_path):
     # Wrong implementation: the projection read the operation's current
     # updated_at and status_reason as the lapse facts, so an operation that had

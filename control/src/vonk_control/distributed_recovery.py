@@ -23,6 +23,9 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
@@ -1101,7 +1104,7 @@ def _singleton_recovery_authority(
             ),
             compiled_endpoint_address=presence.management_address,
             world_size=1,
-            compiled_execution_plan=compiled_plan,
+            compiled_execution_plan=WireCompiledExecutionPlan.parse(compiled_plan),
             master_address=None,
             master_port=None,
         )
@@ -1591,7 +1594,7 @@ def _recovery_authority(
                     presences[node.node_id] if endpoint_owner else None
                 ),
                 world_size=len(nodes),
-                compiled_execution_plan=compiled_plan,
+                compiled_execution_plan=WireCompiledExecutionPlan.parse(compiled_plan),
                 master_address=master_address,
                 master_port=master_port,
                 phase="rank-launch",

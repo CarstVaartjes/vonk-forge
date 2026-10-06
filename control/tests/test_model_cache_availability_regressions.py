@@ -13,6 +13,7 @@ from importlib import resources
 from pathlib import Path
 
 import httpx2
+import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
@@ -556,6 +557,7 @@ def _insert_model_revision(
     return digest
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_update_discovery_uses_nested_lineage_and_explicit_supersedes(
     tmp_path: Path,
 ) -> None:
@@ -997,6 +999,7 @@ def test_two_controller_services_share_one_upstream_object_transfer(
     second.close()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_upstream_check_is_explicit_metadata_only_and_keeps_pin(tmp_path: Path) -> None:
     sessions = _database(tmp_path)
     calls = []
@@ -1045,6 +1048,7 @@ def test_upstream_check_is_explicit_metadata_only_and_keeps_pin(tmp_path: Path) 
     service.close()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_failed_upstream_metadata_check_does_not_hide_catalog_update(
     tmp_path: Path,
 ) -> None:

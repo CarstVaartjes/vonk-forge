@@ -48,7 +48,7 @@ retention sweep read.  A job never waits for an operator without that action.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -65,6 +65,11 @@ from vonk_agent_protocol import (
 from .. import agent_operation_states as aos
 from .. import artifact_job_states as ajs
 from ..agent_operation_facts import aware
+from ..artifact_job_evidence import (
+    ArtifactJobResultEvidence,
+    dump_result_evidence,
+    read_result_evidence,
+)
 from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactJob, Job
@@ -280,10 +285,8 @@ class ArtifactJobAdapter:
             return Effect.ESTABLISHED
         if attempts == 0:
             return Effect.NONE
-        evidence = job.result_evidence
-        residue = isinstance(evidence, Mapping) and (
-            evidence.get("active_scope_may_remain") is True
-        )
+        evidence = read_result_evidence(job.result_evidence)
+        residue = evidence is not None and evidence.active_scope_may_remain is True
         if state is State.CANCELLED:
             return Effect.UNKNOWN if residue else Effect.STOPPED
         if state is State.FAILED:
@@ -394,7 +397,7 @@ class ArtifactJobAdapter:
         now: datetime,
         *,
         reason: str | None = None,
-        evidence: Mapping[str, object] | None = None,
+        evidence: ArtifactJobResultEvidence | None = None,
         output_manifest_sha256: str | None = None,
     ) -> bool:
         """Project a core row onto the stored job; the only writer of its state.
@@ -415,7 +418,7 @@ class ArtifactJobAdapter:
             text = self._default_reason(after, target)
         if target == "succeeded":
             text = None
-        merged = self._evidence(job, after, target, evidence)
+        merged = dump_result_evidence(self._evidence(job, after, target, evidence))
         terminal = target in TERMINAL_STATES
         changed = False
         if changed_state:
@@ -497,8 +500,8 @@ class ArtifactJobAdapter:
         job: ArtifactJob,
         after: Lifecycle,
         target: str | None,
-        given: Mapping[str, object] | None,
-    ) -> dict[str, object] | None:
+        given: ArtifactJobResultEvidence | None,
+    ) -> ArtifactJobResultEvidence | None:
         """The result evidence after this change: the old, the report's, the residue.
 
         A job whose effect is in doubt (after an attempt that ran) records what a
@@ -506,12 +509,11 @@ class ArtifactJobAdapter:
         keys an owner supplied win over the defaults.
         """
 
-        current = job.result_evidence
-        merged: dict[str, object] = (
-            dict(current) if isinstance(current, Mapping) else {}
+        merged = (
+            read_result_evidence(job.result_evidence) or ArtifactJobResultEvidence()
         )
-        if given:
-            merged.update(given)
+        if given is not None:
+            merged = merged.merged(given)
         doubtful = (
             after.attempt > 0
             and after.effect is Effect.UNKNOWN
@@ -520,15 +522,26 @@ class ArtifactJobAdapter:
         )
         if doubtful:
             cancel = after.cancel_requested or target == ajs.CANCELLED
-            merged.setdefault(
-                "failure_kind",
-                "cancellation-stop-uncertain" if cancel else "agent-lease-expired",
+            failure_kind = (
+                "cancellation-stop-uncertain" if cancel else "agent-lease-expired"
             )
-            merged.setdefault("recoverable", True)
-            merged.setdefault("active_scope_may_remain", True)
-            if not cancel:
-                merged.setdefault("late_results_accepted", False)
-        if not merged:
+            defaults = (
+                ArtifactJobResultEvidence(
+                    failure_kind=failure_kind,
+                    recoverable=True,
+                    active_scope_may_remain=True,
+                )
+                if cancel
+                else ArtifactJobResultEvidence(
+                    failure_kind=failure_kind,
+                    recoverable=True,
+                    active_scope_may_remain=True,
+                    late_results_accepted=False,
+                )
+            )
+            # What the owner already recorded wins over the doubt defaults.
+            merged = defaults.merged(merged)
+        if not merged.model_fields_set:
             return None
         return merged
 
@@ -541,7 +554,7 @@ class ArtifactJobAdapter:
         now: datetime,
         *,
         reason: str | None = None,
-        evidence: Mapping[str, object] | None = None,
+        evidence: ArtifactJobResultEvidence | None = None,
         output_manifest_sha256: str | None = None,
     ) -> Lifecycle:
         """Feed an owner's ``event`` to the core and write what it decides, inline.
@@ -592,19 +605,18 @@ class ArtifactJobAdapter:
                 reason=reason,
             )
             return True
-        evidence = job.result_evidence
-        if not (
-            isinstance(evidence, Mapping)
-            and evidence.get("active_scope_may_remain") is True
-        ):
+        evidence = read_result_evidence(job.result_evidence)
+        if evidence is None or evidence.active_scope_may_remain is not True:
             return False
         job.state = ajs.CANCELLED
         job.status_reason = reason[:_MAX_REASON]
-        job.result_evidence = {
-            **evidence,
-            "active_scope_may_remain": False,
-            "residue_resolved_by": "exact-stop",
-        }
+        job.result_evidence = dump_result_evidence(
+            evidence.merged(
+                ArtifactJobResultEvidence(
+                    active_scope_may_remain=False, residue_resolved_by="exact-stop"
+                )
+            )
+        )
         job.completed_at = job.completed_at or now
         job.updated_at = now
         return True
@@ -615,7 +627,7 @@ class ArtifactJobAdapter:
         now: datetime,
         *,
         reason: str | None = None,
-        evidence: Mapping[str, object] | None = None,
+        evidence: ArtifactJobResultEvidence | None = None,
     ) -> bool:
         """Copy what the order decided onto the job; idempotent.
 

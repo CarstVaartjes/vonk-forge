@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -26,9 +27,18 @@ from vonk_control.models import (
     JobAttempt,
     ModelCacheOperation,
 )
+from vonk_control.stored_json import write_guard_mode
 
 NOW = datetime(2026, 9, 1, tzinfo=UTC)
 _IDS = itertools.count(1)
+
+
+@pytest.fixture(autouse=True)
+def _rows_are_placeholders():
+    """The rows only carry state words; their JSON columns are placeholders."""
+
+    with write_guard_mode(strict=False):
+        yield
 
 
 def _row(model, **given):

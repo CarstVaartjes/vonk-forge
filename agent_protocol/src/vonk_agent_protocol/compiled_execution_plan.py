@@ -542,8 +542,8 @@ class CompiledExecutionPlan(_Strict):
         return self.model_dump(mode="json")
 
 
-def validate_compiled_execution_plan(value: object) -> dict[str, object]:
-    return CompiledExecutionPlan.parse(value).to_mapping()
+def validate_compiled_execution_plan(value: object) -> CompiledExecutionPlan:
+    return CompiledExecutionPlan.parse(value)
 
 
 __all__ = [

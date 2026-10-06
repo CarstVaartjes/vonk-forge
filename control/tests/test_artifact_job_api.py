@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from starlette.responses import Response
 from vonk_control.artifact_job_api import ArtifactJobCreate, install_artifact_job_routes
+from vonk_control.artifact_job_evidence import ArtifactJobResultEvidence
 from vonk_control.artifact_jobs import (
     ArtifactJobResponse,
     ArtifactJobService,
@@ -78,7 +79,6 @@ class _ArtifactJobView(ArtifactJobView):
                     "allowed_media_types": ["image/png"],
                 },
                 "max_timeout_seconds": 3600,
-                "engine": {"future_argument": {"enabled": True}},
             }
         )
     )
@@ -96,7 +96,7 @@ class _ArtifactJobView(ArtifactJobView):
     )
     output_manifest_sha256: str | None = None
     output_files: tuple[dict[str, object], ...] = ()
-    result_evidence: dict[str, object] | None = None
+    result_evidence: ArtifactJobResultEvidence | None = None
     status_reason: str | None = None
     timeout_seconds: int = 60
     created_at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
@@ -279,9 +279,7 @@ def test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type(
     assert upload_document["output_limits"]["allowed_media_types"] == ["image/png"]
     assert upload_document["compiled_contract"]["input"]["slots"] == []
     assert upload_document["compiled_contract"]["output"]["slots"][0]["id"] == "image"
-    assert upload_document["compiled_contract"]["engine"]["future_argument"] == {
-        "enabled": True
-    }
+    assert "engine" not in upload_document["compiled_contract"]
     assert upload_document["created_at"].endswith("Z")
     expected = ArtifactJobResponse.model_validate_json(upload.content)
     optional_nulls = {
@@ -358,7 +356,7 @@ def test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion(
     client, _service = _client(tmp_path)
     body = {
         "interface": "image-job",
-        "parameters": {"future_argument": {"enabled": True}},
+        "parameters": {"future_argument": True},
         "inputs": [],
         "output_limits": {
             "max_files": 1,
@@ -369,7 +367,13 @@ def test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion(
         "timeout_seconds": 60,
     }
     accepted = ArtifactJobCreate.model_validate(body)
-    assert accepted.parameters == {"future_argument": {"enabled": True}}
+    assert accepted.parameters == {"future_argument": True}
+    # A parameter is a scalar; a nested object is refused at the boundary.
+    nested = client.post(
+        f"/api/recipe/runs/{JOB_ID}/artifact-jobs",
+        json={**body, "parameters": {"future_argument": {"enabled": True}}},
+    )
+    assert nested.status_code == 422
 
     unknown_field = client.post(
         f"/api/recipe/runs/{JOB_ID}/artifact-jobs",

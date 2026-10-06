@@ -61,6 +61,7 @@ def _damage_plan(sessions, operation_id: str) -> None:
         job.payload = payload
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_cancel_completes_when_the_stored_plan_is_unreadable(tmp_path: Path) -> None:
     accepted = _accepted(tmp_path)
     _damage_plan(accepted.sessions, accepted.operation.operation_id)
@@ -97,6 +98,7 @@ def test_an_inspector_without_model_cache_binding_does_not_fail_composition(
     service.bind_model_cache(object())  # type: ignore[arg-type]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_stop_preview_rebuilds_a_damaged_run_plan_from_its_installation(
     tmp_path: Path,
 ) -> None:
@@ -137,6 +139,7 @@ def test_a_stale_reviewed_plan_still_refuses_at_recheck(tmp_path: Path) -> None:
         accepted.service.recheck_resources_in_session(session, stale, accepted.plan)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_retry_without_a_readable_plan_is_refused_not_replayed(
     tmp_path: Path,
 ) -> None:

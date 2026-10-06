@@ -397,7 +397,7 @@
       "path": "control/src/vonk_control/library_assessment.py",
       "function": "LibraryAssessment._cache",
       "kind": "provenance_comparison",
-      "expression": "image.get('recipe_revision_id') != recipe.identity.recipe_revision_id",
+      "expression": "image.recipe_revision_id != recipe.identity.recipe_revision_id",
       "reason": "Request-response binding: the cache resolution answers for exactly the recipe revision that was asked, and an answer for another revision is refused; compares the asked identity with the answered one."
     },
     {

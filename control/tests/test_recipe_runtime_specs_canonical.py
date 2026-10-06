@@ -27,6 +27,7 @@ from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
+from vonk_control.runtime_spec_contract import RuntimeSpec
 
 from .recipe_library_source import recipe_library_root
 
@@ -44,8 +45,7 @@ def _compile(
     package_handle: object = _BUILT_IMAGE,
     role: str = "entrypoint",
     rank: int = 0,
-    resolved_entities: dict[str, object] | None = None,
-    parameters: dict[str, object] | None = None,
+    option_choices: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Compile published raw documents the way the Controller reads them."""
 
@@ -56,14 +56,13 @@ def _compile(
     }
     return compile_runtime_spec(
         contracts.read_recipe(recipe),
-        resolved_entities,
         models=parsed,
         recipe_digest=contracts.document_sha256(recipe),
         package_handle=package_handle,
-        parameters=parameters,
+        option_choices=option_choices,
         role=role,
         rank=rank,
-    )
+    ).document()
 
 
 def _example(name: str) -> dict[str, object]:
@@ -218,22 +217,6 @@ def test_source_build_requires_and_binds_exact_receipt(
         },
     )
     assert _runtime(spec)["image"] == f"localhost/vonk/recipe-build@sha256:{digest}"
-
-
-def test_runtime_compiler_rejects_retired_entity_authorities(
-    model: dict[str, object],
-) -> None:
-    recipe = _recipe(
-        "recipe-source-build.json",
-        engine="vllm",
-        entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
-    )
-    with pytest.raises(RecipeRuntimeSpecError, match="retired authorities"):
-        _compile(
-            recipe,
-            model,
-            resolved_entities={"execution_harness": {"kind": "execution-harness"}},
-        )
 
 
 @pytest.mark.parametrize(
@@ -522,7 +505,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
                             package_handle=package,
                             role=role.name,
                             rank=rank,
-                            parameters={"option_choices": {option.name: choice.value}},
+                            option_choices={option.name: choice.value},
                         )
                         option_projection_count += 1
                 artifacts = _mappings(spec["artifacts"], "runtime artifacts")
@@ -624,16 +607,6 @@ def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(
 def test_security_is_in_execution_projection_and_build_input_is_separate(
     model: dict[str, object],
 ) -> None:
-    from vonk_control.recipe_runtime_specs import _execution_digest
-
-    common = {
-        "runtime": {"image": "image@sha256:" + "a" * 64},
-        "security": {"user": "10001:10001"},
-    }
-    changed = deepcopy(common)
-    changed["security"]["user"] = "10002:10002"
-    assert _execution_digest(common) != _execution_digest(changed)
-
     recipe = _recipe(
         "recipe-source-build.json",
         engine="vllm",
@@ -647,6 +620,11 @@ def test_security_is_in_execution_projection_and_build_input_is_separate(
         "build_input_sha256": "b" * 64,
     }
     first = _compile(recipe, model, package_handle=package, role="entrypoint", rank=0)
+    # The security envelope is part of the execution identity.
+    typed = RuntimeSpec.model_validate(first)
+    changed = typed.model_copy(deep=True)
+    changed.security.user = "10002:10002"
+    assert typed.launch_identity_sha256() != changed.launch_identity_sha256()
     package["build_input_sha256"] = "c" * 64
     second = _compile(recipe, model, package_handle=package, role="entrypoint", rank=0)
     first_identity = _identity(first)
@@ -796,25 +774,6 @@ def test_published_pipeline_has_output_contract() -> None:
     )
 
 
-@pytest.mark.parametrize("retired", ["model_projections", "package", "build_receipt"])
-def test_runtime_compiler_rejects_retired_resolver_keys_even_with_current_inputs(
-    model: dict[str, object], retired: str
-) -> None:
-    recipe = _recipe(
-        "recipe-source-build.json",
-        engine="vllm",
-        entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
-    )
-    with pytest.raises(RecipeRuntimeSpecError, match="retired authorities"):
-        _compile(
-            recipe,
-            model,
-            resolved_entities={
-                retired: [model] if retired == "model_projections" else {}
-            },
-        )
-
-
 @pytest.mark.parametrize("include_paths", [False, True])
 def test_runtime_compiler_rejects_retired_member_paths(
     model: dict[str, object], include_paths: bool
@@ -881,17 +840,17 @@ def test_chosen_recipe_options_reach_every_rank_and_default_when_unset(
     ]
     assert ranks
 
-    def launch(parameters: dict[str, object] | None, role: str, rank: int) -> Any:
+    def launch(choices: dict[str, str] | None, role: str, rank: int) -> Any:
         parsed = {contracts.document_sha256(model): contracts.read_model(model)}
         spec = compile_runtime_spec(
             recipe,
             models=parsed,
             recipe_digest=contracts.document_sha256(raw),
             package_handle=_BUILT_IMAGE,
-            parameters=parameters,
+            option_choices=choices,
             role=role,
             rank=rank,
-        )
+        ).document()
         env = {
             item["name"]: item["value"]
             for item in _mappings(_runtime(spec)["environment"], "environment")
@@ -899,9 +858,7 @@ def test_chosen_recipe_options_reach_every_rank_and_default_when_unset(
         return list(_argv(spec)), env
 
     for role, rank in ranks:
-        chosen_argv, chosen_env = launch(
-            {"option_choices": {"verification": "adaptive"}}, role, rank
-        )
+        chosen_argv, chosen_env = launch({"verification": "adaptive"}, role, rank)
         assert chosen_argv.count("--verify") == 1
         assert chosen_argv[chosen_argv.index("--verify") + 1] == "prefix"
         assert "--extra-flag" in chosen_argv
@@ -912,7 +869,7 @@ def test_chosen_recipe_options_reach_every_rank_and_default_when_unset(
         assert default_env["MODE"] == "off"
 
     with pytest.raises(RecipeRuntimeSpecError, match="verification"):
-        launch({"option_choices": {"verification": "nope"}}, *ranks[0])
+        launch({"verification": "nope"}, *ranks[0])
 
 
 def test_a_recipe_option_cannot_reach_platform_owned_environment(
@@ -930,7 +887,7 @@ def test_a_recipe_option_cannot_reach_platform_owned_environment(
             models=parsed,
             recipe_digest=contracts.document_sha256(raw),
             package_handle=_BUILT_IMAGE,
-            parameters={"option_choices": {"verification": "adaptive"}},
+            option_choices={"verification": "adaptive"},
             role="entrypoint",
             rank=0,
         )

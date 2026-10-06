@@ -25,6 +25,7 @@ from vonk_control.catalog_sync import (
     ManagedRecipeCatalogSyncService,
     _empty_result,
 )
+from vonk_control.catalog_sync_contract import ManagedCatalogSyncProblem
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -577,7 +578,7 @@ def test_sync_fails_closed_for_unresolvable_canonical_recipe(tmp_path: Path) -> 
 
     assert result.state == "partial"
     assert result.skipped_count == 1
-    assert result.problems[0]["code"] == "catalog.model_reference_missing"
+    assert result.problems[0].code == "catalog.model_reference_missing"
     with sessions() as session:
         assert (
             session.scalars(
@@ -731,7 +732,7 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(
     latest = sync.latest()
     assert latest is not None
     assert latest.state == "failed"
-    assert latest.problems[0]["code"] == "recipe_library.unavailable"
+    assert latest.problems[0].code == "recipe_library.unavailable"
     with sessions() as session:
         run = session.scalar(
             select(RecipeLibrarySyncRun).where(
@@ -747,6 +748,7 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(
 @pytest.mark.parametrize(
     "damage", ["missing-problems", "string-count", "null", "invalid-problem", "extra"]
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_sync_heals_an_unreadable_stored_result_by_resync(tmp_path, damage):
     sessions, service, reader, _item = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)
@@ -793,7 +795,9 @@ def test_old_and_new_stored_results_both_read(tmp_path):
             row.result = stored
         view = sync.get(result.id)
         assert view.state == "current"
-        assert list(view.withdrawn_recipes) == withdrawn
+        assert [
+            item.model_dump(exclude_none=True) for item in view.withdrawn_recipes
+        ] == withdrawn
 
 
 def test_retraction_leaves_out_a_release_label_outside_the_contract(
@@ -830,7 +834,9 @@ def test_retraction_leaves_out_a_release_label_outside_the_contract(
     retracted = apply((original,), "2" * 40)
     assert retracted.state == "current"
     assert retracted.withdrawn_count == 1
-    assert retracted.withdrawn_recipes == ({"recipe_id": original_release.recipe_id},)
+    assert [
+        item.model_dump(exclude_none=True) for item in retracted.withdrawn_recipes
+    ] == [{"recipe_id": original_release.recipe_id}]
 
 
 def test_manual_and_empty_syncs_never_retract(tmp_path: Path) -> None:
@@ -897,9 +903,9 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
             recipes[1]["document"]["identity"]["slug"],
         )
     ]
-    codes = {problem["code"] for problem in snapshot.problems}
+    codes = {problem.code for problem in snapshot.problems}
     assert codes == {"recipe_package.document_incompatible"}
-    details = [str(problem["detail"]) for problem in snapshot.problems]
+    details = [str(problem.detail) for problem in snapshot.problems]
     assert any(
         f"{skipped_model['publisher']}/{skipped_model['slug']}" in detail
         and "files" in detail
@@ -911,9 +917,9 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
         for detail in details
     )
     recipe_problem = next(
-        problem for problem in snapshot.problems if problem["recipe_uri"] is not None
+        problem for problem in snapshot.problems if problem.recipe_uri is not None
     )
-    assert recipe_problem["recipe_uri"] == (
+    assert recipe_problem.recipe_uri == (
         f"vonk://catalog/{skipped_recipe['publisher']}/{skipped_recipe['slug']}"
         f"@sha256:{recipes[0]['content_sha256']}"
     )
@@ -921,11 +927,11 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
 
 def test_sync_reports_skipped_index_documents_as_partial(tmp_path: Path) -> None:
     sessions, service, reader, _item = _fixture(tmp_path)
-    problem = {
-        "recipe_uri": None,
-        "code": "recipe_package.document_incompatible",
-        "detail": "catalog model document is invalid example/future: future_field",
-    }
+    problem = ManagedCatalogSyncProblem(
+        recipe_uri=None,
+        code="recipe_package.document_incompatible",
+        detail="catalog model document is invalid example/future: future_field",
+    )
     reader.snapshot = replace(reader.snapshot, problems=(problem,))
 
     result = _sync(sessions, service, reader).sync(
@@ -938,8 +944,8 @@ def test_sync_reports_skipped_index_documents_as_partial(tmp_path: Path) -> None
     assert result.state == "partial"
     assert result.imported_count == 1
     assert result.skipped_count == 1
-    assert [(item["code"], item["detail"]) for item in result.problems] == [
-        (problem["code"], problem["detail"])
+    assert [(item.code, item.detail) for item in result.problems] == [
+        (problem.code, problem.detail)
     ]
     assert result.processed_count == result.total_count
 
@@ -1037,7 +1043,7 @@ def test_stale_running_sync_never_blocks_a_new_sync(tmp_path: Path) -> None:
                 current_count=0,
                 conflict_count=0,
                 missing_count=0,
-                result=_empty_result(),
+                result=_empty_result().model_dump(mode="json"),
                 actor="test",
                 created_at=started,
                 started_at=started,
@@ -1185,7 +1191,7 @@ def test_sync_retracts_recipes_absent_from_the_published_library(
     retracted = apply((original,), "3" * 40)
     assert retracted.state == "current"
     assert retracted.withdrawn_count == 1
-    assert [item["recipe_id"] for item in retracted.withdrawn_recipes] == [
+    assert [item.recipe_id for item in retracted.withdrawn_recipes] == [
         other_revision.recipe_id
     ]
     assert offered() == {original.slug}

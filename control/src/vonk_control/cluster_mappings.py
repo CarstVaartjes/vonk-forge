@@ -17,6 +17,7 @@ from vonk_agent_protocol import ClusterMappingCode
 from vonk_forge_contracts import RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology
 
+from .mapping_parameters import MappingParameters
 from .models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -40,11 +41,11 @@ class ClusterMappingError(ValueError):
 
 
 _MAPPING_PARAMETERS = TypeAdapter(
-    dict[str, object], config=ConfigDict(strict=True, allow_inf_nan=False)
+    MappingParameters, config=ConfigDict(strict=True, allow_inf_nan=False)
 )
 
 
-def validate_mapping_parameters(value: object) -> dict[str, object]:
+def validate_mapping_parameters(value: object) -> MappingParameters:
     """Validate decoded mapping parameters without constraining engine keys."""
 
     try:
@@ -92,7 +93,7 @@ class ClusterMappingPlan:
     recipe_content_sha256: str
     topology_name: str
     generation: int
-    parameters: dict[str, object]
+    parameters: MappingParameters
     nodes: tuple[ClusterMappingPlacement, ...]
     placement_digest: str
 
@@ -182,7 +183,7 @@ class ClusterMappingService:
             recipe_content_sha256=revision.content_digest,
             topology_name=topology.name,
             generation=1,
-            parameters=effective,
+            parameters=validate_mapping_parameters(effective),
             nodes=placements,
             placement_digest=_digest(identity),
         )

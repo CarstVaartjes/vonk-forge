@@ -19,10 +19,8 @@ turns an upstream source reference into an agent download instruction.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -36,8 +34,30 @@ from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     canonical_message,
 )
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledArtifact,
+    CompiledArtifactMount,
+    CompiledEndpoint,
+    CompiledEnvironmentEntry,
+    CompiledIdentity,
+    CompiledJob,
+    CompiledLifecycle,
+    CompiledModelIdentity,
+    CompiledPlacement,
+    CompiledRuntime,
+    CompiledSecurity,
+    CompiledSecurityMount,
+    CompiledTopology,
+)
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledRuntimeImage as WireCompiledRuntimeImage,
+)
 
 from .content_identity import same_model_object
+from .runtime_spec_contract import RuntimeSpec
 from .strict_json import StrictModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -294,11 +314,11 @@ class VerifiedExecutionPlan(StrictModel):
 
     def to_compiled_launch_payload(
         self,
-        runtime_spec: Mapping[str, object],
+        runtime_spec: RuntimeSpec,
         *,
-        placement: Mapping[str, object],
-    ) -> dict[str, object]:
-        """Project this receipt-bound plan into the agent launch DTO.
+        placement: CompiledPlacement,
+    ) -> WireCompiledExecutionPlan:
+        """Project this receipt-bound plan into the agent launch plan.
 
         ``VerifiedExecutionPlan`` is deliberately the small receipt model used
         by the Controller's cache and build boundaries.  Agents need that
@@ -308,263 +328,104 @@ class VerifiedExecutionPlan(StrictModel):
         authority and keeps selection-scoped model paths intact.
         """
 
-        spec = _mapping(runtime_spec, "runtime spec")
-        runtime = _mapping(spec.get("runtime"), "runtime")
-        security = _mapping(spec.get("security"), "security")
-        lifecycle = _mapping(spec.get("lifecycle"), "lifecycle")
-        topology = _mapping(spec.get("topology"), "topology")
-        endpoint = spec.get("endpoint")
-        job = spec.get("job")
-        if (endpoint is None) == (job is None):
+        spec = runtime_spec
+        if (spec.endpoint is None) == (spec.job is None):
             raise CompiledExecutionPlanError(
                 "compiled launch plan must contain exactly one endpoint or job"
             )
-
-        raw_entrypoint = runtime.get("entrypoint")
-        if (
-            not isinstance(raw_entrypoint, Sequence)
-            or isinstance(raw_entrypoint, (str, bytes))
-            or not raw_entrypoint
-            or any(type(item) is not str for item in raw_entrypoint)
-        ):
+        if not spec.runtime.entrypoint:
             raise CompiledExecutionPlanError(
                 "compiled runtime executable and argv are invalid"
             )
-        executable = str(raw_entrypoint[0])
-        argv = [str(item) for item in raw_entrypoint[1:]]
-        raw_environment = runtime.get("environment", ())
-        if not isinstance(raw_environment, Sequence) or isinstance(
-            raw_environment, (str, bytes)
-        ):
-            raise CompiledExecutionPlanError("compiled runtime environment is invalid")
-        environment: list[dict[str, str]] = []
-        for raw in raw_environment:
-            value = _mapping(raw, "compiled runtime environment entry")
-            name = value.get("name")
-            rendered = value.get("value")
-            if type(name) is not str or type(rendered) is not str:
-                raise CompiledExecutionPlanError(
-                    "compiled runtime environment is invalid"
-                )
-            environment.append({"name": name, "value": rendered})
-
-        raw_mounts = security.get("mounts", ())
-        if not isinstance(raw_mounts, Sequence) or isinstance(raw_mounts, (str, bytes)):
-            raise CompiledExecutionPlanError("compiled security mounts are invalid")
-        mounts: list[dict[str, object]] = []
-        for raw in raw_mounts:
-            mount = _mapping(raw, "compiled security mount")
-            source = mount.get("source")
-            target = mount.get("target")
-            if type(source) is not str or type(target) is not str:
-                raise CompiledExecutionPlanError("compiled security mounts are invalid")
+        mounts: list[CompiledSecurityMount] = []
+        for mount in spec.security.mounts:
+            source = mount.source
             if source == "/run/vonk/models" or source.startswith("/run/vonk/models/"):
-                source = "model"
+                kind: Literal["model", "inputs", "outputs"] = "model"
             elif source == "/run/vonk/inputs":
-                source = "inputs"
+                kind = "inputs"
             elif source == "/run/vonk/outputs":
-                source = "outputs"
+                kind = "outputs"
             else:
                 raise CompiledExecutionPlanError(
                     "compiled security mount is not Controller-owned"
                 )
-            mounts.append({"source": source, "target": target})
-
-        def _required_int(value: object, label: str, *, minimum: int = 0) -> int:
-            if type(value) is not int or value < minimum:
-                raise CompiledExecutionPlanError(f"{label} is invalid")
-            return value
-
-        if "port" not in placement:
-            raise CompiledExecutionPlanError("runtime port is missing")
-        raw_port = placement["port"]
-        placement_doc = {
-            "endpoint_address": placement.get("endpoint_address"),
-            "rank": _required_int(placement.get("rank"), "runtime rank"),
-            "role": placement.get("role"),
-            "world_size": _required_int(
-                placement.get("world_size"),
-                "runtime world size",
-                minimum=1,
-            ),
-            "local_address": placement.get("local_address"),
-            "master_address": placement.get("master_address"),
-            "master_port": placement.get("master_port"),
-            "port": (
-                None
-                if raw_port is None
-                else _required_int(raw_port, "runtime port", minimum=1)
-            ),
-            "reserved_memory_bytes": _required_int(
-                placement.get("reserved_memory_bytes"),
-                "runtime reserved memory",
-                minimum=1,
-            ),
-            "memory_floor_bytes": _required_int(
-                placement.get("memory_floor_bytes"),
-                "runtime memory floor",
-            ),
-        }
-        if type(placement_doc["role"]) is not str or not placement_doc["role"]:
-            raise CompiledExecutionPlanError("runtime role is invalid")
-
-        if security.get("network_mode") not in {"none", "bridge"}:
+            try:
+                mounts.append(CompiledSecurityMount(source=kind, target=mount.target))
+            except ValueError as error:
+                raise CompiledExecutionPlanError(str(error)) from error
+        if spec.security.network_mode not in {"none", "bridge"}:
             raise CompiledExecutionPlanError(
                 "compiled security has an unsupported network mode"
             )
-        network_mode = (
+        network_mode: Literal["none", "bridge"] = (
             "bridge"
-            if placement_doc["endpoint_address"] is not None
-            or placement_doc["master_port"] is not None
+            if placement.endpoint_address is not None
+            or placement.master_port is not None
             else "none"
         )
-
-        artifacts = [
-            {
-                "selection_id": item.selection_id,
-                "file_id": item.file_id,
-                "path": item.path,
-                "sha256": item.sha256,
-                "size_bytes": item.bytes,
-                "roles": list(item.roles),
-                "mount": {"target": item.mount.target},
-                "model": item.model.model_dump(mode="json"),
-            }
-            for item in self.artifacts
-        ]
-        payload: dict[str, object] = {
-            "identity": {
-                "recipe_revision_sha256": self.recipe_revision_sha256,
-                "model_artifact_set_sha256": self.model_artifact_set_sha256,
-            },
-            "runtime": {
-                "executable": executable,
-                "argv": argv,
-                "env": environment,
-                "placement": placement_doc,
-            },
-            "artifacts": artifacts,
-            "runtime_image": self.runtime_image.model_dump(mode="json"),
-            "security": {
-                "gpu": security.get("gpu"),
-                "network_mode": network_mode,
-                "user": security.get("user"),
-                "mounts": mounts,
-            },
-            "topology": {
-                "name": topology.get("name"),
-                "node_count": topology.get("node_count"),
-            },
-            "lifecycle": {
-                "stop_timeout_seconds": lifecycle.get("stop_timeout_seconds"),
-            },
-        }
-        # Keep both mutually exclusive interface keys on the wire.  Rust and
-        # the privileged helper validate the schema by shape, so omitting the
-        # inactive branch would make a semantically valid endpoint payload
-        # ambiguous after a round trip through persisted JSON.
-        payload["endpoint"] = (
-            dict(_mapping(endpoint, "endpoint")) if endpoint is not None else None
-        )
-        payload["job"] = dict(_mapping(job, "job")) if job is not None else None
-        # The projected document is persisted and later served by the agent
-        # route.  Validate it at this producer boundary so the stored payload
-        # is the same canonical schema consumed by agents.
-        return validate_compiled_launch_payload(payload)
-
-
-def _mapping(value: object, label: str) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        raise CompiledExecutionPlanError(f"{label} must be a mapping")
-    return value
-
-
-def _canonical_digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def execution_identity_document(
-    runtime_spec: Mapping[str, object],
-) -> dict[str, object]:
-    """Project every compiled launch-affecting fact into one identity.
-
-    The recipe revision remains provenance on ``VerifiedExecutionPlan``.  This
-    projection instead covers the final runtime command, bound settings,
-    environment, security, mounts, lifecycle, interface, topology and exact
-    selected model files.  Editorial fields outside this projection do not
-    change the execution identity.
-    """
-
-    spec = _mapping(runtime_spec, "runtime spec")
-    identity = _mapping(spec.get("identity"), "runtime identity")
-    artifacts = spec.get("artifacts")
-    if not isinstance(artifacts, Sequence) or isinstance(artifacts, (str, bytes)):
-        raise CompiledExecutionPlanError("runtime spec model artifacts are missing")
-    selected: list[dict[str, object]] = []
-    for raw in artifacts:
-        item = _mapping(raw, "runtime model artifact")
-        model = _mapping(item.get("model"), "runtime model identity")
-        selected.append(
-            {
-                "selection_id": item.get("selection_id"),
-                "file_id": item.get("file_id"),
-                "path": item.get("path"),
-                "sha256": item.get("sha256"),
-                "bytes": item.get("bytes"),
-                "roles": item.get("roles"),
-                "mount": item.get("mount"),
-                "model": {
-                    "publisher": model.get("publisher"),
-                    "slug": model.get("slug"),
-                    "content_sha256": model.get("content_sha256"),
-                },
-            }
-        )
-    selected.sort(
-        key=lambda item: (
-            str(item["selection_id"]),
-            str(item["file_id"]),
-            str(item["path"]),
-        )
-    )
-    raw_dependencies = spec.get("model_dependencies", ())
-    if not isinstance(raw_dependencies, Sequence) or isinstance(
-        raw_dependencies, (str, bytes)
-    ):
-        raise CompiledExecutionPlanError("runtime model dependencies are invalid")
-    dependencies: list[dict[str, object]] = []
-    for raw in raw_dependencies:
-        dependency = _mapping(raw, "runtime model dependency")
-        dependencies.append(
-            {
-                "selection_id": dependency.get("selection_id"),
-                "publisher": dependency.get("publisher"),
-                "slug": dependency.get("slug"),
-                "content_sha256": dependency.get("content_sha256"),
-            }
-        )
-    dependencies.sort(key=lambda item: str(item["selection_id"]))
-    return {
-        "harness_sha256": identity.get("harness_sha256"),
-        "runtime": spec.get("runtime"),
-        "security": spec.get("security"),
-        "lifecycle": spec.get("lifecycle"),
-        "topology": spec.get("topology"),
-        "endpoint": spec.get("endpoint"),
-        "job": spec.get("job"),
-        "model_dependencies": dependencies,
-        "artifacts": selected,
-    }
-
-
-def execution_identity_sha256(runtime_spec: Mapping[str, object]) -> str:
-    """Return the canonical full launch identity, excluding editorial notes."""
-
-    return _canonical_digest(execution_identity_document(runtime_spec))
+        try:
+            return WireCompiledExecutionPlan(
+                identity=CompiledIdentity(
+                    recipe_revision_sha256=self.recipe_revision_sha256,
+                    model_artifact_set_sha256=self.model_artifact_set_sha256,
+                ),
+                runtime=CompiledRuntime(
+                    executable=spec.runtime.entrypoint[0],
+                    argv=list(spec.runtime.entrypoint[1:]),
+                    env=[
+                        CompiledEnvironmentEntry(name=item.name, value=item.value)
+                        for item in spec.runtime.environment
+                    ],
+                    placement=placement,
+                ),
+                artifacts=[
+                    CompiledArtifact(
+                        selection_id=item.selection_id,
+                        file_id=item.file_id,
+                        path=item.path,
+                        sha256=item.sha256,
+                        size_bytes=item.bytes,
+                        roles=list(item.roles),
+                        mount=CompiledArtifactMount(target=item.mount.target),
+                        model=CompiledModelIdentity(
+                            publisher=item.model.publisher,
+                            slug=item.model.slug,
+                            content_sha256=item.model.content_sha256,
+                        ),
+                    )
+                    for item in self.artifacts
+                ],
+                runtime_image=WireCompiledRuntimeImage.model_validate(
+                    self.runtime_image.model_dump(mode="json")
+                ),
+                security=CompiledSecurity(
+                    gpu=spec.security.gpu,
+                    network_mode=network_mode,
+                    user=spec.security.user,
+                    mounts=mounts,
+                ),
+                topology=CompiledTopology(
+                    name=spec.topology.name, node_count=spec.topology.node_count
+                ),
+                lifecycle=CompiledLifecycle(
+                    stop_timeout_seconds=spec.lifecycle.stop_timeout_seconds
+                ),
+                endpoint=(
+                    None
+                    if spec.endpoint is None
+                    else CompiledEndpoint.model_validate(
+                        spec.endpoint.model_dump(mode="json")
+                    )
+                ),
+                job=(
+                    None
+                    if spec.job is None
+                    else CompiledJob.model_validate(spec.job.model_dump(mode="json"))
+                ),
+            )
+        except ValueError as error:
+            raise CompiledExecutionPlanError(str(error)) from error
 
 
 def _digest(value: object, label: str, *, image: bool = False) -> str:
@@ -604,11 +465,11 @@ def materialized_model_path(
 
 
 def compile_verified_execution_plan(
-    runtime_spec: Mapping[str, object],
+    runtime_spec: RuntimeSpec,
     *,
     model_artifact_set_sha256: str,
-    model_objects: Sequence[object],
-    runtime_image: VerifiedRuntimeImage | Mapping[str, object],
+    model_objects: Sequence[VerifiedModelObject],
+    runtime_image: VerifiedRuntimeImage,
 ) -> VerifiedExecutionPlan:
     """Bind canonical compiler output to verified cache/build receipts.
 
@@ -620,24 +481,16 @@ def compile_verified_execution_plan(
     recomputed from this input list.
     """
 
-    spec = _mapping(runtime_spec, "runtime spec")
+    spec = runtime_spec
     artifact_set_sha256 = _digest(
         model_artifact_set_sha256, "model artifact-set digest"
     )
-    if (
-        "model_artifact_set_sha256" in spec
-        and spec["model_artifact_set_sha256"] != artifact_set_sha256
-    ):
-        raise CompiledExecutionPlanError(
-            "runtime model artifact-set digest does not match the cache authority"
-        )
-    identity = _mapping(spec.get("identity"), "runtime identity")
     recipe_revision_sha256 = _digest(
-        identity.get("recipe_revision_sha256"), "recipe revision digest"
+        spec.identity.recipe_revision_sha256, "recipe revision digest"
     )
-    harness_sha256 = _digest(identity.get("harness_sha256"), "harness digest")
-    execution_sha256 = execution_identity_sha256(spec)
-    declared_execution_sha256 = identity.get("execution_sha256")
+    harness_sha256 = _digest(spec.identity.harness_sha256, "harness digest")
+    execution_sha256 = spec.launch_identity_sha256()
+    declared_execution_sha256 = spec.identity.execution_sha256
     if (
         declared_execution_sha256 is not None
         and declared_execution_sha256 != execution_sha256
@@ -645,19 +498,12 @@ def compile_verified_execution_plan(
         raise CompiledExecutionPlanError(
             "runtime execution identity does not cover the compiled launch facts"
         )
-    raw_artifacts = spec.get("artifacts")
-    if not isinstance(raw_artifacts, Sequence) or isinstance(
-        raw_artifacts, (str, bytes)
-    ):
-        raise CompiledExecutionPlanError("runtime spec model artifacts are missing")
-    if not raw_artifacts:
+    if not spec.artifacts:
         raise CompiledExecutionPlanError("runtime spec has no selected model artifacts")
-
-    verified_objects = tuple(_verified_model_object(value) for value in model_objects)
-    if not verified_objects:
+    if not model_objects:
         raise CompiledExecutionPlanError("verified model object sequence is empty")
     by_identity: dict[tuple[str, str], VerifiedModelObject] = {}
-    for item in verified_objects:
+    for item in model_objects:
         key = (item.model_content_sha256, item.file_id)
         if key in by_identity:
             raise CompiledExecutionPlanError(
@@ -668,86 +514,60 @@ def compile_verified_execution_plan(
     artifacts: list[CompiledModelArtifact] = []
     selected_keys: set[tuple[str, str]] = set()
     selected_physical: dict[tuple[str, str], tuple[object, ...]] = {}
-    for raw in raw_artifacts:
-        item = _mapping(raw, "runtime model artifact")
-        allowed = {
-            "id",
-            "selection_id",
-            "file_id",
-            "path",
-            "sha256",
-            "bytes",
-            "roles",
-            "mount",
-            "model",
-        }
-        if set(item) != allowed:
-            raise CompiledExecutionPlanError(
-                "runtime model artifact contains retired or unknown authority"
-            )
-        model = _mapping(item.get("model"), "runtime model identity")
-        if set(model) != {"publisher", "slug", "content_sha256"}:
-            raise CompiledExecutionPlanError(
-                "runtime model identity contains upstream authority"
-            )
-        model_identity = model.get("content_sha256")
-        file_id = item.get("file_id")
-        if not isinstance(model_identity, str) or not isinstance(file_id, str):
-            raise CompiledExecutionPlanError(
-                "runtime model artifact identity is incomplete"
-            )
-        source = by_identity.get((model_identity, file_id))
+    for item in spec.artifacts:
+        model = item.model
+        source = by_identity.get((model.content_sha256, item.file_id))
         if source is None:
             raise CompiledExecutionPlanError(
                 "runtime model artifact is not covered by the verified cache objects"
             )
-        path = item.get("path")
         if (
-            not isinstance(path, str)
-            or path != source.path
-            or item.get("sha256") != source.sha256
-            or item.get("bytes") != source.bytes
+            item.path != source.path
+            or item.sha256 != source.sha256
+            or item.bytes != source.bytes
         ):
             raise CompiledExecutionPlanError(
                 "runtime model file path, digest or size does not match the verified cache object"
             )
-        selection_id = item.get("selection_id")
-        if not isinstance(selection_id, str):
-            raise CompiledExecutionPlanError(
-                "runtime model selection identity is invalid"
-            )
         physical = (
-            model_identity,
-            file_id,
-            path,
+            model.content_sha256,
+            item.file_id,
+            item.path,
             source.sha256,
             source.bytes,
-            model.get("publisher"),
-            model.get("slug"),
+            model.publisher,
+            model.slug,
         )
-        physical_key = (selection_id, path)
+        physical_key = (item.selection_id, item.path)
         previous_physical = selected_physical.get(physical_key)
         if previous_physical is not None and previous_physical != physical:
             raise CompiledExecutionPlanError(
                 "runtime model artifact physical identity conflicts"
             )
         selected_physical[physical_key] = physical
-        selected_keys.add((model_identity, file_id))
-        artifact_data = {
-            "id": item.get("id"),
-            "selection_id": selection_id,
-            "file_id": file_id,
-            "path": path,
-            "sha256": source.sha256,
-            "bytes": source.bytes,
-            "roles": item.get("roles"),
-            "mount": item.get("mount"),
-            "materialized_path": f"/run/vonk/models/{selection_id}/{path}",
-            "model": model,
-        }
+        selected_keys.add((model.content_sha256, item.file_id))
         try:
-            artifacts.append(CompiledModelArtifact.model_validate(artifact_data))
-        except Exception as error:
+            artifacts.append(
+                CompiledModelArtifact(
+                    id=item.id,
+                    selection_id=item.selection_id,
+                    file_id=item.file_id,
+                    path=item.path,
+                    sha256=source.sha256,
+                    bytes=source.bytes,
+                    roles=list(item.roles),
+                    mount=ExecutionMount(
+                        source=item.mount.source, target=item.mount.target
+                    ),
+                    materialized_path=f"/run/vonk/models/{item.selection_id}/{item.path}",
+                    model=ModelCatalogIdentity(
+                        publisher=model.publisher,
+                        slug=model.slug,
+                        content_sha256=model.content_sha256,
+                    ),
+                )
+            )
+        except ValueError as error:
             raise CompiledExecutionPlanError(
                 "canonical runtime artifact cannot bind the verified model object"
             ) from error
@@ -756,51 +576,34 @@ def compile_verified_execution_plan(
             "verified cache objects do not exactly cover the selected model files"
         )
 
-    try:
-        image = (
-            runtime_image
-            if isinstance(runtime_image, VerifiedRuntimeImage)
-            else VerifiedRuntimeImage.model_validate(runtime_image)
-        )
-    except Exception as error:
-        raise CompiledExecutionPlanError(
-            "verified runtime image cannot be bound to the execution plan"
-        ) from error
-    runtime = _mapping(spec.get("runtime"), "runtime")
-    runtime_image_reference = runtime.get("image")
-    if not isinstance(
-        runtime_image_reference, str
-    ) or not runtime_image_reference.endswith(f"@{image.image_digest}"):
+    if not spec.runtime.image.endswith(f"@{runtime_image.image_digest}"):
         raise CompiledExecutionPlanError(
             "verified runtime image does not match the compiled runtime projection"
         )
     try:
-        return VerifiedExecutionPlan.model_validate(
-            {
-                "recipe_revision_sha256": recipe_revision_sha256,
-                "harness_sha256": harness_sha256,
-                "execution_sha256": execution_sha256,
-                "model_artifact_set_sha256": artifact_set_sha256,
-                "model_artifact_set_bytes": sum(
-                    {item.sha256: item.bytes for item in verified_objects}.values()
-                ),
-                "artifacts": artifacts,
-                "runtime_image": image,
-            }
+        return VerifiedExecutionPlan(
+            recipe_revision_sha256=recipe_revision_sha256,
+            harness_sha256=harness_sha256,
+            execution_sha256=execution_sha256,
+            model_artifact_set_sha256=artifact_set_sha256,
+            model_artifact_set_bytes=sum(
+                {item.sha256: item.bytes for item in model_objects}.values()
+            ),
+            artifacts=artifacts,
+            runtime_image=runtime_image,
         )
-    except Exception as error:
+    except ValueError as error:
         raise CompiledExecutionPlanError(
             "verified execution plan receipts are inconsistent"
         ) from error
 
 
-def validate_compiled_launch_payload(value: object) -> dict[str, object]:
+def validate_compiled_launch_payload(value: object) -> WireCompiledExecutionPlan:
     """Enforce canonical schema/security validation and the transport ceiling."""
     from vonk_agent_protocol import validate_compiled_execution_plan
 
-    payload = _mapping(value, "compiled launch plan")
     try:
-        encoded = canonical_message(payload)
+        encoded = canonical_message(value)
     except ValueError as error:
         raise CompiledExecutionPlanError("compiled launch plan is not JSON") from error
     if len(encoded) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
@@ -808,7 +611,7 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
     try:
         # This calls VerifiedExecutionPlan.model_validate, including all nested
         # schema, identity, path, mount, runtime and security validators.
-        return validate_compiled_execution_plan(payload)
+        return validate_compiled_execution_plan(value)
     except ValueError as error:
         raise CompiledExecutionPlanError(str(error)) from error
 
@@ -824,8 +627,6 @@ __all__ = [
     "VerifiedModelObject",
     "VerifiedRuntimeImage",
     "compile_verified_execution_plan",
-    "execution_identity_document",
-    "execution_identity_sha256",
     "materialized_model_path",
     "validate_compiled_launch_payload",
 ]

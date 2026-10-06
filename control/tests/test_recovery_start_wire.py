@@ -220,11 +220,12 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         assert parsed.compiled_execution_plan is not None
         persisted = persisted_plans[child.node_id]
         assert isinstance(persisted, dict)
-        assert parsed.compiled_execution_plan["identity"] == persisted["identity"]
-        placement = parsed.compiled_execution_plan["runtime"]["placement"]
-        assert (placement["rank"], placement["role"]) == (planned.rank, planned.role)
-        assert placement["memory_floor_bytes"] == planned.memory_floor_bytes
-        assert parsed.compiled_execution_plan["security"]["network_mode"] == "host"
+        plan = parsed.compiled_execution_plan
+        assert plan.identity.model_dump() == persisted["identity"]
+        placement = plan.runtime.placement
+        assert (placement.rank, placement.role) == (planned.rank, planned.role)
+        assert placement.memory_floor_bytes == planned.memory_floor_bytes
+        assert plan.security.network_mode == "host"
         assert "expected_bytes" not in child.payload
         assert "kind" not in child.payload
 

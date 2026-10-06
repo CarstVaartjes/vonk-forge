@@ -12,10 +12,10 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel
+  from ..models.cached_resource_estimate import CachedResourceEstimate
+  from ..models.fleet_assignment_model_view import FleetAssignmentModelView
+  from ..models.fleet_assignment_recipe_view import FleetAssignmentRecipeView
   from ..models.fleet_profile_assignment_view_option_choices import FleetProfileAssignmentViewOptionChoices
-  from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe
-  from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources
   from ..models.recipe_update_notice import RecipeUpdateNotice
 
 
@@ -33,46 +33,50 @@ class FleetProfileAssignmentView:
         Attributes:
             assigned_sparks (int):
             display_name (str):
+            model (FleetAssignmentModelView): The model an assignment runs, as the operator reads it.
+            recipe (FleetAssignmentRecipeView): The recipe revision an assignment runs, as the operator reads it.
             recipe_selector (str):
             selector (str):
             spark_ids (list[str]):
-            model (FleetProfileAssignmentViewModel | Unset):
             observed_state (str | Unset):  Default: 'Not loaded'.
             option_choices (FleetProfileAssignmentViewOptionChoices | Unset):
-            recipe (FleetProfileAssignmentViewRecipe | Unset):
             recipe_id (None | str | Unset):
             recipe_update (None | RecipeUpdateNotice | Unset):
             required_sparks (int | None | Unset):
-            resources (FleetProfileAssignmentViewResources | Unset):
+            resources (CachedResourceEstimate | Unset): What loading the resolved revision needs; ``None`` is unknown.
      """
 
     assigned_sparks: int
     display_name: str
+    model: FleetAssignmentModelView
+    recipe: FleetAssignmentRecipeView
     recipe_selector: str
     selector: str
     spark_ids: list[str]
-    model: FleetProfileAssignmentViewModel | Unset = UNSET
     observed_state: str | Unset = 'Not loaded'
     option_choices: FleetProfileAssignmentViewOptionChoices | Unset = UNSET
-    recipe: FleetProfileAssignmentViewRecipe | Unset = UNSET
     recipe_id: None | str | Unset = UNSET
     recipe_update: None | RecipeUpdateNotice | Unset = UNSET
     required_sparks: int | None | Unset = UNSET
-    resources: FleetProfileAssignmentViewResources | Unset = UNSET
+    resources: CachedResourceEstimate | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel # noqa: PLC0415
+        from ..models.cached_resource_estimate import CachedResourceEstimate # noqa: PLC0415
+        from ..models.fleet_assignment_model_view import FleetAssignmentModelView # noqa: PLC0415
+        from ..models.fleet_assignment_recipe_view import FleetAssignmentRecipeView # noqa: PLC0415
         from ..models.fleet_profile_assignment_view_option_choices import FleetProfileAssignmentViewOptionChoices # noqa: PLC0415
-        from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe # noqa: PLC0415
-        from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources # noqa: PLC0415
         from ..models.recipe_update_notice import RecipeUpdateNotice # noqa: PLC0415
         assigned_sparks = self.assigned_sparks
 
         display_name = self.display_name
+
+        model = self.model.to_dict()
+
+        recipe = self.recipe.to_dict()
 
         recipe_selector = self.recipe_selector
 
@@ -82,19 +86,11 @@ class FleetProfileAssignmentView:
 
 
 
-        model: dict[str, Any] | Unset = UNSET
-        if not isinstance(self.model, Unset):
-            model = self.model.to_dict()
-
         observed_state = self.observed_state
 
         option_choices: dict[str, Any] | Unset = UNSET
         if not isinstance(self.option_choices, Unset):
             option_choices = self.option_choices.to_dict()
-
-        recipe: dict[str, Any] | Unset = UNSET
-        if not isinstance(self.recipe, Unset):
-            recipe = self.recipe.to_dict()
 
         recipe_id: None | str | Unset
         if isinstance(self.recipe_id, Unset):
@@ -126,18 +122,16 @@ class FleetProfileAssignmentView:
         field_dict.update({
             "assigned_sparks": assigned_sparks,
             "display_name": display_name,
+            "model": model,
+            "recipe": recipe,
             "recipe_selector": recipe_selector,
             "selector": selector,
             "spark_ids": spark_ids,
         })
-        if model is not UNSET:
-            field_dict["model"] = model
         if observed_state is not UNSET:
             field_dict["observed_state"] = observed_state
         if option_choices is not UNSET:
             field_dict["option_choices"] = option_choices
-        if recipe is not UNSET:
-            field_dict["recipe"] = recipe
         if recipe_id is not UNSET:
             field_dict["recipe_id"] = recipe_id
         if recipe_update is not UNSET:
@@ -153,31 +147,31 @@ class FleetProfileAssignmentView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel # noqa: PLC0415
+        from ..models.cached_resource_estimate import CachedResourceEstimate # noqa: PLC0415
+        from ..models.fleet_assignment_model_view import FleetAssignmentModelView # noqa: PLC0415
+        from ..models.fleet_assignment_recipe_view import FleetAssignmentRecipeView # noqa: PLC0415
         from ..models.fleet_profile_assignment_view_option_choices import FleetProfileAssignmentViewOptionChoices # noqa: PLC0415
-        from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe # noqa: PLC0415
-        from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources # noqa: PLC0415
         from ..models.recipe_update_notice import RecipeUpdateNotice # noqa: PLC0415
         d = dict(src_dict)
         assigned_sparks = d.pop("assigned_sparks")
 
         display_name = d.pop("display_name")
 
+        model = FleetAssignmentModelView.from_dict(d.pop("model"))
+
+
+
+
+        recipe = FleetAssignmentRecipeView.from_dict(d.pop("recipe"))
+
+
+
+
         recipe_selector = d.pop("recipe_selector")
 
         selector = d.pop("selector")
 
         spark_ids = cast(list[str], d.pop("spark_ids"))
-
-
-        _model = d.pop("model", UNSET)
-        model: FleetProfileAssignmentViewModel | Unset
-        if isinstance(_model,  Unset):
-            model = UNSET
-        else:
-            model = FleetProfileAssignmentViewModel.from_dict(_model)
-
-
 
 
         observed_state = d.pop("observed_state", UNSET)
@@ -188,16 +182,6 @@ class FleetProfileAssignmentView:
             option_choices = UNSET
         else:
             option_choices = FleetProfileAssignmentViewOptionChoices.from_dict(_option_choices)
-
-
-
-
-        _recipe = d.pop("recipe", UNSET)
-        recipe: FleetProfileAssignmentViewRecipe | Unset
-        if isinstance(_recipe,  Unset):
-            recipe = UNSET
-        else:
-            recipe = FleetProfileAssignmentViewRecipe.from_dict(_recipe)
 
 
 
@@ -243,11 +227,11 @@ class FleetProfileAssignmentView:
 
 
         _resources = d.pop("resources", UNSET)
-        resources: FleetProfileAssignmentViewResources | Unset
+        resources: CachedResourceEstimate | Unset
         if isinstance(_resources,  Unset):
             resources = UNSET
         else:
-            resources = FleetProfileAssignmentViewResources.from_dict(_resources)
+            resources = CachedResourceEstimate.from_dict(_resources)
 
 
 
@@ -255,13 +239,13 @@ class FleetProfileAssignmentView:
         fleet_profile_assignment_view = cls(
             assigned_sparks=assigned_sparks,
             display_name=display_name,
+            model=model,
+            recipe=recipe,
             recipe_selector=recipe_selector,
             selector=selector,
             spark_ids=spark_ids,
-            model=model,
             observed_state=observed_state,
             option_choices=option_choices,
-            recipe=recipe,
             recipe_id=recipe_id,
             recipe_update=recipe_update,
             required_sparks=required_sparks,

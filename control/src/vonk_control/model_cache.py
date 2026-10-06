@@ -130,8 +130,12 @@ from .logging import log_event, redact_text
 from .machine_states import INSTALLATION_ACTIVE
 from .model_cache_contract import (
     UUID_PATTERN,
+    CachedModelResolution,
+    CachedRecipeResolution,
+    CachedResourceEstimate,
     CacheManifest,
     CacheManifestArtifact,
+    CacheResolution,
     ModelCacheCancellation,
     ModelCacheCancellationRequest,
     ModelCacheDownloadPayload,
@@ -169,7 +173,7 @@ from .operation_blockers import (
     read_blockers,
 )
 from .operation_contract import AvailabilityOperationFailure
-from .revision_images import revision_images
+from .revision_images import RevisionImage, revision_images
 from .runtime_init import RuntimeSecretError, read_runtime_secret
 from .storage_demands import NAS_MODELS, StorageDemands
 from .strict_json import read_stored_model, serialize_json_value
@@ -2400,7 +2404,7 @@ class ModelCacheService:
         model_content_sha256: str | None = None,
         model_variant: str | None = None,
         exact_revision_id: str | None = None,
-    ) -> Mapping[str, object]:
+    ) -> CacheResolution:
         """Resolve one logical Recipe to its newest usable cached revision.
 
         The profile read/load path calls this method for both web and CLI
@@ -2581,7 +2585,7 @@ class ModelCacheService:
                         return digest, variant
                 return "", None
 
-            def verified_image(revision_id: str) -> Mapping[str, object] | None:
+            def verified_image(revision_id: str) -> RevisionImage | None:
                 # SQL names the images the recipe's builds produced; managed
                 # storage owns whether an archive is present. The build row
                 # carries the archive identity, so no receipt row joins them.
@@ -2592,11 +2596,7 @@ class ModelCacheService:
                     if self._runtime_archive_available(
                         image.archive_sha256, image.image_bytes
                     ):
-                        return {
-                            "archive_sha256": image.archive_sha256,
-                            "image_bytes": image.image_bytes,
-                            "image_digest": image.image_digest,
-                        }
+                        return image
                 return None
 
             selected: (
@@ -2604,7 +2604,7 @@ class ModelCacheService:
                     CatalogDocumentRevision,
                     str,
                     str | None,
-                    Mapping[str, object] | None,
+                    RevisionImage | None,
                 ]
                 | None
             ) = None
@@ -2677,8 +2677,8 @@ class ModelCacheService:
             model_verified = model_set.verified_bytes if model_set is not None else None
 
             recipe_cached = receipt is not None
-            image_bytes = receipt["image_bytes"] if receipt is not None else None
-            image_digest = receipt["image_digest"] if receipt is not None else None
+            image_bytes = receipt.image_bytes if receipt is not None else None
+            image_digest = receipt.image_digest if receipt is not None else None
             latest = next(
                 (
                     item
@@ -2697,44 +2697,40 @@ class ModelCacheService:
                 blockers.append(ModelCacheBlockerCode.RECIPE_NOT_CACHED)
             if not model_cached:
                 blockers.append(ModelCacheBlockerCode.MODEL_NOT_CACHED)
-            return {
-                "schema_version": SCHEMA_VERSION,
-                "recipe": {
-                    "recipe_revision_id": revision.id,
-                    "document_id": revision.document_id,
-                    "publisher": revision.publisher,
-                    "slug": revision.slug,
-                    "revision_number": revision.revision_number,
-                    "content_sha256": revision.content_digest,
-                    "cached": recipe_cached,
-                    "cache_state": "cached" if recipe_cached else "missing",
-                    "artifact_set_sha256": receipt["archive_sha256"]
-                    if receipt
-                    else None,
-                    "expected_bytes": image_bytes,
-                    "verified_bytes": image_bytes,
-                    "image_digest": image_digest,
-                    "update_available": latest is not None,
-                },
-                "model": {
-                    "content_sha256": digest,
-                    "cached": model_cached,
-                    "cache_state": "cached" if model_cached else "missing",
-                    "artifact_set_sha256": model_set.artifact_set_sha256
-                    if model_set
-                    else None,
-                    "expected_bytes": model_expected,
-                    "verified_bytes": model_verified,
-                    "variant": variant,
-                },
-                "resources": {
-                    "per_spark_memory_bytes": None,
-                    "additional_disk_bytes": additional,
-                    "model_bytes": model_expected,
-                    "image_bytes": image_bytes,
-                },
-                "blockers": blockers,
-            }
+            return CacheResolution(
+                recipe=CachedRecipeResolution(
+                    recipe_revision_id=revision.id,
+                    document_id=revision.document_id,
+                    publisher=revision.publisher,
+                    slug=revision.slug,
+                    revision_number=revision.revision_number,
+                    content_sha256=revision.content_digest,
+                    cached=recipe_cached,
+                    cache_state="cached" if recipe_cached else "missing",
+                    artifact_set_sha256=receipt.archive_sha256 if receipt else None,
+                    expected_bytes=image_bytes,
+                    verified_bytes=image_bytes,
+                    image_digest=image_digest,
+                    update_available=latest is not None,
+                ),
+                model=CachedModelResolution(
+                    content_sha256=digest,
+                    cached=model_cached,
+                    cache_state="cached" if model_cached else "missing",
+                    artifact_set_sha256=(
+                        model_set.artifact_set_sha256 if model_set else None
+                    ),
+                    expected_bytes=model_expected,
+                    verified_bytes=model_verified,
+                    variant=variant,
+                ),
+                resources=CachedResourceEstimate(
+                    additional_disk_bytes=additional,
+                    model_bytes=model_expected,
+                    image_bytes=image_bytes,
+                ),
+                blockers=blockers,
+            )
 
     def download_model_selector(
         self,

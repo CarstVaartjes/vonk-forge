@@ -81,6 +81,7 @@ from vonk_control.source_bundles import SourceBundleStore, generate_source_bundl
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .stored_documents_support import valid_policy_report
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -780,6 +781,7 @@ def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog)
     assert clock.now.isoformat() not in lines[0]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_system):
     client, services, _, clock = agent_system
     identity = RecipeReconciliationIdentity(
@@ -1161,7 +1163,7 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
                 source_bundle_sha256=bundle.sha256,
                 build_input_sha256="d" * 64,
                 state="planned",
-                policy_report={"passed": True},
+                policy_report=valid_policy_report(),
                 plan={},
                 created_at=clock.now,
                 updated_at=clock.now,
@@ -1234,7 +1236,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
                 source_bundle_sha256="a" * 64,
                 build_input_sha256="b" * 64,
                 state="building",
-                policy_report={"passed": True},
+                policy_report=valid_policy_report(),
                 plan={},
                 created_at=clock.now,
                 updated_at=clock.now,
@@ -1374,7 +1376,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
                 source_bundle_sha256="a" * 64,
                 build_input_sha256="b" * 64,
                 state="building",
-                policy_report={"passed": True},
+                policy_report=valid_policy_report(),
                 plan={},
                 created_at=clock.now,
                 updated_at=clock.now,
@@ -1888,6 +1890,7 @@ def test_claim_rejects_unknown_structural_fields(
 
 
 @pytest.mark.parametrize("field", ("protocol_version", "wait_seconds"))
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_claim_rejects_string_encoded_numeric_fields(
     agent_system,
     field: str,
@@ -2275,6 +2278,7 @@ def test_bootstrap_requires_the_host_helper_authority(
     assert response.json() == {"detail": "host runtime authority is unavailable"}
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
     agent_system,
 ) -> None:
@@ -2340,6 +2344,7 @@ def test_recipe_run_disposition_names_every_run_the_controller_does_not_want(
     assert disposition("e85c4710-e437-4d12-8191-499596aa2a4c", {}).status_code == 401
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_recipe_run_observation_report_applies_process_state_per_run(
     agent_system,
 ) -> None:
@@ -3258,6 +3263,7 @@ def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
     (b"[1]", b"[]", b'"scalar"', b"0", b"true", b"false", b"null"),
     ids=("array", "empty-array", "string", "number", "true", "false", "null"),
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_enrollment_rejects_non_object_json_without_server_error(
     agent_system, raw: bytes
 ) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import DesiredAssignmentState
@@ -256,6 +257,7 @@ def test_newest_is_the_highest_active_revision_and_ignores_candidates() -> None:
         assert recipe_update_notice("Update Recipe", running, newest[RECIPE_ID]) is None
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_notice_without_a_release_version_names_the_revision_number() -> None:
     sessions = _sessions()
     _seed(sessions, running=REVISION_1, first_release=False)

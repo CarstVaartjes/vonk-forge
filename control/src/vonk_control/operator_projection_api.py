@@ -185,17 +185,17 @@ class FleetLogProvider(Protocol):
         recipe: str | None,
         source: str | None,
         follow: bool,
-    ) -> FleetLogResponse | Mapping[str, object]: ...
+    ) -> FleetLogResponse: ...
 
 
 class FleetEnrollmentProvider(Protocol):
     def create_named(
         self, *, name: str, actor: str, request_id: str
-    ) -> Mapping[str, object]: ...
+    ) -> FleetActionResponse: ...
 
     def create_reenrollment(
         self, node_id: str, actor: str, request_id: str
-    ) -> Mapping[str, object]: ...
+    ) -> FleetActionResponse: ...
 
     def revoke_node(self, node_id: str, actor: str) -> None: ...
 
@@ -282,30 +282,33 @@ class _AgentEnrollmentAdapter:
 
     def create_named(
         self, *, name: str, actor: str, request_id: str
-    ) -> Mapping[str, object]:
+    ) -> FleetActionResponse:
         services = self._required()
         assert services.enrollment is not None
         grant = services.enrollment.create_named(
             name, actor, MAX_ENROLLMENT_GRANT_TTL_SECONDS, request_key=request_id
         )
-        return {
-            "display_name": name,
-            "state": "pending",
-            "grant": self._response(grant).model_dump(mode="json"),
-        }
+        return FleetActionResponse(
+            action="enroll",
+            display_name=name,
+            state="pending",
+            grant=self._response(grant),
+        )
 
     def create_reenrollment(
         self, node_id: str, actor: str, request_id: str
-    ) -> Mapping[str, object]:
+    ) -> FleetActionResponse:
         services = self._required()
         assert services.enrollment is not None
         grant = services.enrollment.create_reenrollment(
             node_id, actor, MAX_ENROLLMENT_GRANT_TTL_SECONDS, request_key=request_id
         )
-        return {
-            "state": "pending",
-            "grant": self._response(grant).model_dump(mode="json"),
-        }
+        return FleetActionResponse(
+            action="re-enroll",
+            node_id=node_id,
+            state="pending",
+            grant=self._response(grant),
+        )
 
     def grant_status(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus:
         enrollment = self._services.enrollment
@@ -874,7 +877,7 @@ def install_operator_projection_routes(
                 source=source,
                 follow=follow,
             )
-            return FleetLogResponse.model_validate(value)
+            return value
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
@@ -929,8 +932,7 @@ def install_operator_projection_routes(
                 actor=actor.subject,
                 request_id=body.request_key,
             )
-            result = FleetActionResponse.model_validate({"action": "enroll", **value})
-            return result
+            return value
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
 
@@ -953,10 +955,7 @@ def install_operator_projection_routes(
             value = fleet_services.enrollment.create_reenrollment(
                 node.id, actor.subject, body.request_key
             )
-            result = FleetActionResponse.model_validate(
-                {"action": "re-enroll", "node_id": node.id, **value}
-            )
-            return result
+            return value
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
 

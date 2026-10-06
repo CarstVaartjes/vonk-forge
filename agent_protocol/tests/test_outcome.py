@@ -153,7 +153,7 @@ def test_the_stored_body_is_the_shape_every_reader_already_understands() -> None
     cancelled = AgentResult.parse(_report("cancelled", CANCELLED))
     body = outcome_body(cancelled.result)
     assert body["error_code"] == "operation_cancelled"
-    assert "status" not in body
+    assert body.status is None
     validate_result_for_operation(AgentOperation.RECIPE_START, body, state="cancelled")
 
     failed = AgentResult.parse(_report("failed", FAILED))
@@ -164,7 +164,9 @@ def test_the_stored_body_is_the_shape_every_reader_already_understands() -> None
     validate_result_for_operation(AgentOperation.RECIPE_START, body, state="failed")
 
     done = AgentResult.parse(_report("succeeded", DONE))
-    assert outcome_body(done.result) == {"installed_bytes": 3}
+    assert outcome_body(done.result).model_dump(exclude_none=True) == {
+        "installed_bytes": 3
+    }
 
 
 def test_a_typed_done_is_checked_against_the_operation_that_ran() -> None:

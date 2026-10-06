@@ -80,6 +80,7 @@ def test_a_damaged_stored_file_is_replaced_by_the_verified_archive(
     assert store.get(bundle.sha256).files["Dockerfile"] == b"FROM scratch\n"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_damaged_database_rows_are_rewritten_from_the_verified_archive() -> None:
     """Catches damaged archive or metadata rows blocking their own re-ingress."""
 

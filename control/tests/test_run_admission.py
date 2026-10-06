@@ -35,6 +35,8 @@ from vonk_control.run_admission import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .stored_documents_support import valid_policy_report
+
 
 def setup(
     tmp_path,
@@ -179,7 +181,7 @@ def setup(
             source_bundle_sha256="c" * 64,
             build_input_sha256="e" * 64,
             state="succeeded",
-            policy_report={"passed": True},
+            policy_report=valid_policy_report(),
             plan={},
             image_digest="sha256:" + "f" * 64,
             oci_layout_sha256="0" * 64,

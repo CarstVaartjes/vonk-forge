@@ -67,6 +67,8 @@ from tests.runtime_image_fixtures import place_test_image
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from tests.test_recipe_builds import RecordingQueue
 
+from .stored_documents_support import valid_policy_report
+
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 ROOT = recipe_library_root()
 NOW = datetime(2026, 9, 30, 12, tzinfo=UTC)
@@ -663,7 +665,7 @@ def test_a_spark_build_upload_is_converted_into_the_store_after_success(
                 source_bundle_sha256="b" * 64,
                 build_input_sha256="c" * 64,
                 state="succeeded",
-                policy_report={"passed": True},
+                policy_report=valid_policy_report(),
                 plan={},
                 image_digest="sha256:" + "d" * 64,
                 oci_layout_sha256=upload_sha256,

@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
+from vonk_control.stored_json import install_write_guard
 
 from .api_response_witness import (
     pytest_addoption as _api_response_addoption,
@@ -36,6 +37,10 @@ from .api_response_witness import (  # noqa: F401 - pytest discovers imported ho
 from .api_response_witness import (
     pytest_sessionfinish as _api_response_sessionfinish,
 )
+
+# A test that writes a JSON column its contract refuses fails where it writes;
+# one that damages a row on purpose says so with ``write_guard_mode(strict=False)``.
+install_write_guard(strict=True)
 
 # The same pinned PostgreSQL the Compose deployment runs; scripts/pull-test-images
 # pulls it before the suite, so starting the server never downloads.
@@ -69,6 +74,16 @@ def _load_tools_plugin(name: str):
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
     return sys.modules[module_name]
+
+
+@pytest.fixture
+def damaged_json_rows() -> Iterator[None]:
+    """Let a test write JSON documents its contract refuses (damaged or retired rows)."""
+
+    from vonk_control.stored_json import write_guard_mode
+
+    with write_guard_mode(strict=False):
+        yield
 
 
 def pytest_addoption(
