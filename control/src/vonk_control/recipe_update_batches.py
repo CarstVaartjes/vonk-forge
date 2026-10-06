@@ -83,6 +83,10 @@ class RecipeUpdateClaim:
     owner: str
 
 
+class RecipeUpdateClaimLost(RecipeImageAvailabilityUnknown):
+    """This invocation ended; a newer owner or cancellation now controls the batch."""
+
+
 def _encoded(document: object) -> bytes:
     return json.dumps(
         serialize_json_value(document),
@@ -790,7 +794,7 @@ class RecipeUpdateBatches:
             .with_for_update(nowait=True)
         )
         if job is None:
-            raise RecipeImageAvailabilityUnknown(
+            raise RecipeUpdateClaimLost(
                 RecipeUpdateCode.CLAIM_LOST,
                 "recipe update no longer owns its claim",
                 reason=WaitReason.LEASE_LAPSED,
@@ -803,7 +807,7 @@ class RecipeUpdateBatches:
             or document.claim_until is None
             or document.claim_until <= _now(self.owner._clock())
         ):
-            raise RecipeImageAvailabilityUnknown(
+            raise RecipeUpdateClaimLost(
                 RecipeUpdateCode.CLAIM_LOST,
                 "recipe update no longer owns its claim",
                 reason=WaitReason.LEASE_LAPSED,
@@ -853,6 +857,15 @@ class RecipeUpdateBatches:
         )
 
     def run(self, claim: RecipeUpdateClaim) -> None:
+        try:
+            self._run_once(claim)
+        except RecipeUpdateClaimLost:
+            # An expired/replaced/deleted parent is not work for this executor
+            # to retry. Its current owner keeps every committed child identity;
+            # this stale invocation exits without overwriting their checkpoint.
+            return
+
+    def _run_once(self, claim: RecipeUpdateClaim) -> None:
         from .recipe_image_availability import (
             RecipeImageAvailabilityError,
             RecipeImageAvailabilityView,
@@ -912,10 +925,15 @@ class RecipeUpdateBatches:
                     )
                 )
                 child.retry_at = None
-            except RecipeImageAvailabilityError as error:
-                if error.code == RecipeUpdateCode.CLAIM_LOST:
-                    return
-                retryable = _retryable(error)
+            except RecipeUpdateClaimLost:
+                raise
+            except (
+                RecipeImageAvailabilityUnknown,
+                RecipeImageAvailabilityError,
+            ) as error:
+                retryable = isinstance(
+                    error, RecipeImageAvailabilityUnknown
+                ) or _retryable(error)
                 child.failure = RecipeUpdateFailure(
                     code=error.code,
                     detail=str(redact_text(error.detail))[:512],
@@ -923,7 +941,10 @@ class RecipeUpdateBatches:
                 )
                 child.state = "pending" if retryable else LifecycleState.FAILED
                 child.retry_at = (
-                    now + timedelta(seconds=max(2, error.retry_after_seconds or 2))
+                    now
+                    + timedelta(
+                        seconds=min(300, max(2, error.retry_after_seconds or 2))
+                    )
                     if retryable
                     else None
                 )

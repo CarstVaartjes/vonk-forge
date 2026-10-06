@@ -84,6 +84,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     RunState,
     RunSwitchCode,
+    UnknownOutcomeError,
     canonical_message,
 )
 
@@ -752,6 +753,7 @@ class UnusedStorageCollector:
         self._due_at: datetime | None = None
         self._rounds: dict[str, _Round] = {}
         self._paused_until: dict[str, datetime] = {}
+        self._retry_at: dict[tuple[str, str], datetime] = {}
         self._last_outcome: dict[str, str] = {}
 
     def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
@@ -782,6 +784,7 @@ class UnusedStorageCollector:
 
         now = self._clock()
         deadline = time.monotonic() + self._budget_seconds
+        self._retry_at = {key: due for key, due in self._retry_at.items() if now < due}
         pressures = self._pressures(now)
         if not pressures:
             self._last_outcome.clear()
@@ -1098,6 +1101,12 @@ class UnusedStorageCollector:
         """Remove one item; False when anything still keeps it."""
 
         label = "image receipt" if item.kind == "image" else item.kind
+        key = (item.kind, item.key)
+        retry_at = self._retry_at.get(key)
+        if retry_at is not None and self._clock() < retry_at:
+            kept[f"{label}: deferred until {retry_at.isoformat()}"] += 1
+            return False
+        self._retry_at.pop(key, None)
         done = 0
         for member in item.members:
             try:
@@ -1112,6 +1121,23 @@ class UnusedStorageCollector:
                     self._remove_model(member)
             except _Kept as why:
                 kept[f"{label}: {why}"] += 1
+                break
+            except UnknownOutcomeError as error:
+                # The failed member is retained and discovered again by the
+                # next sweep. Other eligible items continue in this pass.
+                retry_at = self._clock() + self._scan_interval
+                self._retry_at[key] = retry_at
+                kept[f"{label}: deferred {_code(error)}"] += 1
+                log_event(
+                    _LOGGER,
+                    "unused_storage.deferred",
+                    service="control-worker",
+                    kind=item.kind,
+                    record_id=member,
+                    code=_code(error),
+                    detail=str(error),
+                    next_attempt_at=retry_at.isoformat(),
+                )
                 break
             except (
                 KeyError,
