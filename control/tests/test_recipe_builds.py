@@ -2322,14 +2322,20 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
     source_path = next((tmp_path / "bundles").rglob("*.tar"))
     verified_bytes = source_path.read_bytes()
     read_bytes = Path.read_bytes
-    fault = [True]
+    fault: list[bool | str] = [True]
 
     def read(path):
         if path == source_path and fault[0]:
+            if fault[0] == "permission":
+                raise PermissionError(errno.EACCES, "NAS access denied")
             raise OSError(errno.EIO, "temporary NAS read fault")
         return read_bytes(path)
 
     monkeypatch.setattr(Path, "read_bytes", read)
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    with pytest.raises(UnknownOutcomeError):
+        builds.reusable_build_id(revision.id)
     assert first.service.run_pending() == 1
     waiting = first.service.get(queued.id)
     assert waiting.state == "queued"
@@ -2367,4 +2373,12 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
         parent = session.get(Job, queued.id)
         assert parent is not None and parent.request_id == "source-read-recovery"
     assert rederived == []
+    fault[0] = "permission"
+    from vonk_agent_protocol import SecurityRefusalError
+    from vonk_control.recipe_image_availability import _retryable
+
+    with pytest.raises(SecurityRefusalError) as denied:
+        builds.reusable_build_id(revision.id)
+    assert not _retryable(denied.value)
+    fault[0] = False
     restarted.close()

@@ -1402,6 +1402,8 @@ class RecipeBuildService:
 
         try:
             return self.resolve(recipe_revision_id).build_id
+        except (UnknownOutcomeError, SecurityRefusalError):
+            raise
         except (RecipeBuildError, KeyError, TypeError, ValueError):
             return None
 
