@@ -647,3 +647,22 @@ Compose validation and fresh NAS/Spark installer acceptance still run for the
 assembled release. API and worker continue using BuildKit layer caches and
 embed their current Controller source identity, so they are rebuilt on each
 qualifying generation.
+
+
+### Script subprocess time budgets
+
+Developer and CI helpers bound each external command independently of the job
+watchdog. Local metadata, version and signature tools use the publication
+30-second budget. Dependency acquisition allows three five-minute attempts
+within the 20-minute acquisition lane, preserving partial diagnostics on stderr
+and exposing the next retry; denied access and invalid pinned inputs still stop.
+Generators, Cargo probe builds and each wire test selection use the wire lane's
+20-minute budget. Fabric diagnostics and apt index work use ten minutes, while
+the canary restart command shares its configured scenario duration.
+
+Object publication allows a maximum one-GiB artifact at one MiB/s plus the
+30-second setup allowance. Expired uploads reconcile the exact object digest
+before the existing bounded retry. Streaming object reads additionally bound
+connection and socket idle time to 30 seconds and use the same total transfer
+budget. These budgets bound attempts; they do not change document, argument,
+artifact size, authorization or integrity contracts.

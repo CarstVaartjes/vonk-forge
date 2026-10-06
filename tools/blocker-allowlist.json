@@ -147,6 +147,14 @@
     },
     {
       "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.reconcile_removal_gates",
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "reason": "The removal reconciliation pass retains a busy gate and continues its bounded inventory; the worker's advance_removals callback repeats the inventory after cursor wrap, then takes the same exact storage lock before rechecking the owner."
+    },
+    {
+      "path": "control/src/vonk_control/model_cache.py",
       "function": "ModelCacheService._advance_model_removal_step",
       "catches": [
         "_ArtifactWriterBusy"
@@ -835,7 +843,6 @@
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService._collect_model_definitions", "model_cache.model_definition_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService._collect_model_definitions", "model_cache.model_dependency_cycle", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService._recipe_document", "model_cache.recipe_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService.get_operator_operation", "model_cache.operation_not_observable", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService.resolve_artifact_set", "model_cache.pin_required", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService.resolve_latest_cached", "model_cache.recipe_identity_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService.resolve_latest_cached", "model_cache.recipe_revision_missing", 3],
@@ -1169,7 +1176,6 @@
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.create_draft", "catalog.document_exists", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.not_candidate", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.stale_revision", 1],
-        ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.revise", "catalog.candidate_exists", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.revise", "catalog.stale_revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogRevisionContractError", "_rederive_projection", "catalog-revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.model_reference_invalid", 2],
@@ -1364,14 +1370,6 @@
         ["control/src/vonk_control/distribution.py", "DistributionError", "ModelCacheObjectSource._open_cache_object", "distribution.object_unavailable", 3],
         ["control/src/vonk_control/distribution.py", "DistributionError", "ModelCacheObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 4],
         ["control/src/vonk_control/distribution.py", "DistributionError", "RecipeBuildObjectSource.open_object", "distribution.object_unavailable", 1]
-      ]
-    },
-    {
-      "family": "distribution.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
-      "sites": [
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.revoked", 1]
       ]
     },
     {
@@ -1753,7 +1751,7 @@
     {
       "family": "install_admission.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InstallPlanConflict validates a contract or request.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InstallPlanConflict validates a contract or request. Exact admission compares submitted digest and protected execution effects before commit; observation or capacity changes cannot substitute another image, topology, port or resource promise.",
       "sites": [
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "install.dependencies_stale", 2],
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "install.plan_invalid", 1],
@@ -1765,7 +1763,8 @@
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "cluster-mapping-is-not-ready", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "recipe-revision-is-not-resolved", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "successful-recipe-build-does-not-match-the-mapping", 1],
-        ["control/src/vonk_control/install_admission.py", "MissingRecord", "InstallAdmissionService.plan_install", "not-found", 2]
+        ["control/src/vonk_control/install_admission.py", "MissingRecord", "InstallAdmissionService.plan_install", "not-found", 2],
+        ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "require_same_execution", "install.plan_stale", 1]
       ]
     },
     {
@@ -2392,7 +2391,7 @@
     {
       "family": "run_admission.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class RunPlanConflict validates a contract or request.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class RunPlanConflict validates a contract or request. Exact admission compares submitted digest and protected execution effects before commit; observation or capacity changes cannot substitute another image, topology, port or resource promise.",
       "sites": [
         ["control/src/vonk_control/run_admission.py", "InvalidType", "RunAdmissionService.plan_run", "mapping-endpoint-owner-is-missing", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidType", "RunAdmissionService.plan_run", "topology-role-memory-is-invalid", 1],
@@ -2409,7 +2408,8 @@
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.dependencies_stale", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.plan_invalid", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.plan_stale", 1],
-        ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "require_admissible", "run.plan_invalid", 1]
+        ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "require_admissible", "run.plan_invalid", 1],
+        ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "require_same_execution", "run.plan_stale", 1]
       ]
     },
     {
@@ -2455,9 +2455,10 @@
     {
       "family": "runtime_image_preparation.security-edge",
       "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check. A PermissionError reading a managed receipt is an explicit permission_denied refusal, never an automatic repair or absent-image observation.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.digest_mismatch", 1]
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.digest_mismatch", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_load_receipt_document", "permission-denied", 1]
       ]
     },
     {
@@ -3686,7 +3687,7 @@
     {
       "family": "recipe_operations.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class MissingRecord is of the input-validation error type; class RecipeRequestInvalid is of the input-validation error type.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class MissingRecord is of the input-validation error type; class RecipeRequestInvalid is of the input-validation error type. Exact admission compares submitted digest and protected execution effects before commit; observation or capacity changes cannot substitute another image, topology, port or resource promise.",
       "sites": [
         ["control/src/vonk_control/recipe_operations.py", "DistributedRecoveryInvalid", "RecipeOperationService.queue_recovery_stop_in_session", "singleton-recovery-was-superseded-by-a-newer-workload-intent", 1],
         ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService.__init__", "recipe-run-health-age-is-invalid", 1],
@@ -3698,7 +3699,10 @@
         ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._start_once.start_payload", "recipe-start-endpoint-address-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.get", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.run_status", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._record_node_result_once", "node-is-not-part-of-operation-group", 1]
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._record_node_result_once", "node-is-not-part-of-operation-group", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1]
       ]
     },
     {
@@ -3793,6 +3797,18 @@
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._heal_source_bundle", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._verified_bundle.read", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "rederive_source_bundle_from_closure", "permission-denied", 1]
+      ]
+    },
+    {
+      "family": "distribution.security-edge",
+      "category": "security-edge",
+      "reason": "Revoked exact assignments, unsafe managed roots, and explicit source access denial remain typed security refusals through composite source lookup and the agent wire; neither fallback nor availability retry may soften them.",
+      "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "DistributionService._authorize_uncached", "distribution.revoked", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "forbidden", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "permission-denied", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "nas-cache-object-access-was-refused", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "permission-denied", 1]
       ]
     }
   ]

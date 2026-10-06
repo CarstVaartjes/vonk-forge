@@ -47,7 +47,13 @@ def _run(
         ],
         cwd=ROOT,
         env={
-            **os.environ,
+            # This subprocess owns its own initial measurement and isolated
+            # retry. An outer budget retry must not pre-mark its first pass.
+            **{
+                key: value
+                for key, value in os.environ.items()
+                if key != pytest_budget._ISOLATED_ENV
+            },
             "PYTHONPATH": str(ROOT),
             pytest_budget.CALIBRATION_ENV: calibration,
         },
@@ -121,9 +127,12 @@ def test_the_benchmark_measures_wall_time_of_this_machine() -> None:
     assert 0 < pytest_budget.benchmark_seconds(rounds=2) < 5.0
 
 
-def test_only_the_overrun_that_reproduces_fails_among_several(tmp_path: Path) -> None:
+def test_only_the_overrun_that_reproduces_fails_among_several(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Catches one rerun verdict being applied to every suspect in the session."""
 
+    monkeypatch.setenv(pytest_budget._ISOLATED_ENV, "1")
     noisy, slow = tmp_path / "noisy", tmp_path / "slow"
     body = (
         "import pathlib, time\n\n"

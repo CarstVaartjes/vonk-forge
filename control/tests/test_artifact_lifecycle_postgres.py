@@ -237,3 +237,121 @@ def test_valid_empty_cache_manifest_remains_an_open_exact_set(
         assert require_model_sets_open(session, (set_digest,), now=now) == {
             set_digest: ()
         }
+
+
+@pytest.mark.parametrize("owner_state", [None, "failed", "cancelled", "succeeded"])
+def test_dead_removal_gate_reconciles_before_fresh_reference_admission(
+    artifact_sessions: sessionmaker[Session],
+    owner_state: str | None,
+) -> None:
+    from vonk_control.artifact_lifecycle import (
+        dead_removal_identities,
+        release_dead_removal_nowait,
+    )
+    from vonk_control.models import Job
+
+    now = datetime.now(UTC)
+    identity = ArtifactIdentity("runtime-image", "b" * 64)
+    owner_id = "8f19e31a-7155-45da-9f1b-c7da400180b7"
+    with artifact_sessions.begin() as session:
+        if owner_state is not None:
+            session.add(
+                Job(
+                    id=owner_id,
+                    request_id="8f19e31a-7155-45da-9f1b-c7da400180b8",
+                    kind="recipe.cache.remove.v2",
+                    state=owner_state,
+                    actor="operator",
+                    authority_revision="revision",
+                    targets=[],
+                    payload_digest="c" * 64,
+                    payload={},
+                    current_attempt=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        reserve_removal(
+            session,
+            (identity,),
+            owner_kind="recipe-image-job",
+            owner_id=owner_id,
+            fence="8f19e31a-7155-45da-9f1b-c7da400180b9",
+            now=now,
+        )
+    with artifact_sessions() as session:
+        assert dead_removal_identities(
+            session, owner_kind="recipe-image-job", limit=8
+        ) == (identity,)
+    # Production obtains the exact filesystem lock before this short transaction.
+    with artifact_sessions.begin() as session:
+        assert release_dead_removal_nowait(
+            session, identity, owner_kind="recipe-image-job", now=now
+        )
+    with artifact_sessions.begin() as session:
+        require_reference_open(session, (identity,), now=now)
+        assert not check_removal_fence_nowait(
+            session,
+            identity,
+            owner_kind="recipe-image-job",
+            owner_id=owner_id,
+            fence="8f19e31a-7155-45da-9f1b-c7da400180b9",
+        )
+
+
+def test_reaper_rechecks_owner_and_does_not_clear_a_restarted_removal(
+    artifact_sessions: sessionmaker[Session],
+) -> None:
+    from vonk_control.artifact_lifecycle import (
+        dead_removal_identities,
+        release_dead_removal_nowait,
+    )
+    from vonk_control.models import Job
+
+    now = datetime.now(UTC)
+    identity = ArtifactIdentity("runtime-image", "c" * 64)
+    owner_id = "8f19e31a-7155-45da-9f1b-c7da400180b7"
+    with artifact_sessions.begin() as session:
+        session.add(
+            Job(
+                id=owner_id,
+                request_id="8f19e31a-7155-45da-9f1b-c7da400180b8",
+                kind="recipe.cache.remove.v2",
+                state="failed",
+                actor="operator",
+                authority_revision="revision",
+                targets=[],
+                payload_digest="c" * 64,
+                payload={},
+                current_attempt=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        reserve_removal(
+            session,
+            (identity,),
+            owner_kind="recipe-image-job",
+            owner_id=owner_id,
+            fence="8f19e31a-7155-45da-9f1b-c7da400180b9",
+            now=now,
+        )
+    with artifact_sessions() as session:
+        assert dead_removal_identities(
+            session, owner_kind="recipe-image-job", limit=8
+        ) == (identity,)
+    with artifact_sessions.begin() as session:
+        owner = session.get(Job, owner_id)
+        assert owner is not None
+        owner.state = "queued"
+    with artifact_sessions.begin() as session:
+        assert not release_dead_removal_nowait(
+            session, identity, owner_kind="recipe-image-job", now=now
+        )
+        assert check_removal_fence_nowait(
+            session,
+            identity,
+            owner_kind="recipe-image-job",
+            owner_id=owner_id,
+            fence="8f19e31a-7155-45da-9f1b-c7da400180b9",
+        )

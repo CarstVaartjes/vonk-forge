@@ -393,15 +393,22 @@ def _receipt_may_be_newer(value: object, error: BaseException | None) -> bool:
 def _load_receipt_document(path: Path) -> RuntimeImageReceipt:
     """Read one stored receipt file under the current contract.
 
-    An unreadable file -- including a denied read -- raises
-    ``RuntimeImagePreparationError``: an access failure is never a scan miss
-    and remains an explicit blocker.  A document that is present but does not
+    A denied read raises an explicit security refusal. Other unreadable files
+    raise retryable evidence uncertainty; scans can inspect independent files,
+    but cannot turn unresolved uncertainty into an absent-image verdict.
+    A document that is present but does not
     satisfy the current contract raises ``_ReceiptDocumentRejected`` naming the
     rule that rejected it.
     """
 
     try:
         text = path.read_text(encoding="utf-8")
+    except PermissionError as error:
+        raise RuntimeImagePreparationRefused(
+            SecurityRefusalReason.PERMISSION_DENIED,
+            "access to the managed runtime image receipt was denied",
+            reason=SecurityRefusalReason.PERMISSION_DENIED,
+        ) from error
     except OSError as error:
         raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RECEIPT_UNAVAILABLE,
@@ -916,14 +923,29 @@ class FilesystemRuntimeImageStorage:
         cannot parse is one archive's stale metadata: skip it with a bounded
         warning naming its digest instead of failing every lookup that happens
         to walk past it.  ``read_receipt`` for that exact digest stays strict.
-        An unreadable file is not a parse failure and still raises.
+        Temporary read failures defer only their receipt while other verified
+        candidates remain eligible. If no eligible candidate returns, the scan
+        reports the deferred uncertainty rather than inventing an absent image.
+        Access refusals remain immediate and are never treated as scan misses.
         """
 
+        deferred: RuntimeImagePreparationUnknown | None = None
         for receipt_path in sorted(self.root.glob("*.receipt.json")):
             try:
                 yield _load_receipt_document(receipt_path)
             except _ReceiptDocumentRejected as rejection:
                 self._discard_rejected_receipt(receipt_path, rejection)
+            except RuntimeImagePreparationUnknown as error:
+                deferred = deferred or error
+                if self._first_report(receipt_path):
+                    _LOGGER.warning(
+                        "deferred runtime image receipt %s: %s; %s",
+                        receipt_path.name,
+                        error.code,
+                        error.detail,
+                    )
+        if deferred is not None:
+            raise deferred
 
     def _discard_rejected_receipt(
         self, receipt_path: Path, rejection: _ReceiptDocumentRejected

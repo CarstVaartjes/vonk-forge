@@ -11,6 +11,8 @@ from ..types import UNSET, Unset
 from ..types import UNSET, Unset
 from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.model_cache_missing_source_observation import ModelCacheMissingSourceObservation
 
 
 
@@ -27,6 +29,7 @@ class ModelCacheRetry:
             automatic_attempts (int):
             operator_retries (int):
             credential_fingerprint (None | str | Unset):
+            missing_source (ModelCacheMissingSourceObservation | None | Unset):
             next_retry_at (None | str | Unset):
             retry_after_seconds (int | None | Unset):
      """
@@ -34,6 +37,7 @@ class ModelCacheRetry:
     automatic_attempts: int
     operator_retries: int
     credential_fingerprint: None | str | Unset = UNSET
+    missing_source: ModelCacheMissingSourceObservation | None | Unset = UNSET
     next_retry_at: None | str | Unset = UNSET
     retry_after_seconds: int | None | Unset = UNSET
 
@@ -42,6 +46,7 @@ class ModelCacheRetry:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.model_cache_missing_source_observation import ModelCacheMissingSourceObservation # noqa: PLC0415
         automatic_attempts = self.automatic_attempts
 
         operator_retries = self.operator_retries
@@ -51,6 +56,14 @@ class ModelCacheRetry:
             credential_fingerprint = UNSET
         else:
             credential_fingerprint = self.credential_fingerprint
+
+        missing_source: dict[str, Any] | None | Unset
+        if isinstance(self.missing_source, Unset):
+            missing_source = UNSET
+        elif isinstance(self.missing_source, ModelCacheMissingSourceObservation):
+            missing_source = self.missing_source.to_dict()
+        else:
+            missing_source = self.missing_source
 
         next_retry_at: None | str | Unset
         if isinstance(self.next_retry_at, Unset):
@@ -73,6 +86,8 @@ class ModelCacheRetry:
         })
         if credential_fingerprint is not UNSET:
             field_dict["credential_fingerprint"] = credential_fingerprint
+        if missing_source is not UNSET:
+            field_dict["missing_source"] = missing_source
         if next_retry_at is not UNSET:
             field_dict["next_retry_at"] = next_retry_at
         if retry_after_seconds is not UNSET:
@@ -84,6 +99,7 @@ class ModelCacheRetry:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.model_cache_missing_source_observation import ModelCacheMissingSourceObservation # noqa: PLC0415
         d = dict(src_dict)
         automatic_attempts = d.pop("automatic_attempts")
 
@@ -97,6 +113,26 @@ class ModelCacheRetry:
             return cast(None | str | Unset, data)
 
         credential_fingerprint = _parse_credential_fingerprint(d.pop("credential_fingerprint", UNSET))
+
+
+        def _parse_missing_source(data: object) -> ModelCacheMissingSourceObservation | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                missing_source_type_0 = ModelCacheMissingSourceObservation.from_dict(data)
+
+
+
+                return missing_source_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(ModelCacheMissingSourceObservation | None | Unset, data)
+
+        missing_source = _parse_missing_source(d.pop("missing_source", UNSET))
 
 
         def _parse_next_retry_at(data: object) -> None | str | Unset:
@@ -123,6 +159,7 @@ class ModelCacheRetry:
             automatic_attempts=automatic_attempts,
             operator_retries=operator_retries,
             credential_fingerprint=credential_fingerprint,
+            missing_source=missing_source,
             next_retry_at=next_retry_at,
             retry_after_seconds=retry_after_seconds,
         )

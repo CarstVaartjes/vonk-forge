@@ -12,8 +12,8 @@ A revision is **kept** while anything still points at it:
   of its document (so revision numbers never repeat);
 * an installation of it is anything but ``uninstalled`` (``failed`` and
   ``partial`` may have left files), one of its runs is still ``stopping`` or
-  ``lost`` or otherwise active (a ``failed`` run holds nothing and counts as
-  stopped), a build of it is in flight, or a recipe job still names one of its
+  ``lost`` or otherwise active, its canonical planned nodes lack reconciled
+  current-generation process absence, a build is in flight, or a job names its
   runs;
 * it was superseded, or an installation, run, build or mapping of it was last
   touched, less than a grace period ago;
@@ -87,6 +87,7 @@ from .models import (
     SourceBundleArchive,
 )
 from .revision_images import revision_images
+from .run_history_retention import run_absence_reconciled
 
 _LOGGER = logging.getLogger(__name__)
 GRACE = timedelta(hours=24)
@@ -99,8 +100,8 @@ _SCAN_BATCH = 20
 SWEEP_BUDGET_SECONDS = 20.0
 _FINISHED = ("succeeded", "failed", "cancelled", "superseded")
 _FINISHED_BUILDS = ("succeeded", "failed")
-# Neither holds ports, memory or a place on a Spark (see STOPPABLE_RUN_STATES),
-# and nothing ever moves a failed run on to stopped.
+# Terminal states are candidates only; exact current-generation absence is
+# independently required before releasing claims and discarding recovery rows.
 _DEAD_RUNS = (RunState.STOPPED, RunState.FAILED)
 _IN_FLIGHT_BUILDS = ("planned", "building")
 # A uuid (a revision, installation or run id) or a sha256 (a source bundle).
@@ -369,6 +370,11 @@ class CatalogRevisionCollector:
             select(exists().where(ArtifactJob.run_id.in_(runs)))
         ):
             raise _Kept("recipe job")
+        if runs and any(
+            not run_absence_reconciled(session, run)
+            for run in session.scalars(select(RecipeRun).where(RecipeRun.id.in_(runs)))
+        ):
+            raise _Kept("run absence unreconciled")
         if session.scalar(
             select(
                 exists().where(
