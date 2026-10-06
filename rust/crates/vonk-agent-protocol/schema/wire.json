@@ -3234,6 +3234,19 @@
       "additionalProperties": false,
       "description": "The privileged helper's durable result for one operation.",
       "properties": {
+        "diagnostic": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diagnostic"
+        },
         "exit_code": {
           "anyOf": [
             {
@@ -3247,6 +3260,17 @@
           ],
           "default": null,
           "title": "Exit Code"
+        },
+        "process_logs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostHelperProcessLogs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "schema_version": {
           "const": 1,
@@ -8140,8 +8164,20 @@
     },
     "RecipeRunInspectionRequest": {
       "additionalProperties": false,
-      "description": "Helper frame for one read-only inspection of a managed run.\n\nUnlike every other helper operation it needs no Controller grant: it only\nreports whether the exact container of an agent-written ``run-inspect``\nruntime request is running.",
+      "description": "Helper frame for one read-only inspection of a managed run.\n\nUnlike every other helper operation it needs no Controller grant: it only\nreports whether the exact container of an agent-written ``run-inspect``\nruntime request is running.  With ``include_logs`` it also returns the\nbounded tail of that exact container's own output (``process_logs``), read\nwithout stopping it, so a workload that is running but not ready leaves\nevidence of what it was doing.",
       "properties": {
+        "include_logs": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Include Logs"
+        },
         "request_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Request Id",

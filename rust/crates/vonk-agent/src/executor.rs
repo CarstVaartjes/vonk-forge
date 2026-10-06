@@ -517,6 +517,60 @@ impl<R> RecipeExecutor<'_, R> {
         report_complete_recipe_run_observations(self.client, observed_at, results).await
     }
 
+    /// Read the exact workload's bounded output without stopping it, for a
+    /// start that is about to be failed for lack of readiness or stability.
+    ///
+    /// The tail must be read before the stop that ends the attempt removes the
+    /// container.  The result always says what it knows: the output, or the
+    /// typed reason there is none.
+    async fn running_workload_evidence(
+        &self,
+        arguments: &[String],
+        why: &str,
+    ) -> (Option<crate::failure_evidence::FailureProcessLogs>, String) {
+        let request_root = self.runtime_root.join("runtime-requests");
+        let boundary = HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+        };
+        match boundary
+            .inspect_recipe_run_report(arguments.to_vec(), true)
+            .await
+        {
+            Ok(report) => {
+                let mut account = format!("{why} container_running={}", report.running);
+                if report.process_logs.is_none() {
+                    let reason = report
+                        .log_error
+                        .as_deref()
+                        .unwrap_or("the helper returned no output");
+                    account.push_str(&format!(
+                        " logs_unavailable={:?}",
+                        reason.chars().take(160).collect::<String>()
+                    ));
+                }
+                (report.process_logs.map(|logs| *logs), account)
+            }
+            // An exited container answers with the process-exit rejection and
+            // its output and exit account.
+            Err(error) => {
+                let mut account = format!("{why} container_running=false");
+                if let Some(detail) = error.diagnostic() {
+                    account.push(' ');
+                    account.push_str(&detail.chars().take(320).collect::<String>());
+                }
+                if error.process_logs().is_none() {
+                    account.push_str(&format!(
+                        " logs_unavailable=\"inspection failed: {}\"",
+                        error.preflight_code()
+                    ));
+                }
+                (error.process_logs().cloned(), account)
+            }
+        }
+    }
+
     async fn execute_host_runtime_outcome(
         &self,
         claim: &AgentClaim,
@@ -1578,6 +1632,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         Some(error.preflight_code()),
                     );
                 }
+                // The job's own exit account and output, read by the helper
+                // before it removed the container.
+                let job_evidence = outcome
+                    .as_ref()
+                    .ok()
+                    .map(|outcome| (outcome.diagnostic.clone(), outcome.process_logs.clone()));
                 let (exit_code, exit_reason) = match outcome {
                     Ok(outcome) => match outcome.exit_code {
                         Some(0) => (0, None),
@@ -1696,7 +1756,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if exit_code == 0 {
                     ExecutionResult::done(receipt)
                 } else {
-                    job_failure(receipt)
+                    job_failure(receipt, job_evidence)
                 }
             }
             RecipeOperationRequest::Install(request) => {
@@ -2289,6 +2349,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 )
                                 .await;
                         }
+                        // Read before the stop removes the container.
+                        let unstable_evidence = if launch_failure.is_none() {
+                            Some(
+                                self.running_workload_evidence(
+                                    &runtime_guard_arguments,
+                                    "rank_stability_deadline=true",
+                                )
+                                .await,
+                            )
+                        } else {
+                            None
+                        };
                         if let Err(uncertain) = self
                             .stop_start_run(
                                 claim,
@@ -2300,12 +2372,16 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         {
                             return uncertain;
                         }
-                        return match launch_failure {
-                            Some(error) => runtime_failure(
+                        return match (launch_failure, unstable_evidence) {
+                            (Some(error), _) => runtime_failure(
                                 "rank process did not remain stable after launch",
                                 &error,
                             ),
-                            None => failed("rank process did not remain stable after launch"),
+                            (None, Some(evidence)) => failed_with_evidence(
+                                "rank process did not remain stable after launch",
+                                evidence,
+                            ),
+                            (None, None) => failed("rank process did not remain stable after launch"),
                         };
                     }
                     let success = recipe_start_success(&request);
@@ -2375,6 +2451,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
                             .await;
                     }
+                    // Read before any stop removes the container: a workload
+                    // that never became ready leaves its own account of why.
+                    let evidence = self
+                        .running_workload_evidence(
+                            &runtime_guard_arguments,
+                            "readiness_deadline=true",
+                        )
+                        .await;
                     if !collective_readiness
                         && let Err(uncertain) = self
                             .stop_start_run(
@@ -2387,7 +2471,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     {
                         return uncertain;
                     }
-                    return failed("workload did not become ready before its deadline");
+                    return failed_with_evidence(
+                        "workload did not become ready before its deadline",
+                        evidence,
+                    );
                 }
                 let success = recipe_start_success(&request);
                 if *cancellation.borrow() {
@@ -2544,6 +2631,20 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             }
         }
     }
+}
+
+/// A failure that carries the workload's own output, or the typed reason there
+/// is none.
+fn failed_with_evidence(
+    reason: &'static str,
+    evidence: (Option<crate::failure_evidence::FailureProcessLogs>, String),
+) -> ExecutionResult {
+    let (logs, account) = evidence;
+    ExecutionResult::Failed(
+        Failure::new(reason)
+            .diagnostic(account.chars().take(480).collect::<String>())
+            .process_logs(logs),
+    )
 }
 
 fn failed(reason: &'static str) -> ExecutionResult {
@@ -2959,27 +3060,45 @@ fn failed_job(
     started: Instant,
     reason: &'static str,
 ) -> ExecutionResult {
-    job_failure(job_receipt(
-        request,
-        exit_code,
-        started,
-        empty_job_output_manifest(),
-        Some(reason),
-    ))
+    // This failure did not come from the container's own exit, so its typed
+    // reason is the account: there is no exit state or output to read.
+    job_failure(
+        job_receipt(
+            request,
+            exit_code,
+            started,
+            empty_job_output_manifest(),
+            Some(reason),
+        ),
+        Some((Some(format!("job_not_run_to_completion={reason:?}")), None)),
+    )
 }
 
 /// A job whose process ran and exited nonzero (or never ran): a definite failure
 /// that keeps its receipt.
-fn job_failure(receipt: RecipeJobRunResult) -> ExecutionResult {
+fn job_failure(
+    receipt: RecipeJobRunResult,
+    evidence: Option<(Option<String>, Option<Box<crate::failure_evidence::FailureProcessLogs>>)>,
+) -> ExecutionResult {
     let reason = receipt
         .reason
         .clone()
         .unwrap_or_else(|| "job adapter exited unsuccessfully".to_owned());
-    ExecutionResult::Failed(
-        Failure::new(reason)
-            .code(FailureCode::RecipeJobRunFailed)
-            .receipt(receipt),
-    )
+    let (diagnostic, logs) = evidence.unwrap_or((None, None));
+    // A failed job always says what it knows: its output and exit account, or
+    // the typed reason there are none.
+    let diagnostic = diagnostic.unwrap_or_else(|| {
+        "exit_state_unavailable=\"helper reported no detail\" logs_unavailable=\"not captured\""
+            .to_owned()
+    });
+    let mut failure = Failure::new(reason)
+        .code(FailureCode::RecipeJobRunFailed)
+        .diagnostic(diagnostic.chars().take(480).collect::<String>())
+        .receipt(receipt);
+    if let Some(logs) = logs {
+        failure = failure.process_logs(Some(*logs));
+    }
+    ExecutionResult::Failed(failure)
 }
 
 fn cancelled_job(

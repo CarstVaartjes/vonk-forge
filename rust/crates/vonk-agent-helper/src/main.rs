@@ -362,21 +362,26 @@ fn handle(
             HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())
         })?;
         let request_id = inspection.request_id.to_string();
-        let running = executor
-            .inspect_recipe_run(&inspection.request_sha256)
+        let inspected = executor
+            .inspect_recipe_run_with_logs(
+                &inspection.request_sha256,
+                inspection.include_logs == Some(true),
+            )
             .map_err(|error| HelperRejection::for_error(&request_id, false, error))?;
         return respond(
             stream,
             &request_id,
             HelperResponse {
-                diagnostic: None,
-                process_logs: None,
+                // Why a requested tail is missing; never an empty tail that
+                // reads like a workload with nothing to say.
+                diagnostic: inspected.log_error.map(str::to_owned),
+                process_logs: inspected.logs,
                 schema_version: 1,
                 request_id: Some(inspection.request_id),
                 status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
                 exit_code: None,
                 error_code: None,
-                process_running: Some(running),
+                process_running: Some(inspected.running),
             },
         );
     }
@@ -408,8 +413,8 @@ fn handle(
             HelperRejection::for_operation(&request_id, &request.claims.operation, error)
         })?;
     let response = HelperResponse {
-        diagnostic: None,
-        process_logs: None,
+        diagnostic: outcome.diagnostic.clone(),
+        process_logs: outcome.process_logs.clone().map(Box::new),
         schema_version: 1,
         request_id: Some(request.claims.request_id),
         status: outcome.status,
