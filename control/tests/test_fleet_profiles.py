@@ -2736,6 +2736,86 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
         )
 
 
+def test_all_idle_profile_stops_a_lost_run_that_still_has_residue(
+    tmp_path: Path,
+) -> None:
+    """A lost run owns capacity and residue: an idle profile must still stop it.
+
+    Wrong implementation this catches: stop selection read the active-run set,
+    which excludes ``lost``, so the profile saw nothing to stop and the residue
+    stayed on the Spark forever.
+    """
+
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import (
+        installed_recipe,
+        setup_services,
+        started_recipe,
+    )
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=_uuid(1642),
+    )
+    run = started_recipe(
+        sessions,
+        lifecycle,
+        installation.owner_id,
+        nodes,
+        request_id=_uuid(1643),
+    )
+    with sessions.begin() as session:
+        lost = session.get(RecipeRun, run.owner_id)
+        assert lost is not None
+        lost.state = "lost"
+        assert session.scalar(select(RunNode.id).where(RunNode.run_id == lost.id))
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
+    )
+    profile = service.create(
+        FleetProfileInput(name="All idle over a lost run", assignments=[]),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    assert [step.kind for step in preview.steps] == ["switch"]
+
+    application = service.apply(
+        profile.id,
+        request_key=_uuid(1644),
+        actor="admin",
+    )
+    assert service.tick() is True
+    state = service.application(application.id).progress.switch_adapter
+    assert state is not None
+    child_id = state.active_operation_id
+    assert isinstance(child_id, str)
+    child = run_switch.get(child_id)
+    assert child.kind == "recipe.stop.v2"
+    assert child.node_ids == list(nodes)
+
+
 def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)

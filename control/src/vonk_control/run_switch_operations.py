@@ -1945,9 +1945,13 @@ class RecipeLifecyclePhaseExecutor:
                     and status.route_state == "withdrawn"
                     and all(rank.state == "stopped" for rank in status.ranks)
                 )
-                waiting = status.state in ACTIVE_RUN_STATES or status.route_state in {
-                    "pending",
-                }
+                waiting = (
+                    status.state in STOPPABLE_RUN_STATES
+                    or status.route_state
+                    in {
+                        "pending",
+                    }
+                )
                 status_reason = (
                     f"run-switch.stop-verification-pending: run {run_id} is "
                     f"{status.state}, route is {status.route_state}"
@@ -2167,7 +2171,7 @@ class RecipeLifecyclePhaseExecutor:
                     )
                 )
             )
-            active_runs = sum(run.state in ACTIVE_RUN_STATES for run in runs)
+            active_runs = sum(run.state in STOPPABLE_RUN_STATES for run in runs)
             unwithdrawn_routes = sum(run.route_state != "withdrawn" for run in runs)
             verified = (
                 installation.state == "installed"

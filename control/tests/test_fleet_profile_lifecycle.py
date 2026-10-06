@@ -482,6 +482,31 @@ def test_an_application_row_is_written_only_through_the_adapter() -> None:
     assert writes == []
 
 
+def test_profile_stop_selection_never_uses_the_active_run_set() -> None:
+    """The class, guarded: a stop reads the stoppable set, which keeps ``lost``.
+
+    ``ACTIVE_RUN_STATES`` excludes a lost run, so a stop selected from it would
+    leave that run's residue on the Spark forever.  Admission and capacity code
+    elsewhere may keep the active set; the profile module decides only what to
+    stop and what is observed, so it must not name it at all.
+    """
+
+    import ast
+    from pathlib import Path
+
+    import vonk_control.fleet_profiles as module
+
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    uses = sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if (isinstance(node, ast.Name) and node.id == "ACTIVE_RUN_STATES")
+        or (isinstance(node, ast.alias) and node.name == "ACTIVE_RUN_STATES")
+        or (isinstance(node, ast.Attribute) and node.attr == "ACTIVE_RUN_STATES")
+    )
+    assert uses == []
+
+
 # ----------------------------------------- the exact rows an older Controller left
 
 

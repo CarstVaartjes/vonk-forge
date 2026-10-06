@@ -113,7 +113,6 @@ from .lifecycle.types import Effect as _LifecycleEffect
 from .lifecycle.types import State as _LifecycleState
 from .logging import redact_text
 from .models import (
-    ACTIVE_RUN_STATES,
     STOPPABLE_RUN_STATES,
     AgentNode,
     AgentNodeProfile,
@@ -4791,7 +4790,7 @@ class FleetProfileService:
         active_runs = tuple(
             session.scalars(
                 select(RecipeRun)
-                .where(RecipeRun.state.in_(ACTIVE_RUN_STATES))
+                .where(RecipeRun.state.in_(STOPPABLE_RUN_STATES))
                 .order_by(RecipeRun.created_at, RecipeRun.id)
             )
         )
@@ -9779,7 +9778,7 @@ class FleetProfileService:
             select(RecipeRun)
             .where(
                 RecipeRun.installation_id == installation.id,
-                RecipeRun.state.in_(ACTIVE_RUN_STATES),
+                RecipeRun.state.in_(STOPPABLE_RUN_STATES),
             )
             .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())
             .limit(1)
