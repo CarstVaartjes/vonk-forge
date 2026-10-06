@@ -47,7 +47,7 @@ reason); a child that is left running keeps its own lifecycle.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -58,12 +58,19 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
+    canonical_message,
 )
 
 from .. import job_states
 from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
+from ..run_switch_contract import (
+    RunSwitchMemberReceipt,
+    RunSwitchMemberState,
+    RunSwitchOperationResult,
+)
+from ..run_switch_observation_contract import RunSwitchStoredIdentity
 from .adapter import Dispatch
 from .agent_operation import AgentOperationAdapter
 from .composite import aggregate
@@ -114,15 +121,6 @@ _CANCEL_EFFECT_UNKNOWN = (
 Stopper = Callable[[Session, Job, datetime], bool]
 
 
-def _when(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return aware(datetime.fromisoformat(value))
-    except ValueError:
-        return None
-
-
 def _count(value: object) -> int:
     """``retry_attempt`` is the next attempt: the count so far is one less."""
 
@@ -130,18 +128,21 @@ def _count(value: object) -> int:
 
 
 def _intent_ordinal(job: Job) -> int | None:
-    ordinal = (
-        job.payload.get("workload_intent_ordinal")
-        if isinstance(job.payload, Mapping)
-        else None
-    )
-    return ordinal if type(ordinal) is int else None
+    try:
+        identity = RunSwitchStoredIdentity.model_validate_json(
+            canonical_message(job.payload), strict=True
+        )
+    except (TypeError, ValueError):
+        return None
+    return identity.workload_intent_ordinal
 
 
-def set_member_state(entry: MutableMapping[str, object], state: str) -> None:
+def set_member_state(
+    entry: RunSwitchMemberReceipt, state: RunSwitchMemberState
+) -> None:
     """The only writer of a member's progress ``state`` (a projection, not a row)."""
 
-    entry["state"] = state
+    entry.state = state
 
 
 class RunSwitchAdapter:
@@ -188,13 +189,16 @@ class RunSwitchAdapter:
     def adopt(self, stored: Job) -> Lifecycle:
         """Map a stored (possibly legacy) operation onto the core."""
 
-        result = stored.result
-        return self.lifecycle(
-            stored, result if isinstance(result, Mapping) else {}, self.now()
-        )
+        try:
+            result = RunSwitchOperationResult.model_validate_json(
+                canonical_message(stored.result), strict=True
+            )
+        except (TypeError, ValueError):
+            result = RunSwitchOperationResult()
+        return self.lifecycle(stored, result, self.now())
 
     def lifecycle(
-        self, job: Job, progress: Mapping[str, object], now: datetime
+        self, job: Job, progress: RunSwitchOperationResult, now: datetime
     ) -> Lifecycle:
         """The lifecycle row of a stored operation, defaulting what a legacy row lacks.
 
@@ -207,8 +211,12 @@ class RunSwitchAdapter:
         """
 
         now = aware(now)
-        due = _when(progress.get("observation_due_at"))
-        retry_reason = progress.get("retry_reason")
+        due = (
+            aware(progress.observation_due_at)
+            if progress.observation_due_at is not None
+            else None
+        )
+        retry_reason = progress.retry_reason
         retrying = isinstance(retry_reason, str) and bool(retry_reason)
         stored = job.state
         if stored == "queued":
@@ -230,7 +238,7 @@ class RunSwitchAdapter:
             state = State.CANCELLED
         else:  # a state this adapter does not know: re-evaluate it
             state = State.NEEDS_OPERATOR
-        child = progress.get("child_operation_id")
+        child = progress.child_operation_id
         issued = isinstance(child, str) and bool(child)
         if state is State.SUCCEEDED:
             effect = Effect.ESTABLISHED
@@ -239,7 +247,7 @@ class RunSwitchAdapter:
         else:
             effect = Effect.ISSUED if issued else Effect.NONE
         requested_at, request_key = self._cancel_request(progress, now)
-        count = _count(progress.get("retry_attempt"))
+        count = _count(progress.retry_attempt)
         return Lifecycle(
             id=job.id,
             kind=KIND,
@@ -260,13 +268,13 @@ class RunSwitchAdapter:
 
     @staticmethod
     def _cancel_request(
-        progress: Mapping[str, object], now: datetime
+        progress: RunSwitchOperationResult, now: datetime
     ) -> tuple[datetime | None, str | None]:
-        cancellation = progress.get("cancellation")
-        if not isinstance(cancellation, Mapping):
+        cancellation = progress.cancellation
+        if cancellation is None:
             return None, None
-        requested = _when(cancellation.get("requested_at")) or now
-        key = cancellation.get("request_key")
+        requested = aware(cancellation.requested_at)
+        key = cancellation.request_key
         return requested, key if isinstance(key, str) else None
 
     # ----------------------------------------------------- the kind's facts
@@ -358,7 +366,7 @@ class RunSwitchAdapter:
     def apply(
         self,
         job: Job,
-        progress: MutableMapping[str, object] | None,
+        progress: RunSwitchOperationResult | None,
         before: Lifecycle,
         after: Lifecycle,
         now: datetime,
@@ -384,21 +392,19 @@ class RunSwitchAdapter:
         if progress is not None:
             if after.state in {State.BACKOFF, State.OBSERVING}:
                 if after.next_action_at is not None:
-                    progress["observation_due_at"] = aware(
-                        after.next_action_at
-                    ).isoformat()
+                    progress.observation_due_at = aware(after.next_action_at)
                 count = (
                     after.retry_count
                     if after.state is State.BACKOFF
                     else after.observe_count
                 )
                 if count > 0:
-                    progress["retry_attempt"] = count + 1
+                    progress.retry_attempt = count + 1
             if retry_reason is not _KEEP:
                 if retry_reason is None:
-                    progress.pop("retry_reason", None)
+                    progress.retry_reason = None
                 else:
-                    progress["retry_reason"] = retry_reason[:_MAX_REASON]
+                    progress.retry_reason = retry_reason[:_MAX_REASON]
             if after.terminal:
                 if (
                     after.state is State.CANCELLED
@@ -406,16 +412,16 @@ class RunSwitchAdapter:
                 ):
                     # The child's phase ended: nothing of it is outstanding.  An
                     # unknown effect keeps the child's identity as the evidence.
-                    progress["child_operation_id"] = None
-                progress["retryable"] = retryable
+                    progress.child_operation_id = None
+                progress.retryable = retryable
                 if after.state is State.FAILED:
-                    progress["failed_phase"] = progress.get("phase")
+                    progress.failed_phase = progress.phase
                     if failure_code is None:
-                        progress.pop("failure_code", None)
+                        progress.failure_code = None
                     else:
-                        progress["failure_code"] = failure_code
+                        progress.failure_code = failure_code
             elif after.state is State.BACKOFF:
-                progress["retryable"] = False
+                progress.retryable = False
         job.updated_at = now
 
     # ---------------------------------------------------------------- settle
@@ -423,7 +429,7 @@ class RunSwitchAdapter:
     def settle(
         self,
         job: Job,
-        progress: MutableMapping[str, object],
+        progress: RunSwitchOperationResult,
         event: Event,
         now: datetime,
         **write: Any,
@@ -440,7 +446,7 @@ class RunSwitchAdapter:
     def settled(
         self,
         job: Job,
-        progress: MutableMapping[str, object],
+        progress: RunSwitchOperationResult,
         event: Event,
         now: datetime,
         *,
@@ -491,17 +497,16 @@ class RunSwitchAdapter:
 
     @staticmethod
     def _cancelled_reason(
-        progress: Mapping[str, object], after: Lifecycle, write: Mapping[str, Any]
+        progress: RunSwitchOperationResult, after: Lifecycle, write: Mapping[str, Any]
     ) -> str | None:
         given = write.get("reason", _KEEP)
         explicit = given is not _KEEP and given is not None
-        cancellation = progress.get("cancellation")
+        cancellation = progress.cancellation
         base = (
             given
             if explicit
-            else cancellation.get("reason")
-            if isinstance(cancellation, Mapping)
-            and isinstance(cancellation.get("reason"), str)
+            else cancellation.reason
+            if cancellation is not None and isinstance(cancellation.reason, str)
             else None
         )
         if after.effect is Effect.UNKNOWN and not explicit:
@@ -511,7 +516,7 @@ class RunSwitchAdapter:
         return base
 
     def decide(
-        self, job: Job, progress: Mapping[str, object], event: Event, now: datetime
+        self, job: Job, progress: RunSwitchOperationResult, event: Event, now: datetime
     ) -> Decision:
         """The core's decision for ``event`` without writing it (tests and probes)."""
 
@@ -523,7 +528,7 @@ class RunSwitchAdapter:
     def retry(
         self,
         job: Job,
-        progress: MutableMapping[str, object],
+        progress: RunSwitchOperationResult,
         reason: str,
         now: datetime,
         *,
@@ -539,8 +544,8 @@ class RunSwitchAdapter:
         never fails for it.  A cancel in flight wins and is driven instead.
         """
 
-        if reset_on_change and progress.get("retry_reason") != reason[:_MAX_REASON]:
-            progress.pop("retry_attempt", None)
+        if reset_on_change and progress.retry_reason != reason[:_MAX_REASON]:
+            progress.retry_attempt = None
         row = self.settle(
             job,
             progress,
@@ -568,7 +573,7 @@ class RunSwitchAdapter:
     def fail(
         self,
         job: Job,
-        progress: MutableMapping[str, object],
+        progress: RunSwitchOperationResult,
         reason: str,
         now: datetime,
         *,
@@ -588,7 +593,7 @@ class RunSwitchAdapter:
         )
 
     def succeed(
-        self, job: Job, progress: MutableMapping[str, object], now: datetime
+        self, job: Job, progress: RunSwitchOperationResult, now: datetime
     ) -> Lifecycle:
         return self.settle(
             job, progress, Reported(Outcome.DONE), now, reason=None, retry_reason=None
@@ -597,7 +602,7 @@ class RunSwitchAdapter:
     def request_cancel(
         self,
         job: Job,
-        progress: MutableMapping[str, object],
+        progress: RunSwitchOperationResult,
         now: datetime,
         *,
         reason: str | None = None,
@@ -614,7 +619,7 @@ class RunSwitchAdapter:
         ).row
 
     def tick_cancel(
-        self, job: Job, progress: MutableMapping[str, object], now: datetime
+        self, job: Job, progress: RunSwitchOperationResult, now: datetime
     ) -> bool:
         """One stop attempt of a cancel in flight (the core spaces and bounds them).
 
@@ -627,7 +632,7 @@ class RunSwitchAdapter:
     def cancelled(
         self,
         job: Job,
-        progress: MutableMapping[str, object],
+        progress: RunSwitchOperationResult,
         now: datetime,
         *,
         reason: str | None,
@@ -663,7 +668,7 @@ class RunSwitchAdapter:
     def project(
         self,
         job: Job,
-        progress: MutableMapping[str, object] | None,
+        progress: RunSwitchOperationResult | None,
         now: datetime,
         *,
         state: State,
@@ -675,7 +680,7 @@ class RunSwitchAdapter:
         ``running``, ``queued``, or observing until ``due``."""
 
         now = aware(now)
-        before = self.lifecycle(job, progress or {}, now)
+        before = self.lifecycle(job, progress or RunSwitchOperationResult(), now)
         if before.terminal:
             return before
         after = replace(
@@ -687,7 +692,7 @@ class RunSwitchAdapter:
         return after
 
     def heal(
-        self, job: Job, progress: MutableMapping[str, object], now: datetime
+        self, job: Job, progress: RunSwitchOperationResult, now: datetime
     ) -> Lifecycle:
         """Re-evaluate a legacy row that waits with no clock (``waiting-for-operator``).
 
