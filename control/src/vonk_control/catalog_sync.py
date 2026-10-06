@@ -42,6 +42,7 @@ from .recipe_library_types import (
     RecipeLibrarySnapshot,
 )
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from .source_bundles import SourceBundleUnknown
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RESULT_ITEMS = 256
@@ -552,6 +553,10 @@ class ManagedRecipeCatalogSyncService:
                         result.imported_count += 1
                     else:
                         result.updated_count += 1
+                except SourceBundleUnknown as error:
+                    # Keep the previous revision; the automatic sync retries
+                    # this exact source ingress on its next bounded pass.
+                    self._record_problem(result, item, error.code, error.detail)
                 except Exception as error:  # noqa: BLE001 - isolate untyped fetch failures per recipe
                     self._record_problem(
                         result,

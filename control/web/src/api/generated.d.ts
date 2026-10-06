@@ -3486,6 +3486,22 @@ export interface components {
             /** Stops */
             stops: components["schemas"]["StopImpact"][];
         };
+        /**
+         * FleetProfileAdoptedApplicationEffect
+         * @description An exact continuing executor authorized by the newer reviewed snapshot.
+         */
+        FleetProfileAdoptedApplicationEffect: {
+            /** Application Id */
+            application_id: string;
+            /** Assignment Ids */
+            assignment_ids: string[];
+            /** Node Ids */
+            node_ids: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal: number;
+        };
         /** FleetProfileApplicationCancelRequest */
         FleetProfileApplicationCancelRequest: {
             /** Profile Number */
@@ -3789,7 +3805,7 @@ export interface components {
         /** FleetProfileAssignmentPreview */
         FleetProfileAssignmentPreview: {
             /** Actions */
-            actions: ("switch" | "keep")[];
+            actions: ("switch" | "keep" | "adopt")[];
             /** Assignment Id */
             assignment_id: string;
             current_state: components["schemas"]["ObservedAssignmentState"];
@@ -3930,6 +3946,8 @@ export interface components {
          * @description Identified live effects, including complete distributed membership.
          */
         FleetProfileEffects: {
+            /** Adopted */
+            adopted?: components["schemas"]["FleetProfileAdoptedApplicationEffect"][];
             /** Installations */
             installations: components["schemas"]["FleetProfileInstallationEffect"][];
             /** Runs */
