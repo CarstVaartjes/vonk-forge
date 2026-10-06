@@ -1415,7 +1415,7 @@ class RecipeLifecyclePhaseExecutor:
                 )
             except (TypeError, ValueError) as error:
                 raise RunSwitchRetryLater(
-                    f"run-switch.container-build-plan-invalid: {error}",
+                    f"{RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID}: {error}",
                     reason=WaitReason.STALE_PLAN,
                 ) from error
         child_key = str(uuid.uuid5(uuid.UUID(request_key), "container-build"))
@@ -1437,7 +1437,7 @@ class RecipeLifecyclePhaseExecutor:
             ValueError,
         ) as error:
             raise RunSwitchRetryLater(
-                f"run-switch.container-build-start-unavailable: {error}",
+                f"{RunSwitchCode.CONTAINER_BUILD_START_UNAVAILABLE}: {error}",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         with self._sessions.begin() as session:
@@ -1679,7 +1679,7 @@ class RecipeLifecyclePhaseExecutor:
                         )
                     except ProfileHandoffInconsistent as error:
                         raise RunSwitchRetryLater(
-                            f"run-switch.installation-handoff-inconsistent: {error}",
+                            f"{RunSwitchCode.INSTALLATION_HANDOFF_INCONSISTENT}: {error}",
                             reason=WaitReason.SCOPE_CHANGED,
                         ) from error
                     if handed_off is not None:
@@ -1732,7 +1732,7 @@ class RecipeLifecyclePhaseExecutor:
                 ValueError,
             ) as error:
                 raise RunSwitchRetryLater(
-                    f"run-switch.install-plan-unavailable: {error}",
+                    f"{RunSwitchCode.INSTALL_PLAN_UNAVAILABLE}: {error}",
                     reason=WaitReason.STALE_PLAN,
                 ) from error
             prepare_installation = getattr(
@@ -1770,7 +1770,7 @@ class RecipeLifecyclePhaseExecutor:
                 ValueError,
             ) as error:
                 raise RunSwitchRetryLater(
-                    f"run-switch.install-preparation-failed: {error}"
+                    f"{RunSwitchCode.INSTALL_PREPARATION_FAILED}: {error}"
                 ) from error
             prepared_id = _required_string(installation_id)
             with self._sessions() as session:
@@ -1840,7 +1840,7 @@ class RecipeLifecyclePhaseExecutor:
                 ValueError,
             ) as error:
                 raise RunSwitchRetryLater(
-                    f"run-switch.install-start-failed: {error}"
+                    f"{RunSwitchCode.INSTALL_START_FAILED}: {error}"
                 ) from error
             return PhaseExecution(
                 _started_operation_id(value),
@@ -1957,7 +1957,7 @@ class RecipeLifecyclePhaseExecutor:
                     ValueError,
                 ) as error:
                     raise RunSwitchRetryLater(
-                        f"run-switch.reconciliation-start-failed: {error}"
+                        f"{RunSwitchCode.RECONCILIATION_START_FAILED}: {error}"
                     ) from error
                 return PhaseExecution(value.id, {"installation_id": installation_id})
             if plan.cleanup_disposition == "abandon":
@@ -1975,7 +1975,7 @@ class RecipeLifecyclePhaseExecutor:
                     ValueError,
                 ) as error:
                     raise RunSwitchRetryLater(
-                        f"run-switch.uninstall-abandon-failed: {error}"
+                        f"{RunSwitchCode.UNINSTALL_ABANDON_FAILED}: {error}"
                     ) from error
                 return PhaseExecution(
                     result={
@@ -2022,7 +2022,7 @@ class RecipeLifecyclePhaseExecutor:
                 ValueError,
             ) as error:
                 raise RunSwitchRetryLater(
-                    f"run-switch.uninstall-start-failed: {error}"
+                    f"{RunSwitchCode.UNINSTALL_START_FAILED}: {error}"
                 ) from error
             return PhaseExecution(value.id, {"installation_id": installation_id})
         if phase.kind == "final_verify":
@@ -2101,12 +2101,12 @@ class RecipeLifecyclePhaseExecutor:
                     if status.state in {"failed", "lost", "stopped"}:
                         detail = route_error or "run owner reached a terminal state"
                         raise RunSwitchRetryLater(
-                            f"run-switch.run-owner-terminal: {status.state}; {detail}"
+                            f"{RunSwitchCode.RUN_OWNER_TERMINAL}: {status.state}; {detail}"
                         )
                     if status.route_state == "failed":
                         detail = route_error or "route owner reported terminal failure"
                         raise RunSwitchRetryLater(
-                            f"run-switch.route-owner-failed: {detail}"
+                            f"{RunSwitchCode.ROUTE_OWNER_FAILED}: {detail}"
                         )
                     waiting = True
                     route_cause = f"route is {status.route_state}"

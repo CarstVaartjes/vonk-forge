@@ -15,7 +15,8 @@ that does not parse, evidence that is unavailable, a receipt that is missing) is
 bookkeeping that should become *unknown*: observe, reconcile, continue.
 
 ``python -m control.tests.blocker_classifier --summary`` prints the counts per
-category and rule; ``--classify-new`` appends the proposed families.
+category and rule; ``--classify-new`` appends the proposed families; ``--demote-unproven`` moves
+every already-retried unknown-outcome site without a proven retry loop to debt.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from .blocker_boundaries import (
     parsed_modules,
     scan_raises,
 )
+from .blocker_retries import demote_unproven, proven, unknown_classes
 
 SECURITY = BlockerCategory.SECURITY_EDGE.value
 INPUT = BlockerCategory.INPUT_VALIDATION.value
@@ -190,13 +192,14 @@ _DEBT_TEXT = re.compile(
 
 
 #: The contract's raisable base of each category, and the family category a raise
-#: of a class derived from it belongs to.  A class names its category by its type:
-#: an unknown outcome is observed and reconciled by the lifecycle core, so a raise
-#: of one is a handoff and never a dead end.
+#: of a class derived from it belongs to.  Security and invalid-request classes
+#: name their category by type.  An unknown outcome does *not*: raising one is a
+#: handoff only where a registered retry or observe loop is proven to catch and
+#: retry it (``blocker_retries``); everywhere else it is still bookkeeping debt.
 _TYPED_BASES = {
     "SecurityRefusalError": SECURITY,
     "InvalidRequestError": INPUT,
-    "UnknownOutcomeError": RETRIED,
+    "UnknownOutcomeError": DEBT,
 }
 
 
@@ -316,7 +319,7 @@ def _input_class(site: RaiseSite) -> str | None:
     return None
 
 
-def classify(site: RaiseSite) -> Verdict:
+def classify(site: RaiseSite, document: dict[str, object] | None = None) -> Verdict:
     """The proposed category of ``site`` and the rule that chose it.
 
     Order matters.  A security class is security whatever its message; a busy or
@@ -330,6 +333,20 @@ def classify(site: RaiseSite) -> Verdict:
     if site.exception_class in _CLASS_VERDICTS:
         return Verdict(*_CLASS_VERDICTS[site.exception_class])
     typed = _typed_classes().get(site.exception_class)
+    if typed == DEBT and site.exception_class in unknown_classes():
+        if document is not None and proven(
+            document, site.path, site.exception_class, site.function
+        ):
+            return Verdict(
+                RETRIED,
+                f"class {site.exception_class} is caught and retried by a "
+                "registered retry loop",
+            )
+        return Verdict(
+            DEBT,
+            f"class {site.exception_class} is an unknown outcome with no proven "
+            "retry loop",
+        )
     if typed is not None:
         return Verdict(
             typed, f"class {site.exception_class} is of the {typed} error type"
@@ -383,7 +400,7 @@ def propose_families(
     for site in sites:
         if site.identity in listed:
             continue
-        verdict = classify(site)
+        verdict = classify(site, document)
         grouped[(site.path, verdict.category)][site.identity] += 1
         rules[(site.path, verdict.category)].add(verdict.rule)
     families: list[dict[str, object]] = []
@@ -468,7 +485,7 @@ def summary(document: dict[str, object]) -> str:
         category = (
             listed[site.identity][1]
             if site.identity in listed
-            else classify(site).category
+            else classify(site, document).category
         )
         table[("audited" if site.path in audited else "other", category)] += 1
     lines = [f"error-class raise sites: {len(sites)}"]
@@ -493,6 +510,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         ALLOWLIST_PATH.write_text(dump_document(document), encoding="utf-8")
         added = sum(len(family["sites"]) for family in families)  # type: ignore[arg-type]
         print(f"appended {len(families)} families covering {added} site keys")
+        return 0
+    if arguments == ["--demote-unproven"]:
+        moved = demote_unproven(document)
+        ALLOWLIST_PATH.write_text(dump_document(document), encoding="utf-8")
+        print(f"moved {moved} unproven already-retried sites to bookkeeping-debt")
         return 0
     print(__doc__)
     return 2

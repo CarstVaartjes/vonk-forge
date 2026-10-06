@@ -579,7 +579,10 @@ def recovery_start_plan(
     deadline_value = value["deadline"]
     phases = _decode_phases(value.get("start_phases"))
     if phases is None:
-        raise DistributedLifecycleError("distributed recovery phases are invalid")
+        raise DistributedRecoveryInvalid(
+            "distributed recovery phases are invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
     marker = {
         "schema_version": 1,
         "failed_rank": failed_rank,

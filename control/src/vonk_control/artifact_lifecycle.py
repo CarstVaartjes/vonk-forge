@@ -158,7 +158,7 @@ class ArtifactRemovalFenceLost(SecurityRefusalError, ArtifactLifecycleError):
         detail: str,
         *,
         retryable: bool = False,
-        reason: SecurityRefusalReason = SecurityRefusalReason.FORBIDDEN,
+        reason: SecurityRefusalReason = SecurityRefusalReason.STALE_FENCE,
     ) -> None:
         ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
         self.typed_reason = reason

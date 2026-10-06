@@ -222,16 +222,19 @@ def test_run_switch_leaves_keep_the_definite_flag_and_the_legacy_conflict() -> N
 
 def test_recipe_operation_leaves_for_first_half_classes() -> None:
     from vonk_control import recipe_operations
-    from vonk_control.distributed_lifecycle import DistributedLifecycleError
+    from vonk_control.distributed_lifecycle import (
+        DistributedLifecycleError,
+        DistributedRecoveryInvalid,
+    )
     from vonk_control.install_admission import InstallAdmissionBusy
 
-    busy = recipe_operations.RecipeInstallBusy(
+    busy = InstallAdmissionBusy(
         "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
     )
     assert isinstance(busy, InstallAdmissionBusy)
     assert busy.typed_error() is not None
     _only(busy, UnknownOutcomeError)
-    superseded = recipe_operations.RecipeRecoverySuperseded("newer intent")
+    superseded = DistributedRecoveryInvalid("newer intent")
     assert isinstance(superseded, DistributedLifecycleError)
     _only(superseded, InvalidRequestError)
     _only(recipe_operations._RouteNotWithdrawn("run"), UnknownOutcomeError)

@@ -371,6 +371,7 @@ class ProfileReasonCode(WireEnum):
     CHOICES_UNREADABLE = "profile.choices_unreadable"
     CLEANUP_DELEGATED = "profile.cleanup_delegated"
     DISTRIBUTED_CROSS_SCOPE = "profile.distributed_cross_scope"
+    FAILURE_REPEATED = "profile.failure_repeated"
     INCOMPLETE_MULTI_SPARK_MODEL = "profile.incomplete_multi_spark_model"
     INTERRUPTION_EXPECTED = "profile.interruption_expected"
     PENDING_CROSS_SCOPE = "profile.pending_cross_scope"

@@ -61,7 +61,7 @@ def test_unsafe_storage_key_is_a_security_refusal(tmp_path: Path) -> None:
     digest = hashlib.sha256(b"x").hexdigest()
     with pytest.raises(ArtifactBlobUnsafePath) as caught:
         store.resolve("../escape", digest, 1)
-    assert caught.value.typed_reason is SecurityRefusalReason.FORBIDDEN
+    assert caught.value.typed_reason is SecurityRefusalReason.UNSAFE_PATH
 
 
 def test_missing_bytes_are_unknown_and_still_file_not_found(tmp_path: Path) -> None:

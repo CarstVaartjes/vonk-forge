@@ -160,7 +160,7 @@ class ArtifactBlobStore:
             if digest.hexdigest() != expected_sha256:
                 raise ArtifactBlobDigestMismatch(
                     "artifact upload SHA-256 does not match",
-                    reason=SecurityRefusalReason.CONTROLLER_REQUEST_REJECTED,
+                    reason=SecurityRefusalReason.DIGEST_MISMATCH,
                 )
             return existing
         assert reservation is not None
@@ -199,7 +199,7 @@ class ArtifactBlobStore:
             if digest.hexdigest() != expected_sha256:
                 raise ArtifactBlobDigestMismatch(
                     "artifact upload SHA-256 does not match",
-                    reason=SecurityRefusalReason.CONTROLLER_REQUEST_REJECTED,
+                    reason=SecurityRefusalReason.DIGEST_MISMATCH,
                 )
             stored = self._commit(temporary, expected_sha256, observed)
             temporary = Path()
@@ -225,7 +225,7 @@ class ArtifactBlobStore:
         if hashlib.sha256(content).hexdigest() != expected_sha256:
             raise ArtifactBlobDigestMismatch(
                 "artifact upload SHA-256 does not match",
-                reason=SecurityRefusalReason.CONTROLLER_REQUEST_REJECTED,
+                reason=SecurityRefusalReason.DIGEST_MISMATCH,
             )
         self._prepare_root()
         reservation, existing = self._reserve(expected_sha256, len(content))
@@ -258,7 +258,7 @@ class ArtifactBlobStore:
         if storage_key != expected_key:
             raise ArtifactBlobUnsafePath(
                 "artifact storage key is invalid",
-                reason=SecurityRefusalReason.FORBIDDEN,
+                reason=SecurityRefusalReason.UNSAFE_PATH,
             )
         path = self._root / sha256[:2] / sha256
         if path.is_symlink() or not path.is_file() or path.stat().st_size != size_bytes:
@@ -283,13 +283,13 @@ class ArtifactBlobStore:
         if storage_key != expected_key:
             raise ArtifactBlobUnsafePath(
                 "artifact storage key is invalid",
-                reason=SecurityRefusalReason.FORBIDDEN,
+                reason=SecurityRefusalReason.UNSAFE_PATH,
             )
         path = self._root / storage_key
         if path.is_symlink():
             raise ArtifactBlobUnsafePath(
                 "artifact storage path is unsafe",
-                reason=SecurityRefusalReason.FORBIDDEN,
+                reason=SecurityRefusalReason.UNSAFE_PATH,
             )
         if path.exists():
             path.unlink()
@@ -509,7 +509,7 @@ class ArtifactBlobStore:
         if self._root.is_symlink() or not self._root.is_dir():
             raise ArtifactBlobUnsafePath(
                 "artifact storage root is unsafe",
-                reason=SecurityRefusalReason.FORBIDDEN,
+                reason=SecurityRefusalReason.UNSAFE_PATH,
             )
         for name in (".tmp", ".reservations"):
             path = self._root / name
@@ -517,7 +517,7 @@ class ArtifactBlobStore:
             if path.is_symlink() or not path.is_dir():
                 raise ArtifactBlobUnsafePath(
                     "artifact storage metadata path is unsafe",
-                    reason=SecurityRefusalReason.FORBIDDEN,
+                    reason=SecurityRefusalReason.UNSAFE_PATH,
                 )
 
     def _stored_bytes(self) -> int:

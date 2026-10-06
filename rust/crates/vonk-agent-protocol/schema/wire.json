@@ -5142,6 +5142,7 @@
         "profile.choices_unreadable",
         "profile.cleanup_delegated",
         "profile.distributed_cross_scope",
+        "profile.failure_repeated",
         "profile.incomplete_multi_spark_model",
         "profile.interruption_expected",
         "profile.pending_cross_scope",
@@ -7573,6 +7574,7 @@
         "controller.authentication_required",
         "controller.fleet.enrollment_denied",
         "controller.request_rejected",
+        "digest_verification_failed",
         "distribution.revoked",
         "forbidden",
         "grant_invalid",
@@ -7606,9 +7608,11 @@
         "runtime_image.authorization_invalid",
         "runtime_image.authorization_revoked",
         "runtime_image_identity_invalid",
+        "stale_fence",
         "tuf.metadata_invalid",
         "tuf.signature_invalid",
-        "unauthorized"
+        "unauthorized",
+        "unsafe_path"
       ],
       "title": "SecurityRefusalReason",
       "type": "string"

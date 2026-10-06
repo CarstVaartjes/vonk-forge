@@ -44,7 +44,9 @@ def _site(
         (_site("StaleAgentAttempt", "fence is stale"), SECURITY),
         (_site("SourceBundleError", "bundle.digest_mismatch"), SECURITY),
         (_site("RecipeBuildError", "build.signature_invalid"), SECURITY),
-        (_site("InstallAdmissionBusy", "install.capacity_busy"), RETRIED),
+        # An unknown-outcome class is a handoff only where a registered loop is
+        # proven to retry it (test_blocker_retries); by type alone it is debt.
+        (_site("InstallAdmissionBusy", "install.capacity_busy"), DEBT),
         (_site("RecipeRouteSuperseded", "route publication was superseded"), RETRIED),
         (_site("CursorError", "operation cursor is invalid"), INPUT),
         (_site("HarnessCompileError", "harness mounts overlap"), INPUT),
@@ -96,8 +98,8 @@ def test_listed_sites_are_not_proposed_again() -> None:
         ("InvalidValue", INPUT),
         ("MissingRecord", INPUT),
         ("SecurityRefused", SECURITY),
-        ("UnsettledOutcome", RETRIED),
-        ("AdmissionLockBusy", RETRIED),
+        ("UnsettledOutcome", DEBT),
+        ("AdmissionLockBusy", DEBT),
     ],
 )
 def test_a_class_of_a_category_type_names_its_family(cls: str, category: str) -> None:

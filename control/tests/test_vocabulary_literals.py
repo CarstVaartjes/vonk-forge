@@ -385,6 +385,29 @@ def test_the_flat_tiers_fail_on_any_occurrence(tmp_path: Path) -> None:
     assert "add the code to its domain enum first" in found[1]
 
 
+def test_a_subclass_constructor_without_a_code_takes_a_detail(tmp_path: Path) -> None:
+    source = """
+from vonk_agent_protocol import RunSwitchCode
+
+
+class BaseError(Exception):
+    def __init__(self, code, detail=""):
+        self.code = code
+
+
+class FixedError(BaseError):
+    def __init__(self, detail):
+        super().__init__(RunSwitchCode.STALE_PLAN, detail)
+
+
+def use():
+    raise FixedError("the stored image reference is invalid")
+"""
+    path = _module(tmp_path, source)
+
+    assert scan.scan_code_positions([path], root=tmp_path) == []
+
+
 # Parses every Controller module twice more.
 @pytest.mark.slow(30)
 def test_the_repository_has_no_free_string_reason_code() -> None:

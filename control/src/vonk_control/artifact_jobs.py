@@ -2177,7 +2177,7 @@ class ArtifactJobService:
             ):
                 raise ArtifactJobRefused(
                     "content-addressed artifact collision",
-                    reason=SecurityRefusalReason.CONTROLLER_REQUEST_REJECTED,
+                    reason=SecurityRefusalReason.DIGEST_MISMATCH,
                 )
             return
         session.add(

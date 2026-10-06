@@ -471,6 +471,7 @@ def scan_code_positions(
     }
     class_index: dict[str, int] = {}
     class_bases: dict[str, list[str]] = {}
+    own_init: set[str] = set()
     for tree in trees.values():
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
@@ -481,6 +482,7 @@ def scan_code_positions(
             ]
             for member in node.body:
                 if isinstance(member, ast.FunctionDef) and member.name == "__init__":
+                    own_init.add(node.name)
                     index = _code_parameter_index(member)
                     if index is not None:
                         class_index[node.name] = index
@@ -488,6 +490,10 @@ def scan_code_positions(
     def class_code_index(name: str, seen: frozenset[str] = frozenset()) -> int | None:
         if name in class_index:
             return class_index[name]
+        if name in own_init:
+            # Its own constructor takes no code (it passes a fixed one up), so a
+            # string given to it is a detail, not a code.
+            return None
         for base in class_bases.get(name, ()):
             if base not in seen:
                 found = class_code_index(base, seen | {name})

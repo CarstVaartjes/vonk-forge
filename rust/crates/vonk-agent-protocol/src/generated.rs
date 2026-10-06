@@ -5296,6 +5296,8 @@ pub enum ProfileReasonCode {
     ProfileCleanupDelegated,
     #[serde(rename = "profile.distributed_cross_scope")]
     ProfileDistributedCrossScope,
+    #[serde(rename = "profile.failure_repeated")]
+    ProfileFailureRepeated,
     #[serde(rename = "profile.incomplete_multi_spark_model")]
     ProfileIncompleteMultiSparkModel,
     #[serde(rename = "profile.interruption_expected")]
@@ -5366,6 +5368,7 @@ impl ::std::fmt::Display for ProfileReasonCode {
             Self::ProfileChoicesUnreadable => f.write_str("profile.choices_unreadable"),
             Self::ProfileCleanupDelegated => f.write_str("profile.cleanup_delegated"),
             Self::ProfileDistributedCrossScope => f.write_str("profile.distributed_cross_scope"),
+            Self::ProfileFailureRepeated => f.write_str("profile.failure_repeated"),
             Self::ProfileIncompleteMultiSparkModel => {
                 f.write_str("profile.incomplete_multi_spark_model")
             }
@@ -5428,6 +5431,7 @@ impl ::std::str::FromStr for ProfileReasonCode {
             "profile.choices_unreadable" => Ok(Self::ProfileChoicesUnreadable),
             "profile.cleanup_delegated" => Ok(Self::ProfileCleanupDelegated),
             "profile.distributed_cross_scope" => Ok(Self::ProfileDistributedCrossScope),
+            "profile.failure_repeated" => Ok(Self::ProfileFailureRepeated),
             "profile.incomplete_multi_spark_model" => Ok(Self::ProfileIncompleteMultiSparkModel),
             "profile.interruption_expected" => Ok(Self::ProfileInterruptionExpected),
             "profile.pending_cross_scope" => Ok(Self::ProfilePendingCrossScope),
@@ -9206,6 +9210,8 @@ pub enum SecurityRefusalReason {
     ControllerFleetEnrollmentDenied,
     #[serde(rename = "controller.request_rejected")]
     ControllerRequestRejected,
+    #[serde(rename = "digest_verification_failed")]
+    DigestVerificationFailed,
     #[serde(rename = "distribution.revoked")]
     DistributionRevoked,
     #[serde(rename = "forbidden")]
@@ -9272,12 +9278,16 @@ pub enum SecurityRefusalReason {
     RuntimeImageAuthorizationRevoked,
     #[serde(rename = "runtime_image_identity_invalid")]
     RuntimeImageIdentityInvalid,
+    #[serde(rename = "stale_fence")]
+    StaleFence,
     #[serde(rename = "tuf.metadata_invalid")]
     TufMetadataInvalid,
     #[serde(rename = "tuf.signature_invalid")]
     TufSignatureInvalid,
     #[serde(rename = "unauthorized")]
     Unauthorized,
+    #[serde(rename = "unsafe_path")]
+    UnsafePath,
 }
 impl ::std::fmt::Display for SecurityRefusalReason {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -9298,6 +9308,7 @@ impl ::std::fmt::Display for SecurityRefusalReason {
                 f.write_str("controller.fleet.enrollment_denied")
             }
             Self::ControllerRequestRejected => f.write_str("controller.request_rejected"),
+            Self::DigestVerificationFailed => f.write_str("digest_verification_failed"),
             Self::DistributionRevoked => f.write_str("distribution.revoked"),
             Self::Forbidden => f.write_str("forbidden"),
             Self::GrantInvalid => f.write_str("grant_invalid"),
@@ -9351,9 +9362,11 @@ impl ::std::fmt::Display for SecurityRefusalReason {
                 f.write_str("runtime_image.authorization_revoked")
             }
             Self::RuntimeImageIdentityInvalid => f.write_str("runtime_image_identity_invalid"),
+            Self::StaleFence => f.write_str("stale_fence"),
             Self::TufMetadataInvalid => f.write_str("tuf.metadata_invalid"),
             Self::TufSignatureInvalid => f.write_str("tuf.signature_invalid"),
             Self::Unauthorized => f.write_str("unauthorized"),
+            Self::UnsafePath => f.write_str("unsafe_path"),
         }
     }
 }
@@ -9371,6 +9384,7 @@ impl ::std::str::FromStr for SecurityRefusalReason {
             "controller.authentication_required" => Ok(Self::ControllerAuthenticationRequired),
             "controller.fleet.enrollment_denied" => Ok(Self::ControllerFleetEnrollmentDenied),
             "controller.request_rejected" => Ok(Self::ControllerRequestRejected),
+            "digest_verification_failed" => Ok(Self::DigestVerificationFailed),
             "distribution.revoked" => Ok(Self::DistributionRevoked),
             "forbidden" => Ok(Self::Forbidden),
             "grant_invalid" => Ok(Self::GrantInvalid),
@@ -9414,9 +9428,11 @@ impl ::std::str::FromStr for SecurityRefusalReason {
             "runtime_image.authorization_invalid" => Ok(Self::RuntimeImageAuthorizationInvalid),
             "runtime_image.authorization_revoked" => Ok(Self::RuntimeImageAuthorizationRevoked),
             "runtime_image_identity_invalid" => Ok(Self::RuntimeImageIdentityInvalid),
+            "stale_fence" => Ok(Self::StaleFence),
             "tuf.metadata_invalid" => Ok(Self::TufMetadataInvalid),
             "tuf.signature_invalid" => Ok(Self::TufSignatureInvalid),
             "unauthorized" => Ok(Self::Unauthorized),
+            "unsafe_path" => Ok(Self::UnsafePath),
             _ => Err("invalid value".into()),
         }
     }
@@ -16596,6 +16612,7 @@ impl ProfileReasonCode {
             Self::ProfileChoicesUnreadable => "profile.choices_unreadable",
             Self::ProfileCleanupDelegated => "profile.cleanup_delegated",
             Self::ProfileDistributedCrossScope => "profile.distributed_cross_scope",
+            Self::ProfileFailureRepeated => "profile.failure_repeated",
             Self::ProfileIncompleteMultiSparkModel => "profile.incomplete_multi_spark_model",
             Self::ProfileInterruptionExpected => "profile.interruption_expected",
             Self::ProfilePendingCrossScope => "profile.pending_cross_scope",
@@ -16675,6 +16692,8 @@ impl<'de> ::serde::Deserialize<'de> for ProfileReasonCode {
             ProfileCleanupDelegated,
             #[serde(rename = "profile.distributed_cross_scope")]
             ProfileDistributedCrossScope,
+            #[serde(rename = "profile.failure_repeated")]
+            ProfileFailureRepeated,
             #[serde(rename = "profile.incomplete_multi_spark_model")]
             ProfileIncompleteMultiSparkModel,
             #[serde(rename = "profile.interruption_expected")]
@@ -16743,6 +16762,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileReasonCode {
             Raw::ProfileChoicesUnreadable => Self::ProfileChoicesUnreadable,
             Raw::ProfileCleanupDelegated => Self::ProfileCleanupDelegated,
             Raw::ProfileDistributedCrossScope => Self::ProfileDistributedCrossScope,
+            Raw::ProfileFailureRepeated => Self::ProfileFailureRepeated,
             Raw::ProfileIncompleteMultiSparkModel => Self::ProfileIncompleteMultiSparkModel,
             Raw::ProfileInterruptionExpected => Self::ProfileInterruptionExpected,
             Raw::ProfilePendingCrossScope => Self::ProfilePendingCrossScope,
@@ -20925,6 +20945,7 @@ impl SecurityRefusalReason {
             Self::ControllerAuthenticationRequired => "controller.authentication_required",
             Self::ControllerFleetEnrollmentDenied => "controller.fleet.enrollment_denied",
             Self::ControllerRequestRejected => "controller.request_rejected",
+            Self::DigestVerificationFailed => "digest_verification_failed",
             Self::DistributionRevoked => "distribution.revoked",
             Self::Forbidden => "forbidden",
             Self::GrantInvalid => "grant_invalid",
@@ -20968,9 +20989,11 @@ impl SecurityRefusalReason {
             Self::RuntimeImageAuthorizationInvalid => "runtime_image.authorization_invalid",
             Self::RuntimeImageAuthorizationRevoked => "runtime_image.authorization_revoked",
             Self::RuntimeImageIdentityInvalid => "runtime_image_identity_invalid",
+            Self::StaleFence => "stale_fence",
             Self::TufMetadataInvalid => "tuf.metadata_invalid",
             Self::TufSignatureInvalid => "tuf.signature_invalid",
             Self::Unauthorized => "unauthorized",
+            Self::UnsafePath => "unsafe_path",
         }
     }
 }
@@ -21028,6 +21051,8 @@ impl<'de> ::serde::Deserialize<'de> for SecurityRefusalReason {
             ControllerFleetEnrollmentDenied,
             #[serde(rename = "controller.request_rejected")]
             ControllerRequestRejected,
+            #[serde(rename = "digest_verification_failed")]
+            DigestVerificationFailed,
             #[serde(rename = "distribution.revoked")]
             DistributionRevoked,
             #[serde(rename = "forbidden")]
@@ -21094,12 +21119,16 @@ impl<'de> ::serde::Deserialize<'de> for SecurityRefusalReason {
             RuntimeImageAuthorizationRevoked,
             #[serde(rename = "runtime_image_identity_invalid")]
             RuntimeImageIdentityInvalid,
+            #[serde(rename = "stale_fence")]
+            StaleFence,
             #[serde(rename = "tuf.metadata_invalid")]
             TufMetadataInvalid,
             #[serde(rename = "tuf.signature_invalid")]
             TufSignatureInvalid,
             #[serde(rename = "unauthorized")]
             Unauthorized,
+            #[serde(rename = "unsafe_path")]
+            UnsafePath,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -21114,6 +21143,7 @@ impl<'de> ::serde::Deserialize<'de> for SecurityRefusalReason {
             Raw::ControllerAuthenticationRequired => Self::ControllerAuthenticationRequired,
             Raw::ControllerFleetEnrollmentDenied => Self::ControllerFleetEnrollmentDenied,
             Raw::ControllerRequestRejected => Self::ControllerRequestRejected,
+            Raw::DigestVerificationFailed => Self::DigestVerificationFailed,
             Raw::DistributionRevoked => Self::DistributionRevoked,
             Raw::Forbidden => Self::Forbidden,
             Raw::GrantInvalid => Self::GrantInvalid,
@@ -21155,9 +21185,11 @@ impl<'de> ::serde::Deserialize<'de> for SecurityRefusalReason {
             Raw::RuntimeImageAuthorizationInvalid => Self::RuntimeImageAuthorizationInvalid,
             Raw::RuntimeImageAuthorizationRevoked => Self::RuntimeImageAuthorizationRevoked,
             Raw::RuntimeImageIdentityInvalid => Self::RuntimeImageIdentityInvalid,
+            Raw::StaleFence => Self::StaleFence,
             Raw::TufMetadataInvalid => Self::TufMetadataInvalid,
             Raw::TufSignatureInvalid => Self::TufSignatureInvalid,
             Raw::Unauthorized => Self::Unauthorized,
+            Raw::UnsafePath => Self::UnsafePath,
         })
     }
 }

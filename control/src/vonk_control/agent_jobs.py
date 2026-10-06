@@ -4115,14 +4115,14 @@ class AgentJobService:
             if hint is None:
                 raise StaleAgentFence(
                     "agent operation lease, certificate, or fence is stale",
-                    reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                    reason=SecurityRefusalReason.STALE_FENCE,
                 )
             operation_id, node_id, serial, parent_job_id = hint
             scopes = self._lock_operation_scopes(session, (operation_id,), node_id)
             if scopes is None or scopes[operation_id][0] != parent_job_id:
                 raise StaleAgentFence(
                     "agent operation authority is stale",
-                    reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                    reason=SecurityRefusalReason.STALE_FENCE,
                 )
             # Certificate rotation replaces the TLS identity while retaining
             # the node's durable ledger. Authenticate current contact under
@@ -4136,7 +4136,7 @@ class AgentJobService:
             if identity is None or not self._identity_is_active(*identity, now):
                 raise StaleAgentFence(
                     "agent certificate is no longer active",
-                    reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                    reason=SecurityRefusalReason.STALE_FENCE,
                 )
             node, certificate = identity
             self._consume_contact(session, source, node, certificate)
@@ -4160,7 +4160,7 @@ class AgentJobService:
             ):
                 raise StaleAgentFence(
                     "agent operation authority or expired attempt is stale",
-                    reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                    reason=SecurityRefusalReason.STALE_FENCE,
                 )
             message, _outcome = stored_report(operation.kind, message)
             validate_result_for_operation(
@@ -4522,21 +4522,21 @@ class AgentJobService:
         if identity_hint is None:
             raise StaleAgentFence(
                 "agent operation lease, certificate, or fence is stale",
-                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                reason=SecurityRefusalReason.STALE_FENCE,
             )
         operation_id, node_id, certificate_serial, parent_job_id = identity_hint
         scopes = self._lock_operation_scopes(session, (operation_id,), node_id)
         if scopes is None or scopes[operation_id][0] != parent_job_id:
             raise StaleAgentFence(
                 "agent operation lease, certificate, or fence is stale",
-                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                reason=SecurityRefusalReason.STALE_FENCE,
             )
         identity = self._lock_identity(session, node_id, certificate_serial)
         now = self._clock()
         if identity is None or not self._identity_is_active(*identity, now):
             raise StaleAgentFence(
                 "agent operation lease, certificate, or fence is stale",
-                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                reason=SecurityRefusalReason.STALE_FENCE,
             )
         node, certificate = identity
         self._consume_contact(session, source, node, certificate)
@@ -4550,7 +4550,7 @@ class AgentJobService:
         ):
             raise StaleAgentFence(
                 "agent operation lease, certificate, or fence is stale",
-                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                reason=SecurityRefusalReason.STALE_FENCE,
             )
         operation = session.scalar(
             select(StoredOperation)
@@ -4561,7 +4561,7 @@ class AgentJobService:
         if operation is None:
             raise StaleAgentFence(
                 "agent operation lease, certificate, or fence is stale",
-                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                reason=SecurityRefusalReason.STALE_FENCE,
             )
         if (
             self._target_scope(parent.targets) != scopes[operation_id][1]
@@ -4590,7 +4590,7 @@ class AgentJobService:
         ):
             raise StaleAgentFence(
                 "agent operation lease, certificate, or fence is stale",
-                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                reason=SecurityRefusalReason.STALE_FENCE,
             )
         attempt = session.scalar(
             select(AgentOperationAttempt)
@@ -4622,7 +4622,7 @@ class AgentJobService:
         ):
             raise StaleAgentFence(
                 "agent operation lease, certificate, or fence is stale",
-                reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+                reason=SecurityRefusalReason.STALE_FENCE,
             )
         self._record_contact(session, node, certificate, now, None, None, None)
         return operation, attempt
@@ -4730,7 +4730,7 @@ class AgentJobService:
             return fence.fence
         raise StaleAgentFence(
             "agent operation lease, certificate, or fence is stale",
-            reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
+            reason=SecurityRefusalReason.STALE_FENCE,
         )
 
     @staticmethod

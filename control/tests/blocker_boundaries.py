@@ -973,9 +973,12 @@ def evaluate_blocker_gate(
     document: dict[str, object],
     guard: Sequence[UncategorizedRaise] | None = None,
 ) -> list[str]:
+    from .blocker_retries import evaluate_retry_gate
+
     return [
         *evaluate_wait_gate(waits, document),
         *evaluate_raise_gate(raises, document),
+        *evaluate_retry_gate(document),
         *([] if guard is None else evaluate_guard_gate(guard, document)),
     ]
 

@@ -199,6 +199,7 @@ export const SecurityRefusalReason = {
   CONTROLLER_AUTHENTICATION_REQUIRED: "controller.authentication_required",
   CONTROLLER_FLEET_ENROLLMENT_DENIED: "controller.fleet.enrollment_denied",
   CONTROLLER_REQUEST_REJECTED: "controller.request_rejected",
+  DIGEST_MISMATCH: "digest_verification_failed",
   DISTRIBUTION_REVOKED: "distribution.revoked",
   FORBIDDEN: "forbidden",
   GRANT_INVALID: "grant_invalid",
@@ -232,9 +233,11 @@ export const SecurityRefusalReason = {
   RUNTIME_IMAGE_AUTHORIZATION_INVALID: "runtime_image.authorization_invalid",
   RUNTIME_IMAGE_AUTHORIZATION_REVOKED: "runtime_image.authorization_revoked",
   RUNTIME_IMAGE_IDENTITY_INVALID: "runtime_image_identity_invalid",
+  STALE_FENCE: "stale_fence",
   TUF_METADATA_INVALID: "tuf.metadata_invalid",
   TUF_SIGNATURE_INVALID: "tuf.signature_invalid",
   UNAUTHORIZED: "unauthorized",
+  UNSAFE_PATH: "unsafe_path",
 } as const;
 export type SecurityRefusalReason = (typeof SecurityRefusalReason)[keyof typeof SecurityRefusalReason];
 
@@ -614,6 +617,7 @@ export const ProfileReasonCode = {
   CHOICES_UNREADABLE: "profile.choices_unreadable",
   CLEANUP_DELEGATED: "profile.cleanup_delegated",
   DISTRIBUTED_CROSS_SCOPE: "profile.distributed_cross_scope",
+  FAILURE_REPEATED: "profile.failure_repeated",
   INCOMPLETE_MULTI_SPARK_MODEL: "profile.incomplete_multi_spark_model",
   INTERRUPTION_EXPECTED: "profile.interruption_expected",
   PENDING_CROSS_SCOPE: "profile.pending_cross_scope",

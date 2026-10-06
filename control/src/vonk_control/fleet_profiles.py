@@ -280,7 +280,7 @@ _PROFILE_RECOVERY_REFUSED_CODES = frozenset(
 #: The typed blocker a load ends with when the same failure repeated: waiting or
 #: retrying cannot change a deterministic outcome (a start that crashes the same
 #: way every time), so the Controller stops after ``RECOVERY.max_failures``.
-PROFILE_REPEATED_FAILURE_CODE = "profile.failure_repeated"
+PROFILE_REPEATED_FAILURE_CODE = ProfileReasonCode.FAILURE_REPEATED
 _VARIABLE_TEXT = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
     r"|\b[0-9a-f]{12,}\b|\d+"
@@ -1398,7 +1398,7 @@ class RunSwitchFleetProfileAdapter:
         state, children = found
         parts: set[str] = set()
         for child in children:
-            if child.state != "failed":
+            if child.state not in job_states.words(LifecycleState.FAILED):
                 continue
             result = child.result
             if result is not None and result.retryable:
@@ -9363,7 +9363,7 @@ class FleetProfileService:
         it); the recovery scan records the ending once.
         """
 
-        if row.state != "failed":
+        if row.state not in job_states.words(LifecycleState.FAILED):
             return None
         recorded = next(
             (
@@ -9417,7 +9417,9 @@ class FleetProfileService:
                 row = session.get(
                     FleetProfileApplication, application_id, with_for_update=True
                 )
-                if row is None or row.state != "failed":
+                if row is None or row.state not in job_states.words(
+                    LifecycleState.FAILED
+                ):
                     continue
                 progress = _persisted_profile_progress(row)
                 if any(
