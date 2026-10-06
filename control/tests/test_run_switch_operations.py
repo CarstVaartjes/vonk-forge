@@ -64,7 +64,6 @@ from vonk_control.recipe_build_cancellation import (
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     RecipeBuildService,
-    RecipeOperationConflict,
     RecipeOperationService,
     RecipeOperationView,
 )
@@ -5061,7 +5060,7 @@ def _record_successful_reconcile_member(
     return {}
 
 
-def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_strict(
+def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuilds_its_ranks(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
@@ -5101,10 +5100,9 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_s
     assert all(
         target.state == "pending" for target in plan.reconciliation_authority.targets
     )
-    with pytest.raises(
-        RecipeOperationConflict, match="stored installation plan is invalid"
-    ):
-        lifecycle.preview_uninstall(installation.owner_id)
+    # The ordinary uninstall no longer refuses on a damaged launch document: its
+    # ranks are rebuilt from the saved mapping and the damage is retired as unknown.
+    assert lifecycle.preview_uninstall(installation.owner_id).nodes
     with sessions() as session:
         assert (
             session.scalar(select(Job.id).where(Job.kind == "recipe.reconcile")) is None
