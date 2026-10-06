@@ -262,7 +262,7 @@ function jobUpdatesAutomatically(detail: JobDetail): boolean {
 }
 
 function jobRefreshIntervalMs(detail: JobDetail): number {
-  return detail.state === "waiting" ? 60_000 : 5_000;
+  return detail.state === "waiting" || detail.state === LifecycleState.OBSERVING ? 60_000 : 5_000;
 }
 
 function friendlyTarget(target: string, names: Map<string, string>): string {

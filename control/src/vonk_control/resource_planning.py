@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Literal, Protocol, TypeGuard, get_args, runtime_checkable
 
+from vonk_agent_protocol import ResourceBlockerCode
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_forge_contracts.recipe import RecipeDiskResources, RecipeMemoryResources
 
@@ -935,7 +936,7 @@ def plan_capacity(
         if capacity is None:
             node_reasons.append(
                 _reason(
-                    "resource.capacity_unknown",
+                    ResourceBlockerCode.CAPACITY_UNKNOWN,
                     "Capacity evidence is unavailable for the selected rank.",
                     node_id=node_id,
                 )
@@ -1013,7 +1014,7 @@ def plan_capacity(
             if type(value) is not int or value < 0:
                 node_reasons.append(
                     _reason(
-                        "resource.capacity_unknown",
+                        ResourceBlockerCode.CAPACITY_UNKNOWN,
                         f"Current {name} capacity evidence is missing or invalid.",
                         node_id=node_id,
                     )
@@ -1021,7 +1022,7 @@ def plan_capacity(
         if capacity.evidence_state in {"unknown", "stale"}:
             node_reasons.append(
                 _reason(
-                    "resource.capacity_unknown",
+                    ResourceBlockerCode.CAPACITY_UNKNOWN,
                     "Current capacity evidence is missing or stale.",
                     node_id=node_id,
                 )
@@ -1077,7 +1078,7 @@ def plan_capacity(
         if budget_after < 0 and (not release or budget_after_stop < 0):
             node_reasons.append(
                 _reason(
-                    "resource.insufficient_reservation_budget",
+                    ResourceBlockerCode.INSUFFICIENT_RESERVATION_BUDGET,
                     f"Exact memory commitments plus demand and reserve exceed the physical pool by {-budget_after} bytes.",
                     node_id=node_id,
                 )
@@ -1089,7 +1090,7 @@ def plan_capacity(
         ):
             node_reasons.append(
                 _reason(
-                    "resource.resident_usage_unknown",
+                    ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN,
                     _resident_usage_uncertainty_detail(
                         capacity, unknown_residuals, admitted=False
                     ),
@@ -1099,7 +1100,7 @@ def plan_capacity(
         elif current_without_unknown < memory_floor_bytes and not release:
             node_reasons.append(
                 _reason(
-                    "resource.insufficient_capacity",
+                    ResourceBlockerCode.INSUFFICIENT_CAPACITY,
                     f"Observed free capacity less definite claims and selected demand leaves "
                     f"{current_without_unknown} bytes before the required "
                     f"{memory_floor_bytes}-byte reserve, even if retained runs use zero bytes.",
@@ -1109,7 +1110,7 @@ def plan_capacity(
         elif release and after_stop < memory_floor_bytes:
             node_reasons.append(
                 _reason(
-                    "resource.insufficient_capacity_after_stop",
+                    ResourceBlockerCode.INSUFFICIENT_CAPACITY_AFTER_STOP,
                     f"Selected demand leaves {selected} bytes after planned stops; {memory_floor_bytes} bytes must remain reserved.",
                     node_id=node_id,
                 )
@@ -1122,7 +1123,7 @@ def plan_capacity(
         ):
             node_reasons.append(
                 _reason(
-                    "resource.resident_usage_unknown",
+                    ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN,
                     _resident_usage_uncertainty_detail(
                         capacity, unknown_residuals, admitted=True
                     ),

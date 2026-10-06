@@ -6,8 +6,19 @@ import json
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, ConfigDict, Field, model_validator
-from vonk_agent_protocol import OperationProgress
+from pydantic import (
+    AwareDatetime,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_validator,
+)
+from vonk_agent_protocol import (
+    LifecycleState,
+    LifecycleSubject,
+    OperationProgress,
+    state_adopter,
+)
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -24,8 +35,33 @@ RequestKey = Annotated[
     ),
 ]
 Selector = Annotated[str, Field(min_length=1, max_length=256)]
-UpdateState = Literal[
-    "queued", "running", "cancelling", "succeeded", "partial", "failed", "cancelled"
+UpdateState = Annotated[
+    Literal[
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.OBSERVING,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+    ],
+    # A batch that ended ``partial`` (some children succeeded) is ``failed`` with
+    # ``partial`` set on its view; one being cancelled is ``observing``.
+    BeforeValidator(state_adopter(LifecycleSubject.JOB, UPDATE_KIND)),
+]
+#: A child is the image-availability job it froze, or ``pending`` before it exists.
+UpdateChildState = Annotated[
+    Literal[
+        "pending",
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.OBSERVING,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+    ],
+    BeforeValidator(state_adopter(LifecycleSubject.JOB)),
 ]
 
 
@@ -72,16 +108,7 @@ class RecipeUpdateChild(RecipeUpdateIdentity):
     """Frozen identity plus a rebuildable observation; child jobs own execution."""
 
     operation_id: Identifier | None = None
-    state: Literal[
-        "pending",
-        "queued",
-        "running",
-        "cancelling",
-        "succeeded",
-        "partial",
-        "failed",
-        "cancelled",
-    ] = "pending"
+    state: UpdateChildState = "pending"
     failure: RecipeUpdateFailure | None = None
     observed_at: AwareDatetime | None = None
     retry_at: AwareDatetime | None = None
@@ -132,6 +159,8 @@ class RecipeUpdateResponse(StrictJSONModel):
     request_id: RequestKey
     request: RecipeUpdateScope
     state: UpdateState
+    #: Some children succeeded and the batch failed: the update is partly done.
+    partial: bool = False
     attempt: int = Field(ge=0)
     children: list[RecipeUpdateChild]
     cancellation: RecipeOperationCancellationResult | None = None

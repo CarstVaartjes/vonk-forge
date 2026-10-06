@@ -18,13 +18,15 @@ from .artifact_job_create_parameters import ArtifactJobCreateParameters
 from .artifact_job_list_response import ArtifactJobListResponse
 from .artifact_job_response import ArtifactJobResponse
 from .artifact_job_response_interface import ArtifactJobResponseInterface
-from .artifact_job_response_state import ArtifactJobResponseState
+from .artifact_job_response_preparation_type_0 import ArtifactJobResponsePreparationType0
+from .artifact_job_response_state_type_0 import ArtifactJobResponseStateType0
 from .artifact_job_result_evidence import ArtifactJobResultEvidence
 from .artifact_job_storage_capabilities import ArtifactJobStorageCapabilities
 from .artifact_job_transport_capabilities import ArtifactJobTransportCapabilities
 from .artifact_output_contract import ArtifactOutputContract
 from .artifact_output_file import ArtifactOutputFile
 from .artifact_output_limits import ArtifactOutputLimits
+from .artifact_preparation import ArtifactPreparation
 from .artifact_slot_contract import ArtifactSlotContract
 from .artifact_storage_impact import ArtifactStorageImpact
 from .artifact_storage_impact_missing_spark_bytes_by_node_type_0 import ArtifactStorageImpactMissingSparkBytesByNodeType0
@@ -295,7 +297,6 @@ from .model_cache_download_result import ModelCacheDownloadResult
 from .model_cache_operator_request import ModelCacheOperatorRequest
 from .model_cache_operator_response import ModelCacheOperatorResponse
 from .model_cache_operator_response_action import ModelCacheOperatorResponseAction
-from .model_cache_operator_response_state_type_0 import ModelCacheOperatorResponseStateType0
 from .model_cache_operator_response_state_type_1 import ModelCacheOperatorResponseStateType1
 from .model_cache_removal_request import ModelCacheRemovalRequest
 from .model_cache_removal_result import ModelCacheRemovalResult
@@ -455,9 +456,11 @@ from .recipe_validation_check_kind import RecipeValidationCheckKind
 from .removed_recipe_node_result import RemovedRecipeNodeResult
 from .request_validation_issue import RequestValidationIssue
 from .request_validation_problem import RequestValidationProblem
+from .resource_blocker_code import ResourceBlockerCode
 from .resource_demand_evidence import ResourceDemandEvidence
 from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
 from .rollout_preparation import RolloutPreparation
+from .run_admission_code import RunAdmissionCode
 from .run_memory_residual_range import RunMemoryResidualRange
 from .run_memory_residual_range_reservation_kind import RunMemoryResidualRangeReservationKind
 from .run_node_change import RunNodeChange
@@ -597,13 +600,15 @@ __all__ = (
     "ArtifactJobListResponse",
     "ArtifactJobResponse",
     "ArtifactJobResponseInterface",
-    "ArtifactJobResponseState",
+    "ArtifactJobResponsePreparationType0",
+    "ArtifactJobResponseStateType0",
     "ArtifactJobResultEvidence",
     "ArtifactJobStorageCapabilities",
     "ArtifactJobTransportCapabilities",
     "ArtifactOutputContract",
     "ArtifactOutputFile",
     "ArtifactOutputLimits",
+    "ArtifactPreparation",
     "ArtifactSlotContract",
     "ArtifactStorageImpact",
     "ArtifactStorageImpactMissingSparkBytesByNodeType0",
@@ -874,7 +879,6 @@ __all__ = (
     "ModelCacheOperatorRequest",
     "ModelCacheOperatorResponse",
     "ModelCacheOperatorResponseAction",
-    "ModelCacheOperatorResponseStateType0",
     "ModelCacheOperatorResponseStateType1",
     "ModelCacheRemovalRequest",
     "ModelCacheRemovalResult",
@@ -1034,9 +1038,11 @@ __all__ = (
     "RemovedRecipeNodeResult",
     "RequestValidationIssue",
     "RequestValidationProblem",
+    "ResourceBlockerCode",
     "ResourceDemandEvidence",
     "ResourceDemandEvidenceEvidenceState",
     "RolloutPreparation",
+    "RunAdmissionCode",
     "RunMemoryResidualRange",
     "RunMemoryResidualRangeReservationKind",
     "RunNodeChange",

@@ -46,6 +46,7 @@ class RecipeUpdateResponse:
             cancellation (None | RecipeOperationCancellationResult | Unset):
             kind (Literal['recipe.cache.update.v2'] | Unset):  Default: 'recipe.cache.update.v2'.
             next_attempt_at (datetime.datetime | None | Unset):
+            partial (bool | Unset):  Default: False.
             resume_condition (None | str | Unset):
             wait_owner (Literal['recipe-image-availability'] | None | Unset):
             waiting_on (None | str | Unset):
@@ -64,6 +65,7 @@ class RecipeUpdateResponse:
     cancellation: None | RecipeOperationCancellationResult | Unset = UNSET
     kind: Literal['recipe.cache.update.v2'] | Unset = 'recipe.cache.update.v2'
     next_attempt_at: datetime.datetime | None | Unset = UNSET
+    partial: bool | Unset = False
     resume_condition: None | str | Unset = UNSET
     wait_owner: Literal['recipe-image-availability'] | None | Unset = UNSET
     waiting_on: None | str | Unset = UNSET
@@ -121,6 +123,8 @@ class RecipeUpdateResponse:
         else:
             next_attempt_at = self.next_attempt_at
 
+        partial = self.partial
+
         resume_condition: None | str | Unset
         if isinstance(self.resume_condition, Unset):
             resume_condition = UNSET
@@ -161,6 +165,8 @@ class RecipeUpdateResponse:
             field_dict["kind"] = kind
         if next_attempt_at is not UNSET:
             field_dict["next_attempt_at"] = next_attempt_at
+        if partial is not UNSET:
+            field_dict["partial"] = partial
         if resume_condition is not UNSET:
             field_dict["resume_condition"] = resume_condition
         if wait_owner is not UNSET:
@@ -268,6 +274,8 @@ class RecipeUpdateResponse:
         next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
 
 
+        partial = d.pop("partial", UNSET)
+
         def _parse_resume_condition(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -316,6 +324,7 @@ class RecipeUpdateResponse:
             cancellation=cancellation,
             kind=kind,
             next_attempt_at=next_attempt_at,
+            partial=partial,
             resume_condition=resume_condition,
             wait_owner=wait_owner,
             waiting_on=waiting_on,

@@ -21,9 +21,10 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.inventory import MemoryPool
 
+from . import job_states
 from .fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
@@ -262,7 +263,10 @@ def profile_memory_replacements(
     _validate_memory_claim(claim, application, decision.assignment_id, requirement)
     node = session.get(AgentNode, claim.node_id)
     if (
-        application.state not in {"queued", "running", "waiting-for-operator"}
+        application.state
+        not in job_states.words(
+            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+        )
         or node is None
         or progress.workload_intent_ordinal is None
         or node.workload_intent_ordinal != progress.workload_intent_ordinal
@@ -533,11 +537,9 @@ def _profile_assignment(
     tuple[FleetProfileResourceRequirement, ...],
 ]:
     application = session.get(FleetProfileApplication, application_id)
-    if application is None or application.state not in {
-        "queued",
-        "running",
-        "waiting-for-operator",
-    }:
+    if application is None or application.state not in job_states.words(
+        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+    ):
         raise ValueError("profile capacity owner is no longer active")
     progress = read_stored_model(
         FleetProfileApplicationProgress,
@@ -810,7 +812,9 @@ def restore_released_profile_claims(
     Consumption re-checks real capacity, so a restored claim never admits more
     than the ordinary admission would.
     """
-    if application.state not in {"queued", "running", "waiting-for-operator"}:
+    if application.state not in job_states.words(
+        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+    ):
         return
     for claim in session.scalars(
         select(ResourceReservation)

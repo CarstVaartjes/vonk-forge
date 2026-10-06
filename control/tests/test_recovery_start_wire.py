@@ -10,11 +10,11 @@ from vonk_agent_protocol import (
     RecipeOperationRequest,
     canonical_message,
 )
-from vonk_control.distributed_lifecycle import DistributedLifecycleError
 from vonk_control.distributed_recovery import (
     DistributedRecoveryCoordinator,
     _accepted_start_authority,
 )
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentOperation as StoredAgentOperation,
 )
@@ -250,10 +250,13 @@ def test_recovery_authority_requires_succeeded_start_bound_to_current_plan(
             ).hexdigest()
         else:
             original.authority_revision = "0" * 64
-        with pytest.raises(DistributedLifecycleError):
+        # Authority that cannot be proven is retired as residue, never raised.
+        assert isinstance(
             _accepted_start_authority(
                 session,
                 run,
                 "0" * 64 if tamper == "authority_revision" else "1" * 64,
                 nodes[0],
-            )
+            ),
+            Residue,
+        )

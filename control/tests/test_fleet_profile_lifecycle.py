@@ -25,6 +25,8 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from vonk_agent_protocol import LifecycleState
+from vonk_control import fleet_profile_states
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_profiles import (
@@ -149,12 +151,12 @@ def test_a_legacy_operator_wait_is_healed_and_its_child_is_left_alone(tmp_path) 
         assert before is not None
         snapshot = (before.state, before.status_reason, dict(before.result or {}))
     world.edit(state="waiting-for-operator", status_reason="the child is parked")
-    assert world.service.application(world.id).state == "waiting-for-operator"
+    assert world.service.application(world.id).state == LifecycleState.NEEDS_OPERATOR
 
     assert world.service.tick() is True  # healed
     healed = world.service.application(world.id)
     assert healed.state in {"running", "queued"}
-    assert healed.state != "waiting-for-operator"
+    assert healed.state != LifecycleState.NEEDS_OPERATOR
     assert world.child_id() == child_id  # the same child
     with world.sessions() as session:
         after = session.get(Job, child_id)
@@ -163,7 +165,9 @@ def test_a_legacy_operator_wait_is_healed_and_its_child_is_left_alone(tmp_path) 
 
     for _ in range(3):  # and it never goes back to waiting for anyone
         world.service.tick()
-        assert world.service.application(world.id).state != "waiting-for-operator"
+        assert (
+            world.service.application(world.id).state != LifecycleState.NEEDS_OPERATOR
+        )
 
 
 def test_a_legacy_child_state_is_mirrored_as_running_never_as_a_wait(tmp_path) -> None:
@@ -181,9 +185,9 @@ def test_a_legacy_child_state_is_mirrored_as_running_never_as_a_wait(tmp_path) -
     for _ in range(4):
         world.service.tick()
     view = world.service.application(world.id)
-    assert view.state != "waiting-for-operator"
+    assert view.state != LifecycleState.NEEDS_OPERATOR
     assert view.progress.switch_adapter is not None
-    assert view.progress.switch_adapter.state != "waiting-for-operator"
+    assert view.progress.switch_adapter.state != LifecycleState.NEEDS_OPERATOR
 
 
 def test_a_legacy_wait_still_being_admitted_retries_its_admission(tmp_path) -> None:
@@ -305,7 +309,7 @@ def test_a_cancel_completes_for_a_child_issued_without_a_recorded_intent(
     final = world.service.application(world.id)
     assert final.state == "cancelled"
     assert final.cancellation is not None and final.cancellation.state == "cancelled"
-    assert final.state != "waiting-for-operator"
+    assert final.state != LifecycleState.NEEDS_OPERATOR
 
 
 def _stuck_child(world: _World) -> None:
@@ -455,7 +459,7 @@ def test_a_load_with_nothing_to_do_ends_by_its_children_not_by_a_label(
         world.run_switch.tick()
         if world.service.application(world.id).state in {"succeeded", "failed"}:
             break
-    assert world.service.application(world.id).state != "waiting-for-operator"
+    assert world.service.application(world.id).state != LifecycleState.NEEDS_OPERATOR
 
 
 def test_a_restart_in_the_middle_of_a_load_is_safe(tmp_path) -> None:
@@ -480,6 +484,31 @@ def test_an_application_row_is_written_only_through_the_adapter() -> None:
         if write.path.endswith("fleet_profiles.py")
     ]
     assert writes == []
+
+
+def test_profile_stop_selection_never_uses_the_active_run_set() -> None:
+    """The class, guarded: a stop reads the stoppable set, which keeps ``lost``.
+
+    ``ACTIVE_RUN_STATES`` excludes a lost run, so a stop selected from it would
+    leave that run's residue on the Spark forever.  Admission and capacity code
+    elsewhere may keep the active set; the profile module decides only what to
+    stop and what is observed, so it must not name it at all.
+    """
+
+    import ast
+    from pathlib import Path
+
+    import vonk_control.fleet_profiles as module
+
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    uses = sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if (isinstance(node, ast.Name) and node.id == "ACTIVE_RUN_STATES")
+        or (isinstance(node, ast.alias) and node.name == "ACTIVE_RUN_STATES")
+        or (isinstance(node, ast.Attribute) and node.attr == "ACTIVE_RUN_STATES")
+    )
+    assert uses == []
 
 
 # ----------------------------------------- the exact rows an older Controller left
@@ -517,11 +546,11 @@ def test_a_legacy_parked_cancel_leaves_the_wait_and_completes(tmp_path) -> None:
     world = _World(tmp_path)
     _stuck_child(world)
     _legacy_cancel_parking(world)
-    assert world.row().state == "waiting-for-operator"
+    assert world.row().state in fleet_profile_states.NEEDS_OPERATOR
 
     world.now[0] += timedelta(seconds=6)
     world.service.tick()
-    assert world.row().state != "waiting-for-operator"  # on the first pass
+    assert world.row().state != LifecycleState.NEEDS_OPERATOR  # on the first pass
     states = []
     for _ in range(200):
         world.now[0] += timedelta(seconds=15)
@@ -594,13 +623,13 @@ def test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait(
     for _ in range(3):
         world.service.tick()
         view = world.service.application(world.id)
-        assert view.state != "waiting-for-operator"
+        assert view.state != LifecycleState.NEEDS_OPERATOR
         assert view.progress.switch_adapter is not None
-        assert view.progress.switch_adapter.state != "waiting-for-operator"
+        assert view.progress.switch_adapter.state != LifecycleState.NEEDS_OPERATOR
     world.run_switch.tick()  # the child's own tick heals it
     world.now[0] += timedelta(seconds=10)
     world.service.tick()
     with world.sessions() as session:
         healed = session.get(Job, child_id)
-        assert healed is not None and healed.state != "waiting-for-operator"
-    assert world.service.application(world.id).state != "waiting-for-operator"
+        assert healed is not None and healed.state != LifecycleState.NEEDS_OPERATOR
+    assert world.service.application(world.id).state != LifecycleState.NEEDS_OPERATOR

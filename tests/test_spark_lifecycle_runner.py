@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import TypedDict
 
 import pytest
+from vonk_agent_protocol import LifecycleState
 
 ENTRY_POINT = Path(__file__).parent / "acceptance/test_spark_lifecycle.py"
 
@@ -1358,7 +1359,7 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
             selector="acceptance/synthetic-canary", force=True
         ),
         kind="recipe.image.availability.v2",
-        state="succeeded",
+        state=LifecycleState.SUCCEEDED,
         attempt=1,
         recipe_revision_id="33333333-3333-4333-8333-333333333333",
         recipe_content_sha256=recipe_digest,
@@ -1420,7 +1421,7 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch) -> None
             selector="acceptance/synthetic-canary", force=False
         ),
         kind="recipe.image.availability.v2",
-        state="running",
+        state=LifecycleState.RUNNING,
         attempt=2,
         recipe_revision_id="33333333-3333-4333-8333-333333333333",
         recipe_content_sha256=recipe_digest,

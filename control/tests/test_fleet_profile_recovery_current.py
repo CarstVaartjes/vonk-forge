@@ -8,13 +8,14 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileInput,
 )
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
+    _persisted_profile_progress,
     build_production_fleet_profile_service,
 )
 from vonk_control.models import (
@@ -25,6 +26,7 @@ from vonk_control.models import (
     FleetProfileApplication,
     Job,
 )
+from vonk_control.operation_blockers import make_blocker
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
@@ -378,7 +380,7 @@ def test_a_changed_saved_draft_does_not_cancel_accepted_parked_application(
 
     ended = service.application(first.id)
     assert ended.state in {"cancelled", "failed", "queued", "running"}
-    assert ended.state != "waiting-for-operator"
+    assert ended.state != LifecycleState.NEEDS_OPERATOR
     assert ended.status_reason
 
 
@@ -451,7 +453,7 @@ def test_exhausted_profile_retry_keeps_an_automatic_due_time(
     candidate = service._automatic_profile_recovery(due + timedelta(seconds=1))
     assert candidate == (first.id, "admin")
     # Scheduling recovery does not rewrite the parked row into a new state.
-    assert service.application(first.id).state == "waiting-for-operator"
+    assert service.application(first.id).state == LifecycleState.NEEDS_OPERATOR
 
 
 def test_retry_of_a_failed_order_with_a_live_child_resumes_it(tmp_path: Path) -> None:
@@ -1332,3 +1334,186 @@ def test_a_child_start_with_a_stale_review_ends_superseded_not_failed(
     assert ended.state == "superseded", ended.status_reason
     assert ended.reason_code == "effects-changed-during-admission"
     assert ended.blockers == [] and ended.next_attempt_at is None
+
+
+def _expire_backoff(service, lifecycle) -> None:
+    later = lifecycle._clock() + timedelta(hours=2)
+    service._clock = lambda: later
+
+
+def test_a_retry_that_lost_its_selection_ends_superseded_not_parked_forever(
+    tmp_path: Path,
+) -> None:
+    """A Controller redeploy in the middle of a load can leave a retry whose parent
+    no longer owns the selected profile. Waiting never restores that, so the
+    application ends superseded (the client re-reviews) instead of re-parking
+    every minute with ``profile.retry_conflict``."""
+
+    from vonk_control.models import FleetProfileSelection
+
+    sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    with sessions.begin() as session:
+        parent = session.get(FleetProfileApplication, first.id)
+        assert parent is not None
+        parent.selection_generation = None
+        selection = session.get(FleetProfileSelection, 1)
+        if selection is not None:
+            session.delete(selection)
+    _expire_backoff(service, lifecycle)
+    for _ in range(4):
+        service.tick()
+
+    ended = service.application(first.id)
+    assert ended.state == "superseded", (ended.state, ended.status_reason)
+    assert ended.reason_code == "effects-changed-during-admission"
+    assert ended.blockers == [] and ended.next_attempt_at is None
+    assert "lost its current selection" in (ended.status_reason or "")
+
+
+def test_a_row_parked_by_the_old_retry_conflict_heals_to_superseded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vonk_control.fleet_profiles import FleetProfileSelectionLost
+
+    sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    # What the previous Controller left behind: parked by the generic conflict.
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        service._park_for_retry(
+            row,
+            _persisted_profile_progress(row),
+            [
+                make_blocker(
+                    "profile.retry_conflict",
+                    "Selected profile retry lost its current selection",
+                )
+            ],
+        )
+
+    def lost(*_args, **_kwargs):
+        raise FleetProfileSelectionLost(
+            "Selected profile retry lost its current selection"
+        )
+
+    monkeypatch.setattr(service, "retry", lost)
+    _expire_backoff(service, lifecycle)
+    service.tick()
+    ended = service.application(first.id)
+    assert ended.state == "superseded"
+    assert ended.blockers == []
+
+
+def test_an_untyped_conflict_supersedes_instead_of_parking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+
+    def conflict(*_args, **_kwargs):
+        raise FleetProfileConflict(
+            "Selected profile differs from its accepted snapshot"
+        )
+
+    monkeypatch.setattr(service, "retry", conflict)
+    _expire_backoff(service, lifecycle)
+    service.tick()
+    assert service.application(first.id).state == "superseded"
+
+
+def test_a_transient_conflict_still_parks_with_backoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vonk_control.fleet_profiles import FleetProfileAdmissionBusy
+
+    _sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+
+    def busy(*_args, **_kwargs):
+        raise FleetProfileAdmissionBusy("admission is busy", holder="load")
+
+    monkeypatch.setattr(service, "retry", busy)
+    _expire_backoff(service, lifecycle)
+    service.tick()
+    parked = service.application(first.id)
+    assert parked.state == "queued"
+    assert parked.next_attempt_at is not None
+
+
+def _conflict_types() -> list[type]:
+    from vonk_control.fleet_profiles import FleetProfileConflict as base
+
+    found: list[type] = []
+    pending = [base]
+    while pending:
+        current = pending.pop()
+        found.append(current)
+        pending.extend(current.__subclasses__())
+    return found
+
+
+def test_every_conflict_type_declares_what_a_retry_does_with_it() -> None:
+    """A new conflict type must say whether waiting can resolve it: only the
+    types listed here may park; any other new type fails this test until it is
+    classified (and, if it supersedes, carries a contract reason code)."""
+
+    from typing import get_args
+
+    from vonk_control.fleet_profile_contract import FleetProfileSupersedeCode
+    from vonk_control.fleet_profiles import RETRY_SUPERSEDE, RETRY_WAIT
+
+    waits = {
+        "FleetProfileAdmissionBusy",
+        "FleetProfileAdmissionStorageError",
+        "FleetProfileAdmissionEffectBusy",
+        "FleetProfileResourceRecheckUnavailable",
+        "FleetProfileAssetReservationConflict",
+        "_FleetProfileRecoveryBindingConflict",
+    }
+    actual_waits = set()
+    for cls in _conflict_types():
+        assert "retry_disposition" in vars(cls), (
+            f"{cls.__name__} must declare retry_disposition (RETRY_WAIT or "
+            "RETRY_SUPERSEDE)"
+        )
+        assert cls.retry_disposition in {RETRY_WAIT, RETRY_SUPERSEDE}
+        if cls.retry_disposition == RETRY_WAIT:
+            actual_waits.add(cls.__name__)
+        else:
+            assert cls.supersede_code in get_args(FleetProfileSupersedeCode)
+    assert actual_waits == waits
+
+
+def test_parking_refuses_an_error_that_waiting_cannot_resolve(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.fleet_profiles import (
+        FleetProfileAdmissionBusy,
+        FleetProfileReviewStale,
+        FleetProfileSelectionLost,
+    )
+
+    sessions, _lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        progress = _persisted_profile_progress(row)
+        for permanent in (
+            FleetProfileConflict("x"),
+            FleetProfileReviewStale("x"),
+            FleetProfileSelectionLost("x"),
+            RuntimeError("x"),
+        ):
+            with pytest.raises(AssertionError, match="not retryable by waiting"):
+                service._park_for_retry(row, progress, [], because=permanent)
+        service._park_for_retry(
+            row, progress, [], because=FleetProfileAdmissionBusy("busy")
+        )

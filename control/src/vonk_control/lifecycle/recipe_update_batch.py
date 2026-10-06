@@ -33,8 +33,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from vonk_agent_protocol import LEGACY_WAIT_STATE
-
+from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
 from ..recipe_update_contract import RecipeUpdateChild, RecipeUpdateDocument
@@ -59,7 +58,6 @@ from .types import (
 )
 
 KIND = "recipe.cache.update.v2"
-WAITING = LEGACY_WAIT_STATE
 _MAX_REASON = 512
 CANCEL_BUDGET = timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 KEEP: Any = object()
@@ -73,16 +71,9 @@ _STORED = {
     State.FAILED: "failed",
     State.CANCELLED: "cancelled",
 }
-_CHILD_STATE = {
-    "pending": State.BACKOFF,
-    "queued": State.QUEUED,
-    "running": State.RUNNING,
-    "cancelling": State.OBSERVING,
-    "succeeded": State.SUCCEEDED,
-    "partial": State.OBSERVING,  # not settled: the child retries by itself
-    "failed": State.FAILED,
-    "cancelled": State.CANCELLED,
-}
+#: A child that has not been issued yet backs off (it will be); every other child
+#: speaks the core vocabulary, an old spelling adopted by its contract type.
+_PENDING_CHILD = "pending"
 _CANCEL_EFFECT_UNKNOWN = (
     "recipe-update.cancel-effect-unknown: a child operation was still being "
     "cancelled when the stop budget ended; its own lifecycle owns it"
@@ -92,7 +83,7 @@ _CANCEL_EFFECT_UNKNOWN = (
 def child_lifecycle(child: RecipeUpdateChild) -> Lifecycle:
     """A child's recorded observation as a lifecycle row."""
 
-    state = _CHILD_STATE[child.state]
+    state = State.BACKOFF if child.state == _PENDING_CHILD else State(child.state)
     if state is State.SUCCEEDED:
         effect = Effect.ESTABLISHED
     elif state is State.CANCELLED:
@@ -151,11 +142,11 @@ class RecipeUpdateBatchAdapter:
                 state = State.RUNNING
             else:
                 state = State.BACKOFF if due is not None and due > now else State.QUEUED
-        elif stored == "cancelling":
+        elif job_states.means(stored, State.OBSERVING, kind=KIND):
             state = State.OBSERVING
         elif stored == "succeeded":
             state = State.SUCCEEDED
-        elif stored in {"failed", "partial"}:
+        elif stored in job_states.words(State.FAILED, kind=KIND):
             state = State.FAILED
         elif stored == "cancelled":
             state = State.CANCELLED
@@ -179,7 +170,7 @@ class RecipeUpdateBatchAdapter:
             requested_at = aware(cancellation.cancel_requested_at or job.updated_at)
             request_key = cancellation.cancel_request_id
             observe_count = STOP_BUDGET if now >= requested_at + CANCEL_BUDGET else 0
-        elif stored == "cancelling":
+        elif job_states.means(stored, State.OBSERVING, kind=KIND):
             # A cancelling batch whose request cannot be read: the request is
             # still a request (monotonic); see :meth:`cancel_unreadable`.
             requested_at = aware(job.updated_at)
@@ -251,10 +242,11 @@ class RecipeUpdateBatchAdapter:
     ) -> None:
         """Project a core decision onto the stored batch; the only such writer."""
 
+        # A cancel in flight is ``observing`` and a batch that ended with some
+        # children done is ``failed`` (its view says ``partial``; it is derived
+        # from the children, not stored).
         if after.state is State.OBSERVING and after.cancel_requested:
-            state = "cancelling"
-        elif after.state is State.FAILED and partial:
-            state = "partial"
+            state = State.OBSERVING.value
         elif visible is not None and not after.terminal:
             state = visible
         else:

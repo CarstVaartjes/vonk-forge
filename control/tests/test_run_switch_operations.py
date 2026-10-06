@@ -17,6 +17,7 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    LifecycleState,
     canonical_message,
 )
 from vonk_control.auth import CursorCodec
@@ -64,7 +65,6 @@ from vonk_control.recipe_build_cancellation import (
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     RecipeBuildService,
-    RecipeOperationConflict,
     RecipeOperationService,
     RecipeOperationView,
 )
@@ -126,6 +126,7 @@ from .test_recipe_operations import (
     _CanonicalModelCache,
     installed_recipe,
     setup_services,
+    started_recipe,
 )
 
 
@@ -785,7 +786,7 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
         actor="admin",
     )
-    assert operation.state == "waiting"
+    assert operation.state == LifecycleState.OBSERVING
     old_installation_id = str(uuid.uuid4())
     with sessions.begin() as session:
         job = session.get(Job, operation.operation_id)
@@ -926,7 +927,7 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
 
     assert service._advance(operation.operation_id) is True
     waiting = service.get(operation.operation_id)
-    assert waiting.state == "waiting"
+    assert waiting.state == LifecycleState.OBSERVING
     assert "return to active state" in (waiting.status_reason or "")
     assert waiting.result is not None and waiting.result.observation_due_at
     due = waiting.result.observation_due_at
@@ -940,13 +941,13 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     now[0] = due + timedelta(seconds=1)
     assert service._advance(operation.operation_id) is True
     resumed = service.get(operation.operation_id)
-    assert resumed.state != "waiting"
+    assert resumed.state != LifecycleState.OBSERVING
     assert "return to active state" not in (resumed.status_reason or "")
     for _ in range(40):
         if not service._advance(operation.operation_id):
             break
     final = service.get(operation.operation_id)
-    assert final.state not in {"waiting", "failed"}, final.status_reason
+    assert final.state not in {LifecycleState.OBSERVING, "failed"}, final.status_reason
 
 
 def test_child_activity_change_persists_without_clock_only_writes(
@@ -3855,7 +3856,7 @@ def test_cleanup_adapter_retries_when_executor_reports_nas_eviction(
     )
     assert bad_service.tick() is True
     retried = bad_service.get(operation.operation_id)
-    assert retried.state in {"running", "waiting"}
+    assert retried.state in {"running", LifecycleState.OBSERVING}
     assert retried.status_reason and "next attempt" in retried.status_reason
 
 
@@ -4424,7 +4425,7 @@ def test_cancel_closes_a_transfer_parked_for_an_operator_instead_of_waiting(tmp_
     executor.children[child_id].state = "waiting-for-operator"
     for _ in range(3):
         service.tick()
-    assert service.get(operation.operation_id).state == "waiting"
+    assert service.get(operation.operation_id).state == LifecycleState.OBSERVING
 
     service.cancel(
         operation.operation_id,
@@ -4771,8 +4772,8 @@ def test_parked_start_after_observation_deadline_keeps_exact_effect_pending(
     assert service.tick() is True
 
     view = service.get(operation.operation_id)
-    assert view.state == "waiting"
-    assert view.progress.state == "waiting"
+    assert view.state == LifecycleState.OBSERVING
+    assert view.progress.state == LifecycleState.OBSERVING
     assert "start-observation-expired" in (view.status_reason or "")
     assert view.result is not None and view.result.observation_due_at is not None
     # One retry clock: the lifecycle core's bounded backoff, never past a minute.
@@ -4808,10 +4809,10 @@ def test_legacy_operator_wait_without_a_clock_is_healed_not_left_waiting(
         row.result = result
 
     held = service.get(operation.operation_id)
-    assert held.state == "waiting-for-operator"
+    assert held.state == LifecycleState.NEEDS_OPERATOR
     assert service.tick() is True  # healed: it is observed again, not parked
     healed = service.get(operation.operation_id)
-    assert healed.state != "waiting-for-operator"
+    assert healed.state != LifecycleState.NEEDS_OPERATOR
     assert healed.result is not None and healed.result.observation_due_at is not None
     assert healed.result.observation_due_at > now[0]
 
@@ -4862,8 +4863,8 @@ def test_restart_interrupted_start_keeps_exact_child_when_effect_is_uncertain(
 
     assert service.tick() is True
     view = service.get(operation.operation_id)
-    assert view.state == "waiting"
-    assert view.progress.state == "waiting"
+    assert view.state == LifecycleState.OBSERVING
+    assert view.progress.state == LifecycleState.OBSERVING
     assert view.result is not None
     assert view.result.child_operation_id == child_id
 
@@ -5061,7 +5062,7 @@ def _record_successful_reconcile_member(
     return {}
 
 
-def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_strict(
+def test_reconcile_review_binds_opaque_invalid_launch_spec_and_uninstall_rebuilds_its_ranks(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
@@ -5101,10 +5102,9 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_s
     assert all(
         target.state == "pending" for target in plan.reconciliation_authority.targets
     )
-    with pytest.raises(
-        RecipeOperationConflict, match="stored installation plan is invalid"
-    ):
-        lifecycle.preview_uninstall(installation.owner_id)
+    # The ordinary uninstall no longer refuses on a damaged launch document: its
+    # ranks are rebuilt from the saved mapping and the damage is retired as unknown.
+    assert lifecycle.preview_uninstall(installation.owner_id).nodes
     with sessions() as session:
         assert (
             session.scalar(select(Job.id).where(Job.kind == "recipe.reconcile")) is None
@@ -5715,7 +5715,7 @@ def test_scoped_cleanup_refuses_a_planned_row_with_installed_bytes(
         ),
         actor="admin",
     )
-    assert operation.state in {"queued", "waiting"}
+    assert operation.state in {"queued", LifecycleState.OBSERVING}
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None and installation.state == "planned"
@@ -6122,3 +6122,126 @@ def test_missing_per_node_evidence_means_missing_here_never_an_error(
     )
     _total, per_node = _planned_transfer_bytes(uneven)
     assert per_node == {SPARK_A: 0, SPARK_B: 1024 + 1025}
+
+
+def test_stop_verification_keeps_waiting_for_a_lost_run_that_is_not_stopped(
+    tmp_path: Path,
+) -> None:
+    """A lost run still owning residue is not a verified stop and not a failure.
+
+    Wrong implementation this catches: the wait was keyed on the active-run
+    set, which excludes ``lost``, so the stop verification failed outright
+    instead of waiting for the teardown of the residue to converge.
+    """
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    ranks = [
+        SimpleNamespace(
+            node_id=nodes[0], rank=0, role="entrypoint", state="running", fresh=True
+        )
+    ]
+    status = SimpleNamespace(
+        state="lost",
+        route_state="published",
+        route_error=None,
+        healthy=False,
+        run_generation=1,
+        ranks=ranks,
+        recovery_owners=(),
+        route_recovery_pending=False,
+        route_next_attempt_at=None,
+        observation_deadline_at=None,
+    )
+    stub = SimpleNamespace(run_status=lambda _run_id: status)
+    service = RecipeLifecyclePhaseExecutor(
+        stub,  # type: ignore[arg-type]
+        sessions,
+        ClusterMappingService(sessions),
+        lifecycle._clock,
+    )
+    plan = SimpleNamespace(
+        action="stop", run_id=str(uuid.uuid4()), profile_stop_scope=None, alias="x"
+    )
+
+    execution = service.execute(
+        plan,  # type: ignore[arg-type]
+        SimpleNamespace(kind="final_verify"),  # type: ignore[arg-type]
+        item_index=0,
+        actor="admin",
+        request_key=str(uuid.uuid4()),
+        progress={},
+    )
+
+    assert execution.waiting is True
+    assert execution.result is not None
+    assert execution.result["final_verified"] is False
+
+
+def test_installation_verification_refuses_a_lost_run_that_still_has_residue(
+    tmp_path: Path,
+) -> None:
+    """A lost run with residue keeps its installation from being verified.
+
+    Wrong implementation this catches: the active-run count excluded ``lost``,
+    so an installation whose lost run still owned ranks verified as free.
+    """
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    run = started_recipe(
+        sessions,
+        lifecycle,
+        installation.owner_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    with sessions.begin() as session:
+        row = session.get(RecipeRun, run.owner_id)
+        assert row is not None
+        row.state = "lost"
+        row.route_state = "withdrawn"
+    service = RecipeLifecyclePhaseExecutor(
+        lifecycle,
+        sessions,
+        ClusterMappingService(sessions),
+        lifecycle._clock,
+    )
+
+    def bound(session, _plan, installation_id, _mapping_id, _digest):
+        stored = session.get(RecipeInstallation, installation_id)
+        members = tuple(
+            session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        return stored, members
+
+    service._bound_installation = bound  # type: ignore[method-assign,assignment]
+    plan = SimpleNamespace(
+        action="install",
+        installation_id=installation.owner_id,
+        mapping=SimpleNamespace(mapping_id=mapping_id),
+    )
+
+    with pytest.raises(
+        RunSwitchOperationConflict,
+        match="run-switch.installation-verification-failed",
+    ):
+        service.execute(
+            plan,  # type: ignore[arg-type]
+            SimpleNamespace(kind="final_verify"),  # type: ignore[arg-type]
+            item_index=0,
+            actor="admin",
+            request_key=str(uuid.uuid4()),
+            progress={},
+        )

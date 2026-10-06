@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
@@ -356,7 +357,7 @@ def test_successful_install_child_does_not_hide_invalid_final_installation(
     with sessions() as session:
         child = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
         assert child is not None
-        assert child.state in {"queued", "running", "waiting"}
+        assert child.state in {"queued", "running", LifecycleState.OBSERVING}
         assert "run-switch.installation-" in (child.status_reason or "")
 
 

@@ -34,7 +34,9 @@ REQUEST_ID = "00000000-0000-4000-8000-000000000003"
 @dataclass(frozen=True, slots=True)
 class _ArtifactJobView(ArtifactJobView):
     id: str
-    state: str = "draft"
+    state: str | None = None
+    preparation: str | None = "draft"
+    cancel_requested_at: datetime | None = None
     run_id: str = "00000000-0000-4000-8000-000000000002"
     operation_id: str | None = None
     submit_request_id: str | None = None
@@ -188,17 +190,21 @@ def test_artifact_transfer_openapi_declares_binary_streams(tmp_path: Path) -> No
         "$ref": "#/components/schemas/ArtifactJobResponse"
     }
     assert components["ArtifactJobResponse"]["additionalProperties"] is False
-    assert components["ArtifactJobResponse"]["properties"]["state"]["enum"] == [
-        "draft",
-        "ready",
+    properties = components["ArtifactJobResponse"]["properties"]
+    # The lifecycle state is the core vocabulary and is absent while the job is
+    # being prepared; preparation is a separate typed field.
+    assert properties["state"]["anyOf"][0]["enum"] == [
         "queued",
         "running",
+        "backoff",
+        "observing",
+        "needs-operator",
         "succeeded",
         "failed",
-        "cancelling",
         "cancelled",
-        "waiting-for-operator",
     ]
+    assert properties["preparation"]["anyOf"][0]["enum"] == ["draft", "ready"]
+    assert "cancel_requested_at" in properties
 
     lookup = paths["/api/artifact-jobs/requests/{request_id}"]["get"]
     assert lookup["operationId"] == "getArtifactJobByRequestId"
@@ -267,7 +273,8 @@ def test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type(
     assert upload.status_code == 200
     upload_document = upload.json()
     assert upload_document["id"] == JOB_ID
-    assert upload_document["state"] == "draft"
+    assert upload_document["state"] is None
+    assert upload_document["preparation"] == "draft"
     assert upload_document["interface"] == "image-job"
     assert upload_document["output_limits"]["allowed_media_types"] == ["image/png"]
     assert upload_document["compiled_contract"]["input"]["slots"] == []
@@ -280,7 +287,9 @@ def test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type(
     optional_nulls = {
         name: None
         for name, field in ArtifactJobResponse.model_fields.items()
-        if not field.is_required() and field.default is None
+        if not field.is_required()
+        and field.default is None
+        and name != "preparation"  # a draft carries its stage
     }
     assert not optional_nulls.keys() & upload_document.keys()
     # Consume actual emitted output in the generated client, then serialize back
@@ -434,7 +443,8 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     recovered = client.get(f"/api/artifact-jobs/requests/{REQUEST_ID}")
     assert recovered.status_code == 200
     draft_id = recovered.json()["id"]
-    assert recovered.json()["state"] == "draft"
+    assert recovered.json()["state"] is None
+    assert recovered.json()["preparation"] == "draft"
     replay = client.post(
         create_path,
         json=body,
@@ -458,7 +468,8 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     assert uploaded.json()["input_files"] == body["inputs"]
     finalized = client.post(f"/api/artifact-jobs/{draft_id}/finalize")
     assert finalized.status_code == 200
-    assert finalized.json()["state"] == "ready"
+    assert finalized.json()["state"] is None
+    assert finalized.json()["preparation"] == "ready"
     for headers in ({}, {"X-Request-ID": "not-a-uuid"}):
         assert (
             client.post(
@@ -474,7 +485,7 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
             ).status_code
             == 422
         )
-    assert service.get(draft_id).state == "ready"
+    assert service.get(draft_id).preparation == "ready"
     with sessions() as session:
         file = session.scalar(
             select(ArtifactJobFile).where(

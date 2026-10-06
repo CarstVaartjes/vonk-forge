@@ -23,12 +23,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureResult,
+    LifecycleState,
     RecipeBuildEvidence,
     canonical_message,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
+from . import job_states
 from .admission_locking import (
     AdmissionLockBusy,
     acquire_admission_keys,
@@ -649,7 +651,13 @@ def build_recipe_image_availability(
                         current_jobs = tuple(
                             session.scalars(
                                 select(Job).where(
-                                    Job.state.in_({"queued", "running", "partial"}),
+                                    Job.state.in_(
+                                        job_states.words(
+                                            LifecycleState.QUEUED,
+                                            LifecycleState.RUNNING,
+                                            LifecycleState.BACKOFF,
+                                        )
+                                    ),
                                     Job.kind.in_(
                                         {
                                             "recipe.build.v1",
@@ -772,7 +780,13 @@ def build_recipe_image_availability(
                 current_jobs = tuple(
                     session.scalars(
                         select(Job).where(
-                            Job.state.in_({"queued", "running", "partial"}),
+                            Job.state.in_(
+                                job_states.words(
+                                    LifecycleState.QUEUED,
+                                    LifecycleState.RUNNING,
+                                    LifecycleState.BACKOFF,
+                                )
+                            ),
                             Job.kind.in_(
                                 {"recipe.build.v1", "recipe.image.availability.v2"}
                             ),
@@ -1188,7 +1202,9 @@ def _observe_build(
             "accepted build was cancelled",
             recovery_actions=("force_rebuild",),
         )
-    if operation.state in {"queued", "running", "waiting-for-operator"}:
+    if operation.state in job_states.words(
+        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+    ):
         with sessions() as session:
             current_progress = _build_progress(session, operation.id, builder_node_id)
             decision, prebuilt_image = _prebuilt_choice(session, operation.owner_id)
@@ -1216,7 +1232,7 @@ def _observe_build(
             retry_after_seconds=5,
             blockers=blockers,
         )
-    if operation.state in {"failed", "expired"}:
+    if operation.state in job_states.words(LifecycleState.FAILED):
         aggregate = operation.result
         node_evidence = (
             aggregate.get("node_evidence") if isinstance(aggregate, Mapping) else None

@@ -274,7 +274,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
     )
     assert availability.run_pending() == 1
     parent = availability.get(parent.id)
-    assert parent.state == "partial"
+    assert parent.state == LifecycleState.BACKOFF
     assert parent.model_child is not None
     child_id = str(parent.model_child["id"])
     child = cache.get_operation(child_id)
@@ -318,11 +318,11 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
             request_id=cancel_request_id,
             reason=reason,
         )
-        assert cancelling.state == "cancelling"
+        assert cancelling.state == LifecycleState.OBSERVING
         availability.reconcile_cancellations()
-        assert availability.get(parent.id).state == "cancelling"
+        assert availability.get(parent.id).state == LifecycleState.OBSERVING
         child_cancelling = cache.get_operation(child_id)
-        assert child_cancelling.state == "cancelling"
+        assert child_cancelling.state == LifecycleState.OBSERVING
         assert child_cancelling.cancellation is not None
         assert child_cancelling.cancellation["reason"] == reason
         pending_review = cache.review_model_removal(selector)

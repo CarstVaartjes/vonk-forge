@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    InvalidRequestError,
+    LifecycleState,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeInstallPayload,
@@ -26,6 +28,8 @@ from vonk_agent_protocol import (
     RecipeStartResult,
     RecipeStopPayload,
     RecipeUninstallPayload,
+    SecurityRefusalError,
+    UnknownOutcomeError,
     canonical_message,
     parse_recipe_operation_result,
     validate_result_for_operation,
@@ -35,7 +39,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import read_model, read_recipe
 
-from . import agent_operation_states
+from . import agent_operation_states, artifact_job_states, job_states
 from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -80,6 +84,12 @@ from .install_admission import (
 from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
 from .lifecycle.artifact_job import ArtifactJobAdapter
+from .lifecycle.evidence import (
+    BookkeepingReason,
+    Residue,
+    read_or_rebuild,
+    retire_as_unknown,
+)
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import redact_text
 from .models import (
@@ -136,7 +146,6 @@ from .recipe_execution_contract import (
     parse_stored_build_plan,
     parse_stored_build_policy,
     parse_stored_installation_plan,
-    parse_stored_run_plan,
     run_endpoint_document,
     run_plan_document,
 )
@@ -243,6 +252,29 @@ class RecipeOperationConflict(RuntimeError):
     """A lifecycle request is stale, conflicting, or unsafe to execute."""
 
 
+class RecipeRequestInvalid(InvalidRequestError, RecipeOperationConflict):
+    """The request names an entity, argument or operation that cannot be acted on.
+
+    It is refused at submit time, before anything is persisted, and the caller
+    can change the request.  It is never raised for damaged stored state: that is
+    rebuilt from evidence or retired as unknown (``lifecycle.evidence``).
+    """
+
+
+class RecipeStopAuthorityRefused(SecurityRefusalError, RecipeOperationConflict):
+    """A destructive Stop or workload-intent fence lacks the exact authority.
+
+    A Stop is built only from the run's exact durable Start authority, and a job
+    joins only the workload intent it was admitted under.  Without that proof the
+    Controller must not invent a destructive payload or take a newer intent.
+    """
+
+
+class RecipeRetryLater(UnknownOutcomeError, RecipeOperationConflict):
+    """The request cannot be served yet (a service not bound, an owner busy, evidence
+    not reported); nothing was persisted and the caller retries it."""
+
+
 class _RouteNotWithdrawn(Exception):
     """The run's route is listed again; withdraw it again before dispatching."""
 
@@ -330,31 +362,284 @@ class RecipeInstallPreflightExpired(RecipeOperationConflict):
 
 
 def _validated_result(kind: str, value: object) -> dict[str, object] | None:
-    """Validate a lifecycle result before persistence and on readback."""
+    """Validate a lifecycle result this call composes, before it is persisted.
+
+    Only documents the caller has just built come through here; a stored result
+    is read with :func:`_recorded_result`, which never raises.
+    """
 
     if value is None:
         return None
     if not isinstance(value, Mapping):
-        raise RecipeOperationConflict("recipe operation result is invalid")
+        raise RecipeRequestInvalid("recipe operation result is invalid")
     try:
         parse_recipe_lifecycle_result(kind, value)
     except (TypeError, ValueError) as error:
-        raise RecipeOperationConflict("recipe operation result is invalid") from error
+        raise RecipeRequestInvalid("recipe operation result is invalid") from error
     return dict(value)
 
 
-def _stored_run_plan(value: object) -> dict[str, object]:
-    try:
-        return run_plan_document(value)
-    except RecipeExecutionContractError as error:
-        raise RecipeOperationConflict("stored run plan is invalid") from error
+def _recorded_result(
+    kind: str, value: object, *, subject: str
+) -> dict[str, object] | None:
+    """A stored lifecycle result; damaged evidence is retired as unknown.
+
+    The result is evidence of what was done, never a reason to refuse the next
+    step: a result that does not parse is recorded as residue and read as absent.
+    """
+
+    if value is None:
+        return None
+
+    def read() -> dict[str, object]:
+        if not isinstance(value, Mapping):
+            raise TypeError("stored recipe operation result is not an object")
+        parse_recipe_lifecycle_result(kind, value)
+        return dict(value)
+
+    loaded = read_or_rebuild(kind="recipe.operation-result", subject=subject, read=read)
+    return None if isinstance(loaded, Residue) else loaded
 
 
-def _stored_installation_plan(value: object) -> dict[str, object]:
+# The one place the stored word of a failed rank is spelled for the rank rows.
+_RANK_FAILED = "failed"
+
+
+def _unproven_evidence(detail: str) -> dict[str, object]:
+    """The typed marker recorded for a node whose evidence cannot be accepted."""
+
+    return {"code": "recipe.evidence_unproven", "detail": detail[:512]}
+
+
+def _evidence_is_acceptable(kind: str, node_id: str, evidence: object) -> bool:
+    """Whether the lifecycle contract accepts this node evidence for the kind."""
+
     try:
-        return installation_plan_document(value, for_uninstall=True)
-    except RecipeExecutionContractError as error:
-        raise RecipeOperationConflict("stored installation plan is invalid") from error
+        parse_recipe_lifecycle_result(kind, {"node_evidence": {node_id: evidence}})
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+_AcceptedRanks = tuple[frozenset[tuple[str, int, str]], bool]
+
+
+def _ranks_from_mapping(
+    session: Session, mapping_id: str, generation: int, revision_id: str
+) -> _AcceptedRanks | None:
+    """The accepted (node, rank, role) set from the saved mapping, as evidence.
+
+    A mapping generation is immutable, so it names the same ranks the stored plan
+    of an installation or run was accepted with.
+    """
+
+    mapping = session.get(ClusterMapping, mapping_id)
+    if mapping is None:
+        return None
+    rows = tuple(
+        session.scalars(
+            select(ClusterMappingNode).where(
+                ClusterMappingNode.mapping_id == mapping_id
+            )
+        )
+    )
+    if not rows:
+        return None
+    ranks = frozenset((row.node_id, row.rank, row.role) for row in rows)
+    return ranks, (
+        len(ranks) == len(rows)
+        and mapping.node_count == len(rows)
+        and mapping.generation == generation
+        and mapping.recipe_revision_id == revision_id
+    )
+
+
+def _plan_ranks(
+    document: Mapping[str, object],
+) -> tuple[frozenset[tuple[str, int, str]], int]:
+    nodes = document.get("nodes")
+    if not isinstance(nodes, list) or not all(
+        isinstance(item, Mapping) for item in nodes
+    ):
+        raise TypeError("stored plan has no node list")
+    ranks = frozenset(
+        (item["node_id"], item["rank"], item["role"])
+        for item in nodes
+        if isinstance(item, Mapping)
+    )
+    return ranks, len(nodes)
+
+
+def _run_accepted_ranks(
+    session: Session, run: RecipeRun, revision_id: str
+) -> _AcceptedRanks | Residue:
+    """The ranks a run was accepted with and whether its identity still matches.
+
+    A stored run plan that does not parse is rebuilt from the saved mapping; when
+    that is gone too the damage is retired as unknown and the caller treats the
+    membership as unproven (it never refuses on the damaged document itself).
+    """
+
+    def read() -> _AcceptedRanks:
+        document = run_plan_document(run.plan)
+        ranks, count = _plan_ranks(document)
+        return ranks, (
+            len(ranks) == count
+            and document.get("installation_id") == run.installation_id
+            and document.get("mapping_id") == run.mapping_id
+            and document.get("mapping_generation") == run.mapping_generation
+            and document.get("recipe_revision_id") == revision_id
+            and document.get("plan_digest") == run.plan_digest
+        )
+
+    return read_or_rebuild(
+        kind="recipe.run-plan",
+        subject=run.id,
+        read=read,
+        rebuild=lambda: _ranks_from_mapping(
+            session, run.mapping_id, run.mapping_generation, revision_id
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _UninstallRecipe:
+    """What an uninstall needs to know of the recipe an installation came from."""
+
+    id: str
+    document_id: str
+    content_digest: str
+    document: Mapping[str, object]
+
+
+def _uninstall_recipe(
+    session: Session, installation: RecipeInstallation, *, lock: bool
+) -> _UninstallRecipe | None:
+    """The recipe of an installation, from its active revision or else from the
+    evidence the installation itself carries (its revision row in any state and
+    the digest its accepted plan recorded); ``None`` only when no exact digest
+    can be proven, which an uninstall cannot do without."""
+
+    revision = _active_recipe_revision(
+        session, installation.recipe_revision_id, for_update=lock
+    )
+    if (
+        revision is not None
+        and revision.content_digest is not None
+        and isinstance(revision.document, Mapping)
+    ):
+        return _UninstallRecipe(
+            revision.id,
+            revision.document_id,
+            revision.content_digest,
+            revision.document,
+        )
+    row = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+    plan = installation.plan if isinstance(installation.plan, Mapping) else {}
+    digest = (row.content_digest if row is not None else None) or plan.get(
+        "recipe_content_sha256"
+    )
+    if not isinstance(digest, str) or not _lower_hex_digest(digest):
+        return None
+    retire_as_unknown(
+        "recipe.installation-recipe",
+        installation.id,
+        BookkeepingReason.EVIDENCE_UNAVAILABLE,
+        "the recipe revision is not active; the uninstall uses its recorded digest",
+    )
+    document = row.document if row is not None else None
+    return _UninstallRecipe(
+        installation.recipe_revision_id,
+        row.document_id if row is not None else installation.recipe_revision_id,
+        digest,
+        document if isinstance(document, Mapping) else {},
+    )
+
+
+def _installation_accepted_ranks(
+    session: Session,
+    installation: RecipeInstallation,
+    revision: _UninstallRecipe,
+) -> _AcceptedRanks | Residue:
+    """The ranks an installation was accepted with; rebuilt from its mapping."""
+
+    def read() -> _AcceptedRanks:
+        document = installation_plan_document(installation.plan, for_uninstall=True)
+        ranks, count = _plan_ranks(document)
+        return ranks, (
+            len(ranks) == count
+            and document.get("mapping_id") == installation.mapping_id
+            and document.get("mapping_generation") == installation.mapping_generation
+            and document.get("recipe_revision_id") == revision.id
+            and document.get("recipe_content_sha256") == revision.content_digest
+            and document.get("plan_digest") == installation.plan_digest
+        )
+
+    return read_or_rebuild(
+        kind="recipe.installation-plan",
+        subject=installation.id,
+        read=read,
+        rebuild=lambda: _ranks_from_mapping(
+            session,
+            installation.mapping_id,
+            installation.mapping_generation,
+            revision.id,
+        ),
+    )
+
+
+def _profile_jobrun_parent(job: Job) -> ProfileJobRunStopJob | Residue:
+    """The typed parent of a profile JobRun Stop; damage is retired as unknown."""
+
+    return read_or_rebuild(
+        kind="recipe.profile-jobrun-stop-parent",
+        subject=job.id,
+        read=lambda: ProfileJobRunStopJob.model_validate_parent(job.payload),
+    )
+
+
+def _run_is_one_shot(session: Session, run: RecipeRun) -> bool:
+    """Whether the run only hosts one-shot jobs (no service container).
+
+    The stored plan says so; when it does not parse, the evidence is the
+    activation operation that created the run, which nothing else produces.
+    """
+
+    def read() -> bool:
+        return run_plan_document(run.plan).get("execution_mode") == "one-shot-jobs"
+
+    def rebuild() -> bool:
+        return (
+            session.scalar(
+                select(Job.id)
+                .where(
+                    Job.kind == "recipe.job.activate.v1",
+                    Job.payload["owner_kind"].as_string() == "run",
+                    Job.payload["owner_id"].as_string() == run.id,
+                )
+                .limit(1)
+            )
+            is not None
+        )
+
+    loaded = read_or_rebuild(
+        kind="recipe.run-plan", subject=run.id, read=read, rebuild=rebuild
+    )
+    return loaded is True
+
+
+def _run_observes_per_generation(run: RecipeRun) -> bool:
+    """Whether the run's observations are tracked per generation.
+
+    A plan that does not parse is read as the current schema: the observations it
+    resets are re-established by the next report of each rank, so nothing is lost.
+    """
+
+    def read() -> bool:
+        return run_plan_document(run.plan).get("observation_schema_version") == 2
+
+    loaded = read_or_rebuild(kind="recipe.run-plan", subject=run.id, read=read)
+    return True if isinstance(loaded, Residue) else loaded
 
 
 _RECIPE_WIRE_PAYLOAD_MODELS = {
@@ -407,7 +692,7 @@ class RecipeRunRankStatus:
 class RecipeRunRecoveryOwner:
     operation_id: str
     kind: Literal["recipe.start", "recipe.stop"]
-    state: Literal["queued", "running", "waiting-for-operator"]
+    state: str  # a word of the core vocabulary
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,7 +712,11 @@ class RecipeRunStatus:
 
 
 new_recipe_job = RecipeOperationAdapter.new_job
-_TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
+_TERMINAL_JOB_STATES = frozenset(
+    job_states.words(
+        LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+    )
+)
 _INITIAL_OBSERVATION_GRACE_SECONDS = 120
 # A Stop withdraws the run's route again if a competing publication listed it
 # between the withdrawal and the dispatch.
@@ -448,20 +737,48 @@ _WORKLOAD_INTENT_KINDS = frozenset(
 
 
 def _bound_workload_intent(job: Job) -> int:
+    """The exact intent a job was admitted under; a fence, so it never defaults."""
+
     ordinal = job.payload.get("workload_intent_ordinal")
     if type(ordinal) is not int or ordinal < 1:
-        raise RecipeOperationConflict("workload operation lacks its admitted intent")
+        raise RecipeStopAuthorityRefused("workload operation lacks its admitted intent")
     return ordinal
+
+
+def _job_workload_intent(session: Session, job: Job) -> int | None:
+    """The intent a job was admitted under, re-derived from its orders when its
+    own payload lost it; ``None`` when nothing proves it (the caller then treats
+    the job as no longer current, never as the newest intent)."""
+
+    def read() -> int:
+        ordinal = job.payload.get("workload_intent_ordinal")
+        if type(ordinal) is not int or ordinal < 1:
+            raise ValueError("job payload carries no workload intent")
+        return ordinal
+
+    def rebuild() -> int | None:
+        ordinals = {
+            child.workload_intent_ordinal
+            for child in session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            )
+        }
+        return ordinals.pop() if len(ordinals) == 1 else None
+
+    loaded = read_or_rebuild(
+        kind="recipe.workload-intent", subject=job.id, read=read, rebuild=rebuild
+    )
+    if isinstance(loaded, Residue) or loaded < 1:
+        return None
+    return loaded
 
 
 def _run_start_intent(session: Session, run_id: str) -> int:
     run = session.get(RecipeRun, run_id)
     if run is None:
-        raise RecipeOperationConflict("recipe run does not exist")
+        raise RecipeRequestInvalid("recipe run does not exist")
     root_kind = (
-        "recipe.job.activate.v1"
-        if _stored_run_plan(run.plan).get("execution_mode") == "one-shot-jobs"
-        else "recipe.start"
+        "recipe.job.activate.v1" if _run_is_one_shot(session, run) else "recipe.start"
     )
     starts = tuple(
         session.scalars(
@@ -477,7 +794,7 @@ def _run_start_intent(session: Session, run_id: str) -> int:
         )
     )
     if len(starts) != 1:
-        raise RecipeOperationConflict(
+        raise RecipeStopAuthorityRefused(
             "recipe run lacks its original workload authority"
         )
     return _bound_workload_intent(starts[0])
@@ -500,21 +817,33 @@ def _intent_is_current(session: Session, ordinal: int, targets: Sequence[str]) -
 def _workload_owner_scope(
     session: Session, kind: str, owner_id: str
 ) -> tuple[str, ...]:
+    """The Sparks an owner's rows place work on; empty when its rows are damaged.
+
+    An owner row that names no Spark (or one twice) is bookkeeping damage: it is
+    retired as unknown and callers use the Sparks each job itself names.
+    """
+
     if kind in {"recipe.start", "recipe.stop"}:
         if session.get(RecipeRun, owner_id) is None:
-            raise RecipeOperationConflict("recipe run does not exist")
+            raise RecipeRequestInvalid("recipe run does not exist")
         statement = select(RunNode.node_id).where(RunNode.run_id == owner_id)
     elif kind in {"recipe.install", "recipe.uninstall", "recipe.reconcile"}:
         if session.get(RecipeInstallation, owner_id) is None:
-            raise RecipeOperationConflict("recipe installation does not exist")
+            raise RecipeRequestInvalid("recipe installation does not exist")
         statement = select(InstallationNode.node_id).where(
             InstallationNode.installation_id == owner_id
         )
     else:
-        raise RecipeOperationConflict("workload reconciliation kind is invalid")
+        raise RecipeRequestInvalid("workload reconciliation kind is invalid")
     targets = tuple(sorted(session.scalars(statement)))
     if not targets or len(targets) != len(set(targets)):
-        raise RecipeOperationConflict("workload owner scope is invalid")
+        retire_as_unknown(
+            "recipe.workload-owner-scope",
+            owner_id,
+            BookkeepingReason.ROW_INCOMPLETE,
+            f"{kind} owner has no exact Spark membership",
+        )
+        return ()
     return targets
 
 
@@ -528,9 +857,10 @@ def _profile_effect_scope(
     if (
         not targets
         or targets != tuple(sorted(set(targets)))
-        or not set(targets) < set(owner_scope)
+        # An owner whose rows name no Spark (retired as unknown) proves no subset.
+        or (owner_scope and not set(targets) < set(owner_scope))
     ):
-        raise RecipeOperationConflict("profile Stop target scope is invalid")
+        raise RecipeRequestInvalid("profile Stop target scope is invalid")
     return targets
 
 
@@ -548,7 +878,11 @@ def _active_owned_workload_jobs(
         .where(
             Job.kind == kind,
             Job.state.in_(
-                ("queued", "running", "waiting-for-operator")
+                job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
                 if include_waiting_cancellation
                 else ("queued", "running")
             ),
@@ -562,7 +896,7 @@ def _active_owned_workload_jobs(
     return tuple(
         job
         for job in session.scalars(statement)
-        if job.state != "waiting-for-operator"
+        if job.state not in job_states.words(LifecycleState.NEEDS_OPERATOR)
         or (
             isinstance(job.result, Mapping)
             and job.result.get("cancel_requested") is True
@@ -690,22 +1024,22 @@ class RecipeOperationService:
         actor: str,
     ) -> ClusterMappingPlan:
         if self._mappings is None:
-            raise RecipeOperationConflict("cluster mapping service is unavailable")
+            raise RecipeRetryLater("cluster mapping service is unavailable")
         return self._mappings.preview(recipe_revision_id, node_ids, parameters, actor)
 
     def create_mapping(self, plan: ClusterMappingPlan, *, actor: str) -> str:
         if self._mappings is None:
-            raise RecipeOperationConflict("cluster mapping service is unavailable")
+            raise RecipeRetryLater("cluster mapping service is unavailable")
         try:
             return self._mappings.materialize(plan, actor=actor, now=self._clock())
         except (RuntimeError, ValueError) as error:
-            raise RecipeOperationConflict(str(error)) from error
+            raise RecipeRequestInvalid(str(error)) from error
 
     def preview_build(
         self, recipe_revision_id: str, builder_node_id: str
     ) -> RecipeBuildPlan:
         if self._builds is None:
-            raise RecipeOperationConflict("recipe build service is unavailable")
+            raise RecipeRetryLater("recipe build service is unavailable")
         return self._builds.plan(recipe_revision_id, builder_node_id, now=self._clock())
 
     def reusable_build_id(self, recipe_revision_id: str) -> str | None:
@@ -715,7 +1049,7 @@ class RecipeOperationService:
 
     def check_build_source(self, recipe_revision_id: str) -> SourcePolicyReport:
         if self._builds is None:
-            raise RecipeOperationConflict("recipe build service is unavailable")
+            raise RecipeRetryLater("recipe build service is unavailable")
         return self._builds.check_source(recipe_revision_id)
 
     def build(
@@ -833,33 +1167,56 @@ class RecipeOperationService:
                 succeeded = self._successful_build_job_in_session(
                     session, build.id, build.build_input_sha256
                 )
-                if succeeded is None:
-                    raise RecipeOperationConflict("recipe build receipt is unavailable")
-                replay = new_recipe_job(
-                    id=str(uuid.uuid4()),
-                    request_id=request_id,
-                    kind=succeeded.kind,
-                    state="succeeded",
-                    actor=actor,
-                    authority_revision=succeeded.authority_revision,
-                    targets=list(succeeded.targets),
-                    payload_digest=succeeded.payload_digest,
-                    payload=dict(succeeded.payload)
-                    | {"build_intent": intent.model_dump(mode="json")},
-                    result=_validated_result("recipe.build.v1", succeeded.result),
-                    created_at=now,
-                    updated_at=now,
+                receipt = (
+                    _recorded_result(
+                        "recipe.build.v1", succeeded.result, subject=succeeded.id
+                    )
+                    if succeeded is not None
+                    else None
                 )
-                session.add(replay)
-                session.flush()
-                return self._view(replay)
+                if succeeded is None or receipt is None:
+                    # The build row says succeeded but its receipt is gone: the
+                    # evidence is rebuilt by building again (the same replacement
+                    # a forced build performs), never by refusing the request.
+                    retire_as_unknown(
+                        "recipe.build-receipt",
+                        build.id,
+                        BookkeepingReason.ROW_INCOMPLETE,
+                        "succeeded build has no successful receipt",
+                    )
+                    force = True
+                else:
+                    replay = new_recipe_job(
+                        id=str(uuid.uuid4()),
+                        request_id=request_id,
+                        kind=succeeded.kind,
+                        state="succeeded",
+                        actor=actor,
+                        authority_revision=succeeded.authority_revision,
+                        targets=list(succeeded.targets),
+                        payload_digest=succeeded.payload_digest,
+                        payload=dict(succeeded.payload)
+                        | {"build_intent": intent.model_dump(mode="json")},
+                        result=receipt,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    session.add(replay)
+                    session.flush()
+                    return self._view(replay)
             # Reusing a verified receipt above needs no new execution capacity.
             # A new attempt must wait for the cancelled executor's cleanup.
             cancelling = session.scalar(
                 select(Job).where(
                     Job.kind == "recipe.build.v1",
                     Job.payload["owner_id"].as_string() == plan.build_id,
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
                 )
             )
@@ -913,7 +1270,11 @@ class RecipeOperationService:
                     .where(
                         Job.kind == "recipe.build.v1",
                         Job.state.in_(
-                            ("failed", "waiting-for-operator", "expired", "cancelled")
+                            job_states.words(
+                                LifecycleState.FAILED,
+                                LifecycleState.NEEDS_OPERATOR,
+                                LifecycleState.CANCELLED,
+                            )
                         ),
                         Job.payload["owner_id"].as_string() == build.id,
                         Job.payload["plan_digest"].as_string()
@@ -923,10 +1284,24 @@ class RecipeOperationService:
                     .limit(1)
                 )
                 if previous is None:
-                    raise RecipeOperationConflict(
-                        "failed recipe build receipt is unavailable"
+                    # A failed build with no failed receipt: the evidence is
+                    # rebuilt by starting the build again.
+                    retire_as_unknown(
+                        "recipe.build-receipt",
+                        build.id,
+                        BookkeepingReason.ROW_INCOMPLETE,
+                        "failed build has no failed receipt",
                     )
-                if previous.state == "cancelled":
+                    job = self._start_build_in_session(
+                        session,
+                        build,
+                        plan,
+                        actor=actor,
+                        request_id=request_id,
+                        now=now,
+                        intent=intent,
+                    )
+                elif previous.state == "cancelled":
                     cancellation = build_cancellation(previous)
                     if cancellation is None or cancellation.cancelled is not True:
                         raise RecipeOperationConflict(
@@ -978,7 +1353,7 @@ class RecipeOperationService:
         force: bool = False,
     ) -> Job:
         if self._builds is None:
-            raise RecipeOperationConflict("recipe build service is unavailable")
+            raise RecipeRetryLater("recipe build service is unavailable")
         prebuilt = policy_prebuilt_reference(build.policy_report)
         if prebuilt is not None:
             return self._queue_prebuilt_build_in_session(
@@ -1170,7 +1545,7 @@ class RecipeOperationService:
         except InstallAdmissionBusy:
             raise
         except (RuntimeError, ValueError) as error:
-            raise RecipeOperationConflict(str(error)) from error
+            raise RecipeRequestInvalid(str(error)) from error
         with self._sessions.begin() as session:
             existing_id = self._prepared_installation_id(session, plan)
             if existing_id is not None:
@@ -1187,26 +1562,33 @@ class RecipeOperationService:
             except InstallAdmissionBusy:
                 raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeOperationConflict(str(error)) from error
+                raise RecipeRequestInvalid(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             assert installation is not None
+            # The row was written by this very transaction: its plan must carry
+            # the compiled documents before anything can commit it.
             try:
                 stored_plan = parse_stored_installation_plan(installation.plan)
             except RecipeExecutionContractError as error:
-                raise RecipeOperationConflict(
+                raise RecipeRequestInvalid(
                     "compiled execution plan was not persisted"
                 ) from error
             if not stored_plan.compiled_execution_plans:
-                raise RecipeOperationConflict(
-                    "compiled execution plan was not persisted"
-                )
+                raise RecipeRequestInvalid("compiled execution plan was not persisted")
             return installation_id
 
     @staticmethod
     def _prepared_installation_id(
         session: Session, plan: InstallPlan, *, planned_only: bool = False
     ) -> str | None:
-        existing = session.scalar(
+        """The newest installation already prepared for this exact plan.
+
+        An installation whose stored plan cannot be read is no preparation: it is
+        retired as unknown and skipped, so the next acceptance prepares a fresh,
+        readable one (the damaged row is left to space-driven cleanup).
+        """
+
+        candidates = session.scalars(
             select(RecipeInstallation)
             .where(
                 RecipeInstallation.mapping_id == plan.mapping_id,
@@ -1220,21 +1602,77 @@ class RecipeOperationService:
                 ),
             )
             .order_by(RecipeInstallation.created_at.desc())
-            .limit(1)
         )
-        if existing is None:
-            return None
-        try:
-            stored_plan = parse_stored_installation_plan(existing.plan)
-        except RecipeExecutionContractError as error:
-            raise RecipeOperationConflict(
-                "stored installation plan is invalid"
-            ) from error
-        if not stored_plan.compiled_execution_plans:
-            raise RecipeOperationConflict(
-                "stored installation has no compiled execution plan"
-            )
-        return existing.id
+        for existing in candidates:
+
+            def read(candidate: RecipeInstallation = existing) -> bool:
+                stored = parse_stored_installation_plan(candidate.plan)
+                if not stored.compiled_execution_plans:
+                    raise ValueError("stored installation has no compiled plan")
+                return True
+
+            if (
+                read_or_rebuild(
+                    kind="recipe.installation-plan", subject=existing.id, read=read
+                )
+                is True
+            ):
+                return existing.id
+        return None
+
+    def _stored_compiled_plans(
+        self,
+        session: Session,
+        installation: RecipeInstallation,
+        node_ids: Collection[str],
+        *,
+        now: datetime,
+    ) -> dict[str, dict[str, object]] | Residue:
+        """The compiled launch documents an installation was accepted with.
+
+        A stored plan that does not parse (or does not cover the ranks) is
+        re-planned from its mapping and build; the result is evidence only when
+        it carries the installation's own plan digest.  Otherwise the damage is
+        retired as unknown and the caller refuses the request, which the next
+        prepare answers with a fresh installation.
+        """
+
+        wanted = set(node_ids)
+
+        def read() -> dict[str, dict[str, object]]:
+            plans = parse_stored_installation_plan(
+                installation.plan
+            ).compiled_execution_plans
+            if not plans or not wanted <= set(plans):
+                raise ValueError("stored installation plan lacks compiled documents")
+            return {
+                node_id: value.model_dump(mode="json")
+                for node_id, value in plans.items()
+            }
+
+        def rebuild() -> dict[str, dict[str, object]] | None:
+            try:
+                fresh = self._install_admission.plan_install(
+                    installation.mapping_id,
+                    installation.recipe_build_id,
+                    now=now,
+                    _session=session,
+                )
+            except (RuntimeError, ValueError, KeyError):
+                return None
+            plans = fresh.compiled_plan_by_node
+            if fresh.plan_digest != installation.plan_digest or not wanted <= set(
+                plans
+            ):
+                return None
+            return plans
+
+        return read_or_rebuild(
+            kind="recipe.installation-plan",
+            subject=installation.id,
+            read=read,
+            rebuild=rebuild,
+        )
 
     def start_installation(
         self,
@@ -1252,7 +1690,7 @@ class RecipeOperationService:
                 RecipeInstallation, installation_id, with_for_update=True
             )
             if installation is None:
-                raise RecipeOperationConflict("recipe installation is unavailable")
+                raise RecipeRequestInvalid("recipe installation is unavailable")
             existing = self._idempotent_in_session(
                 session,
                 request_id,
@@ -1267,14 +1705,21 @@ class RecipeOperationService:
                 select(Job.id)
                 .where(
                     Job.kind == "recipe.reconcile",
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     Job.payload["owner_kind"].as_string() == "installation",
                     Job.payload["owner_id"].as_string() == installation_id,
                 )
                 .limit(1)
             )
             if reconciliation is not None:
-                raise RecipeOperationConflict("recipe installation is being reconciled")
+                raise RecipeRetryLater("recipe installation is being reconciled")
+            receipt_missing = False
             if installation.state == "installed":
                 completed = session.scalar(
                     select(Job)
@@ -1290,9 +1735,16 @@ class RecipeOperationService:
                 )
                 if completed is not None:
                     return self._view(completed)
-                raise RecipeOperationConflict(
-                    "recipe installation is already complete without an operation"
+                # Installed, but its receipt is gone: the effect is unknown, so
+                # the install is run again (it verifies bytes already present)
+                # instead of refusing the request.
+                retire_as_unknown(
+                    "recipe.install-receipt",
+                    installation_id,
+                    BookkeepingReason.ROW_INCOMPLETE,
+                    "installed installation has no successful install receipt",
                 )
+                receipt_missing = True
             active = session.scalar(
                 select(Job)
                 .where(
@@ -1310,21 +1762,17 @@ class RecipeOperationService:
                     and active.payload.get("workload_intent_ordinal")
                     != workload_intent_ordinal
                 ):
-                    raise RecipeOperationConflict(
+                    raise RecipeRetryLater(
                         "prior installation intent requires exact observation before replacement"
                     )
                 return self._view(active)
-            if installation.state not in {"planned", "partial", "failed", "installing"}:
-                raise RecipeOperationConflict("recipe installation is not launchable")
-            try:
-                stored_installation_plan = parse_stored_installation_plan(
-                    installation.plan
-                )
-            except RecipeExecutionContractError as error:
-                raise RecipeOperationConflict(
-                    "compiled execution plan is unavailable"
-                ) from error
-            raw_plans = stored_installation_plan.compiled_execution_plans
+            if not receipt_missing and installation.state not in {
+                "planned",
+                "partial",
+                "failed",
+                "installing",
+            }:
+                raise RecipeRequestInvalid("recipe installation is not launchable")
             nodes = tuple(
                 session.scalars(
                     select(InstallationNode)
@@ -1332,13 +1780,17 @@ class RecipeOperationService:
                     .order_by(InstallationNode.rank, InstallationNode.node_id)
                 )
             )
-            if not nodes or any(node.node_id not in raw_plans for node in nodes):
-                raise RecipeOperationConflict(
-                    "compiled execution plan is missing for one or more nodes"
+            raw_plans = self._stored_compiled_plans(
+                session, installation, [node.node_id for node in nodes], now=now
+            )
+            if isinstance(raw_plans, Residue) or not nodes:
+                raise RecipeRetryLater(
+                    "stored installation plan is unreadable; it is recorded and the "
+                    "next preparation installs afresh"
                 )
             revision = _active_recipe_revision(session, installation.recipe_revision_id)
             if revision is None or revision.content_digest is None:
-                raise RecipeOperationConflict("recipe revision is unavailable")
+                raise RecipeRequestInvalid("recipe revision is unavailable")
             installation.state = "installing"
             installation.updated_at = now
             for node in nodes:
@@ -1359,9 +1811,7 @@ class RecipeOperationService:
                             "installation_id": installation_id,
                             "plan_digest": installation.plan_digest,
                             "expected_bytes": node.required_bytes,
-                            "compiled_execution_plan": raw_plans[
-                                node.node_id
-                            ].model_dump(mode="json"),
+                            "compiled_execution_plan": raw_plans[node.node_id],
                         },
                     )
                     for node in nodes
@@ -1514,19 +1964,18 @@ class RecipeOperationService:
                     .order_by(RunNode.rank)
                 )
             )
-            try:
-                stored_plan = parse_stored_run_plan(run.plan)
-            except RecipeExecutionContractError as error:
-                raise RecipeOperationConflict("stored run plan is invalid") from error
-            expected = [node.model_dump(mode="json") for node in stored_plan.nodes]
+            installation = session.get(RecipeInstallation, run.installation_id)
+            accepted = _run_accepted_ranks(
+                session,
+                run,
+                installation.recipe_revision_id if installation is not None else "",
+            )
+            # A plan nobody can read proves no membership: the run is shown not
+            # healthy until its ranks are re-established, never refused.
             exact_ranks = (
-                isinstance(expected, list)
-                and len(expected) == len(nodes)
-                and all(isinstance(item, Mapping) for item in expected)
-                and {
-                    (item.get("node_id"), item.get("rank"), item.get("role"))
-                    for item in expected
-                }
+                not isinstance(accepted, Residue)
+                and len(accepted[0]) == len(nodes)
+                and accepted[0]
                 == {(node.node_id, node.rank, node.role) for node in nodes}
             )
             recovery_jobs = tuple(
@@ -1535,7 +1984,13 @@ class RecipeOperationService:
                     select(Job)
                     .where(
                         Job.kind.in_({"recipe.start", "recipe.stop"}),
-                        Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
+                        ),
                         Job.payload["owner_kind"].as_string() == "run",
                         Job.payload["owner_id"].as_string() == run.id,
                     )
@@ -1552,13 +2007,11 @@ class RecipeOperationService:
                 else:
                     continue
                 if job.state == "queued":
-                    state: Literal["queued", "running", "waiting-for-operator"] = (
-                        "queued"
-                    )
+                    state = LifecycleState.QUEUED.value
                 elif job.state == "running":
-                    state = "running"
-                elif job.state == "waiting-for-operator":
-                    state = "waiting-for-operator"
+                    state = LifecycleState.RUNNING.value
+                elif job.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
+                    state = LifecycleState.NEEDS_OPERATOR.value
                 else:
                     continue
                 recovery_owners.append(
@@ -1638,7 +2091,7 @@ class RecipeOperationService:
         except InstallAdmissionBusy:
             raise
         except (RuntimeError, ValueError) as error:
-            raise RecipeOperationConflict(str(error)) from error
+            raise RecipeRequestInvalid(str(error)) from error
         with self._sessions.begin() as session:
             try:
                 acquire_admission_keys(
@@ -1667,14 +2120,14 @@ class RecipeOperationService:
             except InstallAdmissionBusy:
                 raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeOperationConflict(str(error)) from error
+                raise RecipeRequestInvalid(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             assert installation is not None
             installation.state = "installing"
             installation.updated_at = now
             compiled_plans = plan.compiled_plan_by_node
             if set(compiled_plans) != {node.node_id for node in plan.nodes}:
-                raise RecipeOperationConflict(
+                raise RecipeRequestInvalid(
                     "compiled execution plan is missing for one or more mapped nodes"
                 )
             job = self._queue_in_session(
@@ -1763,31 +2216,36 @@ class RecipeOperationService:
                 )
             }
             if set(presences) != {node.node_id for node in plan.nodes}:
-                raise RecipeOperationConflict(
-                    "recipe node endpoint evidence is unavailable"
-                )
+                # A Spark reports its address when it next contacts the Controller.
+                raise RecipeRetryLater("recipe node endpoint evidence is unavailable")
             master = next((node for node in plan.nodes if node.endpoint_owner), None)
             if master is None:
-                raise RecipeOperationConflict("recipe run has no endpoint owner")
+                raise RecipeRequestInvalid("recipe run has no endpoint owner")
             world_size = len(plan.nodes)
             master_address = master.fabric_address if world_size > 1 else None
             master_port = master.rendezvous_port if world_size > 1 else None
             if world_size > 1 and (master_address is None or master_port is None):
-                raise RecipeOperationConflict(
+                raise RecipeRequestInvalid(
                     "recipe direct-fabric rendezvous is unavailable"
                 )
             active_uninstall = session.scalar(
                 select(Job.id)
                 .where(
                     Job.kind.in_(("recipe.uninstall", "recipe.reconcile")),
-                    Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     Job.payload["owner_kind"].as_string() == "installation",
                     Job.payload["owner_id"].as_string() == plan.installation_id,
                 )
                 .limit(1)
             )
             if active_uninstall is not None:
-                raise RecipeOperationConflict("recipe installation is not runnable")
+                raise RecipeRetryLater("recipe installation is not runnable")
             try:
                 run_id = self._run_admission.accept_run_in_session(
                     session,
@@ -1800,35 +2258,23 @@ class RecipeOperationService:
             except RunAdmissionBusy:
                 raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeOperationConflict(str(error)) from error
+                raise RecipeRequestInvalid(str(error)) from error
             run = session.get(RecipeRun, run_id)
             revision = _active_recipe_revision(session, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)
             assert run is not None and revision is not None and installation is not None
-            try:
-                stored_installation_plan = parse_stored_installation_plan(
-                    installation.plan
+            loaded_plans = self._stored_compiled_plans(
+                session, installation, [node.node_id for node in plan.nodes], now=now
+            )
+            if isinstance(loaded_plans, Residue):
+                raise RecipeRetryLater(
+                    "compiled execution plan is unavailable for the installed recipe; "
+                    "it is recorded and the next preparation installs afresh"
                 )
-            except RecipeExecutionContractError as error:
-                raise RecipeOperationConflict(
-                    "compiled execution plan is unavailable for the installed recipe"
-                ) from error
-            compiled_plans = {
-                node_id: value.model_dump(mode="json")
-                for node_id, value in stored_installation_plan.compiled_execution_plans.items()
-            }
-            if not compiled_plans:
-                raise RecipeOperationConflict(
-                    "compiled execution plan is unavailable for the installed recipe"
-                )
-            if any(
-                not isinstance(compiled_plans.get(node.node_id), Mapping)
-                for node in plan.nodes
-            ):
-                raise RecipeOperationConflict(
-                    "compiled execution plan is missing for one or more run ranks"
-                )
+            compiled_plans = loaded_plans
             start_order = _topology_order(revision.document, "start_order")
+            if start_order is None:
+                raise RecipeRequestInvalid("recipe topology is invalid")
             topology = recipe_topology(revision.document)
             distributed_readiness = _canonical_distributed_readiness(revision.document)
             two_phase_start = (
@@ -1837,11 +2283,13 @@ class RecipeOperationService:
                 and distributed_readiness is not None
             )
             start_deadline = (
-                _distributed_start_deadline(
-                    revision.document,
-                    now=now,
-                    timeout_seconds=self._distributed_start_timeout_seconds,
-                )
+                # Persist the accepted loading/JIT budget. Exact rank-loss recovery
+                # derives this same duration; neither lease renewal nor retry
+                # extends a deadline.
+                (
+                    _aware(now)
+                    + timedelta(seconds=self._distributed_start_timeout_seconds)
+                ).isoformat()
                 if two_phase_start
                 else None
             )
@@ -1887,13 +2335,17 @@ class RecipeOperationService:
                         start_deadline=start_deadline,
                     )
                 except (KeyError, RecipeStartPayloadError) as error:
-                    raise RecipeOperationConflict(
+                    raise RecipeRequestInvalid(
                         "recipe start payload is invalid"
                     ) from error
                 return node_id, payload
 
             start_payloads = tuple(start_payload(node) for node in plan.nodes)
             role_phases = _role_phases(start_order, start_payloads)
+            if role_phases is None:
+                # Starting blind (without the recipe's role order) could launch
+                # a rank before what it depends on.
+                raise RecipeRequestInvalid("operation topology order is invalid")
             phases = role_phases
             if start_deadline is not None:
                 owner_payload = next(
@@ -1960,7 +2412,7 @@ class RecipeOperationService:
             )
         )
         if node is None:
-            raise RecipeOperationConflict("recipe job target is not running")
+            raise RecipeRequestInvalid("recipe job target is not running")
         return self._queue_in_session(
             session,
             kind="recipe.job.run.v1",
@@ -2042,12 +2494,12 @@ class RecipeOperationService:
                 "artifact-job",
             }
             if len(adapters) != 1 or adapters[0] not in artifact_adapters:
-                raise RecipeOperationConflict("recipe is not an artifact job recipe")
+                raise RecipeRequestInvalid("recipe is not an artifact job recipe")
             topology = (
                 revision.document.get("topology") if revision is not None else None
             )
             if not isinstance(topology, Mapping) or topology.get("node_count") != 1:
-                raise RecipeOperationConflict(
+                raise RecipeRequestInvalid(
                     "artifact job recipes currently require a single-node topology"
                 )
             try:
@@ -2055,17 +2507,19 @@ class RecipeOperationService:
                     session, plan, actor=actor, now=now
                 )
             except (RuntimeError, ValueError) as error:
-                raise RecipeOperationConflict(str(error)) from error
+                raise RecipeRequestInvalid(str(error)) from error
             run = session.get(RecipeRun, run_id)
             assert run is not None and revision is not None
             run.state = "running"
             run.route_state = "withdrawn"
+            # The run row was written by this very transaction: its plan must
+            # accept the one-shot mode before anything can commit it.
             try:
                 updated_plan = run_plan_document(run.plan)
                 updated_plan["execution_mode"] = "one-shot-jobs"
                 run.plan = run_plan_document(updated_plan)
             except RecipeExecutionContractError as error:
-                raise RecipeOperationConflict("stored run plan is invalid") from error
+                raise RecipeRequestInvalid("stored run plan is invalid") from error
             run.updated_at = now
             nodes = tuple(
                 session.scalars(
@@ -2087,7 +2541,7 @@ class RecipeOperationService:
                 )
             )
             if tuple(node.node_id for node in target_nodes) != tuple(targets):
-                raise RecipeOperationConflict("artifact workload target disappeared")
+                raise RecipeRequestInvalid("artifact workload target disappeared")
             workload_intent_ordinal = (
                 max(node.workload_intent_ordinal for node in target_nodes) + 1
             )
@@ -2141,11 +2595,19 @@ class RecipeOperationService:
         *,
         profile_target_node_ids: Sequence[str] | None = None,
     ) -> IssuedWorkloadReconciliation | None:
-        """Name exact issued work that needs fresh observation before resumption."""
+        """Name exact issued work that needs fresh observation before resumption.
+
+        Bookkeeping that disagrees (an owner scope that changed, an intent or plan
+        the job lost, children or attempts that are missing) never refuses the
+        assessment: the job's own Sparks and orders are the evidence, the
+        disagreement is retired as unknown, and the job is reported for
+        observation.  With several such jobs the earliest due one is named; the
+        others surface on the next assessment.
+        """
         if workload_intent_ordinal is not None and (
             type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1
         ):
-            raise RecipeOperationConflict("workload intent ordinal is invalid")
+            raise RecipeRequestInvalid("workload intent ordinal is invalid")
         now = _aware(self._clock())
         with self._sessions() as session:
             scope = _workload_owner_scope(session, kind, owner_id)
@@ -2153,18 +2615,19 @@ class RecipeOperationService:
             if workload_intent_ordinal is not None and not _intent_is_current(
                 session, workload_intent_ordinal, intent_scope
             ):
-                raise RecipeOperationConflict("workload intent was superseded")
+                raise RecipeRequestInvalid("workload intent was superseded")
             pending: list[IssuedWorkloadReconciliation] = []
             for job in _active_owned_workload_jobs(
                 session, kind, owner_id, include_waiting_cancellation=True
             ):
-                ordinal = job.payload.get("workload_intent_ordinal")
                 if tuple(sorted(job.targets)) != scope:
-                    raise RecipeOperationConflict("workload owner scope changed")
-                if type(ordinal) is not int or ordinal < 1:
-                    raise RecipeOperationConflict(
-                        "issued workload authority is invalid"
+                    retire_as_unknown(
+                        "recipe.workload-owner-scope",
+                        job.id,
+                        BookkeepingReason.EVIDENCE_MISMATCH,
+                        "job targets differ from the owner's Sparks",
                     )
+                ordinal = _job_workload_intent(session, job) or 0
                 if (
                     workload_intent_ordinal is not None
                     and ordinal >= workload_intent_ordinal
@@ -2179,29 +2642,29 @@ class RecipeOperationService:
                         .order_by(AgentOperation.id)
                     )
                 )
-                if not children or any(
-                    child.node_id not in scope
-                    or child.workload_intent_ordinal != ordinal
-                    for child in children
-                ):
-                    raise RecipeOperationConflict(
-                        "issued workload children are invalid"
-                    )
-                attempts = tuple(
-                    session.scalars(
-                        select(AgentOperationAttempt).where(
-                            AgentOperationAttempt.operation_id.in_(
-                                tuple(child.id for child in children)
+                attempts = (
+                    tuple(
+                        session.scalars(
+                            select(AgentOperationAttempt).where(
+                                AgentOperationAttempt.operation_id.in_(
+                                    tuple(child.id for child in children)
+                                )
                             )
                         )
                     )
+                    if children
+                    else ()
                 )
-                if not attempts:
-                    raise RecipeOperationConflict(
-                        "issued workload attempt evidence is missing"
+                if not children or not attempts:
+                    retire_as_unknown(
+                        "recipe.issued-workload",
+                        job.id,
+                        BookkeepingReason.ROW_INCOMPLETE,
+                        "issued job has no orders or attempt evidence",
                     )
                 latest_lease = max(
-                    _aware(attempt.lease_deadline) for attempt in attempts
+                    (_aware(attempt.lease_deadline) for attempt in attempts),
+                    default=now,
                 )
                 # The helper grant is bounded to 300 seconds; stop/cleanup
                 # helpers can run for up to 645 seconds after admission.
@@ -2215,14 +2678,16 @@ class RecipeOperationService:
                     ),
                 )
                 plan_digest = job.payload.get("plan_digest")
-                if not isinstance(plan_digest, str):
-                    raise RecipeOperationConflict("issued workload plan is invalid")
                 pending.append(
                     IssuedWorkloadReconciliation(
                         job_id=job.id,
                         kind=kind,
                         owner_id=owner_id,
-                        plan_digest=plan_digest,
+                        plan_digest=(
+                            plan_digest
+                            if isinstance(plan_digest, str)
+                            else job.payload_digest
+                        ),
                         payload_digests=tuple(
                             child.payload_digest for child in children
                         ),
@@ -2231,11 +2696,11 @@ class RecipeOperationService:
                         observation_deadline=observation_deadline,
                     )
                 )
-            if len(pending) > 1:
-                raise RecipeOperationConflict(
-                    "multiple issued workload effects need observation"
-                )
-            return pending[0] if pending else None
+            return min(
+                pending,
+                key=lambda item: (item.observe_due_at, item.job_id),
+                default=None,
+            )
 
     def reconcile_superseded_unissued(
         self,
@@ -2247,7 +2712,7 @@ class RecipeOperationService:
     ) -> bool:
         """Retire only exact older workload jobs with no issued agent attempt."""
         if type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1:
-            raise RecipeOperationConflict("workload intent ordinal is invalid")
+            raise RecipeRequestInvalid("workload intent ordinal is invalid")
         now = self._clock()
         retired = False
         with self._sessions.begin() as session:
@@ -2267,11 +2732,19 @@ class RecipeOperationService:
                 or node.revoked_at is not None
                 for node in nodes
             ):
-                raise RecipeOperationConflict("workload intent was superseded")
+                raise RecipeRequestInvalid("workload intent was superseded")
             for job in _active_owned_workload_jobs(session, kind, owner_id, lock=True):
                 previous_ordinal = job.payload.get("workload_intent_ordinal")
                 if tuple(sorted(job.targets)) != scope:
-                    raise RecipeOperationConflict("workload owner scope changed")
+                    # The job's Sparks and the owner's rows disagree: the job is
+                    # not retired on this evidence, and stays for observation.
+                    retire_as_unknown(
+                        "recipe.workload-owner-scope",
+                        job.id,
+                        BookkeepingReason.EVIDENCE_MISMATCH,
+                        "job targets differ from the owner's Sparks",
+                    )
+                    continue
                 if (
                     type(previous_ordinal) is not int
                     or previous_ordinal < 1
@@ -2395,7 +2868,7 @@ class RecipeOperationService:
             if job.state != "succeeded":
                 self._agent_jobs.notify_available()
             return job
-        raise RecipeOperationConflict(
+        raise RecipeRetryLater(
             "the run's route withdrawal has not settled; retry the stop"
         )
 
@@ -2574,20 +3047,37 @@ class RecipeOperationService:
         recovery_context: Mapping[str, object],
         workload_intent_ordinal: int,
         now: datetime,
-    ) -> Job:
+    ) -> Job | Residue:
         """Queue an accepted-run recovery through the canonical Stop owner.
 
         The caller already owns the route-publication transaction and has
         withdrawn this run's route.  Keeping the Stop admission and queue write
         in that transaction makes duplicate recovery ticks and newer workload
         intent serialize against the same run and node facts.
+
+        A recovery whose scope is no longer current, or whose stored continuation
+        or start authority is damaged, queues nothing: the damage is retired as
+        unknown (a :class:`Residue`).  A scope that is only not current yet
+        (``EVIDENCE_UNAVAILABLE``) is retried on the next pass; damaged
+        authority is settled by the recovery owner as unrecoverable.  Either way
+        the owner goes on to the next run.
         """
 
         run = session.get(RecipeRun, run_id, with_for_update=True)
         if run is None or run.state != "running" or run.route_state != "withdrawn":
-            raise RecipeOperationConflict("recovery Stop scope is no longer current")
+            return retire_as_unknown(
+                "recipe.recovery",
+                run_id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "recovery Stop scope is no longer current",
+            )
         if type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1:
-            raise RecipeOperationConflict("recovery workload intent is invalid")
+            return retire_as_unknown(
+                "recipe.recovery",
+                run_id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                "recovery workload intent is invalid",
+            )
         try:
             decoded = recovery_start_plan(
                 {"recovery": dict(recovery_context)},
@@ -2595,9 +3085,19 @@ class RecipeOperationService:
                 require_unexpired=False,
             )
         except DistributedLifecycleError as error:
-            raise RecipeOperationConflict("recovery continuation is invalid") from error
+            return retire_as_unknown(
+                "recipe.recovery",
+                run_id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                f"recovery continuation is invalid: {error}",
+            )
         if decoded is None:
-            raise RecipeOperationConflict("recovery continuation is missing")
+            return retire_as_unknown(
+                "recipe.recovery",
+                run_id,
+                BookkeepingReason.ROW_INCOMPLETE,
+                "recovery continuation is missing",
+            )
         start_phases, marker = decoded
         nodes = tuple(
             session.scalars(
@@ -2612,16 +3112,24 @@ class RecipeOperationService:
             or len(start_phases[0]) != 1
             or start_phases[0][0][0] != nodes[0].node_id
         ):
-            raise RecipeOperationConflict("recovery Start rank set is invalid")
+            return retire_as_unknown(
+                "recipe.recovery",
+                run_id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "recovery Start rank set is invalid",
+            )
         start_payload = start_phases[0][0][1]
         try:
             accepted_start = read_stored_model(
                 RecipeStartPayload, canonical_message(start_payload), from_json=True
             )
         except (TypeError, ValueError) as error:
-            raise RecipeOperationConflict(
-                "recovery Start payload is invalid"
-            ) from error
+            return retire_as_unknown(
+                "recipe.recovery",
+                run_id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                f"recovery Start payload is invalid: {error}",
+            )
         if (
             str(accepted_start.run_id) != run.id
             or accepted_start.plan_digest != run.plan_digest
@@ -2631,7 +3139,12 @@ class RecipeOperationService:
             or accepted_start.compiled_execution_plan.runtime.placement.role
             != "entrypoint"
         ):
-            raise RecipeOperationConflict("recovery Start differs from accepted run")
+            return retire_as_unknown(
+                "recipe.recovery",
+                run_id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "recovery Start differs from accepted run",
+            )
         request_id = str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
@@ -2655,7 +3168,12 @@ class RecipeOperationService:
             or admitted.authority_digest != run.plan_digest
             or {item.node_id for item in admitted.nodes} != {nodes[0].node_id}
         ):
-            raise RecipeOperationConflict("recovery Stop admission is blocked")
+            return retire_as_unknown(
+                "recipe.recovery",
+                run_id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "recovery Stop admission is blocked",
+            )
         try:
             return self._queue_stop_in_session(
                 session,
@@ -2682,16 +3200,29 @@ class RecipeOperationService:
         admitted: StopPlan,
         *,
         stop_run_generation: int | None = None,
-    ) -> tuple[CatalogDocumentRevision, Mapping[str, Mapping[str, object]], set[str]]:
-        """The recipe revision and exact durable Start authority a Stop needs.
+    ) -> tuple[tuple[str, ...] | None, Mapping[str, Mapping[str, object]], set[str]]:
+        """The role stop order and exact durable Start authority a Stop needs.
 
-        Read-only, so a Stop is refused here before anything is withdrawn.
+        Read-only, so a Stop is refused here before anything is withdrawn.  The
+        Stop payloads come only from the run's exact durable Start authority; a
+        Stop that cannot prove it is a security refusal.  The role order is
+        convenience, not authority: a recipe whose topology cannot be read stops
+        every target at once.
         """
 
-        installation = session.get(RecipeInstallation, run.installation_id)
         revision = _active_recipe_revision(session, admitted.recipe_revision_id)
-        if installation is None or revision is None:
-            raise RecipeOperationConflict("recipe run topology is unavailable")
+        stop_order = (
+            _topology_order(revision.document, "stop_order")
+            if revision is not None
+            else None
+        )
+        if stop_order is None:
+            retire_as_unknown(
+                "recipe.stop-order",
+                run.id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "recipe topology is unreadable; the targets are stopped together",
+            )
         generation = (
             run.run_generation if stop_run_generation is None else stop_run_generation
         )
@@ -2705,15 +3236,15 @@ class RecipeOperationService:
                 allow_missing_nodes=False,
             )
         except RecipeStopAuthorityError as error:
-            raise RecipeOperationConflict(
+            raise RecipeStopAuthorityRefused(
                 "recipe Stop lacks its exact durable Start authority"
             ) from error
         target_ids = set(admitted.target_node_ids)
         if not target_ids or not target_ids <= set(exact_stop_payloads):
-            raise RecipeOperationConflict(
+            raise RecipeStopAuthorityRefused(
                 "recipe Stop target lacks its exact durable Start authority"
             )
-        return revision, exact_stop_payloads, target_ids
+        return stop_order, exact_stop_payloads, target_ids
 
     def _queue_stop_in_session(
         self,
@@ -2729,11 +3260,10 @@ class RecipeOperationService:
         stop_run_generation: int | None = None,
         profile_target_node_ids: Sequence[str] | None = None,
     ) -> Job:
-        revision, exact_stop_payloads, target_ids = self._exact_stop_authority(
+        stop_order, exact_stop_payloads, target_ids = self._exact_stop_authority(
             session, run, admitted, stop_run_generation=stop_run_generation
         )
-        stop_order = _topology_order(revision.document, "stop_order")
-        if profile_target_node_ids is not None:
+        if stop_order is not None and profile_target_node_ids is not None:
             reachable_roles = {
                 node.role for node in admitted.nodes if node.node_id in target_ids
             }
@@ -2744,6 +3274,17 @@ class RecipeOperationService:
                 "target_node_ids": list(admitted.target_node_ids),
                 "missing_node_ids": list(admitted.missing_node_ids),
             }
+        stop_payloads = tuple(
+            (
+                node.node_id,
+                json.loads(canonical_message(exact_stop_payloads[node.node_id])),
+            )
+            for node in admitted.nodes
+            if node.node_id in target_ids
+        )
+        stop_phases = (
+            _role_phases(stop_order, stop_payloads) if stop_order is not None else None
+        )
         run.state = "stopping"
         run.route_state = "withdrawn"
         run.updated_at = now
@@ -2755,27 +3296,8 @@ class RecipeOperationService:
             plan_digest=admitted.plan_digest,
             actor=actor,
             request_id=request_id,
-            node_payloads=tuple(
-                (
-                    node.node_id,
-                    json.loads(canonical_message(exact_stop_payloads[node.node_id])),
-                )
-                for node in admitted.nodes
-                if node.node_id in target_ids
-            ),
-            phases=_role_phases(
-                stop_order,
-                tuple(
-                    (
-                        node.node_id,
-                        json.loads(
-                            canonical_message(exact_stop_payloads[node.node_id])
-                        ),
-                    )
-                    for node in admitted.nodes
-                    if node.node_id in target_ids
-                ),
-            ),
+            node_payloads=stop_payloads,
+            phases=stop_phases,
             authority_digest=admitted.authority_digest,
             now=now,
             workload_intent_ordinal=workload_intent_ordinal,
@@ -2896,7 +3418,13 @@ class RecipeOperationService:
         active_jobs = tuple(
             session.scalars(
                 select(Job).where(
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     Job.payload["owner_kind"].as_string() == "installation",
                     Job.payload["owner_id"].as_string() == installation.id,
                     Job.kind.in_(
@@ -2909,7 +3437,13 @@ class RecipeOperationService:
             tuple(
                 session.scalars(
                     select(Job).where(
-                        Job.state.in_(("queued", "running", "waiting-for-operator")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
+                        ),
                         Job.payload["owner_kind"].as_string() == "run",
                         Job.payload["owner_id"].as_string().in_(run_ids),
                         Job.kind.in_(("recipe.start", "recipe.stop")),
@@ -3088,13 +3622,13 @@ class RecipeOperationService:
                 "reconcile.installation_identity_mismatch",
                 "The relational installation identity differs from its original admitted plan.",
             )
-        try:
-            recipe_model_content_sha256, _ = _primary_model_identity(revision.document)
-        except RecipeOperationConflict as error:
+        model_identity = _primary_model_identity(revision.document)
+        if model_identity is None:
             blocked(
                 "reconcile.recipe_revision_unavailable",
-                f"The exact accepted recipe revision has no model identity: {error}",
+                "The exact accepted recipe revision has no model identity.",
             )
+        recipe_model_content_sha256, _ = model_identity
         if installation.model_content_sha256 not in {
             None,
             recipe_model_content_sha256,
@@ -3188,7 +3722,13 @@ class RecipeOperationService:
             )
 
         active_jobs_statement = select(Job).where(
-            Job.state.in_(("queued", "running", "waiting-for-operator")),
+            Job.state.in_(
+                job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
+            ),
             Job.payload["owner_kind"].as_string() == "installation",
             Job.payload["owner_id"].as_string() == installation.id,
             Job.kind.in_(("recipe.install", "recipe.uninstall", "recipe.reconcile")),
@@ -3201,7 +3741,13 @@ class RecipeOperationService:
             tuple(
                 session.scalars(
                     select(Job).where(
-                        Job.state.in_(("queued", "running", "waiting-for-operator")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
+                        ),
                         Job.payload["owner_kind"].as_string() == "run",
                         Job.payload["owner_id"].as_string().in_(run_ids),
                         Job.kind.in_(("recipe.start", "recipe.stop")),
@@ -3492,7 +4038,7 @@ class RecipeOperationService:
                     target for target in authority.targets if target.state == "pending"
                 )
                 if not pending_targets:
-                    raise RecipeOperationConflict(
+                    raise RecipeRequestInvalid(
                         "reconciliation has no pending targets but is not complete"
                     )
                 payloads = tuple(
@@ -3576,7 +4122,7 @@ class RecipeOperationService:
                     .with_for_update(of=RecipeInstallation)
                 )
                 if installation_fence is None:
-                    raise RecipeOperationConflict("recipe installation does not exist")
+                    raise RecipeRequestInvalid("recipe installation does not exist")
                 existing = self._idempotent_in_session(
                     session,
                     request_id,
@@ -3598,7 +4144,7 @@ class RecipeOperationService:
                 if plan.disposition != "uninstall":
                     # A plan that never reached a node is abandoned by the
                     # cleanup phase; it must never queue agent removal work.
-                    raise RecipeOperationConflict(
+                    raise RecipeRequestInvalid(
                         "installation was never installed; abandon it instead "
                         "of uninstalling it"
                     )
@@ -3672,7 +4218,7 @@ class RecipeOperationService:
                 .with_for_update(of=RecipeInstallation)
             )
             if installation is None:
-                raise RecipeOperationConflict("recipe installation does not exist")
+                raise RecipeRequestInvalid("recipe installation does not exist")
             if installation.state == "uninstalled":
                 # A restarted cleanup phase replays the disposal.  The row is
                 # already resolved, so the replay succeeds instead of failing
@@ -3710,17 +4256,21 @@ class RecipeOperationService:
         now = self._clock()
         with self._sessions.begin() as session:
             previous = session.get(Job, operation_id, with_for_update=True)
-            if previous is None:
-                raise RecipeOperationConflict("recipe operation is not retryable")
-            previous_plan_digest = _required_string(previous.payload, "plan_digest")
+            previous_plan_digest = (
+                _payload_string(previous.payload, "plan_digest")
+                if previous is not None
+                else None
+            )
+            if previous is None or previous_plan_digest is None:
+                raise RecipeRequestInvalid("recipe operation is not retryable")
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is not None:
                 if (
                     existing.kind != previous.kind
-                    or _required_string(existing.payload, "plan_digest")
+                    or _payload_string(existing.payload, "plan_digest")
                     != previous_plan_digest
                 ):
-                    raise RecipeOperationConflict("request key was already used")
+                    raise RecipeRequestInvalid("request key was already used")
                 return self._view(existing)
             if previous.kind == "recipe.build.v1":
                 job = self._retry_build_in_session(
@@ -3736,7 +4286,7 @@ class RecipeOperationService:
                     session, previous, actor=actor, request_id=request_id, now=now
                 )
             else:
-                raise RecipeOperationConflict("recipe operation is not retryable")
+                raise RecipeRequestInvalid("recipe operation is not retryable")
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
@@ -3749,11 +4299,13 @@ class RecipeOperationService:
         request_id: str,
         now: datetime,
     ) -> Job:
-        previous_plan_digest = _required_string(previous.payload, "plan_digest")
-        owner_id = _required_string(previous.payload, "owner_id")
+        previous_plan_digest = _payload_string(previous.payload, "plan_digest")
+        owner_id = _payload_string(previous.payload, "owner_id")
+        if previous_plan_digest is None or owner_id is None:
+            raise RecipeRequestInvalid("recipe operation is not retryable")
         installation = session.get(RecipeInstallation, owner_id, with_for_update=True)
         if installation is None or installation.state not in {"partial", "failed"}:
-            raise RecipeOperationConflict("recipe installation is not retryable")
+            raise RecipeRequestInvalid("recipe installation is not retryable")
         nodes = tuple(
             session.scalars(
                 select(InstallationNode)
@@ -3764,20 +4316,13 @@ class RecipeOperationService:
         revision = _active_recipe_revision(session, installation.recipe_revision_id)
         assert revision is not None and revision.content_digest is not None
         recipe_digest = revision.content_digest
-        try:
-            stored_installation_plan = parse_stored_installation_plan(installation.plan)
-        except RecipeExecutionContractError as error:
-            raise RecipeOperationConflict(
-                "stored compiled execution plan is missing for install retry"
-            ) from error
-        compiled_plans = stored_installation_plan.compiled_execution_plans
-        if (
-            not compiled_plans
-            or not nodes
-            or any(node.node_id not in compiled_plans for node in nodes)
-        ):
-            raise RecipeOperationConflict(
-                "stored compiled execution plan is missing for install retry"
+        compiled_plans = self._stored_compiled_plans(
+            session, installation, [node.node_id for node in nodes], now=now
+        )
+        if isinstance(compiled_plans, Residue) or not nodes:
+            raise RecipeRetryLater(
+                "stored compiled execution plan is unreadable for install retry; it "
+                "is recorded and the next preparation installs afresh"
             )
         installation.state = "installing"
         installation.updated_at = now
@@ -3812,9 +4357,7 @@ class RecipeOperationService:
                         "installation_id": owner_id,
                         "plan_digest": previous_plan_digest,
                         "expected_bytes": node.required_bytes,
-                        "compiled_execution_plan": compiled_plans[
-                            node.node_id
-                        ].model_dump(mode="json"),
+                        "compiled_execution_plan": compiled_plans[node.node_id],
                     },
                 )
                 for node in nodes
@@ -3834,31 +4377,52 @@ class RecipeOperationService:
         now: datetime,
         intent: RecipeBuildIntent,
     ) -> Job:
-        if previous.state not in {"failed", "waiting-for-operator", "expired"}:
-            raise RecipeOperationConflict("recipe build is not retryable")
+        if previous.state not in job_states.words(
+            LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+        ):
+            raise RecipeRequestInvalid("recipe build is not retryable")
         if build_cancellation(previous) is not None:
-            raise RecipeOperationConflict(
-                "cancelled recipe build intent is not retryable"
-            )
+            raise RecipeRequestInvalid("cancelled recipe build intent is not retryable")
         if self._builds is None:
-            raise RecipeOperationConflict("recipe build service is unavailable")
-        owner_id = _required_string(previous.payload, "owner_id")
-        build = session.get(RecipeBuild, owner_id, with_for_update=True)
-        if build is None or build.state not in {"building", "failed"}:
-            raise RecipeOperationConflict("recipe build is not retryable")
-        active = any(
-            job.id != previous.id
-            and job.state in {"queued", "running"}
-            and isinstance(job.payload, Mapping)
-            and job.payload.get("owner_id") == owner_id
-            for job in session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+            raise RecipeRetryLater("recipe build service is unavailable")
+        owner_id = _payload_string(previous.payload, "owner_id")
+        build = (
+            session.get(RecipeBuild, owner_id, with_for_update=True)
+            if owner_id is not None
+            else None
         )
-        if active:
-            raise RecipeOperationConflict("recipe build already has an active retry")
-        try:
-            payload = build_plan_document(build.plan)
+        if (
+            owner_id is None
+            or build is None
+            or build.state not in {"building", "failed"}
+        ):
+            raise RecipeRequestInvalid("recipe build is not retryable")
+        active = next(
+            (
+                job
+                for job in session.scalars(
+                    select(Job).where(Job.kind == "recipe.build.v1").order_by(Job.id)
+                )
+                if job.id != previous.id
+                and job.state in {"queued", "running"}
+                and isinstance(job.payload, Mapping)
+                and job.payload.get("owner_id") == owner_id
+            ),
+            None,
+        )
+        if active is not None:
+            # A retry is already in flight: this request adopts it.
+            return active
+
+        def plan_from(document: object) -> RecipeBuildPlan:
+            payload = build_plan_document(document)
             parsed_payload = parse_stored_build_plan(payload)
-            plan = RecipeBuildPlan(
+            if (
+                payload.get("build_id") != owner_id
+                or payload.get("build_input_sha256") != build.build_input_sha256
+            ):
+                raise ValueError("stored build plan names another build")
+            return RecipeBuildPlan(
                 build_id=owner_id,
                 recipe_revision_id=parsed_payload.recipe_revision_id,
                 recipe_content_sha256=parsed_payload.recipe_content_sha256,
@@ -3867,18 +4431,33 @@ class RecipeOperationService:
                 build_input_sha256=build.build_input_sha256,
                 agent_payload=payload,
             )
-        except (RecipeExecutionContractError, KeyError, TypeError) as error:
-            detail = (
-                error.detail if isinstance(error, RecipeExecutionContractError) else ""
+
+        def rebuild() -> RecipeBuildPlan | None:
+            # The build order the previous attempt carried is the plan it ran.
+            child = session.scalar(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == previous.id)
+                .order_by(AgentOperation.id)
+                .limit(1)
             )
-            raise RecipeOperationConflict(
-                "stored recipe build plan is invalid" + detail
-            ) from error
-        if (
-            payload.get("build_id") != owner_id
-            or payload.get("build_input_sha256") != build.build_input_sha256
-        ):
-            raise RecipeOperationConflict("stored recipe build plan is invalid")
+            if child is None:
+                return None
+            recovered = plan_from(child.payload)
+            build.plan = recovered.agent_payload
+            return recovered
+
+        loaded = read_or_rebuild(
+            kind="recipe.build-plan",
+            subject=owner_id,
+            read=lambda: plan_from(build.plan),
+            rebuild=rebuild,
+        )
+        if isinstance(loaded, Residue):
+            raise RecipeRetryLater(
+                "stored recipe build plan is unreadable; it is recorded and the next "
+                "build request re-plans it"
+            )
+        plan = loaded
         self._release(session, "recipe-build", owner_id, now)
         return self._start_build_in_session(
             session,
@@ -3922,7 +4501,7 @@ class RecipeOperationService:
                 else None
             )
             if operation is None:
-                raise RecipeOperationConflict("node is not part of operation group")
+                raise RecipeRequestInvalid("node is not part of operation group")
             AgentOperationAdapter(session).record_outcome(
                 operation,
                 None,
@@ -3963,7 +4542,15 @@ class RecipeOperationService:
                 or job.result.get("cancel_requested") is not True
             ):
                 raise RecipeOperationConflict("recipe cancellation was not requested")
-            owner_id = _required_string(job.payload, "owner_id")
+            owner_id = _payload_string(job.payload, "owner_id")
+            if owner_id is None:
+                retire_as_unknown(
+                    "recipe.operation",
+                    job.id,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    "the cancelled operation payload names no owner",
+                )
+                return
             now = self._clock()
             if job.kind in {"recipe.install", "recipe.uninstall", "recipe.reconcile"}:
                 node = session.scalar(
@@ -3981,7 +4568,7 @@ class RecipeOperationService:
                     raise RecipeOperationConflict(
                         "installation cancellation scope changed"
                     )
-                node.state = "failed"
+                node.state = _RANK_FAILED
                 node.updated_at = now
                 installation.state = "partial"
                 installation.updated_at = now
@@ -4029,9 +4616,12 @@ class RecipeOperationService:
                 # its failure policy. Do not independently restate that policy
                 # here or turn its scheduled cleanup into a terminal failure.
                 return
+        succeeded = state == "succeeded"
+        raw_evidence: Mapping[str, object] | None = None
+        unproven: str | None = None
         if state not in {"succeeded", "failed"} or not isinstance(result, Mapping):
-            raise RecipeOperationConflict("recipe agent result is invalid")
-        if state == "succeeded" and job.kind in {
+            unproven = "the agent result carried no final evidence"
+        elif succeeded and job.kind in {
             "recipe.stop",
             "recipe.uninstall",
             "recipe.reconcile",
@@ -4040,20 +4630,32 @@ class RecipeOperationService:
                 parsed_result = parse_recipe_operation_result(
                     ProtocolAgentOperation(job.kind), result
                 )
-            except (KeyError, ValueError) as error:
-                raise RecipeOperationConflict(
-                    "recipe operation result is invalid"
-                ) from error
-            raw_evidence = parsed_result.model_dump(mode="json")
+            except (KeyError, ValueError):
+                unproven = "the agent success evidence does not match its operation"
+            else:
+                raw_evidence = parsed_result.model_dump(mode="json")
         else:
             raw_evidence = result.get("evidence", result)
             if not isinstance(raw_evidence, Mapping):
-                raise RecipeOperationConflict("recipe agent evidence is invalid")
+                raw_evidence = None
+                unproven = "the agent evidence is not an object"
+        if raw_evidence is None:
+            # The effect is unknown: the node is recorded failed with a typed
+            # marker (its retry or cleanup is the owner's), and the operation
+            # still completes instead of rolling the agent's result back.
+            retire_as_unknown(
+                "recipe.agent-result",
+                operation.id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                unproven or "no evidence",
+            )
+            succeeded = False
+            raw_evidence = _unproven_evidence(unproven or "no evidence")
         self._project_node_result(
             session,
             job,
             operation,
-            succeeded=state == "succeeded",
+            succeeded=succeeded,
             evidence=raw_evidence,
             now=self._clock(),
         )
@@ -4102,6 +4704,105 @@ class RecipeOperationService:
             node.state == "uninstalled" for node in node_rows
         )
 
+    def _apply_build_cleanup(
+        self,
+        session: Session,
+        job: Job,
+        operation: AgentOperation,
+        evidence: Mapping[str, object],
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> str | None:
+        """Complete a build's cancellation from its Spark cleanup receipt.
+
+        Returns why the receipt cannot be applied (the cleanup then records the
+        node as unproven and the build stays under its own sweeper), else ``None``.
+        """
+
+        try:
+            read_stored_model(
+                RecipeBuildCleanupEvidence,
+                canonical_message(evidence),
+                from_json=True,
+            )
+            expected = read_stored_model(
+                RecipeBuildCleanupRequest,
+                canonical_message(operation.payload),
+                from_json=True,
+            )
+            requested = read_stored_model(
+                RecipeOperationCancellationResult,
+                canonical_message(job.payload["build_cancellation"]),
+                from_json=True,
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            reason = f"recipe build cleanup record is invalid: {error}"
+            retire_as_unknown(
+                "recipe.build-cleanup",
+                job.id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                reason,
+            )
+            return reason[:512]
+        if expected.build_id != owner_id:
+            retire_as_unknown(
+                "recipe.build-cleanup",
+                job.id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "cleanup names another build",
+            )
+            return "recipe build cleanup does not match its authority"
+        original = session.get(
+            AgentOperation, expected.operation_id, with_for_update=True
+        )
+        original_job = (
+            None
+            if original is None
+            else session.get(Job, original.parent_job_id, with_for_update=True)
+        )
+        build = session.get(RecipeBuild, owner_id, with_for_update=True)
+        if (
+            original is None
+            or original.node_id != operation.node_id
+            or original.kind != "recipe.build.v1"
+            or original_job is None
+            or original_job.payload.get("owner_id") != owner_id
+            or build is None
+        ):
+            retire_as_unknown(
+                "recipe.build-cleanup",
+                job.id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "the cleaned build's operation or row changed",
+            )
+            return "recipe build cleanup authority changed"
+        cancellation = build_cancellation(original_job)
+        if (
+            cancellation is None
+            or cancellation.cancel_request_id != requested.cancel_request_id
+            or cancellation.cancel_actor != requested.cancel_actor
+            or cancellation.cancel_requested_at != requested.cancel_requested_at
+            or cancellation.reason != requested.reason
+        ):
+            retire_as_unknown(
+                "recipe.build-cleanup",
+                job.id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "the build's cancellation no longer matches the cleanup",
+            )
+            return "recipe build cleanup authority changed"
+        AgentOperationAdapter(session).record_outcome(
+            original, None, original_job, Outcome.CANCELLED, now
+        )
+        RecipeOperationAdapter().cancelled(original_job, now)
+        original_job.result = cancellation.model_copy(
+            update={"cancelled": True}
+        ).model_dump(mode="json", exclude_none=True)
+        original_job.updated_at = now
+        self._release_cancelled_build(session, owner_id, now)
+        return None
+
     def _project_node_result(
         self,
         session: Session,
@@ -4115,111 +4816,94 @@ class RecipeOperationService:
         cleanup_queued = False
         locked_job = session.get(Job, job.id, with_for_update=True)
         if locked_job is None:
-            raise RecipeOperationConflict("recipe operation disappeared")
+            # Nothing owns this result any more: it is recorded as residue and
+            # the order that carried it stays settled.
+            retire_as_unknown(
+                "recipe.operation",
+                job.id,
+                BookkeepingReason.ROW_INCOMPLETE,
+                "the operation row disappeared before its result was projected",
+            )
+            return False
         job = locked_job
         # Lock acquisition can outlive a retained recovery deadline. Every
         # phase/terminal transition uses a fresh time sampled inside the lock.
         now = self._clock()
         operation.updated_at = now
         node_id = operation.node_id
-        owner_id = _required_string(job.payload, "owner_id")
-        if job.kind == "recipe.build.cleanup.v1":
+        # A node whose evidence cannot be accepted: the typed marker is recorded
+        # in its place and the node is counted failed (its retry or cleanup is
+        # the owner's), so the operation completes instead of rolling back.
+        unproven: dict[str, str] = {}
+        owner_id = _payload_string(job.payload, "owner_id")
+        if owner_id is None:
+            retire_as_unknown(
+                "recipe.operation",
+                job.id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                "the operation payload names no owner",
+            )
+            owner_id = ""
+            unproven[node_id] = "the operation payload names no owner"
+        if unproven:
+            pass
+        elif job.kind == "recipe.build.cleanup.v1":
             if succeeded:
-                read_stored_model(
-                    RecipeBuildCleanupEvidence,
-                    canonical_message(evidence),
-                    from_json=True,
+                reason = self._apply_build_cleanup(
+                    session, job, operation, evidence, owner_id=owner_id, now=now
                 )
-                expected = read_stored_model(
-                    RecipeBuildCleanupRequest,
-                    canonical_message(operation.payload),
-                    from_json=True,
-                )
-                if expected.build_id != owner_id:
-                    raise RecipeOperationConflict(
-                        "recipe build cleanup does not match its authority"
-                    )
-                original = session.get(
-                    AgentOperation, expected.operation_id, with_for_update=True
-                )
-                original_job = (
-                    None
-                    if original is None
-                    else session.get(Job, original.parent_job_id, with_for_update=True)
-                )
-                build = session.get(RecipeBuild, owner_id, with_for_update=True)
-                if (
-                    original is None
-                    or original.node_id != node_id
-                    or original.kind != "recipe.build.v1"
-                    or original_job is None
-                    or original_job.payload.get("owner_id") != owner_id
-                    or build is None
-                ):
-                    raise RecipeOperationConflict(
-                        "recipe build cleanup authority changed"
-                    )
-                cancellation = build_cancellation(original_job)
-                requested = read_stored_model(
-                    RecipeOperationCancellationResult,
-                    canonical_message(job.payload["build_cancellation"]),
-                    from_json=True,
-                )
-                if (
-                    cancellation is None
-                    or cancellation.cancel_request_id != requested.cancel_request_id
-                    or cancellation.cancel_actor != requested.cancel_actor
-                    or cancellation.cancel_requested_at != requested.cancel_requested_at
-                    or cancellation.reason != requested.reason
-                ):
-                    raise RecipeOperationConflict(
-                        "recipe build cleanup authority changed"
-                    )
-                AgentOperationAdapter(session).record_outcome(
-                    original, None, original_job, Outcome.CANCELLED, now
-                )
-                RecipeOperationAdapter().cancelled(original_job, now)
-                original_job.result = cancellation.model_copy(
-                    update={"cancelled": True}
-                ).model_dump(mode="json", exclude_none=True)
-                original_job.updated_at = now
-                self._release_cancelled_build(session, owner_id, now)
+                if reason is not None:
+                    unproven[node_id] = reason
         elif job.kind == "recipe.build.v1":
             build = session.get(RecipeBuild, owner_id, with_for_update=True)
             if build is None or build.builder_node_id != node_id:
-                raise RecipeOperationConflict("recipe build authority is invalid")
-            cancellation = build_cancellation(job)
-            if cancellation is not None:
-                # Completion can race cancellation. Retain the authenticated
-                # attempt's outcome, but only its own cancellation governs it.
-                # A later attempt may already own this build and its capacity.
-                if cancellation.cancelled is True:
-                    AgentOperationAdapter(session).record_outcome(
-                        operation, None, job, Outcome.CANCELLED, now
-                    )
-                    RecipeOperationAdapter().cancelled(job, now)
-                else:
-                    # The cancel stays in flight for the cleanup sweeper; it never
-                    # waits for an operator (audit C7).
-                    RecipeOperationAdapter().cancel_race(job, now)
-                return False
-            force_rebuild = job.payload.get("force_rebuild") is True
-            if succeeded:
-                record_build_evidence(
+                # The build this result belongs to is gone or is another
+                # builder's: nothing is recorded on it.
+                retire_as_unknown(
+                    "recipe.build-result",
+                    job.id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the build row is missing or names another builder",
+                )
+                unproven[node_id] = "recipe build authority is invalid"
+            else:
+                cancellation = build_cancellation(job)
+                if cancellation is not None:
+                    # Completion can race cancellation. Retain the authenticated
+                    # attempt's outcome, but only its own cancellation governs it.
+                    # A later attempt may already own this build and its capacity.
+                    if cancellation.cancelled is True:
+                        AgentOperationAdapter(session).record_outcome(
+                            operation, None, job, Outcome.CANCELLED, now
+                        )
+                        RecipeOperationAdapter().cancelled(job, now)
+                    else:
+                        # The cancel stays in flight for the cleanup sweeper; it never
+                        # waits for an operator (audit C7).
+                        RecipeOperationAdapter().cancel_race(job, now)
+                    return False
+                force_rebuild = job.payload.get("force_rebuild") is True
+                recorded_build = succeeded and record_build_evidence(
                     session,
                     build,
                     evidence,
                     now=now,
                     replace_existing=force_rebuild,
                 )
-            else:
-                # A forced rebuild is an attempt to replace a still-valid
-                # receipt.  Keep that receipt authoritative if the new
-                # attempt fails; the availability operation itself reports
-                # the failed attempt and remains retryable.
-                build.state = "succeeded" if force_rebuild else "failed"
-                build.error = str(evidence.get("reason", "agent build failed"))[:512]
-                build.updated_at = now
+                if succeeded and not recorded_build:
+                    unproven[node_id] = "recipe build evidence is invalid"
+                if not recorded_build:
+                    # A forced rebuild is an attempt to replace a still-valid
+                    # receipt.  Keep that receipt authoritative if the new
+                    # attempt fails; the availability operation itself reports
+                    # the failed attempt and remains retryable.
+                    build.state = "succeeded" if force_rebuild else "failed"
+                    build.error = (
+                        unproven[node_id]
+                        if node_id in unproven
+                        else str(evidence.get("reason", "agent build failed"))[:512]
+                    )
+                    build.updated_at = now
         elif job.kind == "recipe.install":
             node = session.scalar(
                 select(InstallationNode).where(
@@ -4231,9 +4915,17 @@ class RecipeOperationService:
             node.state = "installed" if succeeded else "failed"
             if succeeded:
                 installed_bytes = evidence.get("installed_bytes")
-                if not isinstance(installed_bytes, int) or installed_bytes < 0:
-                    raise RecipeOperationConflict("install evidence is invalid")
-                node.installed_bytes = installed_bytes
+                if (
+                    not isinstance(installed_bytes, int)
+                    or isinstance(installed_bytes, bool)
+                    or installed_bytes < 0
+                ):
+                    # An install whose byte count cannot be proven is not
+                    # installed: the rank is failed and the install retried.
+                    node.state = _RANK_FAILED
+                    unproven[node_id] = "install evidence is invalid"
+                else:
+                    node.installed_bytes = installed_bytes
             node.updated_at = now
         elif job.kind in {"recipe.start", "recipe.stop"}:
             node = session.scalar(
@@ -4247,36 +4939,52 @@ class RecipeOperationService:
             )
             if start_phase == "rank-launch":
                 if not succeeded:
-                    node.state = "failed"
+                    node.state = _RANK_FAILED
                 elif node.state != "failed":
                     node.state = "starting"
                 if succeeded:
-                    _start_endpoint(operation, evidence)
+                    launch_endpoint = _start_endpoint(operation, evidence)
+                    if isinstance(launch_endpoint, Residue):
+                        node.state = _RANK_FAILED
+                        unproven[node_id] = launch_endpoint.note
                 node.updated_at = now
             elif start_phase == "collective-readiness":
                 if not succeeded:
-                    node.state = "failed"
+                    node.state = _RANK_FAILED
                 if succeeded:
                     endpoint = _start_endpoint(operation, evidence)
-                    recorded = _validated_result(job.kind, job.result) or {}
+                    recorded = (
+                        _recorded_result(job.kind, job.result, subject=job.id) or {}
+                    )
                     launches = recorded.get("launch_evidence")
-                    for started_node in session.scalars(
-                        select(RunNode).where(RunNode.run_id == owner_id)
+                    run_nodes = tuple(
+                        session.scalars(
+                            select(RunNode).where(RunNode.run_id == owner_id)
+                        )
+                    )
+                    if isinstance(endpoint, Residue):
+                        node.state = _RANK_FAILED
+                        unproven[node_id] = endpoint.note
+                    elif not isinstance(launches, Mapping) or any(
+                        not isinstance(launches.get(started.node_id), Mapping)
+                        for started in run_nodes
                     ):
-                        if not isinstance(launches, Mapping) or not isinstance(
-                            launches.get(started_node.node_id), Mapping
-                        ):
-                            raise RecipeOperationConflict(
-                                "collective readiness preceded rank launch"
+                        # Readiness cannot be proven without every rank's launch
+                        # evidence: no rank is marked running and the start ends
+                        # through its recovery error.
+                        node.state = _RANK_FAILED
+                        unproven[node_id] = "collective readiness preceded rank launch"
+                    else:
+                        for started_node in run_nodes:
+                            started_node.state = "running"
+                            started_node.updated_at = now
+                        try:
+                            node.endpoint = run_endpoint_document({"url": endpoint})
+                        except RecipeExecutionContractError:
+                            node.state = _RANK_FAILED
+                            unproven[node_id] = (
+                                "recipe start endpoint evidence is invalid"
                             )
-                        started_node.state = "running"
-                        started_node.updated_at = now
-                    try:
-                        node.endpoint = run_endpoint_document({"url": endpoint})
-                    except RecipeExecutionContractError as error:
-                        raise RecipeOperationConflict(
-                            "recipe start endpoint evidence is invalid"
-                        ) from error
                 node.updated_at = now
             else:
                 node.state = (
@@ -4288,22 +4996,28 @@ class RecipeOperationService:
                 )
                 if job.kind == "recipe.start" and succeeded:
                     endpoint = _start_endpoint(operation, evidence)
-                    try:
-                        if endpoint is not None:
-                            node.endpoint = run_endpoint_document({"url": endpoint})
-                    except RecipeExecutionContractError as error:
-                        raise RecipeOperationConflict(
-                            "recipe start endpoint evidence is invalid"
-                        ) from error
+                    if isinstance(endpoint, Residue):
+                        node.state = _RANK_FAILED
+                        unproven[node_id] = endpoint.note
+                    else:
+                        try:
+                            if endpoint is not None:
+                                node.endpoint = run_endpoint_document({"url": endpoint})
+                        except RecipeExecutionContractError:
+                            node.state = _RANK_FAILED
+                            unproven[node_id] = (
+                                "recipe start endpoint evidence is invalid"
+                            )
                 node.updated_at = now
             if (
                 job.kind == "recipe.start"
                 and succeeded
                 and start_phase != "rank-launch"
+                and node_id not in unproven
             ):
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
-                if _stored_run_plan(run.plan).get("observation_schema_version") == 2:
+                if _run_observes_per_generation(run):
                     run.observation_deadline_at = now + timedelta(
                         seconds=_INITIAL_OBSERVATION_GRACE_SECONDS
                     )
@@ -4323,7 +5037,14 @@ class RecipeOperationService:
                 )
             )
             if installation is None or node is None:
-                raise RecipeOperationConflict("reconciliation scope changed")
+                # The rows this cleanup reconciles are gone: nothing is applied.
+                retire_as_unknown(
+                    "recipe.reconciliation",
+                    job.id,
+                    BookkeepingReason.ROW_INCOMPLETE,
+                    "the installation or its node row disappeared",
+                )
+                unproven[node_id] = "reconciliation scope changed"
             authority = job.payload.get("reconciliation_authority")
             authority_targets = (
                 authority.get("targets") if isinstance(authority, Mapping) else None
@@ -4346,12 +5067,22 @@ class RecipeOperationService:
                     canonical_message(operation.payload),
                     from_json=True,
                 )
-            except (TypeError, ValueError) as error:
-                raise RecipeOperationConflict(
-                    "reconciliation operation payload is invalid"
-                ) from error
-            if (
-                not isinstance(authority, Mapping)
+            except (TypeError, ValueError):
+                expected = None
+                retire_as_unknown(
+                    "recipe.reconciliation",
+                    job.id,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    "reconciliation operation payload is invalid",
+                )
+                unproven.setdefault(
+                    node_id, "reconciliation operation payload is invalid"
+                )
+            if node_id in unproven or installation is None or node is None:
+                pass
+            elif (
+                expected is None
+                or not isinstance(authority, Mapping)
                 or authority.get("installation_id") != owner_id
                 or authority.get("original_plan_digest") != expected.plan_digest
                 or target is None
@@ -4368,11 +5099,18 @@ class RecipeOperationService:
                     if isinstance(item, Mapping) and item.get("state") == "pending"
                 )
             ):
-                raise RecipeOperationConflict(
+                retire_as_unknown(
+                    "recipe.reconciliation",
+                    job.id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "operation differs from its reviewed authority",
+                )
+                unproven[node_id] = (
                     "reconciliation operation differs from its reviewed authority"
                 )
-            node.state = "uninstalled" if succeeded else "failed"
-            node.updated_at = now
+            else:
+                node.state = "uninstalled" if succeeded else "failed"
+                node.updated_at = now
         elif job.kind == "recipe.uninstall":
             node = session.scalar(
                 select(InstallationNode).where(
@@ -4383,7 +5121,7 @@ class RecipeOperationService:
             assert node is not None
             node.state = "uninstalled" if succeeded else "failed"
             node.updated_at = now
-        recorded_result = _validated_result(job.kind, job.result) or {}
+        recorded_result = _recorded_result(job.kind, job.result, subject=job.id) or {}
         evidence_field = (
             "launch_evidence"
             if job.kind == "recipe.start"
@@ -4394,19 +5132,43 @@ class RecipeOperationService:
             else "node_evidence"
         )
         raw_node_evidence = recorded_result.get(evidence_field, {})
-        if not isinstance(raw_node_evidence, Mapping):
-            raise RecipeOperationConflict("recipe operation evidence is invalid")
-        node_evidence = {
-            str(recorded_node): dict(recorded_evidence)
-            for recorded_node, recorded_evidence in raw_node_evidence.items()
-            if isinstance(recorded_node, str) and isinstance(recorded_evidence, Mapping)
-        }
-        if len(node_evidence) != len(raw_node_evidence):
-            raise RecipeOperationConflict("recipe operation evidence is invalid")
-        observed_evidence = json.loads(canonical_message(evidence))
+        node_evidence: dict[str, dict[str, object]] = {}
+        if isinstance(raw_node_evidence, Mapping):
+            node_evidence = {
+                recorded_node: dict(recorded_evidence)
+                for recorded_node, recorded_evidence in raw_node_evidence.items()
+                if isinstance(recorded_node, str)
+                and isinstance(recorded_evidence, Mapping)
+                and _evidence_is_acceptable(job.kind, recorded_node, recorded_evidence)
+            }
+        if not isinstance(raw_node_evidence, Mapping) or len(node_evidence) != len(
+            raw_node_evidence
+        ):
+            # Recorded evidence that does not hold is dropped, never refused:
+            # what the agents report next is recorded again beside what survives.
+            retire_as_unknown(
+                "recipe.operation-evidence",
+                job.id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                "recorded node evidence was damaged",
+            )
+        observed_evidence: dict[str, object] = json.loads(canonical_message(evidence))
+        if node_id not in unproven and not _evidence_is_acceptable(
+            job.kind, node_id, observed_evidence
+        ):
+            unproven[node_id] = "recipe node evidence is invalid"
+        if node_id in unproven:
+            observed_evidence = _unproven_evidence(unproven[node_id])
         if node_id in node_evidence and node_evidence[node_id] != observed_evidence:
-            raise RecipeOperationConflict("recipe node evidence changed")
-        node_evidence[node_id] = observed_evidence
+            # The first receipt of a node stands; a differing replay is residue.
+            retire_as_unknown(
+                "recipe.operation-evidence",
+                job.id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                f"a differing receipt was replayed for {node_id}",
+            )
+        else:
+            node_evidence[node_id] = observed_evidence
         job.result = _validated_result(
             job.kind,
             {**recorded_result, evidence_field: node_evidence},
@@ -4416,24 +5178,60 @@ class RecipeOperationService:
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
             )
         )
-        phases = _stored_phases(job.payload)
+        # Nodes whose evidence was recorded as unproven (by this or an earlier
+        # result of the same operation) count as failed, whatever their order said.
+        recorded_for_phases = (
+            _recorded_result(job.kind, job.result, subject=job.id) or {}
+        )
+        marker_nodes = set(unproven)
+        for field in ("node_evidence", "launch_evidence"):
+            recorded_field = recorded_for_phases.get(field)
+            if isinstance(recorded_field, Mapping):
+                marker_nodes |= {
+                    recorded_node
+                    for recorded_node, recorded_item in recorded_field.items()
+                    if isinstance(recorded_item, Mapping)
+                    and recorded_item.get("code") == "recipe.evidence_unproven"
+                }
+        loaded_phases = _stored_phases(job.payload, subject=job.id)
         recovery_error: DistributedLifecycleError | None = None
-        if phases:
-            try:
-                _enforce_start_deadline(job.payload, now=now)
-                enforce_recovery_deadline(job.payload, now=now)
-            except DistributedLifecycleError as error:
-                recovery_error = error
+        if isinstance(loaded_phases, Residue):
+            # Nothing re-derives how a multi-phase operation was grouped: it ends
+            # through its recovery error (its ranks are stopped), never advanced
+            # blind and never refused.
+            stored_phases: _PhaseGroups = ()
+            recovery_error = DistributedLifecycleError(
+                "stored operation phases are damaged; the operation was ended"
+            )
+            for child in children:
+                if child.state not in _TERMINAL_JOB_STATES:
+                    AgentOperationAdapter(session).record_outcome(
+                        child, None, job, Outcome.FAILED, now
+                    )
+        else:
+            stored_phases = loaded_phases
+        if stored_phases:
+            deadline_failure = _start_deadline_failure(job.payload, now=now)
+            phase_error: DistributedLifecycleError | None = None
+            if deadline_failure is not None:
+                phase_error = DistributedLifecycleError(deadline_failure)
+            else:
+                try:
+                    enforce_recovery_deadline(job.payload, now=now)
+                except DistributedLifecycleError as error:
+                    phase_error = error
+            if phase_error is not None:
+                recovery_error = phase_error
                 for child in children:
                     if child.state not in _TERMINAL_JOB_STATES:
                         AgentOperationAdapter(session).record_outcome(
                             child, None, job, Outcome.FAILED, now
                         )
-            phase_index = _current_phase_index(children, phases)
+            phase_index = _current_phase_index(children, stored_phases)
             if phase_index is not None:
                 phase_operations = {
                     operation_id
-                    for operation_id, _node_id, _payload in phases[phase_index]
+                    for operation_id, _node_id, _payload in stored_phases[phase_index]
                 }
                 phase_children = tuple(
                     child for child in children if child.id in phase_operations
@@ -4445,14 +5243,17 @@ class RecipeOperationService:
                     return cleanup_queued
                 if (
                     all(child.state == "succeeded" for child in phase_children)
-                    and phase_index + 1 < len(phases)
+                    and not any(
+                        child.node_id in marker_nodes for child in phase_children
+                    )
+                    and phase_index + 1 < len(stored_phases)
                     and recovery_error is None
                 ):
                     for (
                         next_operation_id,
                         next_node_id,
                         next_payload,
-                    ) in phases[phase_index + 1]:
+                    ) in stored_phases[phase_index + 1]:
                         self._agent_jobs.enqueue_in_session(
                             session,
                             job.id,
@@ -4465,6 +5266,7 @@ class RecipeOperationService:
                     RecipeOperationAdapter().project(job, now)
                     return True
         terminal = all(child.state in _TERMINAL_JOB_STATES for child in children)
+        profile_completion_note: str | None = None
         if terminal:
             successful = sorted(
                 {child.node_id for child in children if child.state == "succeeded"}
@@ -4476,6 +5278,7 @@ class RecipeOperationService:
             # launch (succeeded) and the collective readiness (failed).  The
             # node failed; listing it as successful too makes the aggregate
             # result invalid, so the failed readiness could never be recorded.
+            failed = sorted(set(failed) | marker_nodes)
             successful = sorted(set(successful) - set(failed))
             reconciliation_complete = False
             reconciliation_error: str | None = None
@@ -4497,11 +5300,14 @@ class RecipeOperationService:
                         "topology cleanup did not uninstall every rank"
                     )
             if job.kind == "recipe.start" and recovery_error is None:
-                try:
-                    _enforce_start_deadline(job.payload, now=now)
-                    enforce_recovery_deadline(job.payload, now=now)
-                except DistributedLifecycleError as error:
-                    recovery_error = error
+                late_failure = _start_deadline_failure(job.payload, now=now)
+                if late_failure is not None:
+                    recovery_error = DistributedLifecycleError(late_failure)
+                else:
+                    try:
+                        enforce_recovery_deadline(job.payload, now=now)
+                    except DistributedLifecycleError as error:
+                        recovery_error = error
             start_failed = bool(failed) or recovery_error is not None
             if job.payload.get("execution_mode") == "profile-jobrun-stop":
                 failed = sorted(
@@ -4525,9 +5331,18 @@ class RecipeOperationService:
                 job.payload.get("execution_mode") == "profile-jobrun-stop"
                 and not job_failed
             ):
-                self._complete_profile_jobrun_stop_in_session(
+                completion = self._complete_profile_jobrun_stop_in_session(
                     session, job, children, now=now
                 )
+                if isinstance(completion, Residue):
+                    # The exact Stop receipts cannot be proven against the
+                    # accepted authority: no old JobRun identity is retired, the
+                    # Stop ends failed and the profile's own retry answers it.
+                    profile_completion_note = completion.note[:500] or "unproven"
+                    failed = sorted(set(failed) | {child.node_id for child in children})
+                    successful = sorted(set(successful) - set(failed))
+                    job_failed = True
+                    recovery_error = DistributedLifecycleError(profile_completion_note)
             RecipeOperationAdapter().finish(job, now, failed=job_failed)
             stored_result = job.result
             projected_result = (
@@ -4546,7 +5361,7 @@ class RecipeOperationService:
                     job.kind,
                     {
                         **(job.result or {}),
-                        "recovery_error": str(recovery_error),
+                        "recovery_error": (str(recovery_error) or "unproven")[:512],
                     },
                 )
             elif reconciliation_error is not None:
@@ -4582,19 +5397,23 @@ class RecipeOperationService:
                             f"vonk:recipe-start-cleanup:{job.id}",
                         )
                     )
-                    intent_current = _intent_is_current(
-                        session, _bound_workload_intent(job), job.targets
+                    intent = _job_workload_intent(session, job)
+                    intent_current = intent is not None and _intent_is_current(
+                        session, intent, job.targets
                     )
                     if not intent_current:
                         run.state = "failed"
                         run.route_error = (
                             "start cleanup superseded by a newer workload intent"
+                            if intent is not None
+                            else "start cleanup has no provable workload intent"
                         )
                     if (
                         not session.scalar(
                             select(Job.id).where(Job.request_id == cleanup_request_id)
                         )
                         and intent_current
+                        and intent is not None
                     ):
                         stop_nodes = tuple(
                             session.scalars(
@@ -4613,12 +5432,15 @@ class RecipeOperationService:
                             if installation is not None
                             else None
                         )
-                        if revision is None:
-                            raise RecipeOperationConflict(
-                                "recipe run topology is unavailable"
-                            )
+                        stop_order = (
+                            _topology_order(revision.document, "stop_order")
+                            if revision is not None
+                            else None
+                        )
                         try:
-                            exact_stop_payloads = durable_run_stop_payloads(
+                            exact_stop_payloads: (
+                                Mapping[str, Mapping[str, object]] | None
+                            ) = durable_run_stop_payloads(
                                 session,
                                 run,
                                 stop_nodes,
@@ -4626,39 +5448,56 @@ class RecipeOperationService:
                                 cancel_pending_start=True,
                                 allow_missing_nodes=False,
                             )
-                        except RecipeStopAuthorityError as error:
-                            raise RecipeOperationConflict(
-                                "failed recipe Start lacks exact cleanup authority"
-                            ) from error
-                        stop_node_payloads = tuple(
-                            (
-                                run_node.node_id,
-                                json.loads(
-                                    canonical_message(
-                                        exact_stop_payloads[run_node.node_id]
-                                    )
-                                ),
+                        except RecipeStopAuthorityError:
+                            exact_stop_payloads = None
+                        if exact_stop_payloads is None:
+                            # No exact Start authority to stop from: nothing is
+                            # invented.  The run is recorded failed with its
+                            # reason, and the run reconciliation owns what the
+                            # Sparks still report.
+                            retire_as_unknown(
+                                "recipe.start-cleanup",
+                                run.id,
+                                BookkeepingReason.ROW_INCOMPLETE,
+                                "failed Start lacks exact cleanup authority",
                             )
-                            for run_node in stop_nodes
-                        )
-                        self._queue_in_session(
-                            session,
-                            kind="recipe.stop",
-                            owner_kind="run",
-                            owner_id=owner_id,
-                            plan_digest=run.plan_digest,
-                            actor=job.actor,
-                            request_id=cleanup_request_id,
-                            node_payloads=stop_node_payloads,
-                            phases=_role_phases(
-                                _topology_order(revision.document, "stop_order"),
-                                stop_node_payloads,
-                            ),
-                            authority_digest=run.plan_digest.removeprefix("sha256:"),
-                            now=now,
-                            workload_intent_ordinal=_bound_workload_intent(job),
-                        )
-                        cleanup_queued = True
+                            run.state = "failed"
+                            run.route_error = (
+                                "failed recipe Start lacks exact cleanup authority"
+                            )
+                        else:
+                            stop_node_payloads = tuple(
+                                (
+                                    run_node.node_id,
+                                    json.loads(
+                                        canonical_message(
+                                            exact_stop_payloads[run_node.node_id]
+                                        )
+                                    ),
+                                )
+                                for run_node in stop_nodes
+                            )
+                            self._queue_in_session(
+                                session,
+                                kind="recipe.stop",
+                                owner_kind="run",
+                                owner_id=owner_id,
+                                plan_digest=run.plan_digest,
+                                actor=job.actor,
+                                request_id=cleanup_request_id,
+                                node_payloads=stop_node_payloads,
+                                phases=(
+                                    _role_phases(stop_order, stop_node_payloads)
+                                    if stop_order is not None
+                                    else None
+                                ),
+                                authority_digest=run.plan_digest.removeprefix(
+                                    "sha256:"
+                                ),
+                                now=now,
+                                workload_intent_ordinal=intent,
+                            )
+                            cleanup_queued = True
                 else:
                     run.state = "running"
                     run.route_state = "pending"
@@ -4670,51 +5509,75 @@ class RecipeOperationService:
                 partial_scope = job.payload.get("profile_partial_stop")
                 profile_jobrun_partial_targets: set[str] | None = None
                 profile_jobrun_partial_nodes: set[str] | None = None
+                profile_jobrun_parent: ProfileJobRunStopJob | None = None
+                parent_damage: str | None = None
                 if job.payload.get("execution_mode") == "profile-jobrun-stop":
-                    try:
-                        profile_jobrun_parent = (
-                            ProfileJobRunStopJob.model_validate_parent(job.payload)
+                    loaded_parent = _profile_jobrun_parent(job)
+                    if isinstance(loaded_parent, Residue):
+                        # The accepted scope of this Stop cannot be read: the run
+                        # is recorded failed with the reason, never assumed whole.
+                        parent_damage = (
+                            profile_completion_note
+                            or "profile JobRun Stop parent contract is damaged"
                         )
-                    except (TypeError, ValueError) as error:
-                        raise RecipeOperationConflict(
-                            "profile JobRun Stop parent contract is invalid"
-                        ) from error
-                    authorization = profile_jobrun_parent.profile_stop_authorization
-                    if authorization.missing_node_ids:
-                        profile_jobrun_partial_targets = set(
-                            authorization.reachable_node_ids
-                        )
-                        profile_jobrun_partial_nodes = set(authorization.run_node_ids)
-                        partial_scope = {
-                            "target_node_ids": authorization.reachable_node_ids,
-                            "missing_node_ids": authorization.missing_node_ids,
-                        }
+                    else:
+                        profile_jobrun_parent = loaded_parent
+                        authorization = profile_jobrun_parent.profile_stop_authorization
+                        if authorization.missing_node_ids:
+                            profile_jobrun_partial_targets = set(
+                                authorization.reachable_node_ids
+                            )
+                            profile_jobrun_partial_nodes = set(
+                                authorization.run_node_ids
+                            )
+                            partial_scope = {
+                                "target_node_ids": authorization.reachable_node_ids,
+                                "missing_node_ids": authorization.missing_node_ids,
+                            }
+                if profile_completion_note is not None and parent_damage is None:
+                    parent_damage = profile_completion_note
                 recovery = None
                 recovery_error: DistributedLifecycleError | None = None
                 try:
                     recovery = recovery_start_plan(job.payload, now=now)
                 except DistributedLifecycleError as error:
                     recovery_error = error
-                if (
-                    recovery is not None
-                    and not failed
-                    and _intent_is_current(
-                        session, _bound_workload_intent(job), job.targets
+                recovery_intent = _job_workload_intent(session, job)
+                recovery_revision: CatalogDocumentRevision | None = None
+                if recovery is not None:
+                    recovery_installation = session.get(
+                        RecipeInstallation, run.installation_id
                     )
-                ):
-                    phases, marker = recovery
-                    installation = session.get(RecipeInstallation, run.installation_id)
-                    revision = (
+                    recovery_revision = (
                         _active_recipe_revision(
-                            session, installation.recipe_revision_id
+                            session, recovery_installation.recipe_revision_id
                         )
-                        if installation is not None
+                        if recovery_installation is not None
                         else None
                     )
-                    if revision is None or revision.content_digest is None:
-                        raise RecipeOperationConflict(
-                            "distributed recovery authority is unavailable"
+                    if (
+                        recovery_revision is None
+                        or recovery_revision.content_digest is None
+                    ):
+                        # Without the recipe's accepted authority the restart
+                        # cannot be queued: the Stop completes as a plain Stop.
+                        retire_as_unknown(
+                            "recipe.recovery",
+                            run.id,
+                            BookkeepingReason.ROW_INCOMPLETE,
+                            "distributed recovery authority is unavailable",
                         )
+                        recovery = None
+                if (
+                    recovery is not None
+                    and recovery_revision is not None
+                    and recovery_revision.content_digest is not None
+                    and recovery_intent is not None
+                    and not failed
+                    and _intent_is_current(session, recovery_intent, job.targets)
+                ):
+                    phases, marker = recovery
+                    revision = recovery_revision
                     flattened = tuple(item for phase in phases for item in phase)
                     unique_payloads = tuple(
                         {
@@ -4739,7 +5602,7 @@ class RecipeOperationService:
                         phases=phases,
                         authority_digest=revision.content_digest,
                         now=now,
-                        workload_intent_ordinal=_bound_workload_intent(job),
+                        workload_intent_ordinal=recovery_intent,
                         job_context={
                             "recovery": marker,
                             "start_deadline": marker["deadline"],
@@ -4774,6 +5637,7 @@ class RecipeOperationService:
                             }
                         )
                         if profile_jobrun_partial_targets is not None
+                        and profile_jobrun_parent is not None
                         else sorted(partial_targets)
                         if isinstance(partial_targets, list)
                         else None
@@ -4809,18 +5673,30 @@ class RecipeOperationService:
                         )
                     )
                     partial_success = (
-                        valid_partial_scope and not failed and recovery_error is None
+                        valid_partial_scope
+                        and not failed
+                        and recovery_error is None
+                        and parent_damage is None
                     )
                     run.state = (
                         "lost"
                         if partial_success
                         else "failed"
-                        if failed or recovery_error or partial_scope is not None
+                        if failed
+                        or recovery_error
+                        or partial_scope is not None
+                        or parent_damage is not None
                         else "stopped"
                     )
-                    run.stopped_at = now if not failed and not partial_scope else None
+                    run.stopped_at = (
+                        now
+                        if not failed and not partial_scope and parent_damage is None
+                        else None
+                    )
                     run.route_state = "withdrawn"
-                    if partial_success:
+                    if parent_damage is not None:
+                        run.route_error = parent_damage[:512]
+                    elif partial_success:
                         run.route_error = "incomplete multi-Spark model; missing ranks were not stopped"
                         self._release_node_reservations(
                             session, owner_id, job.targets, now
@@ -4832,7 +5708,12 @@ class RecipeOperationService:
                             "profile partial Stop scope no longer matches the full run"
                         )
                     run.updated_at = now
-                    if not failed and recovery_error is None and not partial_scope:
+                    if (
+                        not failed
+                        and recovery_error is None
+                        and not partial_scope
+                        and parent_damage is None
+                    ):
                         self._release(session, "run", owner_id, now)
             elif job.kind == "recipe.uninstall":
                 installation = session.get(RecipeInstallation, owner_id)
@@ -4907,7 +5788,7 @@ class RecipeOperationService:
             already_invalidated = superseded and (
                 job.state in {"cancelled", "failed"}
                 or (
-                    job.state == "waiting-for-operator"
+                    job.state in job_states.words(LifecycleState.NEEDS_OPERATOR)
                     and isinstance(job.result, Mapping)
                     and job.result.get("cancel_requested") is True
                 )
@@ -4948,7 +5829,7 @@ class RecipeOperationService:
                 )
                 return self._view(job)
             if job.state == "cancelled":
-                previous = _validated_result(job.kind, job.result) or {}
+                previous = _recorded_result(job.kind, job.result, subject=job.id) or {}
                 if (
                     previous.get("cancel_request_id") == request_id
                     and previous.get("reason") == cancellation_reason
@@ -4958,12 +5839,16 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(
                     "cancellation request key was already used differently"
                 )
-            if job.state not in {"queued", "running", "waiting-for-operator"}:
+            if job.state not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
                 # A cancel always completes (rule 4): a parent that mirrors an
                 # order's wait (the Stop of a one-shot job in doubt, a legacy
                 # parked order) accepts it, and the orders end it.
                 raise RecipeOperationConflict("recipe operation is not cancellable")
-            previous = _validated_result(job.kind, job.result) or {}
+            previous = _recorded_result(job.kind, job.result, subject=job.id) or {}
             if previous.get("cancel_requested") is True:
                 if (
                     previous.get("cancel_request_id") == request_id
@@ -4987,7 +5872,11 @@ class RecipeOperationService:
                         child, None, job, Outcome.CANCELLED, now
                     )
             if any(
-                child.state in {"running", "waiting-for-operator"} for child in children
+                child.state
+                in job_states.words(
+                    LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+                )
+                for child in children
             ):
                 job.result = _validated_result(
                     job.kind,
@@ -5009,7 +5898,7 @@ class RecipeOperationService:
             job.result = _validated_result(
                 job.kind,
                 {
-                    **(dict(job.result) if isinstance(job.result, Mapping) else {}),
+                    **(_recorded_result(job.kind, job.result, subject=job.id) or {}),
                     "cancelled": True,
                     "cancel_requested": True,
                     "cancel_request_id": request_id,
@@ -5038,7 +5927,13 @@ class RecipeOperationService:
                 select(Job)
                 .where(
                     Job.kind == "recipe.build.v1",
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     or_(
                         _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
                         Job.payload["build_intent"]["kind"].as_string() == "dependency",
@@ -5146,85 +6041,38 @@ class RecipeOperationService:
                 uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:retirement-cleanup:{job.id}")
             )
             try:
-                _validated_result(job.kind, job.result)
-                owner_id = _required_string(job.payload, "owner_id")
-                ordinal = _bound_workload_intent(job)
+                owner_id = _payload_string(job.payload, "owner_id")
+                with self._sessions() as probe:
+                    ordinal = _job_workload_intent(probe, job)
                 kind = (
                     "recipe.stop"
                     if job.kind in {"recipe.start", "recipe.stop"}
                     else "recipe.uninstall"
                 )
                 owner_kind = "run" if kind == "recipe.stop" else "installation"
-                if job.payload.get("owner_kind") != owner_kind:
-                    raise RecipeOperationConflict("retired owner binding is invalid")
-                with self._sessions() as session:
-                    existing = self._idempotent_in_session(
-                        session,
-                        request_id,
-                        kind,
-                        None,
-                        owner_kind=owner_kind,
-                        owner_id=owner_id,
+                if (
+                    owner_id is None
+                    or ordinal is None
+                    or job.payload.get("owner_kind") != owner_kind
+                ):
+                    # The retired operation lost its owner or its workload intent:
+                    # a cleanup is never issued without them (it would take a
+                    # newer intent), and the damage is recorded as unknown.
+                    retire_as_unknown(
+                        "recipe.retirement",
+                        job.id,
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        "retired operation owner or workload intent is not provable",
                     )
-                    current = _intent_is_current(session, ordinal, job.targets)
-                    owner = session.get(
-                        RecipeRun if kind == "recipe.stop" else RecipeInstallation,
-                        owner_id,
+                    reason = (
+                        "exact cleanup blocked: the retired operation's owner or "
+                        "workload intent is not provable"
                     )
-                    completed = (
-                        owner is not None
-                        and owner.state
-                        == ("stopped" if kind == "recipe.stop" else "uninstalled")
-                        and session.scalar(
-                            select(ResourceReservation.id)
-                            .where(
-                                ResourceReservation.owner_kind
-                                == ("run" if kind == "recipe.stop" else "installation"),
-                                ResourceReservation.owner_id == owner_id,
-                                ResourceReservation.state == "active",
-                            )
-                            .limit(1)
-                        )
-                        is None
-                    )
-                if completed:
-                    reason = "exact cleanup confirmed; capacity released"
-                elif existing is not None:
-                    if existing.state in {
-                        "failed",
-                        "cancelled",
-                        "waiting-for-operator",
-                    }:
-                        reason = (
-                            f"exact cleanup {existing.id} is {existing.state}: "
-                            f"{existing.status_reason or 'inspect its retained failure evidence'}; "
-                            "inspect/correct the blocker and submit a new exact stop or uninstall; capacity retained"
-                        )
-                    else:
-                        reason = f"exact cleanup {existing.id} is {existing.state}; capacity retained until its receipt"
-                elif not current:
-                    reason = "newer workload intent owns cleanup; uncertain capacity remains reserved"
                 else:
-                    if kind == "recipe.stop":
-                        plan = self.preview_stop(owner_id)
-                        cleanup = self.stop(
-                            owner_id,
-                            plan_digest=plan.plan_digest,
-                            actor=job.actor,
-                            request_id=request_id,
-                            workload_intent_ordinal=ordinal,
-                        )
-                    else:
-                        plan = self.preview_uninstall(owner_id)
-                        cleanup = self.uninstall(
-                            owner_id,
-                            plan_digest=plan.plan_digest,
-                            actor=job.actor,
-                            request_id=request_id,
-                            workload_intent_ordinal=ordinal,
-                        )
-                    progressed = True
-                    reason = f"exact cleanup {cleanup.id} is {cleanup.state}; capacity retained until its receipt"
+                    reason, completed, advanced = self._retirement_cleanup(
+                        job, request_id, kind, owner_kind, owner_id, ordinal
+                    )
+                    progressed = progressed or advanced
             except (
                 RecipeOperationConflict,
                 RecipeRouteError,
@@ -5255,12 +6103,100 @@ class RecipeOperationService:
                         stored.result = _validated_result(
                             stored.kind,
                             {
-                                **(stored.result or {}),
+                                **(
+                                    _recorded_result(
+                                        stored.kind, stored.result, subject=stored.id
+                                    )
+                                    or {}
+                                ),
                                 "recovery": "retry creates a new operation",
                             },
                         )
                     stored.updated_at = now
         return progressed
+
+    def _retirement_cleanup(
+        self,
+        job: Job,
+        request_id: str,
+        kind: str,
+        owner_kind: str,
+        owner_id: str,
+        ordinal: int,
+    ) -> tuple[str, bool, bool]:
+        """Resume one retired owner's exact cleanup: (reason, completed, advanced)."""
+
+        completed = False
+        progressed = False
+        with self._sessions() as session:
+            existing = self._idempotent_in_session(
+                session,
+                request_id,
+                kind,
+                None,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
+            )
+            current = _intent_is_current(session, ordinal, job.targets)
+            owner = session.get(
+                RecipeRun if kind == "recipe.stop" else RecipeInstallation,
+                owner_id,
+            )
+            completed = (
+                owner is not None
+                and owner.state
+                == ("stopped" if kind == "recipe.stop" else "uninstalled")
+                and session.scalar(
+                    select(ResourceReservation.id)
+                    .where(
+                        ResourceReservation.owner_kind
+                        == ("run" if kind == "recipe.stop" else "installation"),
+                        ResourceReservation.owner_id == owner_id,
+                        ResourceReservation.state == "active",
+                    )
+                    .limit(1)
+                )
+                is None
+            )
+        if completed:
+            reason = "exact cleanup confirmed; capacity released"
+        elif existing is not None:
+            if existing.state in job_states.words(
+                LifecycleState.FAILED,
+                LifecycleState.CANCELLED,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
+                reason = (
+                    f"exact cleanup {existing.id} is {existing.state}: "
+                    f"{existing.status_reason or 'inspect its retained failure evidence'}; "
+                    "inspect/correct the blocker and submit a new exact stop or uninstall; capacity retained"
+                )
+            else:
+                reason = f"exact cleanup {existing.id} is {existing.state}; capacity retained until its receipt"
+        elif not current:
+            reason = "newer workload intent owns cleanup; uncertain capacity remains reserved"
+        else:
+            if kind == "recipe.stop":
+                plan = self.preview_stop(owner_id)
+                cleanup = self.stop(
+                    owner_id,
+                    plan_digest=plan.plan_digest,
+                    actor=job.actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=ordinal,
+                )
+            else:
+                plan = self.preview_uninstall(owner_id)
+                cleanup = self.uninstall(
+                    owner_id,
+                    plan_digest=plan.plan_digest,
+                    actor=job.actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=ordinal,
+                )
+            progressed = True
+            reason = f"exact cleanup {cleanup.id} is {cleanup.state}; capacity retained until its receipt"
+        return reason, completed, progressed
 
     def _cancel_build(
         self,
@@ -5310,15 +6246,42 @@ class RecipeOperationService:
             job = session.get(Job, job_id, with_for_update={"nowait": True})
             if job is None or job.state == "cancelled":
                 return False
-            if job.state not in {"queued", "running", "waiting-for-operator"}:
-                raise RecipeOperationConflict("recipe build is not cancellable")
-            build = session.get(
-                RecipeBuild,
-                _required_string(job.payload, "owner_id"),
-                with_for_update={"nowait": True},
+            if job.state not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
+                # A cancel always completes: a build that already ended has
+                # nothing left to cancel.
+                return False
+            build_id = _payload_string(job.payload, "owner_id")
+            build = (
+                session.get(RecipeBuild, build_id, with_for_update={"nowait": True})
+                if build_id is not None
+                else None
             )
             if build is None:
-                raise RecipeOperationConflict("recipe build authority changed")
+                # The build row this pull belongs to is gone: the pull has
+                # nothing to import into, so its cancellation is completed
+                # on the job alone and the damage is retired as unknown.
+                retire_as_unknown(
+                    "recipe.build-cancel",
+                    job.id,
+                    BookkeepingReason.ROW_INCOMPLETE,
+                    "the build row of a prebuilt pull is missing",
+                )
+                cancellation = request_build_cancellation(
+                    job,
+                    actor=actor,
+                    request_id=request_id,
+                    reason=reason,
+                    now=_aware(now),
+                )
+                RecipeOperationAdapter().cancelled(job, now)
+                job.result = cancellation.model_copy(
+                    update={"cancelled": True}
+                ).model_dump(mode="json", exclude_none=True)
+                return True
             if build_cancellation(job) is None:
                 if only_if_unneeded and read_build_intent(job).kind == "independent":
                     return False
@@ -5374,23 +6337,37 @@ class RecipeOperationService:
                     reason=reason,
                     only_if_unneeded=only_if_unneeded,
                 )
-            if (
-                hinted is None
-                or hinted.kind != "recipe.build.v1"
-                or len(hinted.targets) != 1
-            ):
-                raise RecipeOperationConflict("recipe build is not cancellable")
+            if hinted is None or hinted.kind != "recipe.build.v1":
+                return False
+            if len(hinted.targets) != 1:
+                retire_as_unknown(
+                    "recipe.build-cancel",
+                    hinted.id,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    "the build job does not name exactly one builder",
+                )
+                return False
             node_id = hinted.targets[0]
         now = self._clock()
         with self._sessions.begin() as session:
             node = session.get(AgentNode, node_id, with_for_update={"nowait": True})
             job = session.get(Job, job_id, with_for_update={"nowait": True})
             if node is None or job is None or job.targets != [node_id]:
-                raise RecipeOperationConflict("recipe build authority changed")
+                retire_as_unknown(
+                    "recipe.build-cancel",
+                    job_id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the build's builder or job changed under the cancellation",
+                )
+                return False
             if job.state == "cancelled":
                 return False
-            if job.state not in {"queued", "running", "waiting-for-operator"}:
-                raise RecipeOperationConflict("recipe build is not cancellable")
+            if job.state not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
+                return False
             children = tuple(
                 session.scalars(
                     select(AgentOperation)
@@ -5400,15 +6377,22 @@ class RecipeOperationService:
                 )
             )
             if len(children) != 1 or children[0].node_id != node_id:
-                raise RecipeOperationConflict(
-                    "recipe build operation authority changed"
+                retire_as_unknown(
+                    "recipe.build-cancel",
+                    job_id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the build job's order does not match its builder",
                 )
+                return False
             child = children[0]
+            build_owner = _payload_string(job.payload, "owner_id")
             try:
-                build = session.get(
-                    RecipeBuild,
-                    _required_string(job.payload, "owner_id"),
-                    with_for_update={"nowait": True},
+                build = (
+                    session.get(
+                        RecipeBuild, build_owner, with_for_update={"nowait": True}
+                    )
+                    if build_owner is not None
+                    else None
                 )
             except DBAPIError as error:
                 if getattr(error.orig, "sqlstate", None) != "55P03":
@@ -5417,7 +6401,13 @@ class RecipeOperationService:
                     "build.consumer_busy: build ownership is changing; retry cancellation"
                 ) from error
             if build is None or build.builder_node_id != node_id:
-                raise RecipeOperationConflict("recipe build authority changed")
+                retire_as_unknown(
+                    "recipe.build-cancel",
+                    job_id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "the build row is missing or names another builder",
+                )
+                return False
             if build_cancellation(job) is None:
                 if only_if_unneeded and read_build_intent(job).kind == "independent":
                     return False
@@ -5491,7 +6481,13 @@ class RecipeOperationService:
             .where(
                 Job.kind == "recipe.build.v1",
                 Job.payload["owner_id"].as_string() == build_id,
-                Job.state.in_(("queued", "running", "waiting-for-operator")),
+                Job.state.in_(
+                    job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.NEEDS_OPERATOR,
+                    )
+                ),
             )
             .limit(1)
         )
@@ -5512,14 +6508,10 @@ class RecipeOperationService:
         now = self._clock()
         with self._sessions() as session:
             existing_run = session.get(RecipeRun, run_id)
-            if (
-                existing_run is None
-                or _stored_run_plan(existing_run.plan).get("execution_mode")
-                != "one-shot-jobs"
-            ):
+            if existing_run is None or not _run_is_one_shot(session, existing_run):
                 return None
             if profile_target_node_ids is not None and profile_application_id is None:
-                raise RecipeOperationConflict(
+                raise RecipeRequestInvalid(
                     "partial one-shot Stop requires current profile ownership"
                 )
         with self._sessions.begin() as session:
@@ -5529,17 +6521,16 @@ class RecipeOperationService:
             if pending_job is not None:
                 if pending_job.payload.get("execution_mode") == "profile-jobrun-stop":
                     if profile_application_id is None or pending_job.state != "running":
-                        raise RecipeOperationConflict(
+                        raise RecipeRequestInvalid(
                             "profile JobRun Stop request identity changed"
                         )
-                    try:
-                        typed_parent = ProfileJobRunStopJob.model_validate_parent(
-                            pending_job.payload
-                        )
-                    except (TypeError, ValueError) as error:
-                        raise RecipeOperationConflict(
-                            "profile JobRun Stop parent contract is invalid"
-                        ) from error
+                    typed_parent = _profile_jobrun_parent(pending_job)
+                    if isinstance(typed_parent, Residue):
+                        # The Stop this request key already queued is in flight
+                        # under its own orders; its damaged parent cannot be
+                        # re-checked here, so the request adopts it (its result
+                        # projection settles it).
+                        return self._view(pending_job, session=session)
                     authorization = typed_parent.profile_stop_authorization
                     if (
                         typed_parent.profile_application_id != profile_application_id
@@ -5590,13 +6581,10 @@ class RecipeOperationService:
                     workload_intent_ordinal is not None
                     and workload_intent_ordinal != bound
                 ):
-                    raise RecipeOperationConflict("workload intent was superseded")
+                    raise RecipeRequestInvalid("workload intent was superseded")
                 workload_intent_ordinal = bound
             run = session.get(RecipeRun, run_id, with_for_update=True)
-            if (
-                run is None
-                or _stored_run_plan(run.plan).get("execution_mode") != "one-shot-jobs"
-            ):
+            if run is None or not _run_is_one_shot(session, run):
                 raise RecipeOperationConflict(
                     "logical recipe run changed while stopping"
                 )
@@ -5607,20 +6595,19 @@ class RecipeOperationService:
                 profile_target_node_ids=profile_target_node_ids,
             )
             if not admitted.allowed:
-                raise RecipeOperationConflict("stop plan is stale or blocked")
+                raise RecipeRequestInvalid("stop plan is stale or blocked")
             plan_digest = admitted.plan_digest
             installation = session.get(RecipeInstallation, run.installation_id)
-            revision = (
-                _active_recipe_revision(session, installation.recipe_revision_id)
-                if installation is not None
-                else None
+            if installation is None:
+                raise RecipeRequestInvalid("recipe installation does not exist")
+            revision = _active_recipe_revision(session, installation.recipe_revision_id)
+            # The accepted Stop plan carries the run's own authority; the recipe
+            # revision's digest is used when it is readable, never required.
+            authority_revision = (
+                revision.content_digest
+                if revision is not None and revision.content_digest
+                else admitted.authority_digest.removeprefix("sha256:")
             )
-            if (
-                installation is None
-                or revision is None
-                or revision.content_digest is None
-            ):
-                raise RecipeOperationConflict("recipe revision is unavailable")
             nodes = tuple(
                 session.scalars(
                     select(RunNode)
@@ -5638,7 +6625,7 @@ class RecipeOperationService:
                 )
             )
             if tuple(node.node_id for node in target_nodes) != targets:
-                raise RecipeOperationConflict("artifact workload target disappeared")
+                raise RecipeRequestInvalid("artifact workload target disappeared")
             if workload_intent_ordinal is None:
                 workload_intent_ordinal = (
                     max(node.workload_intent_ordinal for node in target_nodes) + 1
@@ -5656,14 +6643,14 @@ class RecipeOperationService:
                     for node in target_nodes
                 )
             ):
-                raise RecipeOperationConflict("workload intent was superseded")
+                raise RecipeRequestInvalid("workload intent was superseded")
             if profile_application_id is not None:
                 profile_job = self._profile_jobrun_stop_in_session(
                     session,
                     run=run,
                     nodes=nodes,
                     installation=installation,
-                    revision=revision,
+                    authority_revision=authority_revision,
                     target_node_ids=targets,
                     stop_plan_digest=admitted.plan_digest,
                     actor=actor,
@@ -5672,6 +6659,13 @@ class RecipeOperationService:
                     workload_intent_ordinal=workload_intent_ordinal,
                     now=now,
                 )
+                if isinstance(profile_job, Residue):
+                    # The accepted profile Stop cannot be read yet: nothing is
+                    # stopped on a guess, and the profile's retry asks again.
+                    raise RecipeRetryLater(
+                        "the accepted profile Stop is not readable yet; it is "
+                        "recorded and the stop is retried"
+                    )
                 if profile_job is not None:
                     return self._view(profile_job, session=session)
             payload = {
@@ -5697,7 +6691,7 @@ class RecipeOperationService:
                             kind="recipe.stop",
                             state="running",
                             actor=actor,
-                            authority_revision=revision.content_digest,
+                            authority_revision=authority_revision,
                             targets=list(targets),
                             payload_digest=hashlib.sha256(
                                 canonical_message(payload)
@@ -5732,7 +6726,7 @@ class RecipeOperationService:
                 kind="recipe.stop",
                 state="succeeded",
                 actor=actor,
-                authority_revision=revision.content_digest,
+                authority_revision=authority_revision,
                 targets=list(targets),
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
@@ -5783,34 +6777,52 @@ class RecipeOperationService:
         *,
         now: datetime,
         require_current: bool,
-    ) -> tuple[ProfileJobRunStopAuthorization, ProfileJobRunStopTarget]:
+    ) -> tuple[ProfileJobRunStopAuthorization, ProfileJobRunStopTarget] | Residue:
+        """The accepted authorization and target one Stop child executes.
+
+        A child whose identity cannot be proven against its parent's accepted
+        authority is retired as unknown (a :class:`Residue`): nothing is retired
+        on that evidence and the profile's own retry answers the Stop.
+        """
+
+        def unproven(reason: BookkeepingReason, note: str) -> Residue:
+            return retire_as_unknown(
+                "recipe.profile-jobrun-stop", operation.id, reason, note
+            )
+
         if (
             job.kind != "recipe.stop"
             or job.payload.get("execution_mode") != "profile-jobrun-stop"
             or job.payload_digest
             != hashlib.sha256(canonical_message(job.payload)).hexdigest()
         ):
-            raise RecipeOperationConflict("profile JobRun Stop parent is invalid")
-        try:
-            parent = ProfileJobRunStopJob.model_validate_parent(job.payload)
-        except (TypeError, ValueError) as error:
-            raise RecipeOperationConflict(
-                "profile JobRun Stop parent contract is invalid"
-            ) from error
-        phase_matches = [
-            payload
-            for phase in _stored_phases(job.payload)
-            for operation_id, node_id, payload in phase
-            if operation_id == operation.id and node_id == operation.node_id
-        ]
+            return unproven(
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "profile JobRun Stop parent is invalid",
+            )
+        parent = _profile_jobrun_parent(job)
+        if isinstance(parent, Residue):
+            return parent
+        loaded_phases = _stored_phases(job.payload, subject=job.id)
+        phase_matches = (
+            []
+            if isinstance(loaded_phases, Residue)
+            else [
+                payload
+                for phase in loaded_phases
+                for operation_id, node_id, payload in phase
+                if operation_id == operation.id and node_id == operation.node_id
+            ]
+        )
         try:
             operation_payload = read_stored_model(
                 RecipeStopPayload, canonical_message(operation.payload), from_json=True
             )
         except (TypeError, ValueError) as error:
-            raise RecipeOperationConflict(
-                "profile JobRun Stop child payload is invalid"
-            ) from error
+            return unproven(
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                f"profile JobRun Stop child payload is invalid: {error}",
+            )
         stop_digest = hashlib.sha256(canonical_message(operation_payload)).hexdigest()
         targets = [
             target
@@ -5828,7 +6840,10 @@ class RecipeOperationService:
             != canonical_message(operation_payload)
             or len(targets) != 1
         ):
-            raise RecipeOperationConflict("profile JobRun Stop child identity changed")
+            return unproven(
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "profile JobRun Stop child identity changed",
+            )
         authorization = parent.profile_stop_authorization
         try:
             validate_profile_jobrun_stop_target(
@@ -5842,9 +6857,10 @@ class RecipeOperationService:
                 require_current=require_current,
             )
         except ProfileStopAuthorityError as error:
-            raise RecipeOperationConflict(
-                "profile JobRun Stop authority is stale"
-            ) from error
+            return unproven(
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                f"profile JobRun Stop authority is stale: {error}",
+            )
         return authorization, targets[0]
 
     def _complete_profile_jobrun_stop_in_session(
@@ -5854,28 +6870,40 @@ class RecipeOperationService:
         children: Sequence[AgentOperation],
         *,
         now: datetime,
-    ) -> None:
-        """Retire old JobRun identities only after every exact Stop receipt."""
+    ) -> Residue | None:
+        """Retire old JobRun identities only after every exact Stop receipt.
+
+        Every receipt is checked before anything is retired, so a receipt that
+        cannot be proven (a changed payload, an owner no longer provable, a
+        missing child or attempt) retires nothing: the whole completion returns a
+        :class:`Residue` and the Stop ends failed, to be answered by the
+        profile's own retry.  ``None`` means every identity was retired.
+        """
+
+        def unproven(reason: BookkeepingReason, note: str) -> Residue:
+            return retire_as_unknown("recipe.profile-jobrun-stop", job.id, reason, note)
+
         if (
             job.payload_digest
             != hashlib.sha256(canonical_message(job.payload)).hexdigest()
         ):
-            raise RecipeOperationConflict("profile JobRun Stop payload digest changed")
-        try:
-            parent = ProfileJobRunStopJob.model_validate_parent(job.payload)
-        except (TypeError, ValueError) as error:
-            raise RecipeOperationConflict(
-                "profile JobRun Stop parent contract is invalid"
-            ) from error
+            return unproven(
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "profile JobRun Stop payload digest changed",
+            )
+        parent = _profile_jobrun_parent(job)
+        if isinstance(parent, Residue):
+            return parent
         authorization = parent.profile_stop_authorization
         try:
             validate_profile_stop_owner(
                 session, authorization, now=now, require_current=False
             )
         except ProfileStopAuthorityError as error:
-            raise RecipeOperationConflict(
-                "profile JobRun Stop owner is no longer provable"
-            ) from error
+            return unproven(
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                f"profile JobRun Stop owner is no longer provable: {error}",
+            )
         child_by_identity = {
             (
                 child.node_id,
@@ -5886,18 +6914,25 @@ class RecipeOperationService:
         if len(child_by_identity) != len(children) or any(
             child.state != "succeeded" for child in children
         ):
-            raise RecipeOperationConflict(
-                "profile JobRun Stop lacks complete successful child receipts"
+            return unproven(
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "profile JobRun Stop lacks complete successful child receipts",
             )
+        proven: list[
+            tuple[ProfileJobRunStopTarget, ArtifactJob, Job, AgentOperation]
+        ] = []
         for target in authorization.targets:
             child = child_by_identity.get((target.node_id, target.stop_payload_sha256))
             if child is None or child.current_attempt < 1:
-                raise RecipeOperationConflict(
-                    "profile JobRun Stop lacks an exact issued receipt"
+                return unproven(
+                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                    "profile JobRun Stop lacks an exact issued receipt",
                 )
-            self._validate_profile_jobrun_stop_child(
+            validated = self._validate_profile_jobrun_stop_child(
                 session, job, child, now=now, require_current=False
             )
+            if isinstance(validated, Residue):
+                return validated
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
                     AgentOperationAttempt.operation_id == child.id,
@@ -5905,8 +6940,9 @@ class RecipeOperationService:
                 )
             )
             if attempt is None or attempt.state != "succeeded":
-                raise RecipeOperationConflict(
-                    "profile JobRun Stop result does not prove absence"
+                return unproven(
+                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                    "profile JobRun Stop result does not prove absence",
                 )
             artifact = session.get(
                 ArtifactJob, target.artifact_job_id, with_for_update=True
@@ -5923,10 +6959,30 @@ class RecipeOperationService:
                 or artifact.operation_id != source_job.id
                 or source_operation.parent_job_id != source_job.id
             ):
-                raise RecipeOperationConflict(
-                    "stopped JobRun source no longer matches its owner"
+                return unproven(
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "stopped JobRun source no longer matches its owner",
                 )
-            reason = "runtime stopped by the newer accepted profile intent"
+            proven.append((target, artifact, source_job, source_operation))
+        reachable_nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(
+                    RunNode.run_id == authorization.run_id,
+                    RunNode.node_id.in_(authorization.reachable_node_ids),
+                )
+                .with_for_update(of=RunNode)
+            )
+        )
+        if {node.node_id for node in reachable_nodes} != set(
+            authorization.reachable_node_ids
+        ):
+            return unproven(
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "profile JobRun Stop reachable run membership changed",
+            )
+        reason = "runtime stopped by the newer accepted profile intent"
+        for _target, artifact, source_job, source_operation in proven:
             # The exact Stop receipt proves the runtime absent: a definite,
             # confirmed cancellation of the job and of its order.
             ArtifactJobAdapter(session).confirm_stopped(artifact, reason, now)
@@ -5941,25 +6997,10 @@ class RecipeOperationService:
                 now,
                 reason=reason,
             )
-        reachable_nodes = tuple(
-            session.scalars(
-                select(RunNode)
-                .where(
-                    RunNode.run_id == authorization.run_id,
-                    RunNode.node_id.in_(authorization.reachable_node_ids),
-                )
-                .with_for_update(of=RunNode)
-            )
-        )
-        if {node.node_id for node in reachable_nodes} != set(
-            authorization.reachable_node_ids
-        ):
-            raise RecipeOperationConflict(
-                "profile JobRun Stop reachable run membership changed"
-            )
         for node in reachable_nodes:
             node.state = "stopped"
             node.updated_at = now
+        return None
 
     def _profile_jobrun_stop_in_session(
         self,
@@ -5968,7 +7009,7 @@ class RecipeOperationService:
         run: RecipeRun,
         nodes: Sequence[RunNode],
         installation: RecipeInstallation,
-        revision: CatalogDocumentRevision,
+        authority_revision: str,
         target_node_ids: Sequence[str],
         stop_plan_digest: str,
         actor: str,
@@ -5976,8 +7017,15 @@ class RecipeOperationService:
         profile_application_id: str,
         workload_intent_ordinal: int,
         now: datetime,
-    ) -> Job | None:
-        """Queue exact JobRun runtime Stops under the accepted profile Stop."""
+    ) -> Job | Residue | None:
+        """Queue exact JobRun runtime Stops under the accepted profile Stop.
+
+        The accepted profile Stop is the authority for the JobRun runtime Stops.
+        When its progress, owner or plan cannot be read, nothing is stopped on a
+        guess: the damage is retired as unknown (a :class:`Residue`) and the
+        caller's retry asks again.  A JobRun whose exact identity does not match
+        the run is refused as a security edge, never stopped.
+        """
         from .fleet_profiles import _persisted_profile_progress
 
         application = session.get(FleetProfileApplication, profile_application_id)
@@ -5988,9 +7036,12 @@ class RecipeOperationService:
                 else None
             )
         except ValueError as error:
-            raise RecipeOperationConflict(
-                "current profile Stop progress is invalid"
-            ) from error
+            return retire_as_unknown(
+                "recipe.profile-stop",
+                profile_application_id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                f"current profile Stop progress is invalid: {error}",
+            )
         profile_operation = (
             session.get(Job, switch_adapter.active_operation_id)
             if switch_adapter is not None
@@ -5999,7 +7050,12 @@ class RecipeOperationService:
             else None
         )
         if application is None or profile_operation is None:
-            raise RecipeOperationConflict("current profile Stop owner is unavailable")
+            return retire_as_unknown(
+                "recipe.profile-stop",
+                profile_application_id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "current profile Stop owner is unavailable",
+            )
         try:
             from .run_switch_contract import RunSwitchPlan
 
@@ -6022,9 +7078,12 @@ class RecipeOperationService:
             ):
                 raise ValueError("accepted profile has no unique Stop for this run")
         except (TypeError, ValueError) as error:
-            raise RecipeOperationConflict(
-                "accepted profile Stop plan is invalid"
-            ) from error
+            return retire_as_unknown(
+                "recipe.profile-stop",
+                profile_application_id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                f"accepted profile Stop plan is invalid: {error}",
+            )
 
         run_node_by_id = {node.node_id: node for node in nodes}
         reachable_node_ids = set(target_node_ids)
@@ -6039,9 +7098,15 @@ class RecipeOperationService:
             .with_for_update(of=ArtifactJob)
         ):
             if artifact.operation_id is None:
-                if artifact.state not in {"draft", "ready"}:
-                    raise RecipeOperationConflict(
-                        "submitted artifact job has no exact JobRun identity"
+                if artifact_job_states.preparation_of(artifact) is None:
+                    # Submitted without an order: nothing was ever issued for
+                    # it, so there is no runtime to stop and it is superseded
+                    # like an unissued job.
+                    retire_as_unknown(
+                        "recipe.artifact-job",
+                        artifact.id,
+                        BookkeepingReason.ROW_INCOMPLETE,
+                        "submitted artifact job has no JobRun identity",
                     )
                 unissued_artifacts.append(artifact)
                 continue
@@ -6069,19 +7134,19 @@ class RecipeOperationService:
                     canonical_message(source_operations[0].payload)
                 ).hexdigest()
             ):
-                raise RecipeOperationConflict(
+                raise RecipeStopAuthorityRefused(
                     "artifact JobRun physical Stop identity is ambiguous"
                 )
             source_operation = source_operations[0]
             if source_operation.node_id not in run_node_by_id:
-                raise RecipeOperationConflict(
+                raise RecipeStopAuthorityRefused(
                     "artifact JobRun escaped its immutable run membership"
                 )
             if source_operation.node_id not in reachable_node_ids:
                 continue
             source_node = run_node_by_id.get(source_operation.node_id)
             if source_node is None or source_job.targets != [source_operation.node_id]:
-                raise RecipeOperationConflict(
+                raise RecipeStopAuthorityRefused(
                     "artifact JobRun escaped its immutable run membership"
                 )
             try:
@@ -6095,7 +7160,7 @@ class RecipeOperationService:
                     cancel_pending_start=True,
                 )
             except (TypeError, ValueError) as error:
-                raise RecipeOperationConflict(
+                raise RecipeStopAuthorityRefused(
                     "artifact JobRun request cannot authorize exact Stop"
                 ) from error
             if (
@@ -6114,7 +7179,7 @@ class RecipeOperationService:
                 or stop.target_runtime_id != artifact.id
                 or stop.cancel_pending_start is not True
             ):
-                raise RecipeOperationConflict(
+                raise RecipeStopAuthorityRefused(
                     "artifact JobRun is not the exact current run effect"
                 )
             target_rows.append((artifact, source_job, source_operation, stop))
@@ -6164,7 +7229,7 @@ class RecipeOperationService:
                     session, authorization, target, row[3], now=now
                 )
         except (TypeError, ValueError, ProfileStopAuthorityError) as error:
-            raise RecipeOperationConflict(
+            raise RecipeStopAuthorityRefused(
                 "accepted profile does not authorize this exact JobRun Stop: "
                 + str(error)[:240]
             ) from error
@@ -6218,7 +7283,7 @@ class RecipeOperationService:
             request_id=request_id,
             node_payloads=node_payloads,
             phases=phases,
-            authority_digest=revision.content_digest,
+            authority_digest=authority_revision,
             now=now,
             workload_intent_ordinal=workload_intent_ordinal,
             job_context={
@@ -6233,7 +7298,7 @@ class RecipeOperationService:
         try:
             ProfileJobRunStopJob.model_validate_parent(job.payload)
         except (TypeError, ValueError) as error:
-            raise RecipeOperationConflict(
+            raise RecipeStopAuthorityRefused(
                 "profile JobRun Stop parent contract is invalid"
             ) from error
         return job
@@ -6256,16 +7321,7 @@ class RecipeOperationService:
                 select(ArtifactJob)
                 .where(
                     ArtifactJob.run_id == run_id,
-                    ArtifactJob.state.in_(
-                        {
-                            "draft",
-                            "ready",
-                            "queued",
-                            "running",
-                            "cancelling",
-                            "waiting-for-operator",
-                        }
-                    ),
+                    artifact_job_states.sql_preparing_or_live(ArtifactJob),
                 )
                 .order_by(ArtifactJob.created_at, ArtifactJob.id)
                 .with_for_update(of=ArtifactJob)
@@ -6281,9 +7337,14 @@ class RecipeOperationService:
             ):
                 continue
             if artifact.operation_id is None:
-                if artifact.state not in {"draft", "ready"}:
-                    raise RecipeOperationConflict(
-                        "artifact job operation identity is missing"
+                if artifact_job_states.preparation_of(artifact) is None:
+                    # Submitted without an order: nothing was ever issued for it,
+                    # so it is superseded like an unissued job.
+                    retire_as_unknown(
+                        "recipe.artifact-job",
+                        artifact.id,
+                        BookkeepingReason.ROW_INCOMPLETE,
+                        "submitted artifact job has no operation identity",
                     )
                 ArtifactJobAdapter(session).settle(
                     artifact,
@@ -6368,7 +7429,7 @@ class RecipeOperationService:
             run_statement = run_statement.with_for_update(of=RecipeRun)
         run = session.scalar(run_statement)
         if run is None:
-            raise RecipeOperationConflict("recipe run does not exist")
+            raise RecipeRequestInvalid("recipe run does not exist")
         installation_statement = select(RecipeInstallation).where(
             RecipeInstallation.id == run.installation_id
         )
@@ -6378,13 +7439,13 @@ class RecipeOperationService:
             )
         installation = session.scalar(installation_statement)
         if installation is None:
-            raise RecipeOperationConflict("recipe installation does not exist")
+            raise RecipeRequestInvalid("recipe installation does not exist")
 
-        revision = _active_recipe_revision(
-            session, installation.recipe_revision_id, for_update=lock
-        )
-        if revision is None:
-            raise RecipeOperationConflict("recipe revision does not exist")
+        # The Stop plan names the recipe revision by id and needs no more: the run
+        # is stopped from its own durable Start authority, so a revision the
+        # catalog can no longer serve never blocks the Stop.
+        recipe_revision_id = installation.recipe_revision_id
+        _active_recipe_revision(session, recipe_revision_id, for_update=lock)
 
         node_statement = (
             select(RunNode)
@@ -6470,29 +7531,18 @@ class RecipeOperationService:
                 and bool(missing_node_ids)
             )
 
-        stored_run_plan = _stored_run_plan(run.plan)
-        expected_nodes = stored_run_plan.get("nodes")
-        expected_identity = (
-            {
-                (item.get("node_id"), item.get("rank"), item.get("role"))
-                for item in expected_nodes
-            }
-            if isinstance(expected_nodes, list)
-            and all(isinstance(item, Mapping) for item in expected_nodes)
-            else set()
-        )
         actual_identity = {(node.node_id, node.rank, node.role) for node in nodes}
+        accepted_run = _run_accepted_ranks(session, run, recipe_revision_id)
+        accepted_ranks, accepted_exact = (
+            (frozenset[tuple[str, int, str]](), False)
+            if isinstance(accepted_run, Residue)
+            else accepted_run
+        )
         immutable_membership_exact = (
             len(all_nodes) <= _MAX_ACTION_NODES
-            and isinstance(expected_nodes, list)
-            and len(expected_nodes) == len(nodes)
-            and len(expected_identity) == len(nodes)
-            and expected_identity == actual_identity
-            and stored_run_plan.get("installation_id") == run.installation_id
-            and stored_run_plan.get("mapping_id") == run.mapping_id
-            and stored_run_plan.get("mapping_generation") == run.mapping_generation
-            and stored_run_plan.get("recipe_revision_id") == revision.id
-            and stored_run_plan.get("plan_digest") == run.plan_digest
+            and accepted_exact
+            and accepted_ranks == actual_identity
+            and len(actual_identity) == len(nodes)
             and profile_scope_exact
         )
         reservation_membership_exact = (
@@ -6523,7 +7573,7 @@ class RecipeOperationService:
         return stop_plan(
             run_id=run.id,
             installation_id=run.installation_id,
-            recipe_revision_id=revision.id,
+            recipe_revision_id=recipe_revision_id,
             alias=run.alias,
             run_state=run.state,
             route_state=run.route_state,
@@ -6560,19 +7610,11 @@ class RecipeOperationService:
             )
         installation = session.scalar(installation_statement)
         if installation is None:
-            raise RecipeOperationConflict("recipe installation does not exist")
+            raise RecipeRequestInvalid("recipe installation does not exist")
 
-        revision = _active_recipe_revision(
-            session, installation.recipe_revision_id, for_update=lock
-        )
-        if (
-            revision is None
-            or revision.content_digest is None
-            or not isinstance(revision.document, Mapping)
-        ):
+        revision = _uninstall_recipe(session, installation, lock=lock)
+        if revision is None:
             raise RecipeOperationConflict("recipe revision authority is unavailable")
-        stored_installation_plan = _stored_installation_plan(installation.plan)
-
         node_statement = (
             select(InstallationNode)
             .where(InstallationNode.installation_id == installation_id)
@@ -6610,7 +7652,13 @@ class RecipeOperationService:
             select(Job)
             .where(
                 Job.kind.in_(("recipe.uninstall", "recipe.reconcile")),
-                Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                Job.state.in_(
+                    job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.NEEDS_OPERATOR,
+                    )
+                ),
                 Job.payload["owner_id"].as_string() == installation_id,
             )
             .order_by(Job.id)
@@ -6624,7 +7672,13 @@ class RecipeOperationService:
                 select(Job.id)
                 .where(
                     Job.kind == "recipe.reconcile",
-                    Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     Job.payload["owner_id"].as_string() == installation_id,
                 )
                 .limit(1)
@@ -6644,41 +7698,58 @@ class RecipeOperationService:
             ):
                 active_operation = False
 
-        expected_nodes = stored_installation_plan.get("nodes")
-        expected_identity = (
-            {
-                (item.get("node_id"), item.get("rank"), item.get("role"))
-                for item in expected_nodes
-            }
-            if isinstance(expected_nodes, list)
-            and all(isinstance(item, Mapping) for item in expected_nodes)
-            else set()
-        )
         actual_identity = {(node.node_id, node.rank, node.role) for node in nodes}
+        accepted = _installation_accepted_ranks(session, installation, revision)
+        accepted_ranks, accepted_exact = (
+            (frozenset[tuple[str, int, str]](), False)
+            if isinstance(accepted, Residue)
+            else accepted
+        )
         immutable_membership_exact = (
             len(all_nodes) <= _MAX_ACTION_NODES
-            and isinstance(expected_nodes, list)
-            and len(expected_nodes) == len(nodes)
-            and len(expected_identity) == len(nodes)
-            and expected_identity == actual_identity
-            and stored_installation_plan.get("mapping_id") == installation.mapping_id
-            and stored_installation_plan.get("mapping_generation")
-            == installation.mapping_generation
-            and stored_installation_plan.get("recipe_revision_id") == revision.id
-            and stored_installation_plan.get("recipe_content_sha256")
-            == revision.content_digest
-            and stored_installation_plan.get("plan_digest") == installation.plan_digest
+            and accepted_exact
+            and accepted_ranks == actual_identity
+            and len(actual_identity) == len(nodes)
         )
-        model_content_sha256, model_title = _primary_model_identity(revision.document)
+        # The model that was installed is the installation row's own record; the
+        # recipe document names it too.  When they disagree or the document names
+        # none, the installed model wins: cleanup never removes a model it cannot
+        # prove unused, and an unproven identity keeps the model.
+        document_model = _primary_model_identity(revision.document)
+        model_content_sha256, model_title = document_model or (
+            installation.model_content_sha256 or "",
+            "",
+        )
         if installation.model_content_sha256 not in {None, model_content_sha256}:
-            raise RecipeOperationConflict("installation model authority is invalid")
-        dependent_recipe_ids_by_node = self._model_dependents_on_nodes(
-            session,
-            model_content_sha256,
-            {node.node_id for node in nodes},
-            exclude_installation_id=installation.id,
-            lock=lock,
-        )
+            retire_as_unknown(
+                "recipe.installation-model",
+                installation.id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "installation model differs from its recipe revision",
+            )
+            model_content_sha256 = installation.model_content_sha256 or ""
+            model_title = model_title or model_content_sha256[:12]
+        model_title = model_title or model_content_sha256[:12] or "unknown model"
+        node_ids = {node.node_id for node in nodes}
+        if _lower_hex_digest(model_content_sha256):
+            dependent_recipe_ids_by_node = self._model_dependents_on_nodes(
+                session,
+                model_content_sha256,
+                node_ids,
+                exclude_installation_id=installation.id,
+                lock=lock,
+            )
+        else:
+            # No provable model identity: every node keeps its model.
+            retire_as_unknown(
+                "recipe.installation-model",
+                installation.id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                "no provable model identity; the model is kept",
+            )
+            dependent_recipe_ids_by_node = {
+                node_id: (revision.document_id,) for node_id in sorted(node_ids)
+            }
         return uninstall_plan(
             installation_id=installation.id,
             recipe_id=revision.document_id,
@@ -6760,21 +7831,47 @@ class RecipeOperationService:
             if not member_nodes:
                 continue
             revision = _active_recipe_revision(session, installation.recipe_revision_id)
-            if revision is None:
-                raise RecipeOperationConflict(
-                    "dependent recipe authority is unavailable"
+            # What this installation needs is known from its recipe revision and,
+            # failing that, from the model its own row records.  Whatever cannot
+            # be proven unused is a dependent: a model is never removed on a guess.
+            recipe_id = (
+                revision.document_id
+                if revision is not None
+                else installation.recipe_revision_id
+            )
+            identity = (
+                _primary_model_identity(revision.document)
+                if revision is not None
+                else None
+            )
+            identities = (
+                _recipe_model_identities(session, revision.document)
+                if revision is not None and identity is not None
+                else None
+            )
+            if identity is None or identities is None:
+                retire_as_unknown(
+                    "recipe.model-dependents",
+                    installation.id,
+                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                    "the installation's model needs are not provable",
                 )
-            primary_digest, _title = _primary_model_identity(revision.document)
-            if installation.model_content_sha256 not in {None, primary_digest}:
-                raise RecipeOperationConflict("dependent model authority is invalid")
-            if any(
-                digest == model_content_sha256
-                for digest, _title in _recipe_model_identities(
-                    session, revision.document
+                uses = True
+            else:
+                if installation.model_content_sha256 not in {None, identity[0]}:
+                    retire_as_unknown(
+                        "recipe.model-dependents",
+                        installation.id,
+                        BookkeepingReason.EVIDENCE_MISMATCH,
+                        "installation model differs from its recipe revision",
+                    )
+                uses = (
+                    any(digest == model_content_sha256 for digest, _title in identities)
+                    or installation.model_content_sha256 == model_content_sha256
                 )
-            ):
+            if uses:
                 for node_id in member_nodes:
-                    dependent_recipe_ids[node_id].add(revision.document_id)
+                    dependent_recipe_ids[node_id].add(recipe_id)
         return {
             node_id: tuple(sorted(recipe_ids))
             for node_id, recipe_ids in sorted(dependent_recipe_ids.items())
@@ -6953,11 +8050,11 @@ class RecipeOperationService:
                 raise InstallAdmissionBusy("install.capacity_busy") from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         if tuple(node.node_id for node in target_nodes) != tuple(targets):
-            raise RecipeOperationConflict("workload intent target disappeared")
+            raise RecipeRequestInvalid("workload intent target disappeared")
         if workload_intent_ordinal is None and not supersede:
             shared = {node.workload_intent_ordinal for node in target_nodes}
             if len(shared) != 1 or min(shared) < 1:
-                raise RecipeOperationConflict(
+                raise RecipeRetryLater(
                     "workload intent differs across the target Sparks"
                 )
             return shared.pop()
@@ -6984,7 +8081,7 @@ class RecipeOperationService:
                 for node in target_nodes
             )
         ):
-            raise RecipeOperationConflict("workload intent was superseded")
+            raise RecipeRequestInvalid("workload intent was superseded")
         return workload_intent_ordinal
 
     def _queue_in_session(
@@ -7006,7 +8103,7 @@ class RecipeOperationService:
         unattended_guard: Callable[[Session], None] | None = None,
     ) -> Job:
         if not node_payloads:
-            raise RecipeOperationConflict("operation group has no target nodes")
+            raise RecipeRequestInvalid("operation group has no target nodes")
         try:
             payload_model = _RECIPE_WIRE_PAYLOAD_MODELS[kind]
         except KeyError:
@@ -7028,14 +8125,14 @@ class RecipeOperationService:
         if not requested_phase_groups or any(
             not group for group in requested_phase_groups
         ):
-            raise RecipeOperationConflict("operation phases are invalid")
+            raise RecipeRequestInvalid("operation phases are invalid")
         flattened = tuple(item for group in requested_phase_groups for item in group)
         if {node_id for node_id, _payload in flattened} != {
             node_id for node_id, _payload in node_payloads
         } or len({node_id for node_id, _payload in node_payloads}) != len(
             node_payloads
         ):
-            raise RecipeOperationConflict("operation phases do not match target nodes")
+            raise RecipeRequestInvalid("operation phases do not match target nodes")
         phase_groups = tuple(
             tuple((str(uuid.uuid4()), node_id, payload) for node_id, payload in group)
             for group in requested_phase_groups
@@ -7090,7 +8187,7 @@ class RecipeOperationService:
         }
         if workload_intent_ordinal is not None:
             if type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1:
-                raise RecipeOperationConflict("workload intent ordinal is invalid")
+                raise RecipeRequestInvalid("workload intent ordinal is invalid")
             job_payload["workload_intent_ordinal"] = workload_intent_ordinal
         if phases is not None:
             job_payload["phases"] = [
@@ -7106,25 +8203,21 @@ class RecipeOperationService:
             ]
         if job_context is not None:
             if set(job_context) & set(job_payload):
-                raise RecipeOperationConflict("operation context is invalid")
+                raise RecipeRequestInvalid("operation context is invalid")
             job_payload.update(json.loads(canonical_message(job_context)))
         if kind in {"recipe.install", "recipe.start"}:
             try:
                 for _node_id, payload in flattened:
                     compiled_plan = payload.get("compiled_execution_plan")
                     if not isinstance(compiled_plan, Mapping):
-                        raise CompiledExecutionPlanError(
-                            "compiled execution plan is missing"
-                        )
+                        raise TypeError("compiled execution plan is missing")
                     validate_compiled_launch_payload(compiled_plan)
             except (CompiledExecutionPlanError, TypeError, ValueError) as error:
-                raise RecipeOperationConflict(
+                raise RecipeRequestInvalid(
                     f"compiled execution plan is invalid: {error}"
                 ) from None
             if len(canonical_message(job_payload)) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
-                raise RecipeOperationConflict(
-                    "recipe operation job payload is too large"
-                )
+                raise RecipeRequestInvalid("recipe operation job payload is too large")
         job = new_recipe_job(
             id=job_id,
             request_id=request_id,
@@ -7164,7 +8257,17 @@ class RecipeOperationService:
         return job
 
     def _view(self, job: Job, *, session: Session | None = None) -> RecipeOperationView:
-        validate_recipe_lifecycle_terminal(job.kind, job.state, job.result)
+        try:
+            validate_recipe_lifecycle_terminal(job.kind, job.state, job.result)
+        except (TypeError, ValueError) as error:
+            # A terminal operation whose receipt does not hold is shown without
+            # it: the receipt is evidence, never a reason to hide the operation.
+            retire_as_unknown(
+                "recipe.operation-result",
+                job.id,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                f"{type(error).__name__}: {error}",
+            )
         waiting_children = (
             tuple(
                 session.scalars(
@@ -7177,7 +8280,12 @@ class RecipeOperationService:
                 )
             )
             if session is not None
-            and job.state in {"queued", "running", "waiting-for-operator"}
+            and job.state
+            in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            )
             else ()
         )
         retry_due_at = min(
@@ -7195,11 +8303,11 @@ class RecipeOperationService:
         return RecipeOperationView(
             id=job.id,
             kind=job.kind,
-            owner_id=_required_string(job.payload, "owner_id"),
+            owner_id=_payload_string(job.payload, "owner_id") or "",
             state=job.state,
-            plan_digest=_required_string(job.payload, "plan_digest"),
+            plan_digest=_payload_string(job.payload, "plan_digest") or "",
             nodes=tuple(job.targets),
-            result=_validated_result(job.kind, job.result),
+            result=_recorded_result(job.kind, job.result, subject=job.id),
             retry_due_at=retry_due_at,
             status_reason=child_reason or job.status_reason,
         )
@@ -7233,11 +8341,11 @@ class RecipeOperationService:
             reservation.released_at = now
 
 
-def _required_string(value: Mapping[str, object], key: str) -> str:
+def _payload_string(value: Mapping[str, object], key: str) -> str | None:
+    """A string field of a stored job payload, or ``None`` when it is damaged."""
+
     item = value.get(key)
-    if not isinstance(item, str):
-        raise RecipeOperationConflict(f"operation {key} is invalid")
-    return item
+    return item if isinstance(item, str) else None
 
 
 def _lower_hex_digest(value: object) -> bool:
@@ -7248,7 +8356,14 @@ def _lower_hex_digest(value: object) -> bool:
     )
 
 
-def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str]:
+def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str] | None:
+    """The primary model's (digest, title), or ``None`` when the document has none.
+
+    A recipe document that names no usable model is catalog content the catalog
+    re-sync replaces; callers re-derive the identity from the installation row
+    or keep the model (never remove one they cannot prove unused).
+    """
+
     selections = document.get("models")
     selection = (
         selections[0]
@@ -7259,7 +8374,7 @@ def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str]:
     )
     model = selection.get("model") if isinstance(selection, Mapping) else None
     if not isinstance(model, Mapping):
-        raise RecipeOperationConflict("recipe model authority is unavailable")
+        return None
     digest = model.get("content_sha256")
     publisher = model.get("publisher")
     slug = model.get("slug")
@@ -7271,22 +8386,26 @@ def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str]:
         or not isinstance(slug, str)
         or not slug
     ):
-        raise RecipeOperationConflict("recipe model authority is invalid")
+        return None
     return digest, f"{publisher}/{slug}"
 
 
 def _recipe_model_identities(
     session: Session,
     document: Mapping[str, object],
-) -> tuple[tuple[str, str], ...]:
+) -> tuple[tuple[str, str], ...] | None:
+    """Every model a recipe needs (its own and the dependencies of those).
+
+    ``None`` when the closure cannot be read from the catalog: the caller then
+    keeps whatever it cannot prove unused.  A model reached twice is one model.
+    """
+
     try:
         recipe = read_recipe(document)
-    except (TypeError, ValueError) as error:
-        raise RecipeOperationConflict(
-            "recipe model dependencies are invalid"
-        ) from error
+    except (TypeError, ValueError):
+        return None
     if not recipe.models:
-        raise RecipeOperationConflict("recipe model dependencies are invalid")
+        return None
     result: list[tuple[str, str]] = []
     pending = [selection.model for selection in recipe.models]
     seen: set[tuple[str, str, str]] = set()
@@ -7308,41 +8427,29 @@ def _recipe_model_identities(
             .limit(1)
         )
         if revision is None or not isinstance(revision.document, Mapping):
-            raise RecipeOperationConflict("recipe model reference is unavailable")
+            return None
         try:
             model = read_model(revision.document)
-        except (TypeError, ValueError) as error:
-            raise RecipeOperationConflict(
-                "recipe model reference is invalid"
-            ) from error
+        except (TypeError, ValueError):
+            return None
         result.append(
             (reference.content_sha256, f"{reference.publisher}/{reference.slug}")
         )
         pending.extend(model.dependencies)
-    if len({digest for digest, _title in result}) != len(result):
-        raise RecipeOperationConflict("recipe model dependencies are duplicated")
-    return tuple(result)
+    unique = {digest: (digest, title) for digest, title in result}
+    return tuple(unique.values())
 
 
 def _topology_order(
     document: Mapping[str, object], key: Literal["start_order", "stop_order"]
-) -> tuple[str, ...]:
+) -> tuple[str, ...] | None:
+    """The recipe's role order, or ``None`` when its topology cannot be read."""
+
     try:
         topology = recipe_topology(document)
-    except Exception as error:
-        raise RecipeOperationConflict("recipe topology is invalid") from error
+    except Exception:  # noqa: BLE001 - any unreadable topology is "no order"
+        return None
     return tuple(topology.start_order if key == "start_order" else topology.stop_order)
-
-
-def _distributed_start_deadline(
-    document: Mapping[str, object], *, now: datetime, timeout_seconds: int
-) -> str:
-    readiness = _canonical_distributed_readiness(document)
-    if readiness is None:
-        raise RecipeOperationConflict("distributed readiness policy is unavailable")
-    # Persist the accepted loading/JIT budget. Exact rank-loss recovery derives
-    # this same duration; neither lease renewal nor retry extends a deadline.
-    return (_aware(now) + timedelta(seconds=timeout_seconds)).isoformat()
 
 
 def _canonical_distributed_readiness(
@@ -7350,40 +8457,50 @@ def _canonical_distributed_readiness(
 ) -> dict[str, object] | None:
     interfaces = document.get("interfaces")
     if not isinstance(interfaces, Sequence):
-        raise RecipeOperationConflict("distributed readiness interface is invalid")
+        raise RecipeRequestInvalid("distributed readiness interface is invalid")
     try:
         readiness = canonical_distributed_readiness(
             topology=recipe_topology(document),
             interfaces=interfaces,
         )
     except DistributedLifecycleError as error:
-        raise RecipeOperationConflict(str(error)) from error
+        raise RecipeRequestInvalid(str(error)) from error
     return readiness
 
 
-def _enforce_start_deadline(payload: Mapping[str, object], *, now: datetime) -> bool:
+def _start_deadline_failure(
+    payload: Mapping[str, object], *, now: datetime
+) -> str | None:
+    """Why a distributed start's accepted budget no longer holds, else ``None``.
+
+    An elapsed budget is the operation's own timeout outcome; a malformed stored
+    deadline is bookkeeping damage.  Both end the start through its recovery
+    error (the failed ranks are stopped), neither is raised.
+    """
+
     value = payload.get("start_deadline")
     if value is None:
-        return False
+        return None
     if not isinstance(value, str):
-        raise DistributedLifecycleError("distributed start deadline is invalid")
+        return "distributed start deadline is invalid"
     try:
         deadline = datetime.fromisoformat(value)
-    except ValueError as error:
-        raise DistributedLifecycleError(
-            "distributed start deadline is invalid"
-        ) from error
+    except ValueError:
+        return "distributed start deadline is invalid"
     if deadline.tzinfo is None or deadline.utcoffset() is None:
-        raise DistributedLifecycleError("distributed start deadline is invalid")
+        return "distributed start deadline is invalid"
     if _aware(now) >= _aware(deadline):
-        raise DistributedLifecycleError("distributed start deadline elapsed")
-    return True
+        return "distributed start deadline elapsed"
+    return None
 
 
 def _role_phases(
     order: Sequence[str],
     node_payloads: Sequence[tuple[str, Mapping[str, object]]],
-) -> tuple[tuple[tuple[str, Mapping[str, object]], ...], ...]:
+) -> tuple[tuple[tuple[str, Mapping[str, object]], ...], ...] | None:
+    """Group node payloads into role phases; ``None`` when the roles do not
+    match the recipe's order (the caller decides whether to order or refuse)."""
+
     by_role: dict[str, list[tuple[str, Mapping[str, object]]]] = {}
     for node_id, payload in node_payloads:
         plan = payload.get("compiled_execution_plan")
@@ -7391,47 +8508,59 @@ def _role_phases(
         placement = runtime.get("placement") if isinstance(runtime, Mapping) else None
         role = placement.get("role") if isinstance(placement, Mapping) else None
         if not isinstance(role, str):
-            raise RecipeOperationConflict("operation role is invalid")
+            return None
         by_role.setdefault(role, []).append((node_id, dict(payload)))
     if set(by_role) != set(order) or len(set(order)) != len(order):
-        raise RecipeOperationConflict("operation topology order is invalid")
+        return None
     return tuple(
         tuple(sorted(by_role[role], key=lambda item: item[0])) for role in order
     )
 
 
+_PhaseGroups = tuple[tuple[tuple[str, str, Mapping[str, object]], ...], ...]
+
+
 def _stored_phases(
-    payload: Mapping[str, object],
-) -> tuple[tuple[tuple[str, str, Mapping[str, object]], ...], ...]:
-    raw_phases = payload.get("phases")
-    if raw_phases is None:
-        return ()
-    if not isinstance(raw_phases, list) or not raw_phases:
-        raise RecipeOperationConflict("stored operation phases are invalid")
-    phases: list[tuple[tuple[str, str, Mapping[str, object]], ...]] = []
-    seen_operations: set[str] = set()
-    for raw_phase in raw_phases:
-        if not isinstance(raw_phase, list) or not raw_phase:
-            raise RecipeOperationConflict("stored operation phases are invalid")
-        group: list[tuple[str, str, Mapping[str, object]]] = []
-        for raw_item in raw_phase:
-            if not isinstance(raw_item, Mapping):
-                raise RecipeOperationConflict("stored operation phases are invalid")
-            operation_id = raw_item.get("operation_id")
-            node_id = raw_item.get("node_id")
-            item_payload = raw_item.get("payload")
-            if not isinstance(node_id, str) or not isinstance(item_payload, Mapping):
-                raise RecipeOperationConflict("stored operation phases are invalid")
-            if not isinstance(operation_id, str) or operation_id in seen_operations:
-                raise RecipeOperationConflict("stored operation phases are invalid")
-            try:
+    payload: Mapping[str, object], *, subject: str
+) -> _PhaseGroups | Residue:
+    """The phases a job was queued with; damaged phases are retired as unknown.
+
+    Nothing re-derives the grouping of a multi-phase operation, so the caller ends
+    the operation through its recovery error (its ranks are stopped) instead of
+    advancing it blind.
+    """
+
+    def read() -> _PhaseGroups:
+        raw_phases = payload.get("phases")
+        if raw_phases is None:
+            return ()
+        if not isinstance(raw_phases, list) or not raw_phases:
+            raise ValueError("stored operation phases are invalid")
+        phases: list[tuple[tuple[str, str, Mapping[str, object]], ...]] = []
+        seen_operations: set[str] = set()
+        for raw_phase in raw_phases:
+            if not isinstance(raw_phase, list) or not raw_phase:
+                raise ValueError("stored operation phases are invalid")
+            group: list[tuple[str, str, Mapping[str, object]]] = []
+            for raw_item in raw_phase:
+                if not isinstance(raw_item, Mapping):
+                    raise TypeError("stored operation phases are invalid")
+                operation_id = raw_item.get("operation_id")
+                node_id = raw_item.get("node_id")
+                item_payload = raw_item.get("payload")
+                if not isinstance(node_id, str) or not isinstance(
+                    item_payload, Mapping
+                ):
+                    raise TypeError("stored operation phases are invalid")
+                if not isinstance(operation_id, str) or operation_id in seen_operations:
+                    raise ValueError("stored operation phases are invalid")
                 uuid.UUID(operation_id)
-            except ValueError:
-                raise RecipeOperationConflict("stored operation phases are invalid")
-            seen_operations.add(operation_id)
-            group.append((operation_id, node_id, dict(item_payload)))
-        phases.append(tuple(group))
-    return tuple(phases)
+                seen_operations.add(operation_id)
+                group.append((operation_id, node_id, dict(item_payload)))
+            phases.append(tuple(group))
+        return tuple(phases)
+
+    return read_or_rebuild(kind="recipe.operation-phases", subject=subject, read=read)
 
 
 def _current_phase_index(
@@ -7455,7 +8584,15 @@ def record_build_evidence(
     *,
     now: datetime,
     replace_existing: bool = False,
-) -> None:
+) -> bool:
+    """Record a build's image evidence; ``False`` when the evidence does not hold.
+
+    Evidence that is not exactly an image digest, layout digest and size, or that
+    differs from what the build already recorded, is not recorded: the caller
+    ends the attempt as failed (a retry builds again).  A stored plan or policy
+    that does not parse never blocks the evidence: it is retired as unknown.
+    """
+
     # A retried build may already be present in this transaction's identity map
     # with the previous attempt's upload fields. Refresh under the row lock so
     # terminal evidence is compared with the upload transaction that just
@@ -7469,9 +8606,12 @@ def record_build_evidence(
         parse_stored_build_plan(build.plan)
         parse_stored_build_policy(build.policy_report)
     except RecipeExecutionContractError as error:
-        raise RecipeOperationConflict(
-            "stored recipe build envelope is invalid" + error.detail
-        ) from error
+        retire_as_unknown(
+            "recipe.build-envelope",
+            build.id,
+            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+            f"stored recipe build envelope is invalid{error.detail}",
+        )
     if (
         set(evidence) != expected
         or not isinstance(image_digest, str)
@@ -7491,21 +8631,24 @@ def record_build_evidence(
         )
         or (not replace_existing and build.image_bytes not in {None, image_bytes})
     ):
-        raise RecipeOperationConflict("recipe build evidence is invalid")
+        return False
     build.state = "succeeded"
     build.image_digest = image_digest
     build.oci_layout_sha256 = layout_digest
     build.image_bytes = image_bytes
     build.error = None
     build.updated_at = now
+    return True
 
 
 def _start_endpoint(
     operation: AgentOperation, evidence: Mapping[str, object]
-) -> str | None:
+) -> str | Residue | None:
     """The serving rank reports its ready endpoint; every other result is empty.
 
     A rank-launch phase only launches the process, so it never reports one.
+    A start result that does not match its order is retired as unknown (a
+    :class:`Residue`): the rank is then recorded as not proven started.
     """
 
     try:
@@ -7516,13 +8659,23 @@ def _start_endpoint(
             RecipeStartPayload, canonical_message(operation.payload), from_json=True
         )
     except (TypeError, ValueError) as error:
-        raise RecipeOperationConflict("start result is invalid") from error
+        return retire_as_unknown(
+            "recipe.start-result",
+            operation.id,
+            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+            f"start result is invalid: {error}",
+        )
     serving = (
         start.compiled_execution_plan.runtime.placement.endpoint_address is not None
         and start.phase != "rank-launch"
     )
     if serving != (result.endpoint is not None):
-        raise RecipeOperationConflict("start endpoint does not match the serving rank")
+        return retire_as_unknown(
+            "recipe.start-result",
+            operation.id,
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "start endpoint does not match the serving rank",
+        )
     return result.endpoint
 
 
@@ -7565,7 +8718,7 @@ def prepare_exact_recipe_run_observation_nodes(
             if _aware(node.updated_at) >= observed_at:
                 continue
             if run.state not in STOPPABLE_NOT_RUNNING_RUN_STATES:
-                node.state = "failed"
+                node.state = _RANK_FAILED
                 node.observed_run_generation = None
                 node.observation_process_running = None
                 node.observation_observed_at = None

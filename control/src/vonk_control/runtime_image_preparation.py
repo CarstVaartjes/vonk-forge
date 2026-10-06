@@ -11,7 +11,6 @@ are replaced atomically after the archive has been verified.
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import logging
 import os
@@ -31,6 +30,7 @@ from vonk_agent_protocol.wire_model import Digest, WireModel
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .content_identity import ImageContent, differing_image_fields, same_image
+from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .models import RecipeBuild
 from .oci_image_store import (
     DAMAGED_MANIFEST_CODES,
@@ -522,6 +522,8 @@ class FilesystemRuntimeImageStorage:
             raise RuntimeImagePreparationError(
                 "runtime_image.lock_unavailable",
                 "managed image publication lock directory is unavailable",
+                retryable=True,
+                recovery_actions=("retry",),
             ) from error
         try:
             descriptor = os.open(
@@ -538,6 +540,8 @@ class FilesystemRuntimeImageStorage:
             raise RuntimeImagePreparationError(
                 "runtime_image.lock_unavailable",
                 "managed image publication lock file is unavailable",
+                retryable=True,
+                recovery_actions=("retry",),
             ) from error
         os.close(directory_fd)
         with os.fdopen(descriptor, "a+b") as lock:
@@ -545,6 +549,8 @@ class FilesystemRuntimeImageStorage:
                 raise RuntimeImagePreparationError(
                     "runtime_image.lock_unavailable",
                     "managed image publication lock is not a regular file",
+                    retryable=True,
+                    recovery_actions=("retry",),
                 )
             try:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -724,10 +730,16 @@ class FilesystemRuntimeImageStorage:
         if image is None:
             return False
         if image.stored_bytes != expected_bytes:
-            raise RuntimeImagePreparationError(
-                "runtime_image.archive_mismatch",
-                "stored runtime image size changed",
+            # The recorded size no longer describes the stored image: the recorded
+            # build is not reusable, which is the answer to "is it available".
+            # The caller builds again; the mismatch is recorded, not raised.
+            retire_as_unknown(
+                "runtime-image.archive",
+                archive_sha256,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "stored runtime image size differs from the recorded size",
             )
+            return False
         return True
 
     def find_verified(
@@ -899,6 +911,17 @@ class FilesystemRuntimeImageStorage:
         except RuntimeImagePreparationError as error:
             if error.code == "runtime_image.cache_missing":
                 return False
+            if error.code == "runtime_image.archive_mismatch":
+                # The receipt describes other bytes than the stored image: it
+                # proves nothing about them, so a scan reads it as a miss and the
+                # caller prepares the image again.
+                retire_as_unknown(
+                    "runtime-image.receipt",
+                    receipt.oci_archive_sha256,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "receipt size differs from the stored image",
+                )
+                return False
             raise
         return True
 
@@ -962,6 +985,8 @@ def prepare_runtime_image(
             raise RuntimeImagePreparationError(
                 "runtime_image.receipt_persistence_failed",
                 "durable runtime image receipt could not be persisted",
+                retryable=True,
+                recovery_actions=("retry",),
             ) from error
     return receipt
 
@@ -1432,22 +1457,6 @@ def _timestamp(now: datetime | None) -> str:
     return value.astimezone(UTC).isoformat()
 
 
-def _file_digest(path: Path, maximum_bytes: int) -> tuple[int, str]:
-    try:
-        size = path.stat().st_size
-        if size < 1 or size > maximum_bytes:
-            raise ValueError("archive size is outside the allowed range")
-        digest = hashlib.sha256()
-        with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return size, digest.hexdigest()
-    except (OSError, ValueError) as error:
-        raise RuntimeImagePreparationError(
-            "runtime_image.archive_unavailable", "OCI archive could not be verified"
-        ) from error
-
-
 def _atomic_json_replace(path: Path, value: Mapping[str, object]) -> None:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
@@ -1467,6 +1476,8 @@ def _atomic_json_replace(path: Path, value: Mapping[str, object]) -> None:
         raise RuntimeImagePreparationError(
             "runtime_image.receipt_write_failed",
             "runtime image receipt could not be recorded",
+            retryable=True,
+            recovery_actions=("retry",),
         ) from error
 
 

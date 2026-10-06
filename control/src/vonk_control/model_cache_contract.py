@@ -44,14 +44,15 @@ ModelCacheOperationState = Annotated[
         LifecycleState.QUEUED,
         LifecycleState.RUNNING,
         LifecycleState.BACKOFF,
+        LifecycleState.OBSERVING,
         LifecycleState.SUCCEEDED,
         LifecycleState.FAILED,
         LifecycleState.CANCELLED,
     ],
-    # A row written before the rename may still say ``partial``.
+    # A row written before the rename may still say ``partial`` or ``cancelling``.
     BeforeValidator(state_adopter(LifecycleSubject.MODEL_CACHE_OPERATION)),
 ]
-ModelCacheOperatorState = Literal["accepted", "cancelling"] | ModelCacheOperationState
+ModelCacheOperatorState = Literal["accepted"] | ModelCacheOperationState
 ModelCacheOperatorAction = Literal["download", "remove"]
 ModelCacheOperationPhase = Literal[
     "queued",
@@ -409,13 +410,13 @@ class ModelCacheOperatorResponse(StrictModel):
 
     @model_validator(mode="after")
     def cancellation_matches_state(self) -> ModelCacheOperatorResponse:
-        if self.state == "cancelling" and self.cancellation is None:
-            raise ValueError("cancelling model operation requires cancellation intent")
+        if self.state == LifecycleState.OBSERVING and self.cancellation is None:
+            raise ValueError("observed model operation requires cancellation intent")
         if self.cancellation is not None and self.state not in {
-            "cancelling",
-            "cancelled",
+            LifecycleState.OBSERVING,
+            LifecycleState.CANCELLED,
         }:
-            raise ValueError("model cancellation intent requires a cancelling state")
+            raise ValueError("model cancellation intent requires an observed state")
         return self
 
 
@@ -536,7 +537,7 @@ class ModelCacheOperationResponse(StrictModel):
     id: str = Field(pattern=UUID_PATTERN)
     request_key: str = Field(pattern=UUID_PATTERN)
     kind: ModelCacheOperationKind
-    state: ModelCacheOperationState | Literal["cancelling"]
+    state: ModelCacheOperationState
     attempt: int = Field(ge=1)
     artifact_set_sha256: Digest | None
     plan_digest: Digest | None
@@ -564,13 +565,13 @@ class ModelCacheOperationResponse(StrictModel):
             raise ValueError("failed cache operation requires failure evidence")
         if self.state == "running" and self.failure is not None:
             raise ValueError("running cache operation cannot retain failure evidence")
-        if self.state == "cancelling" and self.cancellation is None:
-            raise ValueError("cancelling cache operation requires cancellation intent")
+        if self.state == LifecycleState.OBSERVING and self.cancellation is None:
+            raise ValueError("observed cache operation requires cancellation intent")
         if self.cancellation is not None and self.state not in {
-            "cancelling",
-            "cancelled",
+            LifecycleState.OBSERVING,
+            LifecycleState.CANCELLED,
         }:
-            raise ValueError("cache cancellation intent requires a cancelling state")
+            raise ValueError("cache cancellation intent requires an observed state")
         return self
 
 

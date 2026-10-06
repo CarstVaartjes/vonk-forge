@@ -138,7 +138,7 @@ vonkctl fleet upgrade Atlas --yes
 vonkctl fleet upgrade --all --yes
 vonkctl fleet loginfo Atlas --since 15m --lines 100 --follow
 vonkctl fleet progress JOB_ID --follow
-vonkctl fleet activity --state waiting-for-operator --limit 20
+vonkctl fleet activity --state needs-operator --limit 20
 vonkctl fleet evidence OPERATION_ID --output evidence.json
 vonkctl fleet locks
 vonkctl fleet resume JOB_ID --yes
@@ -224,9 +224,13 @@ owner-provided actions. Keep the same filters when continuing with `--cursor`;
 `--target` takes an exact Spark ID and `--request-id` takes the original request
 UUID. An unreadable historical row is labelled unavailable instead of hiding
 unrelated operations. Inspect its exact operation for the detailed failure.
-Pending profile cancellation appears as `cancelling`, with its cancellation
+Pending profile cancellation appears as `observing`, with its cancellation
 request key, actor, and completed, pending, or unissued effects. Filtering Activity
-by `--state cancelling` uses that same owner state.
+by `--state observing` uses that same owner state. States are the words of the
+core vocabulary (`queued`, `running`, `observing`, `backoff`, `needs-operator`,
+`succeeded`, `failed`, `cancelled`, `superseded`); the retired spellings
+(`waiting-for-operator`, `cancelling`, `waiting`, `partial`, `expired`) are still
+accepted as `--state` input for one release.
 
 `fleet locks` (administrator only, read only, never blocks) lists the admission
 locks held now with their holder, state and transaction age, and the open
@@ -275,7 +279,7 @@ Cancel an exact download with `model cancel`; use `--detach` to return after
 acceptance. The cancellation has its own request UUID and reason. Retain both
 for recovery after response or process loss. The same cancellation request is
 idempotent; a different request cannot replace it. Cancellation may remain
-`cancelling` while an issued writer settles. Verified assets and compatible
+`observing` (with its cancellation intent) while an issued writer settles. Verified assets and compatible
 partial files are retained; cancellation does not evict them. Reconnect with
 `model progress OPERATION_ID --follow` to observe settlement.
 
@@ -595,8 +599,8 @@ vonkctl recipe job cancel JOB_UUID --yes --reason "No longer needed" --request-k
 vonkctl recipe job detail JOB_UUID --follow
 ```
 
-Cancellation can remain `cancelling` while the worker or agent settles already
-issued work. A cancellation receipt is not proof that remote execution has
+Cancellation can remain `observing` (the job shows `cancel_requested_at`) while the
+worker or agent settles already issued work. A cancellation receipt is not proof that remote execution has
 already stopped; follow the same job until it reaches a settled state. A
 bounded follow timeout or Ctrl-C ends local observation only.
 
@@ -604,8 +608,8 @@ A cancellation always completes. If the agent cannot confirm that the job
 stopped, the job ends `cancelled` after a bounded number of checks, with
 `result_evidence.active_scope_may_remain: true` recording that the job's scope
 may still hold memory; it never waits for a person. A job whose agent stopped
-reporting is observed first; if it still cannot be confirmed it shows
-`waiting-for-operator` with `supported_actions: ["stop"]`, and `recipe job
+reporting is `observing` first; if it still cannot be confirmed it shows
+`needs-operator` with `supported_actions: ["stop"]`, and `recipe job
 cancel` is that Stop. A job never waits for an operator without that action.
 
 Download only works for a succeeded job. The destination must already be an

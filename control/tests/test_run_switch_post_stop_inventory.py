@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
@@ -98,7 +99,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         assert initial_starts == (old.id,), (
             "pre-stop inventory authorized a replacement start"
         )
-    assert current.state == "running"
+    assert current.state == LifecycleState.RUNNING
     assert current.result is not None
     assert current.result.retry_reason == "run-switch.post-stop-inventory-pending"
 
@@ -128,7 +129,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     restarted = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
     assert restarted.tick()
     waiting = restarted.get(accepted.operation_id)
-    assert waiting.state == "running" and waiting.result is not None
+    assert waiting.state == LifecycleState.RUNNING and waiting.result is not None
     assert waiting.result.retry_reason == "run-switch.post-stop-inventory-pending"
     now[0] += timedelta(seconds=6)
     samples[0]["observed_at"] = now[0]
@@ -164,7 +165,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
             break
     assert len(starts) == 2
     replacement = next(job for job in starts if job.id != old.id)
-    assert replacement.state == "running"
+    assert replacement.state == LifecycleState.RUNNING
     current = resumed.get(accepted.operation_id)
     assert current.result is not None and current.result.retry_reason is None
     # A later observer adopts the committed child, even if physical telemetry

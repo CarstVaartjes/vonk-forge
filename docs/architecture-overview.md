@@ -705,7 +705,7 @@ restart-safe sequence:
    (`vonk_control/lifecycle`): work that never ran, or that is idempotent, is
    retried with bounded backoff after the Spark inspects the prior effect;
    only an irreversible effect that stays unknown, with an operator action
-   advertised for it, waits as `waiting-for-operator`; a cancel always
+   advertised for it, waits as `needs-operator`; a cancel always
    completes. A Spark order's schedule is `next_action_at`.
 6. Publish routes only after every required result and endpoint readiness is
    accepted, then require an exact LiteLLM supervisor acknowledgement.

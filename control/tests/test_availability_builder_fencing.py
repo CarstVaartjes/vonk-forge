@@ -9,6 +9,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
+from vonk_agent_protocol import LifecycleState
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
 from vonk_control.models import Job, User
@@ -135,7 +136,7 @@ def test_replaced_builder_preserves_current_intent_at_each_commit(
         assert row is not None
         assert row.current_attempt == attempt
         if replacement == "cancel":
-            assert row.state in {"cancelling", "cancelled"}
+            assert row.state in {LifecycleState.OBSERVING, "cancelled"}
             assert row.payload["cancellation"] == payload["cancellation"]
             if row.state == "cancelled":
                 assert "claim_owner" not in row.payload

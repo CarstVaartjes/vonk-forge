@@ -11,6 +11,8 @@ from vonk_agent_protocol import (
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
+    ResourceBlockerCode,
+    RunAdmissionCode,
     SecurityRefusalReason,
     WaitReason,
 )
@@ -232,3 +234,36 @@ def test_the_cli_copy_of_the_wait_words_equals_the_contract() -> None:
         cli_states.NEEDS_OPERATOR,
         cli_states.LEGACY_NEEDS_OPERATOR,
     }
+
+
+def test_no_lifecycle_code_spells_a_retired_state_word() -> None:
+    """The migration is finished: the old words live in the contract's alias table.
+
+    What remains in ``NON_LIFECYCLE_STATE_SITES`` belongs to other state machines
+    (a certificate, an installation, a distribution assignment, an endpoint).
+    """
+
+    assert scan.load_baseline()["legacy_state"] == {}
+
+
+def test_a_bare_run_admission_or_resource_code_is_a_literal_the_enum_replaces(
+    tmp_path: Path,
+) -> None:
+    words = [code.value for code in (*RunAdmissionCode, *ResourceBlockerCode)]
+    assert set(words) <= scan.DISTINCTIVE_WORDS
+    source = "\n".join(f"CODE_{n} = {word!r}" for n, word in enumerate(words))
+
+    counts = _python(tmp_path, source)
+
+    assert counts == Counter({("distinctive", REL): len(words)})
+    assert scan.problems(counts, {tier: {} for tier in scan.TIERS})
+
+
+def test_the_enum_members_are_not_literals(tmp_path: Path) -> None:
+    counts = _python(
+        tmp_path,
+        "from vonk_agent_protocol import RunAdmissionCode\n"
+        "code = RunAdmissionCode.PORT_OCCUPIED\n",
+    )
+
+    assert counts == Counter()

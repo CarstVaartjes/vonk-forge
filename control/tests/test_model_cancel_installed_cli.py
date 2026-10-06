@@ -116,7 +116,7 @@ def test_installed_model_cancel_recovers_lost_receipt_and_observes_settlement(
             assert cancelled.returncode == 0, cancelled.stderr
             recovered_receipt = json.loads(cancelled.stdout)
             assert recovered_receipt["operation_id"] == operation.id
-            assert recovered_receipt["state"] == "cancelling"
+            assert recovered_receipt["state"] == "observing"
             assert recovered_receipt["cancellation"]["request_key"] == (
                 cancellation_key
             )

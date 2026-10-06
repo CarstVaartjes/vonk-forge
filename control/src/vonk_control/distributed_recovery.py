@@ -10,7 +10,6 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
-from urllib.parse import urlsplit
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -23,6 +22,7 @@ from .distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
+from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from .lifecycle.job import JobAdapter
 from .litellm import LiteLlmGeneration
 from .models import (
@@ -42,9 +42,6 @@ from .models import (
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     installation_plan_document,
-    parse_stored_installation_plan,
-    parse_stored_run_endpoint,
-    parse_stored_run_plan,
     run_plan_document,
 )
 from .recipe_start_payloads import (
@@ -64,6 +61,31 @@ _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _RECOVERY_RECHECK_SECONDS = 5
 _RECOVERY_MAX_ATTEMPTS = 5
 _RECOVERY_COOLDOWN_SECONDS = 300
+
+#: Recovery replays a recorded Start only under exact, current authority. A record
+#: that is damaged, missing or no longer matches what is observed is *unknown*:
+#: it is retired as typed residue and the run is settled with its reason (its
+#: claims are released and a new authorised request starts from the live state).
+#: It never raises out of the derivation and never parks the run for an operator.
+_DAMAGED = BookkeepingReason.PERSISTED_STATE_DAMAGED
+_MISMATCH = BookkeepingReason.EVIDENCE_MISMATCH
+_MISSING = BookkeepingReason.ROW_INCOMPLETE
+
+
+def _unproven(
+    subject: str,
+    reason: BookkeepingReason,
+    message: str,
+    cause: BaseException | None = None,
+) -> Residue:
+    """Retire recovery authority that cannot be proven; the caller settles on it.
+
+    The operator-visible ``message`` stays the stable cause text; the cause's type
+    (never its text, which can carry stored payload values) joins the residue note.
+    """
+
+    note = message if cause is None else f"{message} ({type(cause).__name__})"
+    return retire_as_unknown("distributed-recovery.authority", subject, reason, note)
 
 
 def _active_recipe_revision(
@@ -124,7 +146,7 @@ class _RecoveryRunStops(Protocol):
         recovery_context: Mapping[str, object],
         workload_intent_ordinal: int,
         now: datetime,
-    ) -> Job: ...
+    ) -> Job | Residue: ...
 
 
 class _RecoveryDependencyPending(Exception):
@@ -313,10 +335,23 @@ class DistributedRecoveryCoordinator:
                                 ) = observation
                             raise
                     if authority is None:
-                        raise DistributedLifecycleError(
-                            "accepted run has no automatic recovery authority"
+                        authority = _unproven(
+                            run.id,
+                            _MISMATCH,
+                            "accepted run has no automatic recovery authority",
                         )
+                    if isinstance(authority, Residue):
+                        _settle_unrecoverable(run, authority.note, now)
+                        worked = True
+                        continue
                     if singleton:
+                        singleton_generation = run.run_generation
+                        singleton_observation = (
+                            run_nodes[0].observed_run_generation,
+                            run_nodes[0].observation_process_running,
+                            run_nodes[0].observation_observed_at,
+                            run_nodes[0].observation_endpoint_ready,
+                        )
                         run.run_generation += 1
                         run_plan["run_generation"] = run.run_generation
                         run.plan = run_plan_document(run_plan)
@@ -326,9 +361,14 @@ class DistributedRecoveryCoordinator:
                         run_nodes[0].observation_endpoint_ready = None
                     if singleton:
                         if self._recovery_run_stops is None:
-                            raise DistributedLifecycleError(
-                                "singleton recovery Stop owner is unavailable"
+                            unowned = _unproven(
+                                run.id,
+                                _MISSING,
+                                "singleton recovery Stop owner is unavailable",
                             )
+                            _settle_unrecoverable(run, unowned.note, now)
+                            worked = True
+                            continue
                         deadline = authority.get("deadline")
                         start_phases = authority.get("start_phases")
                         workload_intent_ordinal = authority.get(
@@ -340,9 +380,14 @@ class DistributedRecoveryCoordinator:
                             or type(workload_intent_ordinal) is not int
                             or workload_intent_ordinal < 1
                         ):
-                            raise DistributedLifecycleError(
-                                "singleton recovery authority is invalid"
+                            malformed = _unproven(
+                                run.id,
+                                _DAMAGED,
+                                "singleton recovery authority is invalid",
                             )
+                            _settle_unrecoverable(run, malformed.note, now)
+                            worked = True
+                            continue
                         recovery_context = {
                             "schema_version": 1,
                             "failed_rank": 0,
@@ -356,6 +401,25 @@ class DistributedRecoveryCoordinator:
                             workload_intent_ordinal=workload_intent_ordinal,
                             now=now,
                         )
+                        if isinstance(job, Residue):
+                            # The owner retired the damage as unknown: a scope
+                            # that is not current yet is retried on the next
+                            # pass, anything else is settled for this run only.
+                            if job.reason is BookkeepingReason.EVIDENCE_UNAVAILABLE:
+                                # Nothing was queued: the generation bump waits too.
+                                run.run_generation = singleton_generation
+                                run_plan["run_generation"] = singleton_generation
+                                run.plan = run_plan_document(run_plan)
+                                (
+                                    run_nodes[0].observed_run_generation,
+                                    run_nodes[0].observation_process_running,
+                                    run_nodes[0].observation_observed_at,
+                                    run_nodes[0].observation_endpoint_ready,
+                                ) = singleton_observation
+                            else:
+                                _settle_unrecoverable(run, job.note, now)
+                                worked = True
+                            continue
                     else:
                         job = _enqueue_recovery_stop(
                             session,
@@ -365,6 +429,10 @@ class DistributedRecoveryCoordinator:
                             failed_rank=failed[0].rank,
                             now=now,
                         )
+                        if isinstance(job, Residue):
+                            _settle_unrecoverable(run, job.note, now)
+                            worked = True
+                            continue
                 except _RecoveryDependencyPending as pending:
                     worked = _schedule_recovery_wait(run, str(pending), now) or worked
                     continue
@@ -500,6 +568,8 @@ def recovery_start_plan(
     failed_rank = value["failed_rank"]
     deadline_value = value["deadline"]
     phases = _decode_phases(value.get("start_phases"))
+    if phases is None:
+        raise DistributedLifecycleError("distributed recovery phases are invalid")
     marker = {
         "schema_version": 1,
         "failed_rank": failed_rank,
@@ -773,7 +843,7 @@ def _singleton_recovery_authority(
     *,
     next_run_generation: int,
     start_timeout_seconds: int,
-) -> dict[str, object] | None:
+) -> dict[str, object] | Residue | None:
     """Rebuild one exact accepted persistent Start after observed absence."""
 
     if not _proves_fresh_absence(run, run_node, now):
@@ -790,8 +860,8 @@ def _singleton_recovery_authority(
         or installation.image_digest is None
         or resolved is None
     ):
-        raise DistributedLifecycleError(
-            "singleton recovery installation authority is missing"
+        return _unproven(
+            run.id, _MISSING, "singleton recovery installation authority is missing"
         )
     revision, recipe = resolved
     if recipe.topology.distributed:
@@ -807,12 +877,12 @@ def _singleton_recovery_authority(
         or run_node.rank != 0
         or run_node.role != "entrypoint"
     ):
-        raise DistributedLifecycleError("singleton recovery rank set is invalid")
+        return _unproven(run.id, _DAMAGED, "singleton recovery rank set is invalid")
     try:
         run_plan = run_plan_document(run.plan)
         installation_plan = installation_plan_document(installation.plan)
     except RecipeExecutionContractError as error:
-        raise DistributedLifecycleError("singleton recovery plan is invalid") from error
+        return _unproven(run.id, _DAMAGED, "singleton recovery plan is invalid", error)
     run_nodes = run_plan.get("nodes")
     compiled_plans = installation_plan.get("compiled_execution_plans")
     if (
@@ -839,7 +909,9 @@ def _singleton_recovery_authority(
         or not isinstance(compiled_plans, Mapping)
         or set(compiled_plans) != {run_node.node_id}
     ):
-        raise DistributedLifecycleError("singleton recovery plan authority is stale")
+        return _unproven(
+            run.id, _MISMATCH, "singleton recovery plan authority is stale"
+        )
     plan_node = run_nodes[0]
     install_compiled_plan = compiled_plans.get(run_node.node_id)
     if (
@@ -852,7 +924,7 @@ def _singleton_recovery_authority(
         or plan_node.get("fabric_address") is not None
         or not isinstance(install_compiled_plan, Mapping)
     ):
-        raise DistributedLifecycleError("singleton recovery placement is invalid")
+        return _unproven(run.id, _DAMAGED, "singleton recovery placement is invalid")
     memory_floor = plan_node.get("memory_floor_bytes")
     memory_kind = plan_node.get("memory_kind")
     if (
@@ -860,7 +932,7 @@ def _singleton_recovery_authority(
         or memory_floor < 0
         or memory_kind not in {"unified", "host", "accelerator"}
     ):
-        raise DistributedLifecycleError("singleton recovery resources are invalid")
+        return _unproven(run.id, _DAMAGED, "singleton recovery resources are invalid")
     mapping = session.get(ClusterMapping, run.mapping_id)
     if (
         mapping is None
@@ -868,14 +940,16 @@ def _singleton_recovery_authority(
         or mapping.generation != run.mapping_generation
         or mapping.endpoint_owner_node_id != run_node.node_id
     ):
-        raise DistributedLifecycleError("singleton recovery mapping is stale")
+        return _unproven(run.id, _MISMATCH, "singleton recovery mapping is stale")
     stop_timeout = recipe.runtime.lifecycle.stop_timeout_seconds
     start_timeout = validate_distributed_start_timeout_seconds(start_timeout_seconds)
     deadline = _aware(now) + timedelta(seconds=start_timeout + stop_timeout)
     agent_node = session.get(AgentNode, run_node.node_id)
     if agent_node is None or agent_node.state != "active":
-        raise DistributedLifecycleError(
-            "singleton recovery requires exact Stop and observation support"
+        return _unproven(
+            run.id,
+            _MISSING if agent_node is None else _MISMATCH,
+            "singleton recovery requires exact Stop and observation support",
         )
     presence = session.scalar(
         select(AgentPresence)
@@ -893,13 +967,17 @@ def _singleton_recovery_authority(
         raise _RecoveryDependencyPending(
             "singleton recovery waits for a fresh Controller-observed Spark presence report"
         )
-    start_job, start_ordinal = _accepted_start_authority(
+    accepted = _accepted_start_authority(
         session, run, revision.content_digest, run_node.node_id
     )
+    if isinstance(accepted, Residue):
+        return accepted
+    start_job, start_ordinal = accepted
     accepted_start_payload = _accepted_start_authority_payload(
         session, start_job, run_node.node_id
     )
-    compiled_plan = accepted_start_payload.get("compiled_execution_plan")
+    if isinstance(accepted_start_payload, Residue):
+        return accepted_start_payload
     try:
         accepted_start = read_stored_model(
             RecipeStartPayload,
@@ -907,10 +985,10 @@ def _singleton_recovery_authority(
             from_json=True,
         )
     except (TypeError, ValueError) as error:
-        raise DistributedLifecycleError("accepted Start payload is invalid") from error
+        return _unproven(run.id, _DAMAGED, "accepted Start payload is invalid", error)
     compiled_plan = accepted_start_payload.get("compiled_execution_plan")
     if not isinstance(compiled_plan, Mapping):
-        raise DistributedLifecycleError("accepted Start plan is invalid")
+        return _unproven(run.id, _DAMAGED, "accepted Start plan is invalid")
     expected_lifecycle = {"stop_timeout_seconds": stop_timeout}
     for label, plan in (
         ("installed", install_compiled_plan),
@@ -923,8 +1001,10 @@ def _singleton_recovery_authority(
             or canonical_message(dict(compiled_lifecycle))
             != canonical_message(expected_lifecycle)
         ):
-            raise DistributedLifecycleError(
-                f"singleton recovery {label} lifecycle differs from accepted recipe"
+            return _unproven(
+                run.id,
+                _MISMATCH,
+                f"singleton recovery {label} lifecycle differs from accepted recipe",
             )
     accepted_compiled_identity = compiled_plan.get("identity")
     install_compiled_identity = install_compiled_plan.get("identity")
@@ -960,13 +1040,13 @@ def _singleton_recovery_authority(
         or canonical_message(accepted_compiled_identity)
         != canonical_message(install_compiled_identity)
     ):
-        raise DistributedLifecycleError("accepted Start image authority is stale")
+        return _unproven(run.id, _MISMATCH, "accepted Start image authority is stale")
     if start_job.result is not None and (
         not isinstance(start_job.result, Mapping)
         or start_job.result.get("cancel_requested") is True
     ):
-        raise DistributedLifecycleError(
-            "singleton recovery start authority was cancelled"
+        return _unproven(
+            run.id, _MISMATCH, "singleton recovery start authority was cancelled"
         )
     try:
         start_payload = build_recipe_start_payload(
@@ -993,9 +1073,9 @@ def _singleton_recovery_authority(
             master_port=None,
         )
     except (KeyError, RecipeStartPayloadError) as error:
-        raise DistributedLifecycleError(
-            "singleton recovery start payload is invalid"
-        ) from error
+        return _unproven(
+            run.id, _DAMAGED, "singleton recovery start payload is invalid", error
+        )
     return {
         "deadline": deadline.isoformat(),
         "workload_intent_ordinal": start_ordinal,
@@ -1010,10 +1090,7 @@ def _accepted_start_authority(
     run: RecipeRun,
     recipe_digest: str,
     node_id: str,
-    *,
-    allow_multi_target: bool = False,
-    now: datetime | None = None,
-) -> tuple[Job, int]:
+) -> tuple[Job, int] | Residue:
     starts = tuple(
         session.scalars(
             select(Job)
@@ -1046,8 +1123,8 @@ def _accepted_start_authority(
         or type(ordinal) is not int
         or ordinal < 1
     ):
-        raise DistributedLifecycleError(
-            "singleton recovery lacks exact accepted Start authority"
+        return _unproven(
+            run.id, _MISSING, "singleton recovery lacks exact accepted Start authority"
         )
     if run.run_generation == 1:
         start = original
@@ -1062,31 +1139,21 @@ def _accepted_start_authority(
         )
         start = current[-1] if current else None
         if start is None:
-            raise DistributedLifecycleError(
-                "singleton recovery lacks current-generation Start authority"
+            return _unproven(
+                run.id,
+                _MISSING,
+                "singleton recovery lacks current-generation Start authority",
             )
-        if allow_multi_target:
-            if now is None:
-                raise DistributedLifecycleError(
-                    "multi-node recovery observation time is unavailable"
-                )
-            _validate_distributed_recovery_start_origin(
-                session,
-                start,
-                run=run,
-                targets=targets,
-                workload_intent_ordinal=ordinal,
-                now=now,
-            )
-        else:
-            _validate_singleton_recovery_start_origin(
-                session,
-                start,
-                run=run,
-                recipe_digest=recipe_digest,
-                targets=targets,
-                workload_intent_ordinal=ordinal,
-            )
+        origin = _validate_singleton_recovery_start_origin(
+            session,
+            start,
+            run=run,
+            recipe_digest=recipe_digest,
+            targets=targets,
+            workload_intent_ordinal=ordinal,
+        )
+        if isinstance(origin, Residue):
+            return origin
     if (
         start.payload.get("schema_version") != 1
         or start.payload.get("owner_kind") != "run"
@@ -1098,19 +1165,12 @@ def _accepted_start_authority(
             and start.result.get("cancel_requested") is True
         )
     ):
-        raise DistributedLifecycleError(
-            "singleton recovery lacks exact current Start authority"
+        return _unproven(
+            run.id, _MISSING, "singleton recovery lacks exact current Start authority"
         )
-    _accepted_start_authority_payload(
-        session,
-        start,
-        node_id,
-        run=run if allow_multi_target else None,
-        recipe_digest=recipe_digest if allow_multi_target else None,
-        targets=targets if allow_multi_target else None,
-        expected_generation=run.run_generation if allow_multi_target else None,
-        allow_multi_target=allow_multi_target,
-    )
+    payload = _accepted_start_authority_payload(session, start, node_id)
+    if isinstance(payload, Residue):
+        return payload
     return start, ordinal
 
 
@@ -1138,7 +1198,7 @@ def _validate_singleton_recovery_start_origin(
     recipe_digest: str,
     targets: list[str],
     workload_intent_ordinal: int,
-) -> None:
+) -> Residue | None:
     marker = start.payload.get("recovery")
     deadline = marker.get("deadline") if isinstance(marker, Mapping) else None
     if (
@@ -1149,7 +1209,7 @@ def _validate_singleton_recovery_start_origin(
         or not isinstance(deadline, str)
         or start.payload.get("workload_intent_ordinal") != workload_intent_ordinal
     ):
-        raise DistributedLifecycleError("singleton recovery Start marker is invalid")
+        return _unproven(run.id, _DAMAGED, "singleton recovery Start marker is invalid")
     stop_request_id = str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
@@ -1168,13 +1228,15 @@ def _validate_singleton_recovery_start_origin(
     )
     stop = stops[0] if len(stops) == 1 else None
     if stop is None:
-        raise DistributedLifecycleError(
-            "singleton recovery Start lacks its exact completed Stop"
+        return _unproven(
+            run.id, _MISSING, "singleton recovery Start lacks its exact completed Stop"
         )
     recovery = stop.payload.get("recovery")
     if stop.state != "succeeded" or stop.actor != "system:singleton-recovery":
-        raise DistributedLifecycleError(
-            "singleton recovery Stop did not complete under its recovery actor"
+        return _unproven(
+            run.id,
+            _MISMATCH,
+            "singleton recovery Stop did not complete under its recovery actor",
         )
     if (
         stop.authority_revision != run.plan_digest
@@ -1183,8 +1245,8 @@ def _validate_singleton_recovery_start_origin(
         or stop.payload_digest
         != hashlib.sha256(canonical_message(stop.payload)).hexdigest()
     ):
-        raise DistributedLifecycleError(
-            "singleton recovery Stop has stale exact run authority"
+        return _unproven(
+            run.id, _MISMATCH, "singleton recovery Stop has stale exact run authority"
         )
     if (
         not isinstance(recovery, Mapping)
@@ -1192,10 +1254,16 @@ def _validate_singleton_recovery_start_origin(
         != {"schema_version", "failed_rank", "deadline", "start_phases"}
         or any(recovery.get(key) != marker.get(key) for key in marker)
     ):
-        raise DistributedLifecycleError(
-            "singleton recovery Stop continuation differs from its Start"
+        return _unproven(
+            run.id,
+            _MISMATCH,
+            "singleton recovery Stop continuation differs from its Start",
         )
     phases = _decode_phases(recovery.get("start_phases"))
+    if phases is None:
+        return _unproven(
+            run.id, _DAMAGED, "singleton recovery Stop continuation is invalid"
+        )
     projected_start_phases = _project_start_phases(start.payload.get("phases"))
     if (
         projected_start_phases is None
@@ -1209,96 +1277,12 @@ def _validate_singleton_recovery_start_origin(
             )
         )
     ):
-        raise DistributedLifecycleError(
-            "singleton recovery Start differs from its exact Stop continuation"
+        return _unproven(
+            run.id,
+            _MISMATCH,
+            "singleton recovery Start differs from its exact Stop continuation",
         )
-
-
-def _validate_distributed_recovery_start_origin(
-    session: Session,
-    start: Job,
-    *,
-    run: RecipeRun,
-    targets: Sequence[str],
-    workload_intent_ordinal: int,
-    now: datetime,
-) -> None:
-    marker = start.payload.get("recovery")
-    if (
-        not isinstance(marker, Mapping)
-        or set(marker) != {"schema_version", "failed_rank", "deadline"}
-        or marker.get("schema_version") != 1
-        or type(marker.get("failed_rank")) is not int
-        or not 0 <= marker["failed_rank"] < len(targets)
-        or not isinstance(marker.get("deadline"), str)
-        or start.payload.get("workload_intent_ordinal") != workload_intent_ordinal
-    ):
-        raise DistributedLifecycleError("distributed recovery Start marker is invalid")
-    stop_request_id = str(
-        uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"vonk:distributed-recovery:{run.id}:{marker['failed_rank']}:{marker['deadline']}",
-        )
-    )
-    stops = tuple(
-        session.scalars(
-            select(Job).where(
-                Job.kind == "recipe.stop",
-                Job.request_id == stop_request_id,
-                Job.payload["owner_kind"].as_string() == "run",
-                Job.payload["owner_id"].as_string() == run.id,
-            )
-        )
-    )
-    stop = stops[0] if len(stops) == 1 else None
-    if (
-        stop is None
-        or stop.state != "succeeded"
-        or stop.actor != "system:distributed-recovery"
-        or start.actor != "system:distributed-recovery"
-        or stop.authority_revision != run.plan_digest.removeprefix("sha256:")
-        or stop.targets != list(targets)
-        or stop.payload.get("plan_digest") != run.plan_digest
-        or stop.payload.get("workload_intent_ordinal") != workload_intent_ordinal
-        or stop.payload_digest
-        != hashlib.sha256(canonical_message(stop.payload)).hexdigest()
-        or (
-            isinstance(stop.result, Mapping)
-            and stop.result.get("cancel_requested") is True
-        )
-    ):
-        raise DistributedLifecycleError("distributed recovery Stop is stale")
-    try:
-        continuation = recovery_start_plan(
-            stop.payload, now=now, require_unexpired=False
-        )
-    except DistributedLifecycleError as error:
-        raise DistributedLifecycleError(
-            "distributed recovery Stop continuation is invalid"
-        ) from error
-    if continuation is None:
-        raise DistributedLifecycleError(
-            "distributed recovery Stop continuation is missing"
-        )
-    start_phases, stop_marker = continuation
-    projected_start_phases = _project_start_phases(start.payload.get("phases"))
-    if (
-        canonical_message(dict(stop_marker)) != canonical_message(dict(marker))
-        or start.payload.get("start_deadline") != marker.get("deadline")
-        or projected_start_phases is None
-        or canonical_message(_encode_phases(start_phases))
-        != canonical_message(projected_start_phases)
-        or start.request_id
-        != str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"vonk:distributed-recovery-start:{stop.id}",
-            )
-        )
-    ):
-        raise DistributedLifecycleError(
-            "distributed recovery Start differs from its exact Stop continuation"
-        )
+    return None
 
 
 def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) -> bool:
@@ -1351,117 +1335,28 @@ def _project_start_phases(value: object) -> list[list[dict[str, object]]] | None
 
 
 def _accepted_start_authority_payload(
-    session: Session,
-    start: Job,
-    node_id: str,
-    *,
-    run: RecipeRun | None = None,
-    recipe_digest: str | None = None,
-    targets: Sequence[str] | None = None,
-    expected_generation: int | None = None,
-    allow_multi_target: bool = False,
-) -> Mapping[str, object]:
+    session: Session, start: Job, node_id: str
+) -> Mapping[str, object] | Residue:
+    """The exact payload of the one accepted singleton Start child of ``node_id``."""
+
     phases = start.payload.get("phases")
     if not isinstance(phases, list) or not phases:
-        raise DistributedLifecycleError("accepted Start payload is missing")
-    if not allow_multi_target:
-        if sum(len(phase) for phase in phases if isinstance(phase, list)) != 1:
-            raise DistributedLifecycleError("accepted Start payload is not singleton")
-        items = [
-            item
-            for phase in phases
-            if isinstance(phase, list)
-            for item in phase
-            if isinstance(item, Mapping) and item.get("node_id") == node_id
-        ]
-        if len(items) != 1:
-            raise DistributedLifecycleError("accepted Start payload is not singleton")
-        return dict(_accepted_start_child(session, start, node_id, items[0]).payload)
-
-    if (
-        run is None
-        or recipe_digest is None
-        or expected_generation is None
-        or not targets
-        or len(targets) < 2
-        or node_id not in targets
-        or start.targets != list(targets)
-    ):
-        raise DistributedLifecycleError("accepted Start target set is invalid")
-    items: list[Mapping[str, object]] = []
-    phase_targets: set[str] = set()
-    operation_ids: set[str] = set()
-    for phase in phases:
-        if not isinstance(phase, list) or not phase:
-            raise DistributedLifecycleError("accepted Start phase is invalid")
-        for item in phase:
-            if (
-                not isinstance(item, Mapping)
-                or set(item) != {"operation_id", "node_id", "payload"}
-                or not isinstance(item.get("operation_id"), str)
-                or not isinstance(item.get("node_id"), str)
-                or not isinstance(item.get("payload"), Mapping)
-            ):
-                raise DistributedLifecycleError("accepted Start phase item is invalid")
-            try:
-                uuid.UUID(item["operation_id"])
-            except ValueError as error:
-                raise DistributedLifecycleError(
-                    "accepted Start operation identity is invalid"
-                ) from error
-            if item["node_id"] not in targets or item["operation_id"] in operation_ids:
-                raise DistributedLifecycleError("accepted Start target set is invalid")
-            phase_targets.add(item["node_id"])
-            operation_ids.add(item["operation_id"])
-            if item["node_id"] == node_id:
-                items.append(item)
-    if phase_targets != set(targets) or not items:
-        raise DistributedLifecycleError("accepted Start target set is incomplete")
-
-    deadline = start.payload.get("start_deadline")
-    if deadline is not None and not isinstance(deadline, str):
-        raise DistributedLifecycleError("accepted Start deadline is invalid")
-    launch_phase = "rank-launch" if deadline is not None else None
-    bound_items: list[tuple[AgentOperation, RecipeStartPayload]] = []
-    for item in items:
-        child = _accepted_start_child(session, start, node_id, item)
-        try:
-            typed = read_stored_model(
-                RecipeStartPayload, canonical_message(child.payload), from_json=True
-            )
-        except (TypeError, ValueError) as error:
-            raise DistributedLifecycleError(
-                "accepted Start child is invalid"
-            ) from error
-        bound_items.append((child, typed))
-    launches = [item for item in bound_items if item[1].phase == launch_phase]
-    readiness = [
-        item for item in bound_items if item[1].phase == "collective-readiness"
+        return _unproven(start.id, _MISSING, "accepted Start payload is missing")
+    if sum(len(phase) for phase in phases if isinstance(phase, list)) != 1:
+        return _unproven(start.id, _DAMAGED, "accepted Start payload is not singleton")
+    items = [
+        item
+        for phase in phases
+        if isinstance(phase, list)
+        for item in phase
+        if isinstance(item, Mapping) and item.get("node_id") == node_id
     ]
-    if len(launches) != 1 or len(launches) + len(readiness) != len(bound_items):
-        raise DistributedLifecycleError("accepted Start rank phase is invalid")
-    endpoint_owner = _validate_multi_start_payload(
-        session,
-        run,
-        start,
-        node_id,
-        recipe_digest,
-        targets,
-        expected_generation,
-        launches[0][1],
-    )
-    if len(readiness) != int(endpoint_owner and deadline is not None):
-        raise DistributedLifecycleError("accepted Start readiness phase is invalid")
-    if readiness:
-        launch_document = launches[0][1].model_dump(mode="json")
-        readiness_document = readiness[0][1].model_dump(mode="json")
-        launch_document.pop("phase", None)
-        readiness_document.pop("phase", None)
-        if canonical_message(launch_document) != canonical_message(readiness_document):
-            raise DistributedLifecycleError(
-                "accepted Start readiness differs from its rank launch"
-            )
-    return dict(launches[0][0].payload)
+    if len(items) != 1:
+        return _unproven(start.id, _DAMAGED, "accepted Start payload is not singleton")
+    child = _accepted_start_child(session, start, node_id, items[0])
+    if isinstance(child, Residue):
+        return child
+    return dict(child.payload)
 
 
 def _accepted_start_child(
@@ -1469,11 +1364,11 @@ def _accepted_start_child(
     start: Job,
     node_id: str,
     item: Mapping[str, object],
-) -> AgentOperation:
+) -> AgentOperation | Residue:
     operation_id = item.get("operation_id")
     payload = item.get("payload")
     if not isinstance(operation_id, str) or not isinstance(payload, Mapping):
-        raise DistributedLifecycleError("accepted Start child identity is invalid")
+        return _unproven(start.id, _DAMAGED, "accepted Start child identity is invalid")
     child = session.get(AgentOperation, operation_id)
     if (
         child is None
@@ -1486,146 +1381,10 @@ def _accepted_start_child(
         or child.payload_digest
         != hashlib.sha256(canonical_message(child.payload)).hexdigest()
     ):
-        raise DistributedLifecycleError("accepted Start payload binding is invalid")
+        return _unproven(
+            start.id, _MISMATCH, "accepted Start payload binding is invalid"
+        )
     return child
-
-
-def _validate_multi_start_payload(
-    session: Session,
-    run: RecipeRun,
-    start: Job,
-    node_id: str,
-    recipe_digest: str,
-    targets: Sequence[str],
-    expected_generation: int,
-    typed: RecipeStartPayload,
-) -> bool:
-    installation = session.get(RecipeInstallation, run.installation_id)
-    run_node = session.scalar(
-        select(RunNode).where(RunNode.run_id == run.id, RunNode.node_id == node_id)
-    )
-    try:
-        stored_run = parse_stored_run_plan(run.plan)
-        stored_installation = (
-            parse_stored_installation_plan(installation.plan)
-            if installation is not None
-            else None
-        )
-    except RecipeExecutionContractError as error:
-        raise DistributedLifecycleError("accepted Start plan is invalid") from error
-    planned_node = next(
-        (node for node in stored_run.nodes if node.node_id == node_id), None
-    )
-    owners = [node for node in stored_run.nodes if node.endpoint_owner]
-    if (
-        installation is None
-        or run_node is None
-        or stored_installation is None
-        or planned_node is None
-        or len(owners) != 1
-        or tuple(sorted(node.node_id for node in stored_run.nodes)) != tuple(targets)
-        or tuple(sorted(stored_installation.compiled_execution_plans)) != tuple(targets)
-        or run.installation_id != installation.id
-        or run.mapping_id != installation.mapping_id
-        or run.mapping_generation != installation.mapping_generation
-        or stored_run.installation_id != run.installation_id
-        or stored_run.mapping_id != run.mapping_id
-        or stored_run.mapping_generation != run.mapping_generation
-        or stored_run.recipe_revision_id != installation.recipe_revision_id
-        or stored_run.plan_digest != run.plan_digest
-        or stored_run.run_generation != run.run_generation
-        or stored_run.alias != run.alias
-        or stored_installation.mapping_id != installation.mapping_id
-        or stored_installation.mapping_generation != installation.mapping_generation
-        or stored_installation.recipe_revision_id != installation.recipe_revision_id
-        or stored_installation.plan_digest != installation.plan_digest
-        or stored_installation.image_digest != installation.image_digest
-        or stored_installation.recipe_content_sha256 != recipe_digest
-        or expected_generation != run.run_generation
-    ):
-        raise DistributedLifecycleError("accepted Start plan identity is stale")
-
-    endpoint_owner = planned_node.endpoint_owner
-    if endpoint_owner:
-        try:
-            endpoint = parse_stored_run_endpoint(run_node.endpoint)
-        except RecipeExecutionContractError as error:
-            raise DistributedLifecycleError(
-                "accepted Start owner endpoint is invalid"
-            ) from error
-        if endpoint is None:
-            raise DistributedLifecycleError("accepted Start owner endpoint is missing")
-        try:
-            parsed_endpoint = urlsplit(endpoint.url)
-            endpoint_address = parsed_endpoint.hostname
-            endpoint_port = parsed_endpoint.port
-        except ValueError as error:
-            raise DistributedLifecycleError(
-                "accepted Start owner endpoint is invalid"
-            ) from error
-        if (
-            parsed_endpoint.scheme != "http"
-            or parsed_endpoint.username is not None
-            or parsed_endpoint.password is not None
-            or parsed_endpoint.path not in {"", "/"}
-            or parsed_endpoint.query
-            or parsed_endpoint.fragment
-            or endpoint_address is None
-            or endpoint_port != run_node.port
-        ):
-            raise DistributedLifecycleError("accepted Start owner endpoint is invalid")
-    else:
-        endpoint_address = planned_node.fabric_address
-        if not isinstance(endpoint_address, str):
-            raise DistributedLifecycleError("accepted Start fabric address is missing")
-    master_address = owners[0].fabric_address if len(targets) > 1 else None
-    master_port = owners[0].rendezvous_port if len(targets) > 1 else None
-    if len(targets) > 1 and (
-        not isinstance(master_address, str) or master_port is None
-    ):
-        raise DistributedLifecycleError("accepted Start rendezvous plan is invalid")
-    deadline = start.payload.get("start_deadline")
-    if deadline is not None and not isinstance(deadline, str):
-        raise DistributedLifecycleError("accepted Start deadline is invalid")
-    compiled = stored_installation.compiled_execution_plans[node_id]
-    try:
-        expected = build_recipe_start_payload(
-            run_id=run.id,
-            installation_id=installation.id,
-            recipe_revision_id=installation.recipe_revision_id,
-            mapping_id=run.mapping_id,
-            run_generation=expected_generation,
-            plan_digest=run.plan_digest,
-            placement=RecipeStartPlacement(
-                node_id,
-                planned_node.rank,
-                planned_node.role,
-                planned_node.port,
-                planned_node.required_memory_bytes,
-                planned_node.memory_floor_bytes,
-                planned_node.memory_kind,
-                planned_node.fabric_address,
-            ),
-            compiled_endpoint_address=endpoint_address if endpoint_owner else None,
-            world_size=len(targets),
-            compiled_execution_plan=compiled.model_dump(mode="json"),
-            master_address=master_address,
-            master_port=master_port,
-            phase="rank-launch" if deadline is not None else None,
-            start_deadline=deadline,
-        )
-        expected_typed = read_stored_model(
-            RecipeStartPayload, canonical_message(expected), from_json=True
-        )
-    except (RecipeStartPayloadError, TypeError, ValueError) as error:
-        raise DistributedLifecycleError(
-            "accepted Start plan cannot be rebound"
-        ) from error
-    if canonical_message(typed) != canonical_message(expected_typed):
-        raise DistributedLifecycleError(
-            "accepted Start child differs from stored execution plan"
-        )
-    return endpoint_owner
 
 
 def _recovery_authority(
@@ -1635,7 +1394,7 @@ def _recovery_authority(
     failed_rank: int,
     *,
     stop_run_generation: int,
-) -> dict[str, object] | None:
+) -> dict[str, object] | Residue | None:
     installation = session.get(RecipeInstallation, run.installation_id)
     resolved = (
         _active_recipe_revision(session, installation.recipe_revision_id)
@@ -1643,7 +1402,7 @@ def _recovery_authority(
         else None
     )
     if installation is None or resolved is None or installation.image_digest is None:
-        raise DistributedLifecycleError("distributed recovery authority is missing")
+        return _unproven(run.id, _MISSING, "distributed recovery authority is missing")
     revision, recipe = resolved
     topology = recipe.topology
     # A distributed topology withdraws its endpoint on rank loss and recovers
@@ -1667,14 +1426,14 @@ def _recovery_authority(
         or len(nodes) != topology.node_count
         or failed_rank not in {node.rank for node in nodes}
     ):
-        raise DistributedLifecycleError("distributed recovery rank set is invalid")
+        return _unproven(run.id, _DAMAGED, "distributed recovery rank set is invalid")
     try:
         run_plan = run_plan_document(run.plan)
         installation_plan = installation_plan_document(installation.plan)
     except RecipeExecutionContractError as error:
-        raise DistributedLifecycleError(
-            "distributed recovery plan is invalid"
-        ) from error
+        return _unproven(
+            run.id, _DAMAGED, "distributed recovery plan is invalid", error
+        )
     if (
         run.installation_id != installation.id
         or run.mapping_id != installation.mapping_id
@@ -1688,7 +1447,9 @@ def _recovery_authority(
         or run_plan.get("alias") != run.alias
         or run_plan.get("run_generation") != run.run_generation
     ):
-        raise DistributedLifecycleError("distributed recovery run authority is stale")
+        return _unproven(
+            run.id, _MISMATCH, "distributed recovery run authority is stale"
+        )
     plans = run_plan.get("nodes")
     compiled_plans = installation_plan.get("compiled_execution_plans")
     if (
@@ -1696,7 +1457,7 @@ def _recovery_authority(
         or len(plans) != len(nodes)
         or not isinstance(compiled_plans, Mapping)
     ):
-        raise DistributedLifecycleError("distributed recovery plan is invalid")
+        return _unproven(run.id, _DAMAGED, "distributed recovery plan is invalid")
     by_rank = {item.get("rank"): item for item in plans if isinstance(item, Mapping)}
     owners = tuple(
         item
@@ -1708,12 +1469,12 @@ def _recovery_authority(
         or len(owners) != 1
         or set(compiled_plans) != {node.node_id for node in nodes}
     ):
-        raise DistributedLifecycleError("distributed recovery plan is invalid")
+        return _unproven(run.id, _DAMAGED, "distributed recovery plan is invalid")
     owner = owners[0]
     master_address = owner.get("fabric_address")
     master_port = owner.get("rendezvous_port")
     if not isinstance(master_address, str) or type(master_port) is not int:
-        raise DistributedLifecycleError("distributed recovery rendezvous is invalid")
+        return _unproven(run.id, _DAMAGED, "distributed recovery rendezvous is invalid")
     presences: dict[str, str] = {}
     for node in nodes:
         presence = session.scalar(
@@ -1740,9 +1501,10 @@ def _recovery_authority(
                 "Spark presence report"
             )
         presences[node.node_id] = presence.management_address
-    start_job, startup_budget = _original_start_authority(
-        session, run, revision.content_digest
-    )
+    original = _original_start_authority(session, run, revision.content_digest)
+    if isinstance(original, Residue):
+        return original
+    start_job, startup_budget = original
     # Rank reload/JIT needs its accepted startup duration, not the short health
     # probe timeout. Ordered stops have their own per-role execution budget.
     # Persist the total once: phase advances, retries and route publication all
@@ -1772,7 +1534,7 @@ def _recovery_authority(
             or type(endpoint_owner) is not bool
             or not isinstance(compiled_plan, Mapping)
         ):
-            raise DistributedLifecycleError("distributed recovery plan is invalid")
+            return _unproven(run.id, _DAMAGED, "distributed recovery plan is invalid")
         try:
             payload = build_recipe_start_payload(
                 run_id=run.id,
@@ -1802,9 +1564,9 @@ def _recovery_authority(
                 start_deadline=start_deadline,
             )
         except (KeyError, RecipeStartPayloadError) as error:
-            raise DistributedLifecycleError(
-                "distributed recovery start payload is invalid"
-            ) from error
+            return _unproven(
+                run.id, _DAMAGED, "distributed recovery start payload is invalid", error
+            )
         start_payloads[node.role] = (node.node_id, payload)
     start_order = topology.start_order
     roles = {node.role for node in nodes}
@@ -1814,14 +1576,14 @@ def _recovery_authority(
         or len(start_order) != len(roles)
         or len(stop_order) != len(roles)
     ):
-        raise DistributedLifecycleError("distributed recovery order is invalid")
+        return _unproven(run.id, _DAMAGED, "distributed recovery order is invalid")
     owner_role = owner.get("role")
     if not isinstance(owner_role, str) or owner_role not in start_payloads:
-        raise DistributedLifecycleError("distributed recovery endpoint is invalid")
+        return _unproven(run.id, _DAMAGED, "distributed recovery endpoint is invalid")
     owner_node_id, owner_payload = start_payloads[owner_role]
     if type(stop_run_generation) is not int or stop_run_generation < 1:
-        raise DistributedLifecycleError(
-            "distributed recovery prior Start generation is invalid"
+        return _unproven(
+            run.id, _DAMAGED, "distributed recovery prior Start generation is invalid"
         )
     try:
         exact_stop_payloads = durable_run_stop_payloads(
@@ -1833,9 +1595,12 @@ def _recovery_authority(
             allow_missing_nodes=False,
         )
     except RecipeStopAuthorityError as error:
-        raise DistributedLifecycleError(
-            "distributed recovery lacks exact prior Start Stop authority"
-        ) from error
+        return _unproven(
+            run.id,
+            _MISSING,
+            "distributed recovery lacks exact prior Start Stop authority",
+            error,
+        )
     return {
         "deadline": start_deadline,
         "workload_intent_ordinal": start_job.payload.get("workload_intent_ordinal"),
@@ -1872,7 +1637,7 @@ def _enqueue_recovery_stop(
     *,
     failed_rank: int,
     now: datetime,
-) -> Job:
+) -> Job | Residue:
     raw_stop_phases = authority.get("stop_phases")
     raw_start_phases = authority.get("start_phases")
     recipe_digest = authority.get("recipe_content_sha256")
@@ -1883,7 +1648,7 @@ def _enqueue_recovery_stop(
         or not isinstance(recipe_digest, str)
         or not isinstance(deadline, str)
     ):
-        raise DistributedLifecycleError("distributed recovery authority is invalid")
+        return _unproven(run.id, _DAMAGED, "distributed recovery authority is invalid")
     stop_phases = tuple(tuple(group) for group in raw_stop_phases)
     start_phases = tuple(tuple(group) for group in raw_start_phases)
     request_id = str(
@@ -1892,8 +1657,11 @@ def _enqueue_recovery_stop(
             f"vonk:distributed-recovery:{run.id}:{failed_rank}:{deadline}",
         )
     )
-    if session.scalar(select(Job.id).where(Job.request_id == request_id)):
-        raise DistributedLifecycleError("distributed recovery is already queued")
+    queued = session.scalar(select(Job).where(Job.request_id == request_id))
+    if queued is not None:
+        # The request identity is the deterministic recovery of this run, failed
+        # rank and deadline: a repeat is the same request, answered with its Job.
+        return queued
     job_id = str(uuid.uuid4())
     stop_phase_operations = tuple(
         tuple((str(uuid.uuid4()), node_id, payload) for node_id, payload in group)
@@ -1938,8 +1706,10 @@ def _enqueue_recovery_stop(
         or tuple(node.node_id for node in target_nodes) != tuple(targets)
         or any(node.workload_intent_ordinal != start_ordinal for node in target_nodes)
     ):
-        raise DistributedLifecycleError(
-            "distributed recovery start authority was superseded"
+        # A newer workload intent owns these Sparks: newer intent wins, so the
+        # recorded Start is not replayed over it.
+        return _unproven(
+            run.id, _MISMATCH, "distributed recovery start authority was superseded"
         )
     job_payload["workload_intent_ordinal"] = start_ordinal
     job = JobAdapter.new_job(
@@ -1972,7 +1742,7 @@ def _enqueue_recovery_stop(
 
 def _original_start_authority(
     session: Session, run: RecipeRun, recipe_digest: str | None
-) -> tuple[Job, timedelta]:
+) -> tuple[Job, timedelta] | Residue:
     """Read the exact accepted start's budget; configuration is not a fallback."""
 
     starts = tuple(
@@ -1994,8 +1764,8 @@ def _original_start_authority(
         and _start_binds_current_run_plan(session, start, run)
     )
     if not starts:
-        raise DistributedLifecycleError(
-            "distributed recovery lacks its start authority"
+        return _unproven(
+            run.id, _MISSING, "distributed recovery lacks its start authority"
         )
     start = starts[-1]
     deadline_value = start.payload.get("start_deadline")
@@ -2009,11 +1779,18 @@ def _original_start_authority(
         or start.targets != targets
         or not isinstance(deadline_value, str)
     ):
-        raise DistributedLifecycleError(
-            "distributed recovery start authority is invalid"
+        return _unproven(
+            run.id, _DAMAGED, "distributed recovery start authority is invalid"
         )
     try:
-        deadline = _aware(datetime.fromisoformat(deadline_value))
+        parsed_deadline = datetime.fromisoformat(deadline_value)
+        if parsed_deadline.utcoffset() is None:
+            # A stored deadline without a zone is damaged bookkeeping, not a
+            # clock fault.
+            return _unproven(
+                run.id, _DAMAGED, "distributed recovery start authority is invalid"
+            )
+        deadline = _aware(parsed_deadline)
         # PostgreSQL returns an aware UTC value; SQLite's test adapter drops
         # its timezone from this database-owned timestamp.
         created = start.created_at
@@ -2022,12 +1799,14 @@ def _original_start_authority(
         duration = deadline - _aware(created)
         seconds = duration.total_seconds()
         if not seconds.is_integer():
-            raise ValueError("startup budget must be whole seconds")
+            return _unproven(
+                run.id, _DAMAGED, "distributed recovery start authority is invalid"
+            )
         validate_distributed_start_timeout_seconds(int(seconds))
-    except (ValueError, DistributedLifecycleError) as error:
-        raise DistributedLifecycleError(
-            "distributed recovery start authority is invalid"
-        ) from error
+    except ValueError as error:
+        return _unproven(
+            run.id, _DAMAGED, "distributed recovery start authority is invalid", error
+        )
     return start, duration
 
 
@@ -2045,25 +1824,23 @@ def _encode_phases(
 
 def _decode_phases(
     value: object,
-) -> tuple[tuple[tuple[str, Mapping[str, object]], ...], ...]:
+) -> tuple[tuple[tuple[str, Mapping[str, object]], ...], ...] | None:
+    """The stored start phases, or ``None`` when the stored value is damaged."""
+
     if not isinstance(value, list) or not value:
-        raise DistributedLifecycleError("distributed recovery phases are invalid")
+        return None
     phases: list[tuple[tuple[str, Mapping[str, object]], ...]] = []
     for raw_group in value:
         if not isinstance(raw_group, list) or not raw_group:
-            raise DistributedLifecycleError("distributed recovery phases are invalid")
+            return None
         group: list[tuple[str, Mapping[str, object]]] = []
         for item in raw_group:
             if not isinstance(item, Mapping) or set(item) != {"node_id", "payload"}:
-                raise DistributedLifecycleError(
-                    "distributed recovery phases are invalid"
-                )
+                return None
             node_id = item.get("node_id")
             item_payload = item.get("payload")
             if not isinstance(node_id, str) or not isinstance(item_payload, Mapping):
-                raise DistributedLifecycleError(
-                    "distributed recovery phases are invalid"
-                )
+                return None
             group.append((node_id, dict(item_payload)))
         phases.append(tuple(group))
     return tuple(phases)

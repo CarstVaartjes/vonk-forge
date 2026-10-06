@@ -1984,7 +1984,7 @@ def test_parent_job_waits_when_all_operations_terminal_without_failures(
     assert succeeded is not None
     jobs.succeed(succeeded, STOP_RESULT)
 
-    assert job_state(sessions, parent_job.id).state == "waiting-for-operator"
+    assert job_state(sessions, parent_job.id).state == "needs-operator"
 
 
 @pytest.mark.parametrize(

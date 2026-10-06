@@ -10,6 +10,8 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
+from .cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
+
 
 def terminal_text(value: str) -> str:
     """Make untrusted terminal controls visible instead of executing them."""
@@ -1401,7 +1403,9 @@ def _artifact_job_record(payload: Mapping[str, object], action: str) -> None:
     _field("Artifact job", payload.get("id"))
     _field("Command", action)
     _field("Run", payload.get("run_id"))
-    _field("State", payload.get("state"))
+    _field("State", lifecycle_state(dict(payload)))
+    if payload.get("cancel_requested_at") is not None:
+        _field("Cancel requested", _time(payload.get("cancel_requested_at")))
     _field("Interface", payload.get("interface"))
     _field("Contract SHA-256", payload.get("contract_sha256"))
     _field("Input manifest SHA-256", payload.get("input_manifest_sha256"))
@@ -1447,7 +1451,7 @@ def _artifact_job_record(payload: Mapping[str, object], action: str) -> None:
             "Result files", f"unavailable until job succeeds (state: {_text(state)})"
         )
 
-    if isinstance(operation_id, str) and state in {"queued", "running", "cancelling"}:
+    if isinstance(operation_id, str) and state in ARTIFACT_JOB_IN_FLIGHT:
         _field(
             "Reconnect",
             f"vonkctl recipe job detail {shlex.quote(str(payload.get('id')))} --follow",
@@ -1464,7 +1468,7 @@ def _artifact_job_list(payload: Mapping[str, object]) -> None:
         print()
         _field("Artifact job", job.get("id"))
         _field("Run", job.get("run_id"))
-        _field("State", job.get("state"))
+        _field("State", lifecycle_state(dict(job)))
         _field("Interface", job.get("interface"))
         if job.get("status_reason") is not None:
             _field("Reason", job.get("status_reason"))
@@ -1487,11 +1491,7 @@ def _artifact_job_list(payload: Mapping[str, object]) -> None:
         operation_id = job.get("operation_id")
         if operation_id is not None:
             _field("Operation", operation_id)
-        if isinstance(operation_id, str) and job.get("state") in {
-            "queued",
-            "running",
-            "cancelling",
-        }:
+        if isinstance(operation_id, str) and job.get("state") in ARTIFACT_JOB_IN_FLIGHT:
             _field(
                 "Reconnect",
                 f"vonkctl recipe job detail {shlex.quote(str(job.get('id')))} --follow",

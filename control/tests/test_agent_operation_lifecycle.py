@@ -521,11 +521,11 @@ def _decision_for(jobs, sessions, clock, operation_id):
         ([("succeeded", False), ("queued", False)], False, None),
         # every unfinished order is an automatic retry: the job is progressing
         ([("waiting-for-operator", True), ("succeeded", False)], False, "queued"),
-        ([("waiting-for-operator", True)], True, "waiting-for-operator"),
+        ([("waiting-for-operator", True)], True, "needs-operator"),
         (
             [("waiting-for-operator", False), ("succeeded", False)],
             False,
-            "waiting-for-operator",
+            "needs-operator",
         ),
         ([("failed", False), ("waiting-for-operator", False)], False, "failed"),
         ([("cancelled", False), ("succeeded", False)], False, "cancelled"),

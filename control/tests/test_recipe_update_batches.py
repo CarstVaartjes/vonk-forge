@@ -336,7 +336,7 @@ def test_one_admission_failure_does_not_suppress_other_children(update_env):
     now[0] += timedelta(seconds=3)
     service.run_update_claim(service.claim_update(owner="worker"))
     result = service.get_operator_operation(parent.id)
-    assert result.state == "partial"
+    assert result.state == LifecycleState.FAILED and result.partial is True
     assert [child.state for child in result.children] == ["failed", "succeeded"]
     assert result.progress.completed_items == 2
 
@@ -706,7 +706,7 @@ def test_postgres_update_cancel_after_first_child_prevents_later_admission_after
         request_id=cancellation_key,
         reason="stop after the first recipe was admitted",
     )
-    assert requested.state == "cancelling"
+    assert requested.state == LifecycleState.OBSERVING
     assert requested.cancellation is not None
     assert requested.cancellation.cancel_request_id == cancellation_key
 
@@ -728,7 +728,7 @@ def test_postgres_update_cancel_after_first_child_prevents_later_admission_after
     restarted.reconcile_cancellations()
     restarted.reconcile_cancellations()
     settled = restarted.get_operator_operation(parent.id)
-    assert settled.state == "cancelled"
+    assert settled.state == LifecycleState.CANCELLED
     assert settled.cancellation is not None
     assert settled.cancellation.cancel_request_id == cancellation_key
     first_after = settled.children[0]
@@ -840,7 +840,10 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     service.run_claim(image_claim[0])
     first_view = service.get(first.operation_id)
     assert isinstance(first_view, RecipeImageAvailabilityView)
-    assert first_view.state == "partial" and first_view.model_child is not None
+    assert (
+        first_view.state == LifecycleState.BACKOFF
+        and first_view.model_child is not None
+    )
     shared_child_id = str(first_view.model_child["id"])
     shared_child = cache.get_operation(shared_child_id)
     assert shared_child.state == LifecycleState.BACKOFF
@@ -887,7 +890,7 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     service.run_claim(unrelated_claim[0])
     unrelated_view = service.get(unrelated.id)
     assert isinstance(unrelated_view, RecipeImageAvailabilityView)
-    assert unrelated_view.state == "partial"
+    assert unrelated_view.state == LifecycleState.BACKOFF
     assert unrelated_view.model_child is not None
     assert unrelated_view.model_child["id"] == shared_child_id
     assert unrelated_view.model_child["artifact_set_sha256"] == shared_artifact_set
@@ -902,19 +905,22 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
         request_id=cancellation_key,
         reason="stop the multi-recipe update",
     )
-    assert accepted.state == "cancelling"
+    assert accepted.state == LifecycleState.OBSERVING
     service.reconcile_cancellations()
     service.reconcile_cancellations()
 
     settled = service.get_operator_operation(batch.id)
     assert isinstance(settled, RecipeUpdateResponse)
-    assert settled.state == "cancelled"
+    assert settled.state == LifecycleState.CANCELLED
     assert settled.cancellation is not None
     assert settled.cancellation.cancel_request_id == cancellation_key
-    assert [child.state for child in settled.children] == ["cancelled", "cancelled"]
+    assert [str(child.state) for child in settled.children] == [
+        "cancelled",
+        "cancelled",
+    ]
     unchanged = service.get(unrelated.id)
     assert isinstance(unchanged, RecipeImageAvailabilityView)
-    assert unchanged.state == "partial"
+    assert unchanged.state == LifecycleState.BACKOFF
     assert unchanged.cancellation is None
     assert unchanged.model_child is not None
     assert unchanged.model_child["id"] == shared_child_id
@@ -1135,7 +1141,7 @@ def test_cancelling_update_before_admission_settles_without_issuing_children(
         request_id="00000000-0000-4000-8000-000000000911",
         reason="stop this update",
     )
-    assert accepted.state == "cancelling"
+    assert accepted.state == LifecycleState.OBSERVING
     assert accepted.cancellation is not None
     service.reconcile_cancellations()
 

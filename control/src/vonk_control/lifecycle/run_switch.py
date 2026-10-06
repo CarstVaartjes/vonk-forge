@@ -55,8 +55,9 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LEGACY_WAIT_STATE
+from vonk_agent_protocol import LifecycleState
 
+from .. import job_states
 from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
@@ -82,15 +83,17 @@ from .types import (
 )
 
 KIND = "run-switch"
-WAITING = LEGACY_WAIT_STATE
+WAITING = LifecycleState.NEEDS_OPERATOR.value
 _MAX_REASON = 512
 #: Stored states an operation can still advance from.
-LIVE_STATES = frozenset({"queued", "running", "waiting", WAITING})
+LIVE_STATES = frozenset(
+    job_states.words(State.QUEUED, State.RUNNING, State.OBSERVING, State.NEEDS_OPERATOR)
+)
 _STORED = {
     State.QUEUED: "queued",
     State.RUNNING: "running",
     State.BACKOFF: "running",
-    State.OBSERVING: "waiting",
+    State.OBSERVING: LifecycleState.OBSERVING.value,
     State.NEEDS_OPERATOR: WAITING,
     State.SUCCEEDED: "succeeded",
     State.FAILED: "failed",
@@ -212,9 +215,9 @@ class RunSwitchAdapter:
                 state = State.RUNNING
             else:
                 state = State.BACKOFF if retrying else State.OBSERVING
-        elif stored == "waiting":
+        elif job_states.means(stored, State.OBSERVING):
             state = State.BACKOFF if retrying and due is not None else State.OBSERVING
-        elif stored == WAITING:
+        elif job_states.means(stored, State.NEEDS_OPERATOR):
             state = State.OBSERVING if due is not None else State.NEEDS_OPERATOR
         elif stored == "succeeded":
             state = State.SUCCEEDED
@@ -465,7 +468,12 @@ class RunSwitchAdapter:
                 # A cancel being driven keeps showing what the operation was doing.
                 options["visible"] = (
                     job.state
-                    if job.state in {"queued", "running", "waiting"}
+                    if job.state
+                    in job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.OBSERVING,
+                    )
                     else "running"
                 )
             if after.state is State.CANCELLED:
@@ -693,7 +701,9 @@ class RunSwitchAdapter:
     def new_operation(*, allowed: bool, **fields: Any) -> Job:
         """A new operation: ``queued`` when its plan is allowed, else ``waiting``."""
 
-        return Job(state="queued" if allowed else "waiting", **fields)
+        return Job(
+            state=State.QUEUED.value if allowed else State.OBSERVING.value, **fields
+        )
 
 
 __all__ = [

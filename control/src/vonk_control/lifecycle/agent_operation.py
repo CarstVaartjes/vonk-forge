@@ -57,9 +57,10 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LEGACY_WAIT_STATE, AgentOperation
+from vonk_agent_protocol import AgentOperation, LifecycleState
 
 from .. import agent_operation_states as aos
+from .. import job_states
 from ..agent_operation_facts import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     RESTART_REISSUE_OPERATIONS,
@@ -103,7 +104,7 @@ IRREVERSIBLE_OPERATIONS = frozenset(
     }
 )
 #: The word of a parent *job* that waits (the job table converts with its own kind).
-WAITING = LEGACY_WAIT_STATE
+WAITING = LifecycleState.NEEDS_OPERATOR.value
 JOB_RUN_OPERATION = AgentOperation.RECIPE_JOB_RUN.value
 #: The owner kind a one-shot job's order carries in its parent job's payload.
 OWNER_KIND = "artifact-job"
@@ -111,7 +112,11 @@ OWNER_KIND = "artifact-job"
 STOP_ACTION = ActionName.STOP.value
 #: A parent in one of these states can no longer claim, resume or retire anything:
 #: its orders end with it instead of waiting.
-ENDED_PARENT_STATES = frozenset({"succeeded", "failed", "cancelled", "expired"})
+ENDED_PARENT_STATES = frozenset(
+    job_states.words(
+        LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+    )
+)
 #: States in which a parent's aggregate considers an order finished (a waiting
 #: order is final for the aggregate: the parent then waits with it).
 AGGREGATE_FINAL_STATES = frozenset(

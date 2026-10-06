@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control import agent_operation_states as aos
+from vonk_control import job_states
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrade_status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
@@ -892,7 +893,7 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
             )
         )
         assert parent is not None and parent.state == "queued"
-        assert worker_attempt is not None and worker_attempt.state == "expired"
+        assert worker_attempt is not None and job_states.attempt_lapsed(worker_attempt)
         assert operation is not None and operation.state == "running"
         assert operation.current_attempt == 1
         assert len(child_attempts) == 1 and child_attempts[0].fence == child.fence
@@ -987,7 +988,7 @@ def test_waiting_upgrade_resume_expires_worker_fence_without_shortening_helper_f
         worker_attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.job_id == job.id)
         )
-        assert worker_attempt is not None and worker_attempt.state == "expired"
+        assert worker_attempt is not None and job_states.attempt_lapsed(worker_attempt)
 
 
 def test_resume_restores_success_after_late_legacy_failure_of_completed_rollout(

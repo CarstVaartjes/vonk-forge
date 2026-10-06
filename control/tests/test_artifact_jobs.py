@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
+from vonk_control import artifact_job_states as ajs
 from vonk_control import recipe_operations as recipe_operations_module
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.artifact_blob_store import (
@@ -60,6 +61,12 @@ from .test_recipe_operations import (
     installed_recipe,
     setup_services,
 )
+
+
+def _cancelling(view) -> bool:
+    """A cancel was requested and the job has not ended: it completes by itself."""
+
+    return view.cancel_requested_at is not None and view.state not in ajs.ENDED
 
 
 def test_one_shot_job_inherits_activation_intent(
@@ -460,7 +467,7 @@ def test_artifact_job_create_request_lookup_recovers_the_original_draft(
     recovered = service.get_by_request_id(request["request_id"])
 
     assert recovered.id == created.id
-    assert recovered.state == "draft"
+    assert recovered.preparation == "draft"
     with pytest.raises(KeyError):
         service.get_by_request_id("00000000-0000-4000-8000-000000000155")
 
@@ -597,7 +604,7 @@ def test_artifact_job_persisted_parameters_are_validated_before_compilation(
     with sessions() as session:
         row = session.get(ArtifactJob, created.id)
         assert row is not None
-        assert row.state == "ready"
+        assert row.preparation == "ready"
         assert row.operation_id is None
 
 
@@ -671,7 +678,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000103",
     )
-    assert job.state == "draft"
+    assert job.preparation == "draft"
     with pytest.raises(ArtifactJobError, match="SHA-256"):
         service.put_input(
             job.id,
@@ -687,7 +694,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         expected_sha256=input_digest,
         content=input_content,
     )
-    assert service.finalize(job.id).state == "ready"
+    assert service.finalize(job.id).preparation == "ready"
     submitted = service.submit(
         job.id,
         actor="operator",
@@ -1277,15 +1284,14 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
         request_id="00000000-0000-4000-8000-000000000113",
         reason="operator requested stop",
     )
-    assert cancelling.state == "cancelling"
-    assert (
+    assert _cancelling(cancelling)
+    assert _cancelling(
         service.cancel(
             first.id,
             actor="operator",
             request_id="00000000-0000-4000-8000-000000000113",
             reason="operator requested stop",
-        ).state
-        == "cancelling"
+        )
     )
     assert operations.preview_stop(run_id).allowed
     second = create("00000000-0000-4000-8000-000000000109")
@@ -1322,7 +1328,7 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
         request_id="00000000-0000-4000-8000-000000000120",
         reason="operator requested stop",
     )
-    assert cancelling.state == "cancelling"
+    assert _cancelling(cancelling)
     directive = agent_jobs.heartbeat(claim, {"phase": "running"}, 30)
     assert directive.cancel_requested is True
     stop_plan = recipe_operations.preview_stop(run_id)
@@ -1404,7 +1410,7 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
 
     # Not a wait for a person: the cancel is being driven to its end.
     view = service.get(submitted.id)
-    assert view.state == "cancelling"
+    assert _cancelling(view)
     assert view.supported_actions == ()
     assert view.result_evidence is not None
     assert {
@@ -1454,7 +1460,8 @@ def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
     clock.advance(seconds=31)
     assert claim_agent(agent_jobs, node_id, "serial-0") is None
     observed = service.get(submitted.id)
-    assert observed.state == "running"
+    # The agent can no longer report: the job is observed, and stoppable.
+    assert observed.state == ajs.OBSERVING
     assert observed.supported_actions == ("stop",)
     assert observed.result_evidence is not None
     assert observed.result_evidence["failure_kind"] == "agent-lease-expired"
@@ -1469,12 +1476,12 @@ def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
             )
         )
     for _ in range(40):
-        if service.get(submitted.id).state == "waiting-for-operator":
+        if service.get(submitted.id).state == ajs.NEEDS_OPERATOR:
             break
         clock.advance(seconds=120)
         agent_jobs.reconcile_orders()
     waiting = service.get(submitted.id)
-    assert waiting.state == "waiting-for-operator"
+    assert waiting.state == ajs.NEEDS_OPERATOR
     assert waiting.supported_actions == ("stop",)
 
     # Stop completes it: cancelled, the effect unknown, the residue recorded.

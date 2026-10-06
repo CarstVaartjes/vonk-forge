@@ -1251,7 +1251,7 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     assert isinstance(waiting, dict)
     failure = require_mapping(waiting["failure"], "removal failure")
     retry_time = failure["retry_time"]
-    assert waiting["state"] == "partial"
+    assert waiting["state"] == LifecycleState.BACKOFF
     assert failure["code"] == failure_code
     assert failure["retryable"] is True
     assert failure["recovery_actions"] == []
@@ -1702,7 +1702,7 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
 
     waiting = service.get_operator_request(request_key, actor="operator")
     assert isinstance(waiting, dict)
-    assert waiting["state"] == "partial"
+    assert waiting["state"] == LifecycleState.BACKOFF
     failure = require_mapping(waiting["failure"], "removal failure")
     assert failure["code"] == "artifact.reference_busy"
     assert failure["retryable"] is True
@@ -2673,7 +2673,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
     queued = service.start("revision-overlap", actor="operator", request_id="q" * 36)
     assert service.run_pending() == 1
     partial = service.get(queued.id)
-    assert partial.state == "partial"
+    assert partial.state == LifecycleState.BACKOFF
     assert partial.result is None
     assert transport.calls == 1
     assert partial.image_state == "succeeded"
@@ -2926,7 +2926,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
     )
     assert service.run_pending() == 1
     partial = service.get(parent.id)
-    assert partial.state == "partial"
+    assert partial.state == LifecycleState.BACKOFF
     assert transport.calls == 1
 
     model_cache.failed = True
@@ -3059,9 +3059,9 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
             request_id="00000000-0000-4000-8000-000000000903",
             reason="stop image preparation",
         )
-        assert accepted.state == "cancelling"
+        assert accepted.state == LifecycleState.OBSERVING
         service.reconcile_cancellations()
-        assert service.get(operation.id).state == "cancelling"
+        assert service.get(operation.id).state == LifecycleState.OBSERVING
         release.set()
         worker.result(timeout=10)
 
@@ -3110,7 +3110,7 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
         request_id="00000000-0000-4000-8000-000000000904",
         reason="stop image preparation",
     )
-    assert accepted.state == "cancelling"
+    assert accepted.state == LifecycleState.OBSERVING
 
     service._persist_provisional_image_reference(
         claim,
@@ -3153,7 +3153,7 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
                 ARCHIVE_SHA,
                 "recipe-image-availability-operation",
                 operation.id,
-                "cancelling",
+                LifecycleState.OBSERVING.value,
                 "active-work",
                 f"image publication operation {operation.id}",
             )
@@ -3185,7 +3185,7 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
 
     with service._storage.publication_lock(ARCHIVE_SHA):
         service.reconcile_cancellations()
-        assert service.get(operation.id).state == "cancelling"
+        assert service.get(operation.id).state == LifecycleState.OBSERVING
         with sessions() as session:
             row = session.get(Job, operation.id)
             assert row is not None
@@ -3233,7 +3233,7 @@ def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
         ),
         reason="stop image preparation",
     )
-    assert accepted.state == "cancelling"
+    assert accepted.state == LifecycleState.OBSERVING
     with sessions.begin() as session:
         row = session.get(Job, operation.id)
         assert row is not None
@@ -3643,7 +3643,7 @@ def _parked_operation(
         id=operation_id,
         request_id=operation_id.ljust(36, "x"),
         kind="recipe.image.availability.v2",
-        state="partial" if model_child else "queued",
+        state=LifecycleState.BACKOFF.value if model_child else "queued",
         actor="operator",
         authority_revision=f"revision-{operation_id}",
         targets=[f"revision-{operation_id}"],
@@ -3694,7 +3694,7 @@ def test_operations_waiting_only_on_a_model_download_take_no_worker_slot(
     with sessions() as session:
         waiter = session.get(Job, "waiter000")
         assert waiter is not None
-        assert waiter.state == "partial"
+        assert waiter.state == LifecycleState.BACKOFF
         assert waiter.current_attempt == 1
         blockers = require_sequence(waiter.payload["blockers"], "blockers")
         assert [require_mapping(item, "blocker")["code"] for item in blockers] == [

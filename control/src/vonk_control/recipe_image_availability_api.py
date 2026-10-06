@@ -6,7 +6,14 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+from vonk_agent_protocol import LifecycleState, LifecycleSubject, state_adopter
 
 from .auth import MUTATION_ROLES
 from .bounded_json import require_integer, require_sequence
@@ -34,12 +41,31 @@ from .strict_json import StrictJSONModel, read_stored_model
 # One named type per closed set, shared by the contract field and every
 # helper that produces the value, so the vocabulary cannot drift apart.
 RecipeImageAvailabilityKind = Literal["recipe.image.availability.v2"]
-RecipeImageAvailabilityState = Literal[
-    "queued", "running", "partial", "cancelling", "succeeded", "failed", "cancelled"
+RecipeImageAvailabilityState = Annotated[
+    Literal[
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.OBSERVING,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+    ],
+    # A row written before the rename may still say ``partial`` or ``cancelling``.
+    BeforeValidator(state_adopter(LifecycleSubject.JOB)),
 ]
 RecipeImageAvailabilityChildKind = Literal["model-cache", "runtime-image"]
-RecipeOperatorState = Literal[
-    "accepted", "queued", "running", "partial", "succeeded", "failed", "cancelled"
+RecipeOperatorState = Annotated[
+    Literal[
+        "accepted",
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+    ],
+    BeforeValidator(state_adopter(LifecycleSubject.JOB)),
 ]
 RecipeOperatorAction = Literal["remove"]
 

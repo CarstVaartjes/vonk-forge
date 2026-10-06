@@ -661,6 +661,18 @@
       "ArtifactJobResponse": {
         "additionalProperties": false,
         "properties": {
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
           "compiled_contract": {
             "$ref": "#/components/schemas/CompiledArtifactContract"
           },
@@ -748,6 +760,21 @@
             ],
             "title": "Output Manifest Sha256"
           },
+          "preparation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "draft",
+                  "ready"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preparation"
+          },
           "result_evidence": {
             "anyOf": [
               {
@@ -764,19 +791,25 @@
             "type": "string"
           },
           "state": {
-            "enum": [
-              "draft",
-              "ready",
-              "queued",
-              "running",
-              "succeeded",
-              "failed",
-              "cancelling",
-              "cancelled",
-              "waiting-for-operator"
+            "anyOf": [
+              {
+                "enum": [
+                  "queued",
+                  "running",
+                  "backoff",
+                  "observing",
+                  "needs-operator",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "State",
-            "type": "string"
+            "title": "State"
           },
           "status_reason": {
             "anyOf": [
@@ -1088,6 +1121,15 @@
         ],
         "title": "ArtifactOutputLimits",
         "type": "object"
+      },
+      "ArtifactPreparation": {
+        "description": "The stages of an artifact job before it is submitted.\n\nThese are preparation, not execution: a job is ``draft`` while its inputs are\nuploaded and ``ready`` once they are complete.  Its lifecycle ``state`` begins\nat ``queued`` on submit and is absent until then.  The old spelling kept both\nin the one ``state`` word, which is why :func:`legacy_preparation` exists.",
+        "enum": [
+          "draft",
+          "ready"
+        ],
+        "title": "ArtifactPreparation",
+        "type": "string"
       },
       "ArtifactSlotContract": {
         "additionalProperties": false,
@@ -4200,9 +4242,9 @@
             "type": "string"
           },
           "state": {
-            "default": "cancelling",
+            "default": "observing",
             "enum": [
-              "cancelling",
+              "observing",
               "cancelled"
             ],
             "title": "State",
@@ -4333,7 +4375,7 @@
           },
           "state": {
             "enum": [
-              "cancelling",
+              "observing",
               "cancelled"
             ],
             "title": "State",
@@ -4774,7 +4816,7 @@
             "enum": [
               "queued",
               "running",
-              "waiting-for-operator",
+              "needs-operator",
               "succeeded",
               "failed",
               "cancelled",
@@ -5732,7 +5774,7 @@
                 "enum": [
                   "queued",
                   "running",
-                  "waiting-for-operator",
+                  "needs-operator",
                   "succeeded",
                   "failed",
                   "cancelled",
@@ -6936,7 +6978,7 @@
             "enum": [
               "queued",
               "running",
-              "waiting-for-operator",
+              "needs-operator",
               "succeeded",
               "failed",
               "cancelled",
@@ -9210,6 +9252,7 @@
               "queued",
               "running",
               "backoff",
+              "observing",
               "succeeded",
               "failed",
               "cancelled"
@@ -9863,6 +9906,9 @@
           "agent_result_state": {
             "$ref": "#/components/schemas/AgentResultState"
           },
+          "artifact_preparation": {
+            "$ref": "#/components/schemas/ArtifactPreparation"
+          },
           "blocker_category": {
             "$ref": "#/components/schemas/BlockerCategory"
           },
@@ -9898,6 +9944,12 @@
           },
           "outcome_kind": {
             "$ref": "#/components/schemas/OutcomeKind"
+          },
+          "resource_blocker_code": {
+            "$ref": "#/components/schemas/ResourceBlockerCode"
+          },
+          "run_admission_code": {
+            "$ref": "#/components/schemas/RunAdmissionCode"
           },
           "security_refusal_reason": {
             "$ref": "#/components/schemas/SecurityRefusalReason"
@@ -9935,13 +9987,16 @@
           "lifecycle_subject",
           "state_alias",
           "observation_cause",
+          "artifact_preparation",
           "state_write_kind",
           "migration_step",
           "error_category",
           "wait_reason",
           "invalid_request_reason",
           "security_refusal_reason",
-          "failure_code"
+          "failure_code",
+          "run_admission_code",
+          "resource_blocker_code"
         ],
         "title": "LifecycleVocabulary",
         "type": "object"
@@ -10787,10 +10842,7 @@
           "state": {
             "anyOf": [
               {
-                "enum": [
-                  "accepted",
-                  "cancelling"
-                ],
+                "const": "accepted",
                 "type": "string"
               },
               {
@@ -10798,6 +10850,7 @@
                   "queued",
                   "running",
                   "backoff",
+                  "observing",
                   "succeeded",
                   "failed",
                   "cancelled"
@@ -11528,6 +11581,7 @@
             "enum": [
               "wired",
               "wifi",
+              "fabric",
               "other"
             ],
             "title": "Kind",
@@ -13840,8 +13894,8 @@
             "enum": [
               "queued",
               "running",
-              "partial",
-              "cancelling",
+              "backoff",
+              "observing",
               "succeeded",
               "failed",
               "cancelled"
@@ -13989,8 +14043,8 @@
             "enum": [
               "queued",
               "running",
-              "partial",
-              "cancelling",
+              "backoff",
+              "observing",
               "succeeded",
               "failed",
               "cancelled"
@@ -15068,7 +15122,7 @@
               "accepted",
               "queued",
               "running",
-              "partial",
+              "backoff",
               "succeeded",
               "failed",
               "cancelled"
@@ -16241,9 +16295,9 @@
               "pending",
               "queued",
               "running",
-              "cancelling",
+              "backoff",
+              "observing",
               "succeeded",
-              "partial",
               "failed",
               "cancelled"
             ],
@@ -16470,6 +16524,11 @@
             ],
             "title": "Next Attempt At"
           },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
           "progress": {
             "$ref": "#/components/schemas/OperationProgress"
           },
@@ -16497,9 +16556,9 @@
             "enum": [
               "queued",
               "running",
-              "cancelling",
+              "backoff",
+              "observing",
               "succeeded",
-              "partial",
               "failed",
               "cancelled"
             ],
@@ -16760,6 +16819,19 @@
         "title": "RequestValidationProblem",
         "type": "object"
       },
+      "ResourceBlockerCode": {
+        "description": "The capacity-fit codes the resource planner gives a node that cannot fit.\n\n``insufficient`` is the family prefix a run admission maps onto\n``run.insufficient_memory``; the planner itself names the exact\n``insufficient_capacity*`` member.",
+        "enum": [
+          "resource.capacity_unknown",
+          "resource.insufficient",
+          "resource.insufficient_capacity",
+          "resource.insufficient_capacity_after_stop",
+          "resource.insufficient_reservation_budget",
+          "resource.resident_usage_unknown"
+        ],
+        "title": "ResourceBlockerCode",
+        "type": "string"
+      },
       "ResourceDemandEvidence": {
         "additionalProperties": false,
         "description": "The evidence terms used for one selected rank's memory fit.",
@@ -16931,6 +17003,28 @@
         ],
         "title": "RolloutPreparation",
         "type": "object"
+      },
+      "RunAdmissionCode": {
+        "description": "The typed codes a run admission names for a refusal, blocker or wait.\n\n``capacity_busy`` is lock contention only.  Every other reason an admission\nmust wait or is refused carries its own member, so a waiting operation shows\nthe real cause.  The retryable blockers (a plan that may become admissible\nby itself) are a subset the Controller derives from these members.",
+        "enum": [
+          "run.plan_invalid",
+          "run.plan_stale",
+          "run.dependencies_stale",
+          "run.capacity_busy",
+          "run.target_membership_changed",
+          "run.mapping_not_ready",
+          "run.inventory_missing",
+          "run.stale_inventory",
+          "run.insufficient_memory",
+          "run.port_occupied",
+          "run.rendezvous_port_occupied",
+          "run.unreconciled_lost_rank",
+          "run.not_installed",
+          "run.fabric_address_missing",
+          "run.fabric_address_duplicate"
+        ],
+        "title": "RunAdmissionCode",
+        "type": "string"
       },
       "RunMemoryResidualRange": {
         "additionalProperties": false,
@@ -18645,8 +18739,9 @@
             "enum": [
               "queued",
               "running",
-              "waiting",
-              "waiting-for-operator",
+              "backoff",
+              "observing",
+              "needs-operator",
               "succeeded",
               "failed",
               "cancelled",
@@ -19753,8 +19848,9 @@
             "enum": [
               "queued",
               "running",
-              "waiting",
-              "waiting-for-operator",
+              "backoff",
+              "observing",
+              "needs-operator",
               "succeeded",
               "failed",
               "cancelled",

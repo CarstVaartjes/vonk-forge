@@ -37,6 +37,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
+    LifecycleState,
     OperationMemberProgress,
     SecurityRefusalReason,
     canonical_message,
@@ -8059,7 +8060,7 @@ class ModelCacheService:
             request_key=operation.request_key,
             kind=operation.kind,
             state=(
-                "cancelling"
+                LifecycleState.OBSERVING.value
                 if cancellation is not None and operation.state != "cancelled"
                 else model_cache_states.adopted(operation.state)
             ),

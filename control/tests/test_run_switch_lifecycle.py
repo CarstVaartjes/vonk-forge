@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from vonk_agent_protocol import LifecycleState
 from vonk_control.failure_classification import is_security_failure
 from vonk_control.lifecycle import (
     STOP_BUDGET,
@@ -269,11 +270,11 @@ def test_a_legacy_operator_wait_with_a_live_child_is_observed_not_failed(
     child_id = _child_operation_id(harness.view())
     harness.executor.children[child_id].state = "running"
     harness.make_legacy_operator_wait()
-    assert harness.view().state == "waiting-for-operator"
+    assert harness.view().state == LifecycleState.NEEDS_OPERATOR
 
     assert harness.service.tick() is True  # healed
     healed = harness.view()
-    assert healed.state not in {"waiting-for-operator", "failed"}
+    assert healed.state not in {LifecycleState.NEEDS_OPERATOR, "failed"}
     assert _child_operation_id(healed) == child_id  # never re-issued
     harness.advance_to_due()
     harness.service.tick()
@@ -385,7 +386,7 @@ def test_a_cancel_that_is_not_due_is_not_reported_as_progress(tmp_path: Path) ->
 def _retrying(view) -> bool:
     result = _result(view)
     return (
-        view.state in {"running", "waiting"}
+        view.state in {"running", LifecycleState.OBSERVING}
         and result.retry_reason is not None
         and result.observation_due_at is not None
         and result.failure_code is None
@@ -464,7 +465,7 @@ def test_final_verification_that_cannot_be_observed_is_retried_not_failed(
     drive()
     held = service.get(operation.operation_id)
     assert state["calls"] >= 1
-    assert held.state in {"running", "waiting"}, held.status_reason
+    assert held.state in {"running", LifecycleState.OBSERVING}, held.status_reason
     assert _result(held).failure_code is None
     assert _result(held).retry_reason == "run-switch.final-verification-unavailable"
     assert held.blockers  # a retry is a visible wait, never a silent one
@@ -505,7 +506,10 @@ def test_every_conflict_of_the_phase_path_is_retried_unless_it_is_a_security_edg
         executor.faults["verify"] = RunSwitchOperationConflict(code)
         harness.service.tick()
         view = harness.view()
-        assert view.state in {"queued", "running", "waiting"}, (code, view.state)
+        assert view.state in {"queued", "running", LifecycleState.OBSERVING}, (
+            code,
+            view.state,
+        )
         if _result(view).retry_reason == code:
             seen.append(code)
         harness.advance_to_due()

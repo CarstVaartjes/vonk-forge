@@ -10,8 +10,10 @@ from ..types import UNSET, Unset
 
 from ..models.artifact_job_response_interface import ArtifactJobResponseInterface
 from ..models.artifact_job_response_interface import check_artifact_job_response_interface
-from ..models.artifact_job_response_state import ArtifactJobResponseState
-from ..models.artifact_job_response_state import check_artifact_job_response_state
+from ..models.artifact_job_response_preparation_type_0 import ArtifactJobResponsePreparationType0
+from ..models.artifact_job_response_preparation_type_0 import check_artifact_job_response_preparation_type_0
+from ..models.artifact_job_response_state_type_0 import ArtifactJobResponseStateType0
+from ..models.artifact_job_response_state_type_0 import check_artifact_job_response_state_type_0
 from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
@@ -48,11 +50,13 @@ class ArtifactJobResponse:
             output_files (list[ArtifactOutputFile]):
             output_limits (OutputLimits):
             run_id (str):
-            state (ArtifactJobResponseState):
+            state (ArtifactJobResponseStateType0 | None):
             timeout_seconds (int):
             updated_at (datetime.datetime):
+            cancel_requested_at (datetime.datetime | None | Unset):
             operation_id (None | str | Unset):
             output_manifest_sha256 (None | str | Unset):
+            preparation (ArtifactJobResponsePreparationType0 | None | Unset):
             result_evidence (ArtifactJobResultEvidence | None | Unset):
             status_reason (None | str | Unset):
             submit_request_id (None | str | Unset):
@@ -71,11 +75,13 @@ class ArtifactJobResponse:
     output_files: list[ArtifactOutputFile]
     output_limits: OutputLimits
     run_id: str
-    state: ArtifactJobResponseState
+    state: ArtifactJobResponseStateType0 | None
     timeout_seconds: int
     updated_at: datetime.datetime
+    cancel_requested_at: datetime.datetime | None | Unset = UNSET
     operation_id: None | str | Unset = UNSET
     output_manifest_sha256: None | str | Unset = UNSET
+    preparation: ArtifactJobResponsePreparationType0 | None | Unset = UNSET
     result_evidence: ArtifactJobResultEvidence | None | Unset = UNSET
     status_reason: None | str | Unset = UNSET
     submit_request_id: None | str | Unset = UNSET
@@ -130,11 +136,23 @@ class ArtifactJobResponse:
 
         run_id = self.run_id
 
-        state: str = self.state
+        state: None | str
+        if isinstance(self.state, str):
+            state = self.state
+        else:
+            state = self.state
 
         timeout_seconds = self.timeout_seconds
 
         updated_at = self.updated_at.isoformat()
+
+        cancel_requested_at: None | str | Unset
+        if isinstance(self.cancel_requested_at, Unset):
+            cancel_requested_at = UNSET
+        elif isinstance(self.cancel_requested_at, datetime.datetime):
+            cancel_requested_at = self.cancel_requested_at.isoformat()
+        else:
+            cancel_requested_at = self.cancel_requested_at
 
         operation_id: None | str | Unset
         if isinstance(self.operation_id, Unset):
@@ -147,6 +165,14 @@ class ArtifactJobResponse:
             output_manifest_sha256 = UNSET
         else:
             output_manifest_sha256 = self.output_manifest_sha256
+
+        preparation: None | str | Unset
+        if isinstance(self.preparation, Unset):
+            preparation = UNSET
+        elif isinstance(self.preparation, str):
+            preparation = self.preparation
+        else:
+            preparation = self.preparation
 
         result_evidence: dict[str, Any] | None | Unset
         if isinstance(self.result_evidence, Unset):
@@ -194,10 +220,14 @@ class ArtifactJobResponse:
             "timeout_seconds": timeout_seconds,
             "updated_at": updated_at,
         })
+        if cancel_requested_at is not UNSET:
+            field_dict["cancel_requested_at"] = cancel_requested_at
         if operation_id is not UNSET:
             field_dict["operation_id"] = operation_id
         if output_manifest_sha256 is not UNSET:
             field_dict["output_manifest_sha256"] = output_manifest_sha256
+        if preparation is not UNSET:
+            field_dict["preparation"] = preparation
         if result_evidence is not UNSET:
             field_dict["result_evidence"] = result_evidence
         if status_reason is not UNSET:
@@ -279,9 +309,22 @@ class ArtifactJobResponse:
 
         run_id = d.pop("run_id")
 
-        state = check_artifact_job_response_state(d.pop("state"))
+        def _parse_state(data: object) -> ArtifactJobResponseStateType0 | None:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                state_type_0 = check_artifact_job_response_state_type_0(data)
 
 
+
+                return state_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(ArtifactJobResponseStateType0 | None, data)
+
+        state = _parse_state(d.pop("state"))
 
 
         timeout_seconds = d.pop("timeout_seconds")
@@ -289,6 +332,26 @@ class ArtifactJobResponse:
         updated_at = datetime.datetime.fromisoformat(d.pop("updated_at"))
 
 
+
+
+        def _parse_cancel_requested_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                cancel_requested_at_type_0 = datetime.datetime.fromisoformat(data)
+
+
+
+                return cancel_requested_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        cancel_requested_at = _parse_cancel_requested_at(d.pop("cancel_requested_at", UNSET))
 
 
         def _parse_operation_id(data: object) -> None | str | Unset:
@@ -309,6 +372,26 @@ class ArtifactJobResponse:
             return cast(None | str | Unset, data)
 
         output_manifest_sha256 = _parse_output_manifest_sha256(d.pop("output_manifest_sha256", UNSET))
+
+
+        def _parse_preparation(data: object) -> ArtifactJobResponsePreparationType0 | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                preparation_type_0 = check_artifact_job_response_preparation_type_0(data)
+
+
+
+                return preparation_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(ArtifactJobResponsePreparationType0 | None | Unset, data)
+
+        preparation = _parse_preparation(d.pop("preparation", UNSET))
 
 
         def _parse_result_evidence(data: object) -> ArtifactJobResultEvidence | None | Unset:
@@ -378,8 +461,10 @@ class ArtifactJobResponse:
             state=state,
             timeout_seconds=timeout_seconds,
             updated_at=updated_at,
+            cancel_requested_at=cancel_requested_at,
             operation_id=operation_id,
             output_manifest_sha256=output_manifest_sha256,
+            preparation=preparation,
             result_evidence=result_evidence,
             status_reason=status_reason,
             submit_request_id=submit_request_id,

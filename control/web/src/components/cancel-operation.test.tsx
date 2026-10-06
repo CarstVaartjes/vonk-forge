@@ -6,7 +6,7 @@ import {ToastProvider} from "./toast";
 
 test("an accepted cancellation says requested and stays cancelling until the owner observes it stop", async () => {
   const user = userEvent.setup();
-  const cancel = vi.fn(async () => ({state: "cancelling"}));
+  const cancel = vi.fn(async () => ({state: "observing"}));
   render(<ToastProvider><CancelOperation what="load" consequence="Stops it." cancel={cancel}/></ToastProvider>);
   await user.click(screen.getByRole("button", {name: "Cancel load"}));
   await user.click(screen.getByRole("button", {name: "Confirm cancel load"}));

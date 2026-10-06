@@ -1,8 +1,8 @@
 from typing import Literal
 
-RunSwitchOperationState = Literal['cancelled', 'failed', 'queued', 'running', 'succeeded', 'unknown', 'waiting', 'waiting-for-operator']
+RunSwitchOperationState = Literal['backoff', 'cancelled', 'failed', 'needs-operator', 'observing', 'queued', 'running', 'succeeded', 'unknown']
 
-RUN_SWITCH_OPERATION_STATE_VALUES: set[RunSwitchOperationState] = { 'cancelled', 'failed', 'queued', 'running', 'succeeded', 'unknown', 'waiting', 'waiting-for-operator',  }
+RUN_SWITCH_OPERATION_STATE_VALUES: set[RunSwitchOperationState] = { 'backoff', 'cancelled', 'failed', 'needs-operator', 'observing', 'queued', 'running', 'succeeded', 'unknown',  }
 
 def check_run_switch_operation_state(value: str) -> RunSwitchOperationState:
     if value in RUN_SWITCH_OPERATION_STATE_VALUES:

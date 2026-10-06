@@ -76,7 +76,7 @@ def test_create_app_enforces_artifact_mutation_roles_before_owner_effect(
     assert uploaded.status_code == 200, uploaded.text
     finalized = client.post(f"/api/artifact-jobs/{job_id}/finalize", headers=operator)
     assert finalized.status_code == 200, finalized.text
-    assert service.get(job_id).state == "ready"
+    assert service.get(job_id).preparation == "ready"
 
     submit_request_id = "00000000-0000-4000-8000-000000000202"
     submit_path = f"/api/artifact-jobs/{job_id}/submit"
@@ -87,7 +87,7 @@ def test_create_app_enforces_artifact_mutation_roles_before_owner_effect(
         )
         assert refused.status_code == status
         unchanged = service.get(job_id)
-        assert unchanged.state == "ready" and unchanged.operation_id is None
+        assert unchanged.preparation == "ready" and unchanged.operation_id is None
 
     submitted = client.post(
         submit_path,
@@ -120,7 +120,7 @@ def test_create_app_enforces_artifact_mutation_roles_before_owner_effect(
         )
         assert refused.status_code == status
         unchanged = service.get(cancel_job_id)
-        assert unchanged.state == "draft" and unchanged.result_evidence is None
+        assert unchanged.preparation == "draft" and unchanged.result_evidence is None
 
     cancelled = client.post(
         cancel_path,

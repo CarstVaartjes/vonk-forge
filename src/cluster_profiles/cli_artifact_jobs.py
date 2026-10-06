@@ -16,7 +16,15 @@ from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
 from .cli_files import read_json_document
-from .cli_states import OPERATOR_WAIT_STATES
+from .cli_states import (
+    ARTIFACT_JOB_STATES,
+    DRAFT,
+    OPERATOR_WAIT_STATES,
+    READY,
+    cancel_pending,
+    lifecycle_state,
+    preparation,
+)
 from .control_client import (
     ControlClientError,
     ControlHTTPError,
@@ -240,7 +248,7 @@ def _create(
     args.artifact_job_reconcile = (
         f"vonkctl recipe job upload {job['id']} --file {args.file}"
     )
-    if job["state"] in {"draft", "ready"}:
+    if preparation(job) is not None:
         job = _deliver_inputs(args, client, job, declarations, paths, quote)
     return job
 
@@ -335,17 +343,7 @@ def _create_receipt(
             "artifact create request has invalid input declarations"
         )
     _match_input_binding(job, expected_body, expected_inputs)
-    if job["state"] not in {
-        "draft",
-        "ready",
-        "queued",
-        "running",
-        "cancelling",
-        "cancelled",
-        "succeeded",
-        "failed",
-        *OPERATOR_WAIT_STATES,
-    }:
+    if preparation(job) is None and job["state"] not in ARTIFACT_JOB_STATES:
         raise ControlMalformedResponse("artifact create receipt has an invalid state")
     return job
 
@@ -368,11 +366,11 @@ def _upload_existing(
         expected_id=args.job_id,
     )
     _match_input_binding(job, binding, declarations)
-    if job["state"] == "ready":
+    if preparation(job) == READY:
         return job
-    if job["state"] != "draft":
+    if preparation(job) != DRAFT:
         raise ControlClientError(
-            f"artifact job is {job['state']}; its inputs can no longer be changed"
+            f"artifact job is {lifecycle_state(job)}; its inputs can no longer be changed"
         )
     return _deliver_inputs(args, client, job, declarations, paths, quote)
 
@@ -386,9 +384,9 @@ def _deliver_inputs(
     quote: Callable[[str], str],
 ) -> dict[str, object]:
     _match_input_binding(job, None, declarations)
-    if job["state"] == "ready":
+    if preparation(job) == READY:
         return job
-    if job["state"] != "draft":
+    if preparation(job) != DRAFT:
         return job
     transfer = _transfer_client(client)
     uploaded = cast(list[dict[str, object]], args.artifact_job_uploaded)
@@ -437,12 +435,12 @@ def _deliver_inputs(
         job = _job(response, expected_id=cast(str, job["id"]))
         uploaded.append({"name": name, "sha256": declaration["sha256"]})
         uploaded_by_name = _declared_files(job.get("input_files"), "uploaded inputs")
-    if job["state"] == "draft":
+    if preparation(job) == DRAFT:
         response = client.request(
             "POST", f"/api/artifact-jobs/{quote(cast(str, job['id']))}/finalize"
         )
         job = _job(response, expected_id=cast(str, job["id"]))
-    if job["state"] not in {"ready", "draft"}:
+    if preparation(job) is None:
         raise ControlMalformedResponse(
             "artifact input finalization returned an invalid state"
         )
@@ -496,9 +494,9 @@ def _submit(
                 expected_id=args.job_id,
                 expected_submit_request_id=key,
             )
-        if observed["state"] != "ready":
+        if preparation(observed) != READY:
             raise ControlClientError(
-                f"submit response was lost; artifact job is now {observed['state']}"
+                f"submit response was lost; artifact job is now {lifecycle_state(observed)}"
             ) from error
         job = _job(
             client.request("POST", path, extra_headers=headers),
@@ -563,7 +561,7 @@ def _cancel(
         )
         evidence = observed.get("result_evidence")
         accepted = (
-            observed["state"] in {"cancelling", "cancelled"}
+            (cancel_pending(observed) or observed["state"] == "cancelled")
             and isinstance(evidence, Mapping)
             and evidence.get("cancel_request_id") == key
             and evidence.get("cancel_reason") == reason
@@ -580,7 +578,7 @@ def _cancel(
         )
     evidence = job.get("result_evidence")
     if (
-        job["state"] not in {"cancelling", "cancelled"}
+        not (cancel_pending(job) or job["state"] == "cancelled")
         or not isinstance(evidence, Mapping)
         or evidence.get("cancel_request_id") != key
         or evidence.get("cancel_reason") != reason

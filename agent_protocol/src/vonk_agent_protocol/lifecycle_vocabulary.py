@@ -192,6 +192,28 @@ class ObservationCause(WireEnum):
     LEASE_LAPSED = "lease-lapsed"
 
 
+class ArtifactPreparation(WireEnum):
+    """The stages of an artifact job before it is submitted.
+
+    These are preparation, not execution: a job is ``draft`` while its inputs are
+    uploaded and ``ready`` once they are complete.  Its lifecycle ``state`` begins
+    at ``queued`` on submit and is absent until then.  The old spelling kept both
+    in the one ``state`` word, which is why :func:`legacy_preparation` exists.
+    """
+
+    DRAFT = "draft"
+    READY = "ready"
+
+
+def legacy_preparation(stored: str | None) -> ArtifactPreparation | None:
+    """The preparation stage an old artifact-job ``state`` word meant, else ``None``."""
+
+    try:
+        return ArtifactPreparation(stored) if stored is not None else None
+    except ValueError:
+        return None
+
+
 class AdoptedState(NamedTuple):
     """What a stored word means in the core vocabulary.
 
@@ -256,6 +278,9 @@ STATE_ALIASES: Mapping[LifecycleSubject, Mapping[StateAlias, AdoptedState]] = {
     },
     LifecycleSubject.FLEET_PROFILE_APPLICATION: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        # The state of the application's cancellation intent (its progress document):
+        # a cancel being driven is observed.
+        StateAlias.CANCELLING: _CANCELLING,
     },
 }
 
@@ -296,7 +321,29 @@ TERMINAL_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(
 )
 
 
-def adopt_state(subject: LifecycleSubject, stored: str) -> AdoptedState | None:
+#: A kind of the generic job table that spells a word differently from the rest of
+#: the table.  A recipe update batch ends ``partial`` when some of its children
+#: succeeded and some failed: a definite failed outcome, not a retry (which is what
+#: ``partial`` means to the image-availability jobs that share the table).
+JOB_KIND_ALIASES: Mapping[str, Mapping[StateAlias, AdoptedState]] = {
+    "recipe.cache.update.v2": {
+        StateAlias.PARTIAL: AdoptedState(LifecycleState.FAILED),
+    },
+}
+
+
+def _aliases(
+    subject: LifecycleSubject, kind: str | None
+) -> Mapping[StateAlias, AdoptedState]:
+    rows = STATE_ALIASES.get(subject, {})
+    if subject is LifecycleSubject.JOB and kind in JOB_KIND_ALIASES:
+        return {**rows, **JOB_KIND_ALIASES[kind]}
+    return rows
+
+
+def adopt_state(
+    subject: LifecycleSubject, stored: str, kind: str | None = None
+) -> AdoptedState | None:
     """The core meaning of a stored ``state`` word, or ``None`` for a foreign word.
 
     Every reader of a stored lifecycle state goes through this one function: a
@@ -313,7 +360,7 @@ def adopt_state(subject: LifecycleSubject, stored: str) -> AdoptedState | None:
         alias = StateAlias(stored)
     except ValueError:
         return None
-    return STATE_ALIASES.get(subject, {}).get(alias)
+    return _aliases(subject, kind).get(alias)
 
 
 #: The states of a row that has not ended.
@@ -323,20 +370,24 @@ LIVE_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(LifecycleState) - (
 
 
 def stored_words(
-    subject: LifecycleSubject, states: Iterable[LifecycleState]
+    subject: LifecycleSubject,
+    states: Iterable[LifecycleState],
+    kind: str | None = None,
 ) -> tuple[str, ...]:
     """Every word a row of ``subject`` may carry for any of ``states``.
 
     The core words themselves, then the retired spellings that adopt into them.
     A query that selects rows by state uses this, so a row written before the
     rename is found as well as one written after it, and nothing spells a word.
+    ``kind`` names the kind of a generic job when the query is scoped to one, whose
+    own spelling of a word may differ (see :data:`JOB_KIND_ALIASES`).
     """
 
     wanted = frozenset(states)
     words = [state.value for state in LifecycleState if state in wanted]
     words.extend(
         alias.value
-        for alias, adopted in STATE_ALIASES.get(subject, {}).items()
+        for alias, adopted in _aliases(subject, kind).items()
         if adopted.state in wanted
     )
     return tuple(words)
@@ -349,13 +400,16 @@ def live_words(subject: LifecycleSubject) -> tuple[str, ...]:
 
 
 def is_state(
-    subject: LifecycleSubject, stored: str | None, *states: LifecycleState
+    subject: LifecycleSubject,
+    stored: str | None,
+    *states: LifecycleState,
+    kind: str | None = None,
 ) -> bool:
     """Whether a stored word means one of ``states`` (adopting an old spelling)."""
 
     if stored is None:
         return False
-    adopted = adopt_state(subject, stored)
+    adopted = adopt_state(subject, stored, kind)
     return adopted is not None and adopted.state in states
 
 
@@ -376,17 +430,21 @@ def check_words(
     return stored_words(subject, states)
 
 
-def state_adopter(subject: LifecycleSubject) -> Callable[[Any], Any]:
+def state_adopter(
+    subject: LifecycleSubject, kind: str | None = None
+) -> Callable[[Any], Any]:
     """A pydantic ``BeforeValidator`` that adopts a retired spelling of ``subject``.
 
     A contract model that carries a stored state (a persisted document, an API
     view built from a row) validates a row written before the rename as the
     word it means now; anything else passes through for the field to judge.
+    ``kind`` scopes the adoption to one kind of generic job (see
+    :data:`JOB_KIND_ALIASES`).
     """
 
     def adopt(value: Any) -> Any:
         if isinstance(value, str):
-            adopted = adopt_state(subject, value)
+            adopted = adopt_state(subject, value, kind)
             if adopted is not None:
                 return adopted.state
         return value
@@ -608,6 +666,48 @@ class FailureCode(WireEnum):
     RETAINED_CONTAINER_FOREIGN = "retained_container_foreign"
 
 
+class RunAdmissionCode(WireEnum):
+    """The typed codes a run admission names for a refusal, blocker or wait.
+
+    ``capacity_busy`` is lock contention only.  Every other reason an admission
+    must wait or is refused carries its own member, so a waiting operation shows
+    the real cause.  The retryable blockers (a plan that may become admissible
+    by itself) are a subset the Controller derives from these members.
+    """
+
+    PLAN_INVALID = "run.plan_invalid"
+    PLAN_STALE = "run.plan_stale"
+    DEPENDENCIES_STALE = "run.dependencies_stale"
+    CAPACITY_BUSY = "run.capacity_busy"
+    TARGET_MEMBERSHIP_CHANGED = "run.target_membership_changed"
+    MAPPING_NOT_READY = "run.mapping_not_ready"
+    INVENTORY_MISSING = "run.inventory_missing"
+    STALE_INVENTORY = "run.stale_inventory"
+    INSUFFICIENT_MEMORY = "run.insufficient_memory"
+    PORT_OCCUPIED = "run.port_occupied"
+    RENDEZVOUS_PORT_OCCUPIED = "run.rendezvous_port_occupied"
+    UNRECONCILED_LOST_RANK = "run.unreconciled_lost_rank"
+    NOT_INSTALLED = "run.not_installed"
+    FABRIC_ADDRESS_MISSING = "run.fabric_address_missing"
+    FABRIC_ADDRESS_DUPLICATE = "run.fabric_address_duplicate"
+
+
+class ResourceBlockerCode(WireEnum):
+    """The capacity-fit codes the resource planner gives a node that cannot fit.
+
+    ``insufficient`` is the family prefix a run admission maps onto
+    ``run.insufficient_memory``; the planner itself names the exact
+    ``insufficient_capacity*`` member.
+    """
+
+    CAPACITY_UNKNOWN = "resource.capacity_unknown"
+    INSUFFICIENT = "resource.insufficient"
+    INSUFFICIENT_CAPACITY = "resource.insufficient_capacity"
+    INSUFFICIENT_CAPACITY_AFTER_STOP = "resource.insufficient_capacity_after_stop"
+    INSUFFICIENT_RESERVATION_BUDGET = "resource.insufficient_reservation_budget"
+    RESIDENT_USAGE_UNKNOWN = "resource.resident_usage_unknown"
+
+
 class LifecycleVocabulary(WireModel):
     """Carrier that publishes every vocabulary enum into the wire schema.
 
@@ -629,6 +729,7 @@ class LifecycleVocabulary(WireModel):
     lifecycle_subject: LifecycleSubject
     state_alias: StateAlias
     observation_cause: ObservationCause
+    artifact_preparation: ArtifactPreparation
     state_write_kind: StateWriteKind
     migration_step: MigrationStep
     error_category: ErrorCategory
@@ -636,11 +737,14 @@ class LifecycleVocabulary(WireModel):
     invalid_request_reason: InvalidRequestReason
     security_refusal_reason: SecurityRefusalReason
     failure_code: FailureCode
+    run_admission_code: RunAdmissionCode
+    resource_blocker_code: ResourceBlockerCode
 
 
 __all__ = [
     "ATTEMPT_ALIAS_CAUSE",
     "INPUT_ALIASES",
+    "JOB_KIND_ALIASES",
     "LEGACY_WAIT_STATE",
     "LIVE_LIFECYCLE_STATES",
     "SECURITY_REFUSAL_SUFFIXES",
@@ -648,6 +752,7 @@ __all__ = [
     "TERMINAL_LIFECYCLE_STATES",
     "AdoptedState",
     "AgentResultState",
+    "ArtifactPreparation",
     "BlockerCategory",
     "ErrorCategory",
     "FailureCode",
@@ -662,6 +767,8 @@ __all__ = [
     "OperatorActionName",
     "OperatorSurface",
     "OutcomeKind",
+    "ResourceBlockerCode",
+    "RunAdmissionCode",
     "SecurityRefusalReason",
     "StateAlias",
     "StateWriteKind",
@@ -675,6 +782,7 @@ __all__ = [
     "is_live",
     "is_state",
     "legacy_observation_cause",
+    "legacy_preparation",
     "live_words",
     "state_adopter",
     "stored_words",

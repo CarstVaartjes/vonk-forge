@@ -1238,6 +1238,8 @@ export interface components {
         };
         /** ArtifactJobResponse */
         ArtifactJobResponse: {
+            /** Cancel Requested At */
+            cancel_requested_at?: string | null;
             compiled_contract: components["schemas"]["CompiledArtifactContract"];
             /** Contract Sha256 */
             contract_sha256: string;
@@ -1268,14 +1270,13 @@ export interface components {
             output_limits: components["schemas"]["OutputLimits"];
             /** Output Manifest Sha256 */
             output_manifest_sha256?: string | null;
+            /** Preparation */
+            preparation?: ("draft" | "ready") | null;
             result_evidence?: components["schemas"]["ArtifactJobResultEvidence"] | null;
             /** Run Id */
             run_id: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "draft" | "ready" | "queued" | "running" | "succeeded" | "failed" | "cancelling" | "cancelled" | "waiting-for-operator";
+            /** State */
+            state: ("queued" | "running" | "backoff" | "observing" | "needs-operator" | "succeeded" | "failed" | "cancelled") | null;
             /** Status Reason */
             status_reason?: string | null;
             /** Submit Request Id */
@@ -1371,6 +1372,17 @@ export interface components {
             /** Max Total Bytes */
             max_total_bytes: number;
         };
+        /**
+         * ArtifactPreparation
+         * @description The stages of an artifact job before it is submitted.
+         *
+         *     These are preparation, not execution: a job is ``draft`` while its inputs are
+         *     uploaded and ``ready`` once they are complete.  Its lifecycle ``state`` begins
+         *     at ``queued`` on submit and is absent until then.  The old spelling kept both
+         *     in the one ``state`` word, which is why :func:`legacy_preparation` exists.
+         * @enum {string}
+         */
+        ArtifactPreparation: "draft" | "ready";
         /** ArtifactSlotContract */
         ArtifactSlotContract: {
             /** Description */
@@ -2378,10 +2390,10 @@ export interface components {
             requested_at: string;
             /**
              * State
-             * @default cancelling
+             * @default observing
              * @enum {string}
              */
-            state: "cancelling" | "cancelled";
+            state: "observing" | "cancelled";
             /** Successor Application Id */
             successor_application_id?: string | null;
             /** Workload Intent Ordinal */
@@ -2422,7 +2434,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "cancelling" | "cancelled";
+            state: "observing" | "cancelled";
         };
         /**
          * FleetProfileApplicationEffect
@@ -2556,7 +2568,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
+            state: "queued" | "running" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
             /** Status Reason */
             status_reason: string | null;
             /** Superseded By */
@@ -2858,7 +2870,7 @@ export interface components {
             /** Application Id */
             application_id?: string | null;
             /** Application State */
-            application_state?: ("queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded") | null;
+            application_state?: ("queued" | "running" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "superseded") | null;
             /** Assignments */
             assignments: components["schemas"]["FleetProfileEndpointAssignmentView"][] | null;
             /** Number */
@@ -3243,7 +3255,7 @@ export interface components {
              * @default queued
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
+            state: "queued" | "running" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
             /** Status Reason */
             status_reason?: string | null;
             /**
@@ -3959,7 +3971,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
             /** Total Bytes */
             total_bytes?: number | null;
         };
@@ -4178,6 +4190,7 @@ export interface components {
          */
         LifecycleVocabulary: {
             agent_result_state: components["schemas"]["AgentResultState"];
+            artifact_preparation: components["schemas"]["ArtifactPreparation"];
             blocker_category: components["schemas"]["BlockerCategory"];
             effect: components["schemas"]["LifecycleEffect"];
             error_category: components["schemas"]["ErrorCategory"];
@@ -4190,6 +4203,8 @@ export interface components {
             operator_action: components["schemas"]["OperatorActionName"];
             operator_surface: components["schemas"]["OperatorSurface"];
             outcome_kind: components["schemas"]["OutcomeKind"];
+            resource_blocker_code: components["schemas"]["ResourceBlockerCode"];
+            run_admission_code: components["schemas"]["RunAdmissionCode"];
             security_refusal_reason: components["schemas"]["SecurityRefusalReason"];
             state: components["schemas"]["LifecycleState"];
             state_alias: components["schemas"]["StateAlias"];
@@ -4487,7 +4502,7 @@ export interface components {
             /** Selector */
             selector: string;
             /** State */
-            state: ("accepted" | "cancelling") | ("queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled");
+            state: "accepted" | ("queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled");
             /** Total Bytes */
             total_bytes?: number | null;
             /** Transferred Bytes */
@@ -4723,7 +4738,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "wired" | "wifi" | "other";
+            kind: "wired" | "wifi" | "fabric" | "other";
             /** Link Speed Mbps */
             link_speed_mbps?: number | null;
             /** Name */
@@ -5415,7 +5430,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "partial" | "cancelling" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
         };
         /** RecipeImageAvailabilityResponse */
         RecipeImageAvailabilityResponse: {
@@ -5454,7 +5469,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "partial" | "cancelling" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
             /** Updated At */
             updated_at: string;
         };
@@ -5766,7 +5781,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "accepted" | "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
+            state: "accepted" | "queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled";
             /** With Model */
             with_model: boolean;
         };
@@ -6159,7 +6174,7 @@ export interface components {
              * @default pending
              * @enum {string}
              */
-            state: "pending" | "queued" | "running" | "cancelling" | "succeeded" | "partial" | "failed" | "cancelled";
+            state: "pending" | "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
         };
         /**
          * RecipeUpdateFailure
@@ -6243,6 +6258,11 @@ export interface components {
             kind: "recipe.cache.update.v2";
             /** Next Attempt At */
             next_attempt_at?: string | null;
+            /**
+             * Partial
+             * @default false
+             */
+            partial: boolean;
             progress: components["schemas"]["OperationProgress"];
             request: components["schemas"]["RecipeUpdateScope"];
             /** Request Id */
@@ -6253,7 +6273,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "cancelling" | "succeeded" | "partial" | "failed" | "cancelled";
+            state: "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
             /**
              * Updated At
              * Format: date-time
@@ -6326,6 +6346,16 @@ export interface components {
             issues: components["schemas"]["RequestValidationIssue"][];
         };
         /**
+         * ResourceBlockerCode
+         * @description The capacity-fit codes the resource planner gives a node that cannot fit.
+         *
+         *     ``insufficient`` is the family prefix a run admission maps onto
+         *     ``run.insufficient_memory``; the planner itself names the exact
+         *     ``insufficient_capacity*`` member.
+         * @enum {string}
+         */
+        ResourceBlockerCode: "resource.capacity_unknown" | "resource.insufficient" | "resource.insufficient_capacity" | "resource.insufficient_capacity_after_stop" | "resource.insufficient_reservation_budget" | "resource.resident_usage_unknown";
+        /**
          * ResourceDemandEvidence
          * @description The evidence terms used for one selected rank's memory fit.
          */
@@ -6376,6 +6406,17 @@ export interface components {
             /** Targets Ready */
             targets_ready: boolean;
         };
+        /**
+         * RunAdmissionCode
+         * @description The typed codes a run admission names for a refusal, blocker or wait.
+         *
+         *     ``capacity_busy`` is lock contention only.  Every other reason an admission
+         *     must wait or is refused carries its own member, so a waiting operation shows
+         *     the real cause.  The retryable blockers (a plan that may become admissible
+         *     by itself) are a subset the Controller derives from these members.
+         * @enum {string}
+         */
+        RunAdmissionCode: "run.plan_invalid" | "run.plan_stale" | "run.dependencies_stale" | "run.capacity_busy" | "run.target_membership_changed" | "run.mapping_not_ready" | "run.inventory_missing" | "run.stale_inventory" | "run.insufficient_memory" | "run.port_occupied" | "run.rendezvous_port_occupied" | "run.unreconciled_lost_rank" | "run.not_installed" | "run.fabric_address_missing" | "run.fabric_address_duplicate";
         /**
          * RunMemoryResidualRange
          * @description Possible remaining bytes for one exact active run reservation.
@@ -6931,7 +6972,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
+            state: "queued" | "running" | "backoff" | "observing" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
             /** Status Reason */
             status_reason?: string | null;
         };
@@ -7195,7 +7236,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
+            state: "queued" | "running" | "backoff" | "observing" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Total Bytes */

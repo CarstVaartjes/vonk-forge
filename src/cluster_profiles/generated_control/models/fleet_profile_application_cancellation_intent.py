@@ -37,7 +37,7 @@ class FleetProfileApplicationCancellationIntent:
             observation_deadline_at (datetime.datetime | None | Unset):
             observation_due_at (datetime.datetime | None | Unset):
             pending_operation_ids (list[str] | Unset):
-            state (FleetProfileApplicationCancellationIntentState | Unset):  Default: 'cancelling'.
+            state (FleetProfileApplicationCancellationIntentState | Unset):  Default: 'observing'.
             successor_application_id (None | str | Unset):
             workload_intent_ordinal (int | None | Unset):
      """
@@ -49,7 +49,7 @@ class FleetProfileApplicationCancellationIntent:
     observation_deadline_at: datetime.datetime | None | Unset = UNSET
     observation_due_at: datetime.datetime | None | Unset = UNSET
     pending_operation_ids: list[str] | Unset = UNSET
-    state: FleetProfileApplicationCancellationIntentState | Unset = 'cancelling'
+    state: FleetProfileApplicationCancellationIntentState | Unset = 'observing'
     successor_application_id: None | str | Unset = UNSET
     workload_intent_ordinal: int | None | Unset = UNSET
 

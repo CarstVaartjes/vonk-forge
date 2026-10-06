@@ -240,20 +240,6 @@
       "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
     },
     {
-      "path": "control/src/vonk_control/distributed_recovery.py",
-      "function": "_validate_multi_start_payload",
-      "kind": "provenance_comparison",
-      "expression": "stored_installation.recipe_revision_id != installation.recipe_revision_id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
-      "path": "control/src/vonk_control/distributed_recovery.py",
-      "function": "_validate_multi_start_payload",
-      "kind": "provenance_comparison",
-      "expression": "stored_run.recipe_revision_id != installation.recipe_revision_id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
       "path": "control/src/vonk_control/distribution_executor.py",
       "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
       "kind": "provenance_comparison",
@@ -675,13 +661,6 @@
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._project_node_result",
-      "kind": "provenance_comparison",
-      "expression": "expected.build_id != owner_id",
-      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService._reconciliation_authority_in_session",
       "kind": "provenance_comparison",
       "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
@@ -703,31 +682,10 @@
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._retry_build_in_session",
-      "kind": "provenance_comparison",
-      "expression": "payload.get('build_id') != owner_id",
-      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._stop_plan_in_session",
-      "kind": "provenance_comparison",
-      "expression": "stored_run_plan.get('recipe_revision_id') == revision.id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService._successful_build_job_in_session",
       "kind": "provenance_comparison",
       "expression": "Job.payload['owner_id'].as_string() == build_id",
       "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._uninstall_plan_in_session",
-      "kind": "provenance_comparison",
-      "expression": "stored_installation_plan.get('recipe_revision_id') == revision.id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
@@ -966,6 +924,41 @@
       "kind": "provenance_comparison",
       "expression": "newest[0] == installation.recipe_revision_id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._retry_build_in_session.plan_from",
+      "kind": "provenance_comparison",
+      "expression": "payload.get('build_id') != owner_id",
+      "reason": "A recovered build order is accepted as the plan only when it names this very build; a mismatch rejects the candidate (the damage stays retired as unknown), nothing is widened."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._apply_build_cleanup",
+      "kind": "provenance_comparison",
+      "expression": "expected.build_id != owner_id",
+      "reason": "A Spark cleanup receipt completes a build's cancellation only when it names that build; a mismatch applies nothing and records the node unproven."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "_ranks_from_mapping",
+      "kind": "provenance_comparison",
+      "expression": "mapping.recipe_revision_id == revision_id",
+      "reason": "Rebuilding the accepted ranks from the saved mapping: the mapping is evidence only for the revision it was made for; otherwise the membership is reported not exact."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "_run_accepted_ranks.read",
+      "kind": "provenance_comparison",
+      "expression": "document.get('recipe_revision_id') == revision_id",
+      "reason": "Reads the stored run plan's own identity against the run's relational revision; disagreement reports the membership not exact, never trusted."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "_installation_accepted_ranks.read",
+      "kind": "provenance_comparison",
+      "expression": "document.get('recipe_revision_id') == revision.id",
+      "reason": "Reads the stored installation plan's own identity against the installation's relational revision; disagreement reports the membership not exact, never trusted."
     }
   ]
 }

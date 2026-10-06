@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import Actor
 from vonk_control.model_cache import ModelCacheConflict, ModelCacheService
 from vonk_control.model_cache_api import install_model_operator_routes
@@ -146,7 +147,7 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
         )
         assert response.status_code == 202, response.text
         receipt = response.json()
-        assert receipt["state"] == "cancelling"
+        assert receipt["state"] == "observing"
         assert receipt["cancellation"]["request_key"] == CANCEL_REQUEST
         assert receipt["cancellation"]["reason"] == CANCEL_REASON
 
@@ -163,7 +164,7 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
         )
         shared.run_pending()
         assert shared.get_operation(shared_operation.id).state == "queued"
-        assert service.get_operation(operation.id).state == "cancelling"
+        assert service.get_operation(operation.id).state == LifecycleState.OBSERVING
 
         # Process death releases the OS flock. The new Controller instance
         # settles the persisted request before claiming any further downloads.

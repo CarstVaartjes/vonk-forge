@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
+    LifecycleState,
     LifecycleSubject,
     OperationMemberProgress,
     OperationProgress,
@@ -34,7 +35,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 
-from . import agent_operation_states
+from . import agent_operation_states, job_states
 from .agent_jobs import (
     AgentJobService,
     authorize_operator_resume_in_session,
@@ -2150,14 +2151,14 @@ class _DurableOperationProjection:
             job = session.get(Job, job_id)
             if job is None:
                 raise KeyError(job_id)
-            if job.state != "waiting-for-operator":
+            if job.state not in job_states.words(LifecycleState.NEEDS_OPERATOR):
                 raise ValueError("job is not waiting for operator")
             scope = AgentJobService._target_scope(job.targets)
             if scope is None or not AgentJobService._lock_target_scopes(
                 session, {"resume": (job_id, scope)}, scope[0]
             ):
                 raise ValueError("job target scope changed")
-            if job.state != "waiting-for-operator":
+            if job.state not in job_states.words(LifecycleState.NEEDS_OPERATOR):
                 raise ValueError("job is not waiting for operator")
             now = self._clock()
             # The parent transition alone does not release the parked child:

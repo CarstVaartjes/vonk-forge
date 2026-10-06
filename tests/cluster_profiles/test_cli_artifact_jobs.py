@@ -59,7 +59,8 @@ def _job(
         {
             "id": JOB_ID,
             "run_id": RUN_ID,
-            "state": state,
+            "state": None if state in {"draft", "ready"} else state,
+            "preparation": state if state in {"draft", "ready"} else None,
             "timeout_seconds": 1,
             "input_declarations": copy.deepcopy(expected),
             "input_files": copy.deepcopy(uploaded or []),
@@ -187,7 +188,8 @@ class ArtifactJobClient:
                 "cancel_request_id": request_id,
                 "cancel_reason": reason,
             }
-            self.job["state"] = "cancelling"
+            self.job["state"] = "observing"
+            self.job["cancel_requested_at"] = "2026-01-01T00:00:00Z"
             self.job["result_evidence"] = evidence
             self.job["status_reason"] = reason
             if self.lose_cancel_response:
@@ -195,7 +197,8 @@ class ArtifactJobClient:
                 raise ControlTransportError("cancel response was lost")
             return copy.deepcopy(self.job)
         if path == f"/api/artifact-jobs/{JOB_ID}/finalize" and method == "POST":
-            self.job["state"] = "ready"
+            self.job["state"] = None
+            self.job["preparation"] = "ready"
             return copy.deepcopy(self.job)
         if path == f"/api/artifact-jobs/{JOB_ID}" and method == "GET":
             return copy.deepcopy(self.job)
@@ -638,7 +641,7 @@ def test_cli_create_reconciles_lost_receipt_and_never_submits(
     )
 
     assert result == 0
-    assert client.job is not None and client.job["state"] == "ready"
+    assert client.job is not None and client.job["preparation"] == "ready"
     assert (
         len(
             [
@@ -686,7 +689,7 @@ def test_cli_retains_create_key_when_lookup_is_unavailable_for_a_retry(
     assert uncertain == 2
     assert uncertain_document["request_key"] == CREATE_KEY
     assert "--request-key" in uncertain_document["reconcile"]["operation"]
-    assert client.job is not None and client.job["state"] == "draft"
+    assert client.job is not None and client.job["preparation"] == "draft"
 
     retried = cli.main(
         (
@@ -707,7 +710,7 @@ def test_cli_retains_create_key_when_lookup_is_unavailable_for_a_retry(
 
     assert retried == 0
     assert retry_document["id"] == JOB_ID
-    assert retry_document["state"] == "ready"
+    assert retry_document["preparation"] == "ready"
     create_calls = [
         call
         for call in client.calls
@@ -749,7 +752,7 @@ def test_cli_interrupted_upload_preserves_draft_and_resumes_only_missing_input(
     resumed_output = capsys.readouterr().out
 
     assert resumed == 0
-    assert json.loads(resumed_output)["state"] == "ready"
+    assert json.loads(resumed_output)["preparation"] == "ready"
     assert client.upload_calls == ["a.png", "b.png", "b.png"]
     assert (
         sum(
@@ -861,7 +864,8 @@ def test_cli_submit_and_remote_cancel_reconcile_with_the_same_caller_keys(
     cancel_document = json.loads(capsys.readouterr().out)
 
     assert cancelled == 0
-    assert cancel_document["state"] == "cancelling"
+    assert cancel_document["state"] == "observing"
+    assert cancel_document["cancel_requested_at"] is not None
     cancel_post = next(
         call
         for call in client.calls

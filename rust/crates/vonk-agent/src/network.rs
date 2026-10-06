@@ -6,6 +6,7 @@
 //! interface the NAS address routes through); the Controller owns the warning.
 
 use std::{
+    collections::BTreeSet,
     fs,
     net::{IpAddr, Ipv4Addr, ToSocketAddrs},
     path::Path,
@@ -53,6 +54,7 @@ pub fn collect(
     let Ok(entries) = fs::read_dir(sys_class_net) else {
         return NetworkEvidence::default();
     };
+    let rdma = rdma_interfaces(&sys_class_net.with_file_name("infiniband"));
     let mut interfaces: Vec<NetworkInterface> = entries
         .filter_map(Result::ok)
         .filter_map(|entry| {
@@ -61,7 +63,8 @@ pub fn collect(
             if !valid_name(&name) || (!physical && route.as_deref() != Some(name.as_str())) {
                 return None;
             }
-            Some(interface(&entry.path(), name))
+            let fabric = rdma.contains(&name);
+            Some(interface(&entry.path(), name, fabric))
         })
         .collect();
     // Keep the route interface when the list must be bounded.
@@ -88,12 +91,38 @@ fn valid_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
 }
 
-fn interface(path: &Path, name: String) -> NetworkInterface {
+/// Net devices that back an RDMA device (`infiniband/*/device/net/*`).
+fn rdma_interfaces(infiniband: &Path) -> BTreeSet<String> {
+    let Ok(devices) = fs::read_dir(infiniband) else {
+        return BTreeSet::new();
+    };
+    devices
+        .filter_map(Result::ok)
+        .filter_map(|device| fs::read_dir(device.path().join("device/net")).ok())
+        .flat_map(|nets| nets.filter_map(Result::ok))
+        .filter_map(|net| net.file_name().into_string().ok())
+        .collect()
+}
+
+fn mellanox_driver(path: &Path) -> bool {
+    fs::read_link(path.join("device/driver"))
+        .ok()
+        .and_then(|target| {
+            target
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .is_some_and(|name| name.starts_with("mlx5") || name.starts_with("mlx4"))
+}
+
+fn interface(path: &Path, name: String, rdma: bool) -> NetworkInterface {
     let read = |file: &str| fs::read_to_string(path.join(file)).ok();
     let wireless = path.join("wireless").exists() || path.join("phy80211").exists();
     let ethernet = read("type").is_some_and(|value| value.trim() == "1");
     let kind = if wireless {
         NetworkInterfaceKind::Wifi
+    } else if rdma || mellanox_driver(path) {
+        NetworkInterfaceKind::Fabric
     } else if ethernet && path.join("device").exists() {
         NetworkInterfaceKind::Wired
     } else {
@@ -229,6 +258,48 @@ enP7s7\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n";
         let interfaces = evidence.interfaces.unwrap();
         assert_eq!(interfaces[0].link_speed_mbps, Some(10_000));
         assert_eq!(evidence.nas_route_interface.as_deref(), Some("enP7s7"));
+    }
+
+    #[test]
+    fn rdma_and_connectx_ports_are_fabric_not_wired() {
+        let directory = tempdir().unwrap();
+        let net = directory.path().join("net");
+        nic(&net, "enP7s7", "wired", Some("0\n"), None);
+        nic(
+            &net,
+            "enP2p1s0f1np1",
+            "wired",
+            Some("1\n"),
+            Some("200000\n"),
+        );
+        nic(&net, "enp1s0f1np1", "wired", Some("1\n"), Some("200000\n"));
+        // RDMA membership names the first port; the driver names the second.
+        fs::create_dir_all(
+            directory
+                .path()
+                .join("infiniband/rocep1s0f1/device/net/enP2p1s0f1np1"),
+        )
+        .unwrap();
+        let driver = directory.path().join("mlx5_core");
+        fs::create_dir(&driver).unwrap();
+        std::os::unix::fs::symlink(&driver, net.join("enp1s0f1np1/device/driver")).unwrap();
+        let table = directory.path().join("route");
+        fs::write(&table, TABLE).unwrap();
+        let evidence = collect(&net, &table, Some("10.0.0.5".parse().unwrap()));
+        let kinds = evidence
+            .interfaces
+            .unwrap()
+            .iter()
+            .map(|value| (value.name.clone(), value.kind))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                ("enP2p1s0f1np1".to_owned(), NetworkInterfaceKind::Fabric),
+                ("enP7s7".to_owned(), NetworkInterfaceKind::Wired),
+                ("enp1s0f1np1".to_owned(), NetworkInterfaceKind::Fabric),
+            ]
+        );
     }
 
     #[test]

@@ -87,6 +87,20 @@ OVERLAY_VARIABLE = "VONK_ACCEPTANCE_COMPOSE_OVERLAY"
 OBSERVED_PHASES: frozenset[str] = frozenset()
 
 
+#: A profile application that has not reached a terminal outcome (the Controller
+#: sends the core words; an older one sent ``waiting-for-operator``).
+_LIVE_STATES = frozenset(
+    {
+        "queued",
+        "running",
+        "backoff",
+        "observing",
+        "needs-operator",
+        "waiting-for-operator",
+    }
+)
+
+
 @dataclass
 class ProbeResult:
     at: float
@@ -268,7 +282,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         application = require_object(operation, label)
         application_id = application.get("id")
         deadline = time.monotonic() + 1800
-        while application.get("state") in {"queued", "running", "waiting-for-operator"}:
+        while application.get("state") in _LIVE_STATES:
             if time.monotonic() >= deadline:
                 raise LifecycleError(
                     f"{label} did not converge: state={application.get('state')} "

@@ -337,7 +337,7 @@ lifecycle state (`x.state = ...` on a lifecycle row, a `["state"]` store in a
 module that owns one, `update(Model).values(state=...)`, a constructor,
 `_set_application_state`) outside the core and allows none: there is no
 allowlist, and a new writer fails with the place to move it. `control/tests/blocker_boundaries.py`
-finds every place that produces `waiting-for-operator` (Python and the Rust
+finds every place that produces `needs-operator` (or the agent's `waiting-for-operator`) (Python and the Rust
 agent) and every fail-closed raise in all of `control/src` (a raise of any
 exception class defined there, found through the class bases), and compares them
 with `tools/blocker-allowlist.json`: an operator wait needs a verdict and an
@@ -391,12 +391,13 @@ to spell none and to import `vocabulary.generated.ts` instead.
 A third tier, `legacy_state`, keeps the retired state spellings that are ordinary
 words (`waiting`, `partial`, `cancelling`, `expired`) out of lifecycle code: a literal
 equal to one of them in a statement that also names a state (`row.state`, `state=`,
-`*_STATES`, `State.X`) counts, and `tools/vocabulary-literals-baseline.json` holds
-what remains per file, falling to zero as each kind stores the core words. Sites that
-belong to a state machine that is not a lifecycle subject (a certificate, an
-enrollment grant, an installation record) are listed with a reason in
-`NON_LIFECYCLE_STATE_SITES`. `waiting-for-operator` is already found in any context by the distinctive
-tier. Only the contract's alias table (`STATE_ALIASES`) may spell them.
+`*_STATES`, `State.X`) counts. The migration is finished, so its baseline is empty and
+`test_no_lifecycle_code_spells_a_retired_state_word` keeps it so; what remains is listed
+with a reason in `NON_LIFECYCLE_STATE_SITES` (a certificate, an installation, a
+distribution assignment, an endpoint). `waiting-for-operator` is found in any context
+by the distinctive tier. Only the contract's alias table (`STATE_ALIASES`) may spell
+them; the CLI, which ships without the contract, keeps its one copy in
+`cli_states.py`, and a test keeps it equal to the contract.
 
 The Rust agent has
 the equivalent check in `rust/crates/vonk-agent/tests/protocol_literals.rs`: no

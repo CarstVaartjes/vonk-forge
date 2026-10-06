@@ -10,6 +10,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.logging import configure_controller_logging
 from vonk_control.models import (
     AgentNode,
@@ -133,7 +134,7 @@ def test_postgres_invalid_terminal_child_is_retried_without_nested_row_lock(
     # is decided under the one lock it already holds (no nested row lock) and the
     # idempotent child is issued again at the core's backoff.
     held = service.get(operation.operation_id)
-    assert held.state == "running"
+    assert held.state == LifecycleState.RUNNING
     assert held.result is not None
     assert held.result.failure_code is None
     assert held.result.retry_reason == "run-switch.transfer-returned-invalid-evidence"
@@ -206,12 +207,12 @@ def _awaiting_final_verification(tmp_path, engine, *, distributed=False):
     with sessions() as session:
         run = session.scalar(select(RecipeRun))
         assert run is not None
-        assert run.state == "running" and run.route_state == "pending"
+        assert run.state == LifecycleState.RUNNING and run.route_state == "pending"
         run_id = run.id
     mark_current_exact_observations(sessions, run_id, NOW)
     service.tick()
     waiting = service.get(operation.operation_id)
-    assert waiting.state == "running"
+    assert waiting.state == LifecycleState.RUNNING
     assert waiting.result is not None
     assert waiting.result.final_observation is not None
     assert isinstance(waiting.result.final_observation, RunSwitchFinalVerifyResult)
@@ -235,7 +236,7 @@ def test_postgres_running_switch_allows_route_publication_and_survives_restart(
         now[0] += timedelta(seconds=5)
         worker.tick()
     result = restarted.get(operation.operation_id)
-    assert result.state == "succeeded", result.status_reason
+    assert result.state == LifecycleState.SUCCEEDED, result.status_reason
     assert publisher.aliases[-1] == ("qwen",)
     assert result.result is not None
     assert any(
@@ -263,7 +264,7 @@ def test_postgres_final_verification_backs_off_after_durable_deadline(
     )
     restarted.tick()
     waiting = restarted.get(operation.operation_id)
-    assert waiting.state == "running"
+    assert waiting.state == LifecycleState.RUNNING
     assert waiting.result is not None
     assert waiting.result.final_verify_started_at == before.final_verify_started_at
     assert waiting.result.observation_due_at == NOW + timedelta(seconds=360)
@@ -294,8 +295,8 @@ def test_postgres_final_verification_waits_after_accepted_start_deadline(
     assert run_id in expiry_log
 
     expired = service.get(operation.operation_id)
-    assert expired.state == "waiting"
-    assert expired.progress.state == "waiting"
+    assert expired.state == LifecycleState.OBSERVING
+    assert expired.progress.state == LifecycleState.OBSERVING
     assert expired.status_reason is not None
     assert "final-verification-expired" in expired.status_reason
     assert "accepted start deadline" in expired.status_reason
@@ -309,11 +310,11 @@ def test_postgres_final_verification_waits_after_accepted_start_deadline(
     expired_observation = expired.result.final_observation
     assert isinstance(expired_observation, RunSwitchFinalVerifyResult)
     assert expired_observation.final_verified is False
-    assert expired_observation.state == "running"
+    assert expired_observation.state == LifecycleState.RUNNING
     assert expired_observation.route_state == "pending"
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
+        assert run is not None and run.state == LifecycleState.RUNNING
         reservations = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -334,7 +335,7 @@ def test_postgres_final_verification_waits_after_accepted_start_deadline(
     for _ in range(3):
         service.tick()
     recovered = service.get(operation.operation_id)
-    assert recovered.state == "succeeded", recovered.status_reason
+    assert recovered.state == LifecycleState.SUCCEEDED, recovered.status_reason
     assert recovered.result is not None
     assert recovered.result.start_deadline == accepted_deadline
     assert any(
@@ -365,17 +366,17 @@ def test_postgres_final_verification_timeout_hands_run_to_recovery(
 
     assert service.tick() is True
     failed = service.get(operation.operation_id)
-    assert failed.state == "failed"
+    assert failed.state == LifecycleState.FAILED
     assert failed.status_reason is not None
     assert "final-verification-timeout" in failed.status_reason
     assert "exact workload recovery" in failed.status_reason
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         nodes = tuple(session.scalars(select(RunNode).where(RunNode.run_id == run_id)))
-        assert run is not None and run.state == "running"
+        assert run is not None and run.state == LifecycleState.RUNNING
         assert run.route_state == "withdrawn"
         assert run.route_next_attempt_at == now
-        assert nodes and any(node.state == "failed" for node in nodes)
+        assert nodes and any(node.state == LifecycleState.FAILED for node in nodes)
 
 
 def test_postgres_newer_intent_supersedes_parked_final_verification(
@@ -394,7 +395,7 @@ def test_postgres_newer_intent_supersedes_parked_final_verification(
     assert service.tick() is True
 
     expired = service.get(operation.operation_id)
-    assert expired.state == "waiting"
+    assert expired.state == LifecycleState.OBSERVING
     assert expired.result is not None
     next_observation_at = expired.result.observation_due_at
     assert next_observation_at is not None
@@ -409,7 +410,7 @@ def test_postgres_newer_intent_supersedes_parked_final_verification(
     service._clock = lambda: next_observation_at + timedelta(seconds=1)
     assert service.tick() is True
     superseded = service.get(operation.operation_id)
-    assert superseded.state == "cancelled"
+    assert superseded.state == LifecycleState.CANCELLED
     assert superseded.status_reason is not None
     assert "superseded" in superseded.status_reason
 

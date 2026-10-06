@@ -38,7 +38,7 @@ CLI is `vonkctl` unless `VONKCTL` or `--vonkctl` names another.
 
 During every wait, and after each scenario, it reads `fleet activity` and fails
 if any row is in an operator wait (`needs-operator`, or the legacy
-`waiting-for-operator`) without an advertised operator action. A load that is
+`waiting-for-operator` on an older Controller) without an advertised operator action. A load that is
 still not terminal after N minutes fails as a stuck admission.
 
 Exit status: 0 all passed, 1 an invariant failed (each failure is printed),

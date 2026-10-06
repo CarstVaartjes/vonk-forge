@@ -582,7 +582,11 @@ def operation_tokens(
             live(ModelCacheOperation.state, ModelCacheOperation.updated_at)
         ),
         select(ArtifactJob.compiled_contract).where(
-            live(ArtifactJob.state, ArtifactJob.updated_at)
+            # A job still being prepared has no lifecycle state yet.
+            or_(
+                ArtifactJob.state.is_(None),
+                live(ArtifactJob.state, ArtifactJob.updated_at),
+            )
         ),
     )
     found: set[str] = set()

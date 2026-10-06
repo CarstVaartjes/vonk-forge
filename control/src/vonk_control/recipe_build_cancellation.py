@@ -10,9 +10,10 @@ from pydantic import ConfigDict
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_forge_contracts import read_recipe
 
+from . import job_states
 from .agent_jobs import _JsonFlagIsTrue
 from .fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -220,7 +221,13 @@ def lock_build_dependency(
         select(Job).where(
             Job.kind == "recipe.build.v1",
             Job.payload["owner_id"].as_string() == build.id,
-            Job.state.in_(("queued", "running", "waiting-for-operator")),
+            Job.state.in_(
+                job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
+            ),
             _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
         )
     )
@@ -261,7 +268,13 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
                 ),
                 and_(
                     Job.kind == "recipe.image.availability.v2",
-                    Job.state.in_(("queued", "running", "partial")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.BACKOFF,
+                        )
+                    ),
                     Job.payload["runtime"]["builder_node_id"].as_string()
                     == build.builder_node_id,
                     Job.payload["build_input_sha256"].as_string()
@@ -292,7 +305,11 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
         select(FleetProfileApplication)
         .where(
             FleetProfileApplication.state.in_(
-                ("queued", "running", "waiting-for-operator")
+                job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
             ),
             cast(FleetProfileApplication.plan["preparation_decisions"], String).like(
                 f'%"{build.id}"%'

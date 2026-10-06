@@ -1,8 +1,8 @@
 from typing import Literal
 
-FleetProfileApplicationCancellationIntentState = Literal['cancelled', 'cancelling']
+FleetProfileApplicationCancellationIntentState = Literal['cancelled', 'observing']
 
-FLEET_PROFILE_APPLICATION_CANCELLATION_INTENT_STATE_VALUES: set[FleetProfileApplicationCancellationIntentState] = { 'cancelled', 'cancelling',  }
+FLEET_PROFILE_APPLICATION_CANCELLATION_INTENT_STATE_VALUES: set[FleetProfileApplicationCancellationIntentState] = { 'cancelled', 'observing',  }
 
 def check_fleet_profile_application_cancellation_intent_state(value: str) -> FleetProfileApplicationCancellationIntentState:
     if value in FLEET_PROFILE_APPLICATION_CANCELLATION_INTENT_STATE_VALUES:

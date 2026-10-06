@@ -288,12 +288,22 @@ The stored `state` of a lifecycle subject speaks the nine words of
 `LifecycleState` (`queued`, `running`, `observing`, `backoff`, `succeeded`,
 `failed`, `cancelled`, `superseded`, `needs-operator`). The retired spellings
 (`waiting-for-operator`, `cancelling`, `waiting`, `partial`, `expired`) live only
-in the contract's alias table, `STATE_ALIASES`, which says what each one means
+in the contract's alias table, `STATE_ALIASES` (and `JOB_KIND_ALIASES` for the one
+kind of generic job that spells a word differently), which says what each one means
 per subject. Every reader of a stored state goes through
-`vonk_agent_protocol.adopt_state(subject, stored)`, so a row written before the
-rename is adopted when it is read; `input_state(word)` (and the generated
-`STATE_INPUT_ALIASES`) lets an API filter or CLI argument still send a retired
-word for one release. The agent wire keeps its four result words.
+`vonk_agent_protocol.adopt_state(subject, stored)` (selections through
+`stored_words`), so a row written before the rename is adopted when it is read, and
+the Controller rewrites such rows once at startup (`legacy_states.py`);
+`input_state(word)` (and the generated `STATE_INPUT_ALIASES`) lets an API filter or
+CLI argument still send a retired word for one release.
+
+Three things that used to be spelled in a state word are separate typed fields: an
+artifact job's preparation stage (`preparation`: `draft`, `ready`; its state is
+absent until it is submitted), a cancel being driven (`cancel_requested_at`; the
+state stays the core's), and why an attempt is observed (`observation_cause`:
+`reported-unknown` or `lease-lapsed`). A recipe update batch that ended with some
+children done is `failed` with `partial: true`. The agent wire keeps its four result
+words and is mapped to the stored words at one place.
 
 Every agent operation result is one `OperationOutcome`
 (`agent_protocol/src/vonk_agent_protocol/outcome.py`), tagged by `kind`:
@@ -310,10 +320,11 @@ Every agent operation result is one `OperationOutcome`
 
 `AgentResult.state` keeps its four wire words, and the outcome decides which is
 truthful (`done` is `succeeded`, a confirmed cancellation is `cancelled`, any
-other `failed` is `failed`, `unknown` is `waiting-for-operator`); a report whose
-word disagrees with its outcome is refused on both sides. Nothing stored
-changes: the Controller projects a typed outcome back to the body shape every
-stored-row reader already understands.
+other `failed` is `failed`, `unknown` is `waiting-for-operator` on the wire); a
+report whose word disagrees with its outcome is refused on both sides. The
+Controller projects a typed outcome back to the body shape every stored-row reader
+already understands, and stores the unknown report as an `observing` attempt with
+the cause `reported-unknown`.
 
 The Controller reads an agent report through one function,
 `vonk_control/agent_outcome.agent_outcome`. A typed report is the outcome; an

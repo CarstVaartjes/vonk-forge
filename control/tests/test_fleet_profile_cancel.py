@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import AgentResult, LifecycleState
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -561,7 +561,7 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
         actor="admin",
     )
     assert pending.cancellation is not None
-    assert pending.cancellation.state == "cancelling"
+    assert pending.cancellation.state == LifecycleState.OBSERVING
     assert pending.cancellation.dependency == child_id
     assert any(
         effect.operation_id == child_id
@@ -659,7 +659,7 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         actor="admin",
     )
     assert pending.cancellation is not None
-    assert pending.cancellation.state == "cancelling"
+    assert pending.cancellation.state == LifecycleState.OBSERVING
     assert pending.cancellation.dependency == child_id
 
     context = multiprocessing.get_context("spawn")
@@ -683,7 +683,7 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         assert durable.state == "running"
         cancellation_progress = durable.progress.get("cancellation")
         assert isinstance(cancellation_progress, dict)
-        assert cancellation_progress.get("state") == "cancelling"
+        assert cancellation_progress.get("state") == "observing"
         assert parent_job is not None
         assert parent_job.result is not None
         cancellation_result = parent_job.result.get("cancellation")
@@ -775,7 +775,7 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
         actor="admin",
     )
     assert pending.cancellation is not None
-    assert pending.cancellation.state == "cancelling"
+    assert pending.cancellation.state == LifecycleState.OBSERVING
     assert pending.cancellation.dependency == child_id
 
     fresh = service.preview(profile.id)
@@ -934,7 +934,7 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
     receipt = accepted.json()
     assert receipt["state"] == "running"
     assert receipt["cancellation"]["request_key"] == key
-    assert receipt["cancellation"]["state"] == "cancelling"
+    assert receipt["cancellation"]["state"] == "observing"
     assert len(receipt["cancellation"]["cancelled_effects"]) == 1
     lookup_path = f"/api/profile/applications/{application.id}/cancellations/{key}"
     lookup = api.get(lookup_path, headers=_headers(tokens, "administrator"))
@@ -1083,7 +1083,7 @@ def test_pending_profile_cancellation_is_visible_and_filterable_in_activity(
     )
 
     assert detail.status_code == 200, detail.text
-    assert detail.json()["state"] == "cancelling"
+    assert detail.json()["state"] == "observing"
     cancellation = detail.json()["cancellation"]
     assert cancellation["request_key"] == cancel_key
     assert cancellation["actor"] == "administrator"
@@ -1151,7 +1151,7 @@ def test_profile_activity_cancellation_filter_compiles_on_postgres(
 
     assert cancelling.status_code == 200, cancelling.text
     assert cancelling.json()["total"] == 1
-    assert cancelling.json()["operations"][0]["state"] == "cancelling"
+    assert cancelling.json()["operations"][0]["state"] == "observing"
     assert running.status_code == 200, running.text
     assert running.json()["total"] == 0
 
@@ -1168,7 +1168,7 @@ def test_activity_preserves_issued_effect_while_profile_cancellation_waits(
     child_id = active.active_operation_id
     adapter.request_cancellation = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
     adapter.advance = lambda _application_id, **_kwargs: FleetProfileChildOperation(
-        id=child_id, state="running"
+        id=child_id, state=LifecycleState.RUNNING
     )  # type: ignore[method-assign]
     operations = durable_operation_services(
         sessions,
@@ -1191,7 +1191,7 @@ def test_activity_preserves_issued_effect_while_profile_cancellation_waits(
     )
     assert activity.status_code == 200, activity.text
     cancellation = activity.json()["cancellation"]
-    assert activity.json()["state"] == "cancelling"
+    assert activity.json()["state"] == "observing"
     assert cancellation["owner"] == "run-switch"
     assert cancellation["dependency"] == child_id
     assert cancellation["pending_effects"] == [
@@ -1239,7 +1239,7 @@ def test_cancel_during_child_start_keeps_late_start_receipt_from_resuming_profil
                 actor="admin",
             )
             assert requested.cancellation is not None
-            assert requested.cancellation.state == "cancelling"
+            assert requested.cancellation.state == LifecycleState.OBSERVING
             assert requested.cancellation.owner == "run-switch"
             assert requested.cancellation.dependency == active_operation_id
             assert any(
@@ -1267,7 +1267,7 @@ def test_cancel_during_child_start_keeps_late_start_receipt_from_resuming_profil
     late = service.application(application.id)
     assert late.state == "running"
     assert late.cancellation is not None
-    assert late.cancellation.state == "cancelling"
+    assert late.cancellation.state == LifecycleState.OBSERVING
     assert late.current_operation_id == application.id
 
     assert service.tick() is True
@@ -1310,7 +1310,7 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
 
     def pending_child(application_id: str, *, session) -> FleetProfileChildOperation:
         observations.append(application_id)
-        return FleetProfileChildOperation(id=child_id, state="running")
+        return FleetProfileChildOperation(id=child_id, state=LifecycleState.RUNNING)
 
     adapter.advance = pending_child  # type: ignore[method-assign]
     retries: list[str] = []
@@ -1324,7 +1324,7 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
     assert retries == [application.id]
     pending = service.application(application.id).cancellation
     assert pending is not None
-    assert pending.state == "cancelling"
+    assert pending.state == LifecycleState.OBSERVING
     assert pending.pending_effects[0].operation_id == child_id
     progress_cancellation = service.application(application.id).progress.cancellation
     assert progress_cancellation is not None
@@ -1464,7 +1464,9 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     ) -> FleetProfileChildOperation:
         if application_id == latest_id:
             observations.append(application_id)
-            return FleetProfileChildOperation(id=active_child_id, state="running")
+            return FleetProfileChildOperation(
+                id=active_child_id, state=LifecycleState.RUNNING
+            )
         return original_advance(application_id, session=session)
 
     adapter.advance = observe_pending  # type: ignore[method-assign]
@@ -1479,7 +1481,7 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     assert observations == [latest_id]
     cancellation = service.application(latest_id).cancellation
     assert cancellation is not None
-    assert cancellation.state == "cancelling"
+    assert cancellation.state == LifecycleState.OBSERVING
     assert cancellation.pending_effects[0].operation_id == active_child_id
 
 

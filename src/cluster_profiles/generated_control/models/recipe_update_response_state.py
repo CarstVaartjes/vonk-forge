@@ -1,8 +1,8 @@
 from typing import Literal
 
-RecipeUpdateResponseState = Literal['cancelled', 'cancelling', 'failed', 'partial', 'queued', 'running', 'succeeded']
+RecipeUpdateResponseState = Literal['backoff', 'cancelled', 'failed', 'observing', 'queued', 'running', 'succeeded']
 
-RECIPE_UPDATE_RESPONSE_STATE_VALUES: set[RecipeUpdateResponseState] = { 'cancelled', 'cancelling', 'failed', 'partial', 'queued', 'running', 'succeeded',  }
+RECIPE_UPDATE_RESPONSE_STATE_VALUES: set[RecipeUpdateResponseState] = { 'backoff', 'cancelled', 'failed', 'observing', 'queued', 'running', 'succeeded',  }
 
 def check_recipe_update_response_state(value: str) -> RecipeUpdateResponseState:
     if value in RECIPE_UPDATE_RESPONSE_STATE_VALUES:

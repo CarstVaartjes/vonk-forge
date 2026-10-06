@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_control import job_states
 from vonk_control.jobs import JobService, StaleAttempt
 from vonk_control.lifecycle import Lifecycle, State, transition
 from vonk_control.lifecycle.job import JobAdapter
@@ -64,8 +65,10 @@ def test_a_lapsed_lease_is_claimed_again_and_the_old_attempt_expires(env) -> Non
     second = jobs.claim("w2", 30, kinds=("probe",))
     assert second is not None and second.attempt == 2
     with sessions() as session:
-        attempts = {a.attempt: a.state for a in session.scalars(select(JobAttempt))}
-        assert attempts == {1: "expired", 2: "running"}
+        stored = {a.attempt: a for a in session.scalars(select(JobAttempt))}
+        # The first attempt was interrupted: observed, because its lease lapsed.
+        assert job_states.attempt_lapsed(stored[1])
+        assert stored[1].state == "observing" and stored[2].state == "running"
         assert session.get(Job, job.id).state == "running"
     with pytest.raises(StaleAttempt):
         jobs.succeed(first, {})  # the old fence is closed

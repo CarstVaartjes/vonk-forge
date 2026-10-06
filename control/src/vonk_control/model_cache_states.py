@@ -25,6 +25,13 @@ SUBJECT = LifecycleSubject.MODEL_CACHE_OPERATION
 BACKOFF = LifecycleState.BACKOFF.value
 #: Every stored word of an operation that has not ended.
 LIVE: tuple[str, ...] = live_words(SUBJECT)
+#: An operation a new consumer may attach to or wait on: not ended, and not being
+#: cancelled.  A stored row never says ``observing``; the *view* of one whose
+#: cancellation is being driven does, and such an operation is not joined.
+ACTIVE: tuple[str, ...] = stored_words(
+    SUBJECT,
+    (LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF),
+)
 #: Operations waiting to be (re)started: never started, or interrupted.
 WAITING: tuple[str, ...] = stored_words(
     SUBJECT, (LifecycleState.QUEUED, LifecycleState.BACKOFF)

@@ -88,8 +88,13 @@ def test_a_word_the_subject_keeps_outside_the_vocabulary_is_left_to_its_owner() 
     # A subject that never used a retired word does not adopt it silently.
     assert adopt_state(LifecycleSubject.JOB_ATTEMPT, "partial") is None
     # Its CHECK constraint never admitted these.
-    for word in ("waiting", "cancelling", "expired"):
+    for word in ("waiting", "expired"):
         assert adopt_state(LifecycleSubject.FLEET_PROFILE_APPLICATION, word) is None
+    # ``cancelling`` is the state of an application's cancellation intent (its
+    # progress document): a cancel being driven is observed.
+    assert adopt_state(
+        LifecycleSubject.FLEET_PROFILE_APPLICATION, "cancelling"
+    ) == AdoptedState(LifecycleState.OBSERVING, cancel_requested=True)
 
 
 def test_callers_may_still_send_a_retired_word_as_input() -> None:
@@ -156,3 +161,25 @@ def test_an_old_attempt_word_also_yields_why_it_is_observed() -> None:
     )
     assert legacy_observation_cause("expired") is ObservationCause.LEASE_LAPSED
     assert legacy_observation_cause("failed") is None
+
+
+def test_draft_and_ready_are_preparation_not_lifecycle_state() -> None:
+    from vonk_agent_protocol import ArtifactPreparation, legacy_preparation
+
+    assert legacy_preparation("draft") is ArtifactPreparation.DRAFT
+    assert legacy_preparation("ready") is ArtifactPreparation.READY
+    assert legacy_preparation("queued") is None and legacy_preparation(None) is None
+    assert adopt_state(LifecycleSubject.ARTIFACT_JOB, "draft") is None
+
+
+def test_a_kind_of_the_job_table_may_spell_a_word_differently() -> None:
+    from vonk_agent_protocol import JOB_KIND_ALIASES, stored_words
+
+    job = LifecycleSubject.JOB
+    # Image-availability jobs retry as ``partial``; an update batch ends ``partial``.
+    assert adopt_state(job, "partial") == AdoptedState(LifecycleState.BACKOFF)
+    batch = next(iter(JOB_KIND_ALIASES))
+    assert adopt_state(job, "partial", batch) == AdoptedState(LifecycleState.FAILED)
+    assert "partial" in stored_words(job, [LifecycleState.FAILED], batch)
+    assert "partial" not in stored_words(job, [LifecycleState.FAILED])
+    assert "partial" in stored_words(job, [LifecycleState.BACKOFF])

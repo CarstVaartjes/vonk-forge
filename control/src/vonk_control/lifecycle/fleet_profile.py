@@ -55,8 +55,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LEGACY_WAIT_STATE
+from vonk_agent_protocol import LifecycleState
 
+from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..fleet_profile_contract import FleetProfileApplicationProgress
 from ..models import FleetProfileApplication, Job
@@ -82,8 +83,8 @@ from .types import (
 )
 
 KIND = "fleet-profile"
-WAITING = LEGACY_WAIT_STATE
-SUPERSEDED = "superseded"
+WAITING = LifecycleState.NEEDS_OPERATOR.value
+SUPERSEDED = LifecycleState.SUPERSEDED.value
 KEEP: Any = object()
 #: How long a cancel may spend stopping and observing its children before it ends
 #: with their effect recorded as unknown: the authority an agent cancellation of a
@@ -129,7 +130,7 @@ def doc_state(document: dict[str, object], state: str) -> None:
 
 def cancellation_state(progress: dict[str, object], state: str) -> None:
     """The only writer of a cancellation's ``state`` (a record of the cancel the
-    application's own state follows: ``cancelling`` until it ends, then ``cancelled``)."""
+    application's own state follows: ``observing`` until it ends, then ``cancelled``)."""
 
     cancellation = progress.get("cancellation")
     if isinstance(cancellation, dict):
@@ -228,7 +229,7 @@ class FleetProfileAdapter:
             state = State.RUNNING
             if document is not None and document.observation_due_at is not None:
                 due = aware(document.observation_due_at)
-        elif stored == WAITING:
+        elif job_states.means(stored, State.NEEDS_OPERATOR):
             state = State.NEEDS_OPERATOR
         elif stored == "succeeded":
             state = State.SUCCEEDED
@@ -662,7 +663,9 @@ class FleetProfileAdapter:
     def retry_pending(application: FleetProfileApplication) -> bool:
         """An application that ended (or waits) while a retry is still scheduled."""
 
-        return application.state in {State.FAILED.value, WAITING}
+        return application.state == State.FAILED.value or job_states.means(
+            application.state, State.NEEDS_OPERATOR
+        )
 
     def supersede(
         self,
@@ -888,15 +891,8 @@ def legacy_supersession(
 def _recorded(identity: str, stored: str) -> Lifecycle:
     """A child that finished (or whose state was recorded): its stored state."""
 
-    state = {
-        "queued": State.QUEUED,
-        "running": State.RUNNING,
-        "waiting": State.OBSERVING,
-        "succeeded": State.SUCCEEDED,
-        "failed": State.FAILED,
-        "cancelled": State.CANCELLED,
-        "expired": State.FAILED,
-    }.get(stored, State.OBSERVING)  # a state it does not know is observed, never parked
+    # A state it does not know is observed, never parked.
+    state = job_states.core(stored) or State.OBSERVING
     effect = {
         State.SUCCEEDED: Effect.ESTABLISHED,
         State.CANCELLED: Effect.STOPPED,
