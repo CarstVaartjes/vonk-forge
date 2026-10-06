@@ -5317,6 +5317,81 @@ def test_failed_multinode_start_queues_idempotent_stop_for_every_rank(
         assert _required(session.get(RecipeRun, start.owner_id)).state == "stopping"
 
 
+@pytest.mark.parametrize("newer_intent", ["none", "all-nodes", "one-node"])
+def test_every_failed_start_leaves_what_it_launched_stoppable_or_queues_its_stop(
+    tmp_path: Path, newer_intent: str
+) -> None:
+    """A Start that ended failed may have launched ranks. Whatever intent owns the
+    Sparks by then, the run is never left ``failed`` (which nothing stops): a stop
+    is queued (under the intent that owns the Sparks now, never taking a new one),
+    or, with no single owner, the run stays stoppable for its owner."""
+
+    from vonk_control.models import STOPPABLE_RUN_STATES
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    install_plan = service.preview_install(mapping_id, build_id)
+    install = service.install(
+        install_plan,
+        plan_digest=install_plan.plan_digest,
+        actor="admin",
+        request_id="f" * 35 + "0",
+    )
+    for node in nodes:
+        service.record_node_result(
+            install.id, node, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    run_plan = service.preview_run(install.owner_id, "qwen-gang")
+    start = service.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        actor="admin",
+        request_id="f" * 35 + "1",
+    )
+    with sessions.begin() as session:
+        agent_nodes = tuple(
+            session.scalars(select(AgentNode).order_by(AgentNode.node_id))
+        )
+        bound = agent_nodes[0].workload_intent_ordinal
+        if newer_intent == "all-nodes":
+            for node in agent_nodes:
+                node.workload_intent_ordinal = bound + 1
+        elif newer_intent == "one-node":
+            agent_nodes[0].workload_intent_ordinal = bound + 1
+        owner_ordinals = {node.workload_intent_ordinal for node in agent_nodes}
+    for node in nodes:
+        service.record_node_result(
+            start.id, node, succeeded=False, evidence={"code": "start.failed"}
+        )
+
+    with sessions() as session:
+        run = _required(session.get(RecipeRun, start.owner_id))
+        cleanups = tuple(
+            session.scalars(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"].as_string() == start.owner_id,
+                )
+            )
+        )
+        assert run.state in STOPPABLE_RUN_STATES, run.state
+        if newer_intent == "one-node":
+            # No single intent owns both Sparks: nothing may take authority over
+            # either, and the run stays stoppable for whoever does.
+            assert cleanups == () and run.state == "lost"
+        else:
+            assert len(cleanups) == 1 and run.state == "stopping"
+            assert (
+                cleanups[0].payload["workload_intent_ordinal"] == owner_ordinals.pop()
+            )
+            # The cleanup joined the owning intent: no Spark moved to a new one.
+            assert {
+                node.workload_intent_ordinal
+                for node in session.scalars(select(AgentNode))
+            } == ({bound} if newer_intent == "none" else {bound + 1})
+
+
 def test_postgres_ordinary_stop_grant_uses_the_queued_run_plan(
     tmp_path: Path, postgres_engine
 ) -> None:

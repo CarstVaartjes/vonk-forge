@@ -497,6 +497,30 @@ def _intent_is_current(session: Session, ordinal: int, targets: Sequence[str]) -
     )
 
 
+def _shared_workload_intent(session: Session, targets: Sequence[str]) -> int | None:
+    """The one workload intent every target Spark currently shares, if there is one.
+
+    A cleanup of what an older, superseded order may have launched is admitted as
+    a child of the intent that owns the Sparks now: it takes no new intent and so
+    never cancels the newer work, and the stale ordinal of the failed order (which
+    would be refused) is not needed.
+    """
+
+    nodes = tuple(
+        session.scalars(
+            select(AgentNode)
+            .where(AgentNode.node_id.in_(targets))
+            .order_by(AgentNode.node_id)
+            .with_for_update(of=AgentNode)
+        )
+    )
+    ordinals = {node.workload_intent_ordinal for node in nodes}
+    if len(nodes) != len(set(targets)) or len(ordinals) != 1:
+        return None
+    ordinal = ordinals.pop()
+    return ordinal if ordinal >= 1 else None
+
+
 def _workload_owner_scope(
     session: Session, kind: str, owner_id: str
 ) -> tuple[str, ...]:
@@ -4585,16 +4609,32 @@ class RecipeOperationService:
                     intent_current = _intent_is_current(
                         session, _bound_workload_intent(job), job.targets
                     )
+                    # Whatever the failed Start launched is stopped, even when a
+                    # newer intent took the Sparks over meanwhile: the cleanup is
+                    # admitted under the intent that owns them now.  Without a
+                    # single owning intent the run stays ``lost`` (stoppable), so
+                    # the owner of the Sparks still finds it; it is never left
+                    # ``failed``, which nothing stops.
+                    cleanup_ordinal = (
+                        _bound_workload_intent(job)
+                        if intent_current
+                        else _shared_workload_intent(session, job.targets)
+                    )
                     if not intent_current:
-                        run.state = "failed"
+                        run.state = "stopping" if cleanup_ordinal else "lost"
                         run.route_error = (
-                            "start cleanup superseded by a newer workload intent"
+                            "start failed after a newer workload intent took over; "
+                            + (
+                                "cleanup queued"
+                                if cleanup_ordinal
+                                else "cleanup awaits the owning intent"
+                            )
                         )
                     if (
                         not session.scalar(
                             select(Job.id).where(Job.request_id == cleanup_request_id)
                         )
-                        and intent_current
+                        and cleanup_ordinal is not None
                     ):
                         stop_nodes = tuple(
                             session.scalars(
@@ -4656,7 +4696,7 @@ class RecipeOperationService:
                             ),
                             authority_digest=run.plan_digest.removeprefix("sha256:"),
                             now=now,
-                            workload_intent_ordinal=_bound_workload_intent(job),
+                            workload_intent_ordinal=cleanup_ordinal,
                         )
                         cleanup_queued = True
                 else:
