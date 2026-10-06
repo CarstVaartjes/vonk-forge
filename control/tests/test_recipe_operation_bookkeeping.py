@@ -30,6 +30,7 @@ from vonk_agent_protocol import (
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.job_documents import DistributedRecoveryMarker
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
 from vonk_control.models import (
     AgentOperation,
@@ -499,17 +500,21 @@ def test_a_recovery_with_damaged_authority_is_retired_not_raised(tmp_path) -> No
     with sessions.begin() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
         stored.route_state = "withdrawn"
+        stored.plan = {"damaged": True}
+        recovery = DistributedRecoveryMarker(
+            schema_version=1, failed_rank=0, deadline=NOW.isoformat()
+        )
         outcome = service.queue_recovery_stop_in_session(
             session,
             stored.id,
-            recovery_context={"schema_version": 1},
+            recovery_context=recovery,
             workload_intent_ordinal=1,
             now=NOW,
         )
         not_current = service.queue_recovery_stop_in_session(
             session,
             "no-such-run",
-            recovery_context={},
+            recovery_context=recovery,
             workload_intent_ordinal=1,
             now=NOW,
         )

@@ -1150,7 +1150,9 @@ class RecipeOperationService:
             if (
                 existing.state not in {"succeeded", "cancelled"}
                 and not force
-                and not (_cancel_requested(existing))
+                and not isinstance(
+                    existing.lifecycle_result, RecipeOperationCancellationResult
+                )
             ):
                 with self._sessions() as session:
                     succeeded = self._successful_build_job_in_session(
@@ -4805,7 +4807,8 @@ class RecipeOperationService:
             return "recipe build cleanup authority changed"
         cancellation = build_cancellation(original_job)
         if (
-            cancellation is None
+            requested is None
+            or cancellation is None
             or cancellation.cancel_request_id != requested.cancel_request_id
             or cancellation.cancel_actor != requested.cancel_actor
             or cancellation.cancel_requested_at != requested.cancel_requested_at
@@ -4931,6 +4934,7 @@ class RecipeOperationService:
                         if node_id in unproven
                         else node_result.reason[:512]
                         if isinstance(node_result, AgentFailureResult)
+                        and node_result.reason is not None
                         else "agent build failed"
                     )
                     build.updated_at = now
@@ -8657,7 +8661,7 @@ def _parent_execution_mode(
 
 def _parent_force_rebuild(job: Job) -> bool:
     parent = _recorded_parent(job)
-    return isinstance(parent, RecipeBuildParent) and parent.force_rebuild
+    return isinstance(parent, RecipeBuildParent) and parent.force_rebuild is True
 
 
 def _parent_recovery(job: Job) -> DistributedRecoveryMarker | None:
