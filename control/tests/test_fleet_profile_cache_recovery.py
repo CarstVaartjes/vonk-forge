@@ -387,6 +387,7 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_malformed_failed_profile_does_not_block_unrelated_queued_work(
     tmp_path: Path,
 ) -> None:

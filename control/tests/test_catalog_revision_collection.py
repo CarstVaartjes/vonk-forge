@@ -495,6 +495,7 @@ def test_a_payload_naming_the_revision_keeps_it_whatever_contract_wrote_it(
     assert not catalog.exists(finished_long_ago)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_the_selected_profile_application_keeps_the_revision_it_loaded(
     catalog: Catalog,
 ) -> None:

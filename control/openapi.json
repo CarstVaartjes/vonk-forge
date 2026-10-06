@@ -3002,7 +3002,22 @@
             "type": "string"
           },
           "knobs": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
             "maxProperties": 64,
             "title": "Knobs",
             "type": "object"
@@ -9384,37 +9399,6 @@
         "title": "JobResumeResponse",
         "type": "object"
       },
-      "JsonValue": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "items": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "type": "array"
-          },
-          {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
       "LibraryAssessmentCode": {
         "description": "Why a library entry is not assessed runnable on the current fleet.",
         "enum": [
@@ -11001,7 +10985,26 @@
             "type": "object"
           },
           "parameters": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue",
+                  "x-vonk-passthrough": "A structured engine argument value is the upstream recipe's own JSON (RuntimeArgumentValue in vonk_forge_contracts); the engine, not the Controller, defines its structure, and the mapping must keep it exact."
+                }
+              ]
+            },
             "maxProperties": 128,
             "title": "Parameters",
             "type": "object"
@@ -14704,7 +14707,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/vonk_forge_contracts__recipe__JsonValue"
                 },
                 "maxProperties": 32,
                 "minProperties": 1,
@@ -22266,13 +22269,13 @@
           },
           {
             "items": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/vonk_forge_contracts__recipe__JsonValue"
             },
             "type": "array"
           },
           {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/vonk_forge_contracts__recipe__JsonValue"
             },
             "type": "object"
           }
@@ -23967,6 +23970,38 @@
         ],
         "title": "WaitVerdict",
         "type": "string"
+      },
+      "pydantic__types__JsonValue": {},
+      "vonk_forge_contracts__recipe__JsonValue": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/vonk_forge_contracts__recipe__JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/vonk_forge_contracts__recipe__JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "securitySchemes": {
@@ -30619,6 +30654,18 @@
     }
   },
   "x-vonk-json-columns": {
+    "fleet_profile_applications.plan": [
+      "FleetProfilePreview"
+    ],
+    "fleet_profile_applications.progress": [
+      "FleetProfileApplicationProgress"
+    ],
+    "fleet_profile_applications.result": [
+      "FleetProfileApplicationResult"
+    ],
+    "fleet_profiles.assignments": [
+      "FleetProfileAssignmentInput"
+    ],
     "node_inventory_snapshots.network_interfaces": [
       "NetworkInterface"
     ],

@@ -1597,6 +1597,7 @@ def _crash_rounds(sessions, service, clock, reasons: list[str]) -> int:
         return len(tuple(session.scalars(select(FleetProfileApplication))))
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_failure_that_changes_keeps_being_retried(tmp_path: Path) -> None:
     """Retries are for causes that change: different failures never use up the
     budget."""

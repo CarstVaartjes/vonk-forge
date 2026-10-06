@@ -51,30 +51,38 @@ from .strict_json import read_stored_document, stored_document_detail
 _LOG = logging.getLogger(__name__)
 
 
-class ExternalPassthrough(RootModel[dict[str, JsonValue]]):
-    """A JSON object whose structure belongs to someone else.
+@dataclass(frozen=True, slots=True)
+class ExternalPassthrough:
+    """Annotation marking a JSON level whose structure belongs to someone else.
 
-    Subclass it with a written reason that names the external owner and says
-    why the Controller may not type the inside (an upstream document, a
-    third-party API answer).  The reason is mandatory: a subclass without one
-    does not import.  The registry guard treats a field annotated with a
-    subclass as a declared leaf and does not look inside it; everything else in
-    a contract must be typed all the way down.
+    ``EngineArgument = Annotated[JsonValue, ExternalPassthrough("...")]`` keeps
+    the value exactly as received while saying, in writing, whose it is and why
+    the Controller may not type the inside (an upstream document, a third-party
+    answer).  The reason is mandatory.  The registry guard treats an annotated
+    level as a declared leaf and does not look inside it; everything else in a
+    contract must be typed all the way down.  The reason is published in the
+    JSON Schema as ``x-vonk-passthrough``.
     """
 
-    reason: ClassVar[str] = ""
-    _declared: ClassVar[list[type[ExternalPassthrough]]] = []
+    reason: str
 
-    def __init_subclass__(cls, *, reason: str = "", **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-        if not reason.strip():
-            raise TypeError(f"{cls.__name__} must declare a reason for its passthrough")
-        cls.reason = reason.strip()
-        ExternalPassthrough._declared.append(cls)
+    _declared: ClassVar[list[ExternalPassthrough]] = []
+
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise ValueError("an external passthrough must declare its reason")
+        ExternalPassthrough._declared.append(self)
 
     @classmethod
-    def declared(cls) -> tuple[type[ExternalPassthrough], ...]:
+    def declared(cls) -> tuple[ExternalPassthrough, ...]:
         return tuple(ExternalPassthrough._declared)
+
+    def __get_pydantic_json_schema__(
+        self, core_schema: Any, handler: Any
+    ) -> dict[str, Any]:
+        schema = dict(handler(core_schema))
+        schema["x-vonk-passthrough"] = self.reason.strip()
+        return schema
 
 
 #: What a contract may name for one stored document: a model, a union or a list
@@ -436,6 +444,8 @@ def _walk(tp: Any, path: str, seen: set[Any], out: list[_Violation]) -> None:
         return
     origin = get_origin(tp)
     if origin is Annotated:
+        if any(isinstance(item, ExternalPassthrough) for item in get_args(tp)[1:]):
+            return
         _walk(get_args(tp)[0], path, seen, out)
         return
     if origin is Literal:
@@ -467,11 +477,6 @@ def _walk(tp: Any, path: str, seen: set[Any], out: list[_Violation]) -> None:
         _walk(tp._type, path, seen, out)  # type: ignore[attr-defined]
         return
     if isinstance(tp, type) and issubclass(tp, BaseModel):
-        if issubclass(tp, ExternalPassthrough) and tp is not ExternalPassthrough:
-            return
-        if tp is ExternalPassthrough:
-            out.append((path, "undeclared ExternalPassthrough"))
-            return
         if tp.__module__.split(".")[0] == "vonk_forge_contracts":
             return
         if tp in seen:
@@ -488,8 +493,7 @@ def contract_models(binding: JsonColumn) -> list[type[BaseModel]]:
     """Every Pydantic model a column's contract names at its top level.
 
     A union, list or mapping contract contributes its member models; the
-    models' own nested models come with their schemas.  Passthroughs are not
-    published as models, and neither are models of an external package.
+    models' own nested models come with their schemas.  Models of an external package.
     """
 
     found: dict[type[BaseModel], None] = {}
@@ -505,7 +509,6 @@ def contract_models(binding: JsonColumn) -> list[type[BaseModel]]:
         elif (
             isinstance(tp, type)
             and issubclass(tp, BaseModel)
-            and not issubclass(tp, ExternalPassthrough)
             and tp.__module__.split(".")[0] != "vonk_forge_contracts"
         ):
             found[tp] = None

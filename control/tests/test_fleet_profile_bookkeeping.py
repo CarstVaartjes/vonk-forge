@@ -185,6 +185,7 @@ def test_damaged_progress_is_rebuilt_from_the_row_receipt() -> None:
     assert rebuilt.completed_steps == row.current_step
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_damaged_plan_and_result_are_retired_or_rebuilt_never_raised() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)

@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Annotated
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from vonk_control.lifecycle.evidence import Residue
@@ -82,7 +83,10 @@ def test_no_contract_contains_an_untyped_level() -> None:
 
 def test_every_passthrough_states_its_reason() -> None:
     for declared in ExternalPassthrough.declared():
-        assert declared.reason.strip(), declared.__name__
+        assert declared.reason.strip()
+
+
+Reasoned = Annotated[JsonValue, ExternalPassthrough("owned by the upstream registry")]
 
 
 def test_walker_finds_each_kind_of_untyped_level() -> None:
@@ -90,9 +94,6 @@ def test_walker_finds_each_kind_of_untyped_level() -> None:
         anything: object
         mapping: dict[str, object]
         nested: list[dict[str, list[object]]]
-
-    class Reasoned(ExternalPassthrough, reason="owned by the upstream registry"):
-        pass
 
     class Typed(BaseModel):
         model_config = ConfigDict(extra="forbid")
@@ -104,11 +105,9 @@ def test_walker_finds_each_kind_of_untyped_level() -> None:
     assert untyped_leaves(Typed) == []
 
 
-def test_passthrough_without_a_reason_does_not_import() -> None:
-    with pytest.raises(TypeError):
-
-        class Unreasoned(ExternalPassthrough):
-            pass
+def test_passthrough_without_a_reason_is_refused() -> None:
+    with pytest.raises(ValueError):
+        ExternalPassthrough("  ")
 
 
 class _Marker(BaseModel):

@@ -6822,7 +6822,9 @@ class FleetProfileService:
                     ),
                     progress=progress,
                     result=(
-                        {"changed": False, "completed_steps": 0}
+                        FleetProfileApplicationResult(
+                            changed=False, completed_steps=0
+                        ).model_dump(mode="json")
                         if not preview.steps
                         else None
                     ),
@@ -6843,7 +6845,9 @@ class FleetProfileService:
                 row.current_operation_id = None
                 row.progress = progress
                 row.result = (
-                    {"changed": False, "completed_steps": 0}
+                    FleetProfileApplicationResult(
+                        changed=False, completed_steps=0
+                    ).model_dump(mode="json")
                     if not preview.steps
                     else None
                 )
@@ -8617,7 +8621,9 @@ class FleetProfileService:
                     from_json=True,
                 )
                 row.progress = progress.model_dump(mode="json")
-                row.result = {"changed": bool(steps), "completed_steps": len(steps)}
+                row.result = FleetProfileApplicationResult(
+                    changed=bool(steps), completed_steps=len(steps)
+                ).model_dump(mode="json")
                 row.updated_at = now
                 return True
             raw_step = steps[row.current_step]

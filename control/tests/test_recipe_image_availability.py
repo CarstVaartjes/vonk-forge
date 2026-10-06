@@ -1130,6 +1130,7 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
         assert build is not None and build.state == "building"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_recipe_removal_reference_scan_enforces_accumulated_owner_budget(
     tmp_path: Path, monkeypatch
 ) -> None:

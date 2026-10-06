@@ -2031,7 +2031,7 @@ export interface components {
             kind: "generation" | "embedding" | "job";
             /** Knobs */
             knobs?: {
-                [key: string]: unknown;
+                [key: string]: string | number | boolean;
             };
             /** Max Batch Tokens */
             max_batch_tokens?: number | null;
@@ -4024,9 +4024,6 @@ export interface components {
             /** State */
             state: string;
         };
-        JsonValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
-            [key: string]: components["schemas"]["JsonValue"];
-        } | null;
         /**
          * LibraryAssessmentCode
          * @description Why a library entry is not assessed runnable on the current fleet.
@@ -4507,7 +4504,7 @@ export interface components {
             };
             /** Parameters */
             parameters?: {
-                [key: string]: unknown;
+                [key: string]: string | number | boolean | components["schemas"]["pydantic__types__JsonValue"];
             };
             /** Placement Digest */
             placement_digest: string;
@@ -5645,7 +5642,7 @@ export interface components {
         RecipeHttpServingRequest: {
             /** Body */
             body?: {
-                [key: string]: components["schemas"]["JsonValue"];
+                [key: string]: components["schemas"]["vonk_forge_contracts__recipe__JsonValue"];
             } | null;
             /**
              * Method
@@ -7945,8 +7942,8 @@ export interface components {
             /** Verified Oci Layout Sha256 */
             verified_oci_layout_sha256: string;
         };
-        RuntimeArgumentValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
-            [key: string]: components["schemas"]["JsonValue"];
+        RuntimeArgumentValue: string | number | boolean | components["schemas"]["vonk_forge_contracts__recipe__JsonValue"][] | {
+            [key: string]: components["schemas"]["vonk_forge_contracts__recipe__JsonValue"];
         };
         /**
          * RuntimeImageCode
@@ -8470,6 +8467,10 @@ export interface components {
          * @enum {string}
          */
         WaitVerdict: "KEEP" | "SELF-HEAL" | "FIX-ACTION" | "DERIVED";
+        pydantic__types__JsonValue: unknown;
+        vonk_forge_contracts__recipe__JsonValue: string | number | boolean | components["schemas"]["vonk_forge_contracts__recipe__JsonValue"][] | {
+            [key: string]: components["schemas"]["vonk_forge_contracts__recipe__JsonValue"];
+        } | null;
     };
     responses: never;
     parameters: never;

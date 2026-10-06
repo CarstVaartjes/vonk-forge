@@ -370,6 +370,7 @@ def test_a_cancel_survives_a_restart_in_the_middle(tmp_path) -> None:
     assert world.service.application(world.id).state == "cancelled"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_cancel_completes_when_its_evidence_cannot_be_read(tmp_path) -> None:
     """Unreadable evidence of what was issued is an unknown effect, not a reason to
     park the cancel: the load ends ``cancelled`` and the document is retained."""
@@ -473,6 +474,7 @@ def test_a_restart_in_the_middle_of_a_load_is_safe(tmp_path) -> None:
         assert world.service.application(world.id).state != "failed"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_an_application_row_is_written_only_through_the_adapter() -> None:
     """The class, guarded: the module no longer writes an application's state."""
 

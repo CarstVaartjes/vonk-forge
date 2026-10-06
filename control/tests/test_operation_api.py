@@ -621,6 +621,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     assert filtered.json()["operations"][0]["id"] == newest_id
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_activity_page_survives_one_unreadable_profile_application(tmp_path) -> None:
     """A damaged record must not fail the global Activity page or its detail."""
 

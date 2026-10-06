@@ -76,6 +76,16 @@ def _load_tools_plugin(name: str):
     return sys.modules[module_name]
 
 
+@pytest.fixture
+def damaged_json_rows() -> Iterator[None]:
+    """Let a test write JSON documents its contract refuses (damaged or retired rows)."""
+
+    from vonk_control.stored_json import write_guard_mode
+
+    with write_guard_mode(strict=False):
+        yield
+
+
 def pytest_addoption(
     parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager
 ) -> None:

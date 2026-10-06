@@ -439,6 +439,7 @@ def test_installation_a_saved_profile_points_to_goes_after_the_unpointed(
     assert pointed in lifecycle.removed
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_of_the_loaded_profile_is_never_evicted(
     world: Catalog,
 ) -> None:
@@ -794,6 +795,7 @@ def test_admission_relief_removes_the_installations_of_a_model_together_and_free
             )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_load_waiting_to_be_admitted_does_not_keep_what_it_waits_for_space_from(
     world: Catalog,
 ) -> None:
@@ -829,6 +831,7 @@ def test_a_load_waiting_to_be_admitted_does_not_keep_what_it_waits_for_space_fro
     assert lifecycle.removed == [installation]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_load_that_issued_something_still_keeps_the_installations_it_uses(
     world: Catalog,
 ) -> None:
@@ -910,6 +913,7 @@ def _application(
             )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_a_profile_load_in_flight_on_its_sparks_is_kept(
     world: Catalog,
 ) -> None:
@@ -927,6 +931,7 @@ def test_installation_a_profile_load_in_flight_on_its_sparks_is_kept(
     assert _kept(result, "live operation") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_the_selected_profile_application_names_is_kept(
     world: Catalog,
 ) -> None:
@@ -965,6 +970,7 @@ def test_a_load_accepted_before_the_removal_is_queued_stops_the_removal(
     assert _kept(result, "live operation") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_profile_saved_before_the_removal_is_queued_stops_the_removal(
     world: Catalog,
 ) -> None:
@@ -985,6 +991,7 @@ def test_a_profile_saved_before_the_removal_is_queued_stops_the_removal(
     assert _kept(result, "profile") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_is_kept_while_a_profile_cannot_be_read(world: Catalog) -> None:
     """Nothing is proven unused when a profile is unreadable (fail closed)."""
 
@@ -1982,6 +1989,7 @@ def test_an_operation_that_just_finished_makes_an_installation_recent_not_kept(
     assert lifecycle.removed == [used]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_load_waiting_for_this_disk_does_not_keep_the_installations_it_needs_gone(
     world: Catalog,
 ) -> None:
@@ -2015,6 +2023,7 @@ def test_a_load_waiting_for_this_disk_does_not_keep_the_installations_it_needs_g
     assert lifecycle.removed == [installation]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_refusal_says_what_stays_and_why(world: Catalog) -> None:
     """Catches 'only N bytes can be removed' with no word on what is kept."""
 

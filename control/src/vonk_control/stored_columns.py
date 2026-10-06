@@ -16,7 +16,14 @@ from vonk_agent_protocol import CacheReferenceReason
 from vonk_agent_protocol.inventory import Capability, NetworkInterface
 from vonk_agent_protocol.route_activation import ActivationMarker
 
-from .fleet_profile_contract import LabelName, LabelValue
+from .fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileApplicationResult,
+    FleetProfileAssignmentInput,
+    FleetProfilePreview,
+    LabelName,
+    LabelValue,
+)
 from .recipe_execution_contract import StoredRunEndpoint
 from .stored_documents import RouteClaimMarker
 from .stored_json import bind
@@ -39,5 +46,15 @@ bind(
     "route_publications",
     "activation_marker",
     ActivationMarker | RouteClaimMarker,
+    nullable=True,
+)
+
+bind("fleet_profiles", "assignments", list[FleetProfileAssignmentInput])
+bind("fleet_profile_applications", "plan", FleetProfilePreview)
+bind("fleet_profile_applications", "progress", FleetProfileApplicationProgress)
+bind(
+    "fleet_profile_applications",
+    "result",
+    FleetProfileApplicationResult,
     nullable=True,
 )
