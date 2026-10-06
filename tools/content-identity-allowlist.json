@@ -612,7 +612,7 @@
     },
     {
       "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._read_removal_result",
+      "function": "RecipeImageAvailabilityService._stored_removal_result",
       "kind": "provenance_comparison",
       "expression": "result.recipe_revision_id != intent.recipe_revision_id",
       "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
