@@ -15,8 +15,10 @@
       "control/src/vonk_control/artifact_lifecycle.py",
       "control/src/vonk_control/artifact_reference_scan.py",
       "control/src/vonk_control/fleet_profiles.py",
+      "control/src/vonk_control/image_store_collection.py",
       "control/src/vonk_control/library_projection.py",
       "control/src/vonk_control/model_cache.py",
+      "control/src/vonk_control/recipe_operation_phases.py",
       "control/src/vonk_control/recipe_operations.py",
       "control/src/vonk_control/run_switch_operations.py"
     ],
@@ -54,7 +56,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 203,
-    "unaudited": 382,
+    "unaudited": 366,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -1468,14 +1470,6 @@
       ]
     },
     {
-      "family": "image_store_collection.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record.",
-      "sites": [
-        ["control/src/vonk_control/image_store_collection.py", "OciImageStoreError", "ImageStoreCollector._receipt_addresses", "image-receipts-cannot-be-listed-so-nothing-was-removed", 1]
-      ]
-    },
-    {
       "family": "install_admission.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InstallPlanConflict validates a contract or request.",
@@ -1596,13 +1590,7 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore._copy", "image_store.copy_failed", 3],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore._copy", "image_store.import_incomplete", 1],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore._lock", "another-image-is-being-stored", 1],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore._referenced_blobs", "manifest", 2],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.import_reference", "image_store.import_incomplete", 1],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.import_reference", "image_store.reference_unpinned", 1],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.read", "image_store.manifest_unreadable", 1]
+        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.import_reference", "image_store.reference_unpinned", 1]
       ]
     },
     {
@@ -3423,14 +3411,6 @@
       ]
     },
     {
-      "family": "agent_operation.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/lifecycle/agent_operation.py", "UnsettledOutcome", "AgentOperationAdapter._stored", "unmapped-lifecycle-state", 1]
-      ]
-    },
-    {
       "family": "model_cache.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
@@ -3466,15 +3446,6 @@
         ["control/src/vonk_control/model_cache.py", "StoredStateTypeDamaged", "_read_removal_checkpoint", "model-removal-payload-is-invalid", 1],
         ["control/src/vonk_control/model_cache.py", "StoredStateTypeDamaged", "_reject_non_json_containers", "manifest-json-must-use-arrays-not-tuples", 1],
         ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._download_one_unique", "message", 2]
-      ]
-    },
-    {
-      "family": "recipe_operation_phases.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/recipe_operation_phases.py", "BookkeepingUnknown", "decode_stored_phases", "stored-operation-phases-are-invalid", 4],
-        ["control/src/vonk_control/recipe_operation_phases.py", "StoredStateTypeDamaged", "decode_stored_phases", "stored-operation-phases-are-invalid", 1]
       ]
     },
     {

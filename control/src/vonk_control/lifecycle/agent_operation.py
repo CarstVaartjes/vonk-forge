@@ -61,7 +61,6 @@ from vonk_agent_protocol import (
     AgentOperation,
     InvalidRequestReason,
     LifecycleState,
-    WaitReason,
 )
 
 from .. import agent_operation_states as aos
@@ -78,7 +77,7 @@ from ..agent_operation_facts import (
     operation_start_deadline,
     stalled_interruptions,
 )
-from ..categorized_errors import InvalidValue, UnsettledOutcome
+from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from .adapter import Dispatch
@@ -513,10 +512,9 @@ class AgentOperationAdapter:
                 return "failed", None
             case State.CANCELLED:
                 return "cancelled", None
-        raise UnsettledOutcome(  # pragma: no cover
-            f"unmapped lifecycle state {after.state}",
-            reason=WaitReason.REPORT_UNCERTAIN,
-        )
+        # A state the stored vocabulary has no word for is unknown, not an error:
+        # the order is observed again and the core decides from what it finds.
+        return aos.OBSERVING, after.next_action_at or now  # pragma: no cover
 
     def _scheduled_reason(
         self, operation: StoredOperation, after: Lifecycle, event_reason: str | None

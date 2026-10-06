@@ -19,6 +19,7 @@ from vonk_control.models import (
     Base,
     RecipeBuild,
 )
+from vonk_control.oci_image_store import StoredImage
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
@@ -53,7 +54,7 @@ def _age(*paths: Path) -> None:
 def _image(storage: FilesystemRuntimeImageStorage, address: str) -> set[Path]:
     place_test_image(storage, address, 1024)
     image = storage.layout.read(f"sha256:{address}")
-    assert image is not None
+    assert isinstance(image, StoredImage)
     return {storage.layout.blob_path(digest) for digest in image.blob_digests}
 
 

@@ -56,6 +56,7 @@ from .oci_image_store import (
     STORE_BUSY,
     OciImageStore,
     OciImageStoreError,
+    StoreUnknown,
 )
 from .recipe_library_types import RecipeLibraryItem
 from .source_bundles import GeneratedSourceBundle
@@ -551,13 +552,12 @@ class PrebuiltImageImporter:
         if archive_sha256 is None:
             return
         archive = self._image_cache / archive_sha256
-        try:
-            image = self._store.import_archive(archive)
-        except OciImageStoreError as error:
+        image = self._store.import_archive(archive)
+        if isinstance(image, StoreUnknown):
             _LOGGER.warning(
                 "uploaded build %s could not be stored (%s); retrying",
                 build_id,
-                error.detail,
+                image.detail,
             )
             return
         with self._sessions.begin() as session:
@@ -640,24 +640,26 @@ class PrebuiltImageImporter:
         try:
             _LOGGER.info("pulling prebuilt runtime image %s", reference)
             image = self._store.import_reference(reference)
-        except OciImageStoreError as error:
-            if error.code != STORE_BUSY:
-                self._fail(job_id, build_id, node_id, reference, error)
-            else:
-                self._release(job_id)
-        except OSError as error:
+        except (OciImageStoreError, OSError) as error:
+            # A malformed reference or a local fault: this pull is over.
             self._fail(job_id, build_id, node_id, reference, error)
         else:
-            self._finish(
-                job_id,
-                build_id,
-                node_id,
-                evidence=RecipeBuildEvidence(
-                    image_bytes=image.stored_bytes,
-                    image_digest=image.manifest_digest,
-                    oci_layout_sha256=image.manifest_digest.removeprefix("sha256:"),
-                ),
-            )
+            if isinstance(image, StoreUnknown):
+                if image.code == STORE_BUSY:
+                    self._release(job_id)
+                else:
+                    self._fail(job_id, build_id, node_id, reference, image)
+            else:
+                self._finish(
+                    job_id,
+                    build_id,
+                    node_id,
+                    evidence=RecipeBuildEvidence(
+                        image_bytes=image.stored_bytes,
+                        image_digest=image.manifest_digest,
+                        oci_layout_sha256=image.manifest_digest.removeprefix("sha256:"),
+                    ),
+                )
         finally:
             stop.set()
 
@@ -667,7 +669,7 @@ class PrebuiltImageImporter:
         build_id: str,
         node_id: str,
         reference: str,
-        error: OciImageStoreError | OSError,
+        error: OciImageStoreError | StoreUnknown | OSError,
     ) -> None:
         code = PREBUILT_PULL_FAILED
         detail = str(getattr(error, "detail", error)) or type(error).__name__
