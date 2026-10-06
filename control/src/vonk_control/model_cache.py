@@ -33,7 +33,7 @@ from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, ValidationError
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
@@ -4104,7 +4104,7 @@ class ModelCacheService:
                 .where(
                     ModelCacheOperation.id > self._removal_request_after
                     if self._removal_request_after is not None
-                    else True
+                    else true()
                 )
                 .order_by(ModelCacheOperation.id)
                 .limit(limit)

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from pydantic import ValidationError
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -2138,7 +2138,7 @@ class RecipeImageAvailabilityService:
                 .where(
                     Job.id > self._removal_request_after
                     if self._removal_request_after is not None
-                    else True
+                    else true()
                 )
                 .order_by(Job.id)
                 .limit(limit)
