@@ -3615,7 +3615,11 @@ impl ::std::convert::From<ExecuteContainerRuntimeRequestOperation> for HostOpera
 #[derive(Eq)]
 pub struct HostOperationOutcome {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub diagnostic: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub exit_code: ::std::option::Option<i64>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
     pub schema_version: u8,
     pub status: HostHelperResponseStatus,
 }
@@ -8629,6 +8633,8 @@ pub struct RecipeReconciliationIdentity {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeRunInspectionRequest {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub include_logs: ::std::option::Option<bool>,
     pub request_id: ::uuid::Uuid,
     pub request_sha256: ::std::string::String,
 }
@@ -18240,14 +18246,20 @@ impl<'de> ::serde::Deserialize<'de> for HostOperationOutcome {
         #[derive(Eq)]
         struct Raw {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub diagnostic: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub exit_code: ::std::option::Option<i64>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
             pub schema_version: u8,
             pub status: HostHelperResponseStatus,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
+            diagnostic: raw.diagnostic,
             exit_code: raw.exit_code,
+            process_logs: raw.process_logs,
             schema_version: raw.schema_version,
             status: raw.status,
         })
@@ -24400,12 +24412,15 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunInspectionRequest {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub include_logs: ::std::option::Option<bool>,
             pub request_id: ::uuid::Uuid,
             pub request_sha256: ::std::string::String,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
+            include_logs: raw.include_logs,
             request_id: raw.request_id,
             request_sha256: raw.request_sha256,
         })

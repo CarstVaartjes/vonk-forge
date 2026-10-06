@@ -207,6 +207,7 @@ fn observe() {
     fs::write(&request_path, &body).unwrap();
     fs::set_permissions(&request_path, fs::Permissions::from_mode(0o600)).unwrap();
     let frame = canonical_json(&vonk_agent_protocol::RecipeRunInspectionRequest {
+        include_logs: None,
         request_id: Uuid::new_v4(),
         request_sha256: request_sha,
     })

@@ -2591,9 +2591,17 @@ def _fleet(
         operation_id = _quoted(args.operation_id)
         attempt = args.attempt
         if attempt is None:
-            attempt = client.request("GET", f"/api/operations/{operation_id}").get(
-                "attempt"
-            )
+            try:
+                attempt = client.request("GET", f"/api/operations/{operation_id}").get(
+                    "attempt"
+                )
+            except ControlNotFound:
+                # Jobs that Activity does not project (a recipe image build, a
+                # run/switch parent) are still readable as jobs, and their
+                # failure evidence answers to the job's current attempt.
+                attempt = client.request("GET", f"/api/jobs/{operation_id}").get(
+                    "current_attempt"
+                )
         if type(attempt) is not int or attempt < 0:
             raise ValueError("operation has no attempt; pass --attempt")
         with PrivateOutput(args.output) as destination:
