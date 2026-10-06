@@ -2139,7 +2139,9 @@ def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
     assert publisher.aliases[-1] == ("slow-launch",)
 
 
-def test_distributed_start_rejects_missing_run_generation(tmp_path: Path) -> None:
+def test_distributed_start_with_missing_run_generation_records_the_rank_unproven(
+    tmp_path: Path,
+) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, distributed_lifecycle=True
     )
@@ -2165,16 +2167,25 @@ def test_distributed_start_rejects_missing_run_generation(tmp_path: Path) -> Non
         }
         launch.payload = payload
 
-    with pytest.raises(RecipeOperationConflict):
-        service.record_node_result(
-            start.id,
-            launch.node_id,
-            succeeded=True,
-            evidence=start_evidence(payload),
-        )
+    # A start whose order no longer parses cannot prove the rank started: the
+    # rank is recorded with a typed unproven marker, never refused.
+    view = service.record_node_result(
+        start.id,
+        launch.node_id,
+        succeeded=True,
+        evidence=start_evidence(payload),
+    )
+    recorded = _required(view.result)
+    marker = require_mapping(
+        require_mapping(recorded["launch_evidence"], "launch evidence")[launch.node_id],
+        "evidence",
+    )
+    assert marker["code"] == "recipe.evidence_unproven"
 
 
-def test_tensor_parallel_start_rejects_missing_run_generation(tmp_path: Path) -> None:
+def test_tensor_parallel_start_with_missing_run_generation_records_the_rank_unproven(
+    tmp_path: Path,
+) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
@@ -2200,13 +2211,19 @@ def test_tensor_parallel_start_rejects_missing_run_generation(tmp_path: Path) ->
         }
         child.payload = payload
 
-    with pytest.raises(RecipeOperationConflict):
-        service.record_node_result(
-            start.id,
-            child.node_id,
-            succeeded=True,
-            evidence=start_evidence(payload),
-        )
+    view = service.record_node_result(
+        start.id,
+        child.node_id,
+        succeeded=True,
+        evidence=start_evidence(payload),
+    )
+    recorded = _required(view.result)
+    evidence = require_mapping(
+        recorded.get("launch_evidence") or recorded["node_evidence"], "evidence"
+    )
+    assert require_mapping(evidence[child.node_id], "node evidence")["code"] == (
+        "recipe.evidence_unproven"
+    )
 
 
 def test_worker_death_while_owner_is_healthy_never_publishes_route(
@@ -3389,8 +3406,8 @@ def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
     with sessions.begin() as session:
         row = _required(session.get(Job, first.id))
         row.result = None
-    with pytest.raises(ValueError, match="requires result evidence"):
-        service.get(first.id)
+    # A terminal receipt that is gone is shown as absent, not as a refusal.
+    assert service.get(first.id).result is None
 
 
 def test_failed_install_retry_state_rolls_back_when_queue_write_fails(
@@ -3872,10 +3889,12 @@ def test_uninstall_validates_stored_identity_without_requiring_launch_placement(
             _required(
                 session.get(RecipeInstallation, installation.owner_id)
             ).plan = malformed
-        with pytest.raises(
-            RecipeOperationConflict, match="stored installation plan is invalid"
-        ):
-            service.preview_uninstall(installation.owner_id)
+        # A stored plan that does not parse is not a reason to refuse the removal:
+        # the accepted ranks are rebuilt from the saved mapping, and the damage is
+        # retired as unknown.
+        damaged_preview = service.preview_uninstall(installation.owner_id)
+        assert damaged_preview.allowed
+        assert damaged_preview.nodes
         with sessions() as session:
             assert not list(
                 session.scalars(select(Job).where(Job.kind == "recipe.uninstall"))

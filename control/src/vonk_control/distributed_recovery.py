@@ -23,6 +23,7 @@ from .distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
+from .lifecycle.evidence import BookkeepingReason, Residue
 from .lifecycle.job import JobAdapter
 from .litellm import LiteLlmGeneration
 from .models import (
@@ -124,7 +125,7 @@ class _RecoveryRunStops(Protocol):
         recovery_context: Mapping[str, object],
         workload_intent_ordinal: int,
         now: datetime,
-    ) -> Job: ...
+    ) -> Job | Residue: ...
 
 
 class _RecoveryDependencyPending(Exception):
@@ -317,6 +318,13 @@ class DistributedRecoveryCoordinator:
                             "accepted run has no automatic recovery authority"
                         )
                     if singleton:
+                        singleton_generation = run.run_generation
+                        singleton_observation = (
+                            run_nodes[0].observed_run_generation,
+                            run_nodes[0].observation_process_running,
+                            run_nodes[0].observation_observed_at,
+                            run_nodes[0].observation_endpoint_ready,
+                        )
                         run.run_generation += 1
                         run_plan["run_generation"] = run.run_generation
                         run.plan = run_plan_document(run_plan)
@@ -356,6 +364,25 @@ class DistributedRecoveryCoordinator:
                             workload_intent_ordinal=workload_intent_ordinal,
                             now=now,
                         )
+                        if isinstance(job, Residue):
+                            # The owner retired the damage as unknown: a scope
+                            # that is not current yet is retried on the next
+                            # pass, anything else is settled for this run only.
+                            if job.reason is BookkeepingReason.EVIDENCE_UNAVAILABLE:
+                                # Nothing was queued: the generation bump waits too.
+                                run.run_generation = singleton_generation
+                                run_plan["run_generation"] = singleton_generation
+                                run.plan = run_plan_document(run_plan)
+                                (
+                                    run_nodes[0].observed_run_generation,
+                                    run_nodes[0].observation_process_running,
+                                    run_nodes[0].observation_observed_at,
+                                    run_nodes[0].observation_endpoint_ready,
+                                ) = singleton_observation
+                            else:
+                                _settle_unrecoverable(run, job.note, now)
+                                worked = True
+                            continue
                     else:
                         job = _enqueue_recovery_stop(
                             session,
