@@ -609,6 +609,19 @@ the same key returns its original receipt. Explicit recovery of an existing
 operation retains its original intent and checks its exact child state.
 A new load of an already reconciled profile records a successful no-op.
 
+When a newer whole-fleet review changes one independent assignment, it may bind
+continuing work for another exactly unchanged assignment. The reviewed adoption
+names the original application, immutable plan digest, workload ordinal, complete
+assignment identities, and complete Spark scopes. The new selected snapshot is
+the only policy authority; the original executor retains its child identities,
+progress, and unconsumed capacity promises for the adopted scope. It cannot issue
+changed sibling effects. Preparation identities, options, aliases, retention
+policy, and topology remain bound; changing any of them requires new work. A
+multi-Spark effect is adopted only as its entire group. The newer application
+reports its continuing dependency and completes after both its own effects and
+the adopted effects converge. Cancellation fences and observes both sets of exact
+issued effects. Repeating the entire same profile remains a fresh explicit load.
+
 Profile authoring resolves every choice through the trusted NAS/Controller
 cache. The cache projection selects the exact active recipe revision, model
 variant, model artifact set, and recipe image available for the profile. A
