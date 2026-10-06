@@ -194,7 +194,8 @@ function ProfileReview({preview}: {preview: FleetProfilePreview}) {
     {preview.waits_for_preparation && !preview.allowed && <p className="library-profile-plain-note">{["The Controller prepares this first, then loads:", ...(preview.preparation_steps ?? []).map(step => step.label)].join(" · ")}</p>}
     {!loadable(preview) && preview.reasons[0] && <p className="library-profile-plain-error" role="alert">{preview.reasons[0].detail}</p>}
     {(preview.reasons ?? []).slice(loadable(preview) ? 0 : 1).map(reason => <p key={`${reason.code}:${reason.detail}`} className="library-profile-plain-note">{reason.detail}</p>)}
-    {(preview.steps ?? []).length > 0 ? <ol className="library-profile-review-steps">{preview.steps.map(step => <li key={step.index}>{step.label}</li>)}</ol> : <p>Nothing changes: every Spark already matches this profile.</p>}
+    {(preview.effects.adopted ?? []).map(effect => <p key={effect.application_id} className="library-profile-plain-note">Existing work continues on {effect.node_ids.join(", ")}; its progress is preserved.</p>)}
+    {(preview.steps ?? []).length > 0 ? <ol className="library-profile-review-steps">{preview.steps.map(step => <li key={step.index}>{step.label}</li>)}</ol> : (preview.effects.adopted ?? []).length > 0 ? <p>The load completes when continuing work finishes.</p> : <p>Nothing changes: every Spark already matches this profile.</p>}
     {counts.length > 0 && <p className="library-profile-review-summary">{counts.join(" · ")}</p>}
     <details><summary>Technical detail</summary>
       <dl><div><dt>Plan digest</dt><dd><code>{preview.plan_digest}</code></dd></div><div><dt>Profile digest</dt><dd><code>{preview.profile_digest}</code></dd></div></dl>

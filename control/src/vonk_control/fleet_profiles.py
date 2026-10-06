@@ -5072,7 +5072,9 @@ class FleetProfileService:
                 builds=sum(step.kind == "build" for step in steps),
                 distributions=sum(step.kind == "distribute-image" for step in steps),
                 installs=sum(
-                    not state.installation_ready for state in control.states.values()
+                    not state.installation_ready
+                    for identifier, state in control.states.items()
+                    if identifier not in adopted_by_assignment
                 ),
                 starts=sum(
                     item.desired_state == DesiredAssignmentState.RUNNING
@@ -8956,7 +8958,17 @@ class FleetProfileService:
                     row.status_reason = "Waiting for exact continuing assignments to finish under the selected profile"
                     row.updated_at = now
                     return True
-                self._lifecycle.succeed(row, now, reason=None, session=session)
+                continuing_scope = self._adopted_application_scope(session, row)
+                self._lifecycle.succeed(
+                    row,
+                    now,
+                    reason=(
+                        "Continuing assignments completed under the newer selected profile; changed sibling assignments were superseded"
+                        if continuing_scope is not None
+                        else None
+                    ),
+                    session=session,
+                )
                 progress = read_stored_model(
                     FleetProfileApplicationProgress,
                     canonical_message(
