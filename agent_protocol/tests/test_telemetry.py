@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from vonk_agent_protocol import (
+    AgentEvidenceCode,
     AgentProtocolError,
     TelemetryRequest,
     canonical_message,
@@ -97,5 +98,10 @@ def test_cpu_frequency_and_temperature_are_optional_and_bounded() -> None:
     inverted["samples"][0].update(  # type: ignore[attr-defined]
         {"cpu_frequency_avg_mhz": 1000, "cpu_frequency_min_mhz": 2000}
     )
-    with pytest.raises(AgentProtocolError):
-        TelemetryRequest.parse(inverted)
+    # An inconsistent optional reading is dropped and named, not refused.
+    parsed = TelemetryRequest.parse(inverted)
+    assert parsed.samples[0].cpu_frequency_avg_mhz is None
+    assert (
+        AgentEvidenceCode.TELEMETRY_READING_DROPPED
+        in parsed.samples[0].evidence_warnings
+    )

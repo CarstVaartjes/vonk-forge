@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use vonk_nas_setup::{
-    CanonicalTemplatePayload, HiddenSecretInput, OsSecretGenerator, PromptIo, SetupRequest, prepare,
+    HiddenSecretInput, OsSecretGenerator, PromptIo, SetupRequest, parse_template_payload, prepare,
 };
 
 const MAX_TEMPLATE_BYTES: u64 = 16 * 1024 * 1024;
@@ -66,7 +66,7 @@ fn prepare_bundle<R: io::BufRead, W: Write, S: vonk_nas_setup::SecretInput<R, W>
     if !metadata.is_file() || metadata.len() > MAX_TEMPLATE_BYTES {
         return Err("template payload is not a regular file of an acceptable size".into());
     }
-    let payload = CanonicalTemplatePayload::from_json(&fs::read(&cli.template)?)?;
+    let payload = parse_template_payload(&fs::read(&cli.template)?)?;
 
     let request = if cli.upgrade {
         SetupRequest::upgrade(&cli.output)

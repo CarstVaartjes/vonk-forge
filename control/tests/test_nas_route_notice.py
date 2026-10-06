@@ -47,3 +47,15 @@ def test_fabric_ports_are_never_the_recommended_nas_port() -> None:
     notice = nas_route_notice([fabric, wifi], "wlP9s9")
     assert notice is not None
     assert notice.code == "network.nas-route-wifi-no-wired-port"
+
+
+def test_a_route_over_a_tunnel_is_reported_as_such_and_never_warns() -> None:
+    """Catches treating a Tailscale/IPv6 NAS route as a Wi-Fi or missing-port finding."""
+
+    tunnel = NetworkInterface(name="tailscale0", kind="tunnel", carrier=True)
+    wifi = NetworkInterface(name="wlP9s9", kind="wifi", carrier=True)
+    down = NetworkInterface(name="enP7s7", kind="wired", carrier=False)
+    # Wi-Fi is up and the wired port is down, but the NAS is reached over the
+    # overlay: the one route that matters is not Wi-Fi.
+    assert nas_route_notice([down, wifi, tunnel], "tailscale0") is None
+    assert tunnel.kind == "tunnel"

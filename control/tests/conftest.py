@@ -411,6 +411,21 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 @pytest.fixture(scope="session")
+def retry_proof_graph() -> object:
+    """The call graph the blocker ratchet's retry proof walks, built once.
+
+    Parsing ``control/src`` and resolving its calls costs several seconds; the
+    blocker tests that need the proof share this setup instead of each paying it
+    inside the per-test budget.
+    """
+
+    from .blocker_boundaries import load_allowlist
+    from .blocker_retries import build_graph_for
+
+    return build_graph_for(load_allowlist())
+
+
+@pytest.fixture(scope="session")
 def parsed_repository() -> None:
     """Parse the scanned source trees once, outside any one test's time budget.
 

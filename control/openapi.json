@@ -9,6 +9,21 @@
         "title": "AdmissionCode",
         "type": "string"
       },
+      "AgentEvidenceCode": {
+        "description": "Optional agent evidence that was dropped so the mandatory report is kept.\n\nAn agent report carries a mandatory core (identity, lease, capacity, outcome)\nand optional evidence (NICs, the NAS route, fabric details, readings,\nprogress, diagnostics). Invalid optional evidence is never a reason to refuse\nthe core: the evidence is dropped and one of these words names what was lost,\non the agent that dropped it and on the Controller that received it.",
+        "enum": [
+          "agent_evidence.claim_hint_dropped",
+          "agent_evidence.failure_diagnostics_dropped",
+          "agent_evidence.inventory_fabric_dropped",
+          "agent_evidence.inventory_nas_route_dropped",
+          "agent_evidence.inventory_network_dropped",
+          "agent_evidence.inventory_network_interface_dropped",
+          "agent_evidence.progress_dropped",
+          "agent_evidence.telemetry_reading_dropped"
+        ],
+        "title": "AgentEvidenceCode",
+        "type": "string"
+      },
       "AgentFailureKind": {
         "enum": [
           "temporary-dependency",
@@ -2387,6 +2402,21 @@
         ],
         "title": "CertificateState",
         "type": "string"
+      },
+      "CliTokenDownload": {
+        "additionalProperties": false,
+        "description": "What the browser learns from a token download: when the token stops working.\n\nThe token itself is the response body, exact bytes; the expiry travels in the\n``X-Vonk-Token-Expires-At`` header, which the web client reads into this shape.",
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at"
+        ],
+        "title": "CliTokenDownload",
+        "type": "object"
       },
       "ClusterMappingCode": {
         "description": "Refusals of a cluster mapping (recipe-to-Spark assignment) request.",
@@ -6309,6 +6339,7 @@
       },
       "FleetProfileNode": {
         "additionalProperties": false,
+        "description": "One rank of a profile assignment, the same shape a Spark group names it.",
         "properties": {
           "endpoint_owner": {
             "default": false,
@@ -12260,6 +12291,7 @@
               "wired",
               "wifi",
               "fabric",
+              "tunnel",
               "other"
             ],
             "title": "Kind",
@@ -13466,6 +13498,19 @@
         "title": "OutputLimits",
         "type": "object"
       },
+      "PackageActivationPhase": {
+        "description": "Where a package activation transaction stands.",
+        "enum": [
+          "armed",
+          "activation_failed",
+          "acknowledged",
+          "rolling_back",
+          "rolled_back",
+          "rollback_failed"
+        ],
+        "title": "PackageActivationPhase",
+        "type": "string"
+      },
       "PackageActivationReceipt": {
         "additionalProperties": false,
         "properties": {
@@ -13507,16 +13552,7 @@
             "type": "string"
           },
           "phase": {
-            "enum": [
-              "armed",
-              "activation_failed",
-              "acknowledged",
-              "rolling_back",
-              "rolled_back",
-              "rollback_failed"
-            ],
-            "title": "Phase",
-            "type": "string"
+            "$ref": "#/components/schemas/PackageActivationPhase"
           },
           "schema_version": {
             "const": 2,
@@ -13836,6 +13872,9 @@
           "admission_code": {
             "$ref": "#/components/schemas/AdmissionCode"
           },
+          "agent_evidence_code": {
+            "$ref": "#/components/schemas/AgentEvidenceCode"
+          },
           "artifact_lifecycle_code": {
             "$ref": "#/components/schemas/ArtifactLifecycleCode"
           },
@@ -13962,6 +14001,7 @@
         },
         "required": [
           "admission_code",
+          "agent_evidence_code",
           "artifact_lifecycle_code",
           "cache_reference_reason",
           "catalog_code",
@@ -18061,6 +18101,8 @@
       "ResourcePlanningCode": {
         "description": "Resource planning (memory, disk, parallelism) refusals and unknowns.",
         "enum": [
+          "resource.envelope_exceeds_capacity",
+          "resource.envelope_unverified",
           "resource.estimate_uncertain",
           "resource.evidence_invalid",
           "resource.evidence_unknown",
@@ -19347,6 +19389,8 @@
           "run-switch.cleanup-waiting-without-child",
           "run-switch.cleanup-returned-no-evidence",
           "run-switch.resource.capacity_unknown",
+          "run-switch.resource.envelope_exceeds_capacity",
+          "run-switch.resource.envelope_unverified",
           "run-switch.resource.estimate_uncertain",
           "run-switch.resource.evidence_invalid",
           "run-switch.resource.evidence_unknown",
@@ -24658,7 +24702,15 @@
                 }
               }
             },
-            "description": "A short-lived administrator bearer token download"
+            "description": "A short-lived administrator bearer token download",
+            "headers": {
+              "X-Vonk-Token-Expires-At": {
+                "description": "When the token stops working (CliTokenDownload.expires_at)",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "content": {

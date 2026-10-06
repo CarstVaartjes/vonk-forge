@@ -115,7 +115,7 @@ def test_builder_plan_and_acceptance_account_for_runtime_physical_pool(
         memory_pool="shared",
         system_reserve=50,
     )
-    runs = RunAdmissionService(run_sessions)
+    runs = RunAdmissionService(run_sessions, memory_floor_bytes=0)
     runtime = runs.plan_run(installation, "existing-runtime", now=now)
     assert runtime.allowed
     runs.accept_run(runtime, actor="admin", now=now)
@@ -149,7 +149,7 @@ def test_builder_plan_and_acceptance_account_for_runtime_physical_pool(
     operations = RecipeOperationService(
         sessions,
         install_admission=InstallAdmissionService(sessions),
-        run_admission=RunAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions, memory_floor_bytes=0),
         agent_jobs=RecordingQueue(),
         clock=lambda: now,
         builds=builds,
@@ -196,7 +196,7 @@ def test_unified_demand_checks_each_separate_pool_without_adding_independent_cla
     )
     for kind in ("host-memory", "gpu-memory"):
         _claim(sessions, node, now, kind=kind, amount=50, owner="recipe-build")
-    runs = RunAdmissionService(sessions)
+    runs = RunAdmissionService(sessions, memory_floor_bytes=0)
     plan = runs.plan_run(installation, "unified", now=now)
     assert plan.allowed == (pool == "separate")
     if plan.allowed:

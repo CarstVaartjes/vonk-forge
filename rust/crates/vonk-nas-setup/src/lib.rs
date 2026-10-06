@@ -89,193 +89,53 @@ impl SecretGenerator for OsSecretGenerator {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CanonicalTemplatePayload {
-    schema_version: u8,
-    docker_compose_yaml: String,
-    #[serde(default)]
-    preflight: Vec<String>,
-    #[serde(default)]
-    internal_values: Vec<InternalValue>,
-    #[serde(default)]
-    required_values: Vec<RequiredValuePrompt>,
-    /// Keys the installer never writes but an upgrade keeps when the operator
-    /// set them; any other key not named by this payload is dropped.
-    #[serde(default)]
-    optional_values: Vec<String>,
-    #[serde(default)]
-    secrets: Vec<SecretPrompt>,
-    #[serde(default)]
-    generated_secrets: GeneratedSecrets,
-    /// Secrets read by capability-free containers through one supplementary
-    /// group (Compose `group_add`). Written 0640 with this group.
-    #[serde(default)]
-    group_readable_secrets: Option<GroupReadableSecrets>,
-    install_modes: Option<InstallModes>,
-    step_ca_controller: Option<StepCaControllerRequest>,
-    hermes: Option<HermesPrompt>,
+pub use vonk_agent_protocol::generated::NasInstallTemplate as CanonicalTemplatePayload;
+use vonk_agent_protocol::generated::{
+    NasGeneratedSecrets as GeneratedSecrets, NasHermesPrompt as HermesPrompt,
+    NasInstallModes as InstallModes, NasPostgresUrlRequest as PostgresUrlRequest,
+    NasRequiredValuePrompt as RequiredValuePrompt,
+    NasRequiredValuePromptValidation as RequiredValueValidation, NasSecretPrompt as SecretPrompt,
+    NasStepCaControllerFiles as StepCaControllerFiles,
+    NasStepCaControllerRequest as StepCaControllerRequest,
+};
+
+/// The generated secrets a payload asks for; a payload that names none asks for none.
+fn generated_secrets(payload: &CanonicalTemplatePayload) -> &GeneratedSecrets {
+    static NONE: GeneratedSecrets = GeneratedSecrets {
+        random_text: Vec::new(),
+        ed25519_pkcs8_pem: Vec::new(),
+        postgres_urls: Vec::new(),
+    };
+    payload.generated_secrets.as_ref().unwrap_or(&NONE)
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GroupReadableSecrets {
-    gid: u32,
-    files: Vec<String>,
+fn step_ca_files(files: &StepCaControllerFiles) -> [&str; 9] {
+    [
+        &files.root_certificate,
+        &files.intermediate_certificate,
+        &files.intermediate_private_key,
+        &files.controller_server_certificate,
+        &files.controller_server_private_key,
+        &files.provisioner_private_jwk,
+        &files.provisioner_public_jwk,
+        &files.ca_config,
+        &files.password,
+    ]
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct InstallModes {
-    prompt: String,
-    #[serde(default = "default_install_mode")]
-    default: String,
-    lab_value: String,
-    secure_remote_value: String,
-    /// Values that replace the secure-remote-only prompts in lab mode.
-    lab_values: Vec<InternalValue>,
+/// Parse and validate the canonical NAS template payload.
+pub fn parse_template_payload(raw: &[u8]) -> Result<CanonicalTemplatePayload, SetupError> {
+    let payload: CanonicalTemplatePayload = serde_json::from_slice(raw)
+        .map_err(|error| SetupError::InvalidPayload(error.to_string()))?;
+    payload.validate()?;
+    Ok(payload)
 }
 
-fn default_install_mode() -> String {
-    // Secure remote (Tailscale) is the default; lab (LAN only) is an explicit choice.
-    "secure-remote".to_owned()
+trait TemplateValidation {
+    fn validate(&self) -> Result<(), SetupError>;
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct InternalValue {
-    env: String,
-    value: String,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct GeneratedSecrets {
-    #[serde(default)]
-    random_text: Vec<RandomTextRequest>,
-    #[serde(default)]
-    ed25519_pkcs8_pem: Vec<Ed25519KeyRequest>,
-    #[serde(default)]
-    postgres_urls: Vec<PostgresUrlRequest>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RandomTextRequest {
-    file: String,
-    bytes: usize,
-    prefix: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Ed25519KeyRequest {
-    file: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PostgresUrlRequest {
-    file: String,
-    password_file: String,
-    scheme: String,
-    username: String,
-    host: String,
-    port: u16,
-    database: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StepCaControllerRequest {
-    /// The control hostname; the enrollment, agent, and registry names are
-    /// fixed prefixes of it, so one value names the whole controller.
-    hostname_env: String,
-    provisioner_name: String,
-    password_bytes: usize,
-    files: StepCaControllerFiles,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StepCaControllerFiles {
-    root_certificate: String,
-    intermediate_certificate: String,
-    intermediate_private_key: String,
-    controller_server_certificate: String,
-    controller_server_private_key: String,
-    provisioner_private_jwk: String,
-    provisioner_public_jwk: String,
-    ca_config: String,
-    password: String,
-}
-
-impl StepCaControllerFiles {
-    fn all(&self) -> [&str; 9] {
-        [
-            &self.root_certificate,
-            &self.intermediate_certificate,
-            &self.intermediate_private_key,
-            &self.controller_server_certificate,
-            &self.controller_server_private_key,
-            &self.provisioner_private_jwk,
-            &self.provisioner_public_jwk,
-            &self.ca_config,
-            &self.password,
-        ]
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RequiredValuePrompt {
-    env: String,
-    prompt: String,
-    default: Option<String>,
-    #[serde(default)]
-    validation: RequiredValueValidation,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum RequiredValueValidation {
-    #[default]
-    NonEmpty,
-    Ipv4,
-    CidrList,
-    OptionalCidrList,
-    Hostname,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SecretPrompt {
-    file: String,
-    prompt: String,
-    #[serde(default)]
-    optional: bool,
-    /// Lab mode leaves this secret empty instead of asking for it.
-    #[serde(default)]
-    secure_remote_only: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HermesPrompt {
-    env: String,
-    prompt: String,
-    enabled_value: String,
-    disabled_value: String,
-}
-
-impl CanonicalTemplatePayload {
-    pub fn from_json(raw: &[u8]) -> Result<Self, SetupError> {
-        let payload: Self = serde_json::from_slice(raw)
-            .map_err(|error| SetupError::InvalidPayload(error.to_string()))?;
-        payload.validate()?;
-        Ok(payload)
-    }
-
+impl TemplateValidation for CanonicalTemplatePayload {
     fn validate(&self) -> Result<(), SetupError> {
         if self.schema_version != 2 {
             return Err(SetupError::InvalidPayload(
@@ -386,7 +246,7 @@ impl CanonicalTemplatePayload {
                 }
             }
         }
-        for request in &self.generated_secrets.random_text {
+        for request in &generated_secrets(self).random_text {
             validate_generated_file(&request.file, &mut secrets)?;
             if !(16..=128).contains(&request.bytes) {
                 return Err(SetupError::InvalidPayload(format!(
@@ -407,10 +267,10 @@ impl CanonicalTemplatePayload {
                 )));
             }
         }
-        for request in &self.generated_secrets.ed25519_pkcs8_pem {
+        for request in &generated_secrets(self).ed25519_pkcs8_pem {
             validate_generated_file(&request.file, &mut secrets)?;
         }
-        for request in &self.generated_secrets.postgres_urls {
+        for request in &generated_secrets(self).postgres_urls {
             validate_generated_file(&request.file, &mut secrets)?;
             validate_secret_name(&request.password_file)?;
             if !secrets.contains(request.password_file.as_str()) {
@@ -437,7 +297,7 @@ impl CanonicalTemplatePayload {
                     request.hostname_env
                 )));
             }
-            for file in request.files.all() {
+            for file in step_ca_files(&request.files) {
                 validate_generated_file(file, &mut secrets)?;
             }
         }
@@ -1134,10 +994,10 @@ fn generate_missing_secrets<G: SecretGenerator>(
         Some(root) => secret_file_exists(root, file),
         None => Ok(false),
     };
-    let generated = &payload.generated_secrets;
+    let generated = &generated_secrets(payload);
     for request in &generated.random_text {
         if !exists(&request.file)? {
-            let value = generator.generate(request.bytes)?;
+            let value = generator.generate(request.bytes as usize)?;
             let value = format!("{}{value}", request.prefix.as_deref().unwrap_or_default());
             secret_values.push((request.file.clone(), value));
         }
@@ -1243,7 +1103,7 @@ fn generate_pki<G: SecretGenerator>(
     generator: &G,
 ) -> Result<Vec<(String, String)>, SetupError> {
     let hostnames = pki_hostnames(request, environment)?;
-    let password = generator.generate(request.password_bytes)?;
+    let password = generator.generate(request.password_bytes as usize)?;
     validate_single_line_secret(&password, &request.files.password)?;
 
     let root_key = KeyPair::generate_for(&PKCS_ED25519)
@@ -1984,7 +1844,7 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         new_secrets.push((secret.file.clone(), value));
     }
     generate_missing_secrets(payload, Some(&secret_root), &mut new_secrets, generator)?;
-    for request in &payload.generated_secrets.ed25519_pkcs8_pem {
+    for request in &generated_secrets(payload).ed25519_pkcs8_pem {
         if secret_file_exists(&secret_root, &request.file)? {
             validate_ed25519_private_key(
                 &read_existing_secret(&secret_root, &request.file)?,
@@ -1995,18 +1855,14 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
 
     let mut controller_leaf_replacement = None;
     if let Some(request) = &payload.step_ca_controller {
-        let existing = request
-            .files
-            .all()
+        let existing = step_ca_files(&request.files)
             .into_iter()
             .map(|file| secret_file_exists(&secret_root, file))
             .collect::<Result<Vec<_>, _>>()?;
         match existing.into_iter().filter(|present| *present).count() {
             0 => new_secrets.extend(generate_pki(request, &environment, generator)?),
-            count if count == request.files.all().len() => {
-                let files = request
-                    .files
-                    .all()
+            count if count == step_ca_files(&request.files).len() => {
+                let files = step_ca_files(&request.files)
                     .into_iter()
                     .map(|file| {
                         read_existing_secret(&secret_root, file)

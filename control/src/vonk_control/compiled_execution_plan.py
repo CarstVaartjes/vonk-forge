@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import (
-    ConfigDict,
     Field,
     StringConstraints,
     field_validator,
@@ -39,7 +38,7 @@ from vonk_agent_protocol import (
 )
 
 from .content_identity import same_model_object
-from .strict_json import StrictJSONModel
+from .strict_json import StrictModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -53,10 +52,6 @@ _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 
 class CompiledExecutionPlanError(ValueError):
     """The canonical runtime and verified delivery receipts cannot be bound."""
-
-
-class _StrictModel(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 def _safe_path(value: str, *, absolute: bool, max_length: int = 512) -> str:
@@ -76,7 +71,7 @@ def _safe_path(value: str, *, absolute: bool, max_length: int = 512) -> str:
     return value
 
 
-class ExecutionMount(_StrictModel):
+class ExecutionMount(StrictModel):
     """The platform-owned read-only mount used by one selected model file."""
 
     source: str = Field(min_length=1, max_length=512)
@@ -96,7 +91,7 @@ class ExecutionMount(_StrictModel):
         return _safe_path(value, absolute=True)
 
 
-class ModelCatalogIdentity(_StrictModel):
+class ModelCatalogIdentity(StrictModel):
     """Safe model identity used for display and execution evidence.
 
     Upstream repository and revision fields deliberately do not exist here.
@@ -115,7 +110,7 @@ class ModelCatalogIdentity(_StrictModel):
         return value
 
 
-class DistributionObjectReceipt(_StrictModel):
+class DistributionObjectReceipt(StrictModel):
     """A verified immutable object served by the Controller."""
 
     name: str = Field(min_length=1, max_length=512)
@@ -135,7 +130,7 @@ class DistributionObjectReceipt(_StrictModel):
         return self
 
 
-class VerifiedModelObject(_StrictModel):
+class VerifiedModelObject(StrictModel):
     """One cache-authorized model file before recipe mount selection.
 
     The model content identity and file ID are part of the lookup key.  A
@@ -180,7 +175,7 @@ class VerifiedModelObject(_StrictModel):
         return self
 
 
-class CompiledModelArtifact(_StrictModel):
+class CompiledModelArtifact(StrictModel):
     """One exact model file selected by the canonical runtime compiler."""
 
     id: Identifier
@@ -234,7 +229,7 @@ class CompiledModelArtifact(_StrictModel):
         return self
 
 
-class CompiledRuntimeImage(_StrictModel):
+class VerifiedRuntimeImage(StrictModel):
     """The exact Controller-built linux/arm64 OCI archive given to each Spark."""
 
     image_digest: ImageDigest
@@ -246,7 +241,7 @@ class CompiledRuntimeImage(_StrictModel):
     runtime_interface_label: str = Field(min_length=1, max_length=128)
 
 
-class CompiledExecutionPlan(_StrictModel):
+class VerifiedExecutionPlan(StrictModel):
     """Internal verified execution plan consumed by distribution/install."""
 
     recipe_revision_sha256: Digest
@@ -255,10 +250,10 @@ class CompiledExecutionPlan(_StrictModel):
     model_artifact_set_sha256: Digest
     model_artifact_set_bytes: int = Field(ge=0, le=16 * 1024**4)
     artifacts: list[CompiledModelArtifact] = Field(min_length=1, max_length=4096)
-    runtime_image: CompiledRuntimeImage
+    runtime_image: VerifiedRuntimeImage
 
     @model_validator(mode="after")
-    def artifact_set_bytes_are_exact(self) -> CompiledExecutionPlan:
+    def artifact_set_bytes_are_exact(self) -> VerifiedExecutionPlan:
         by_digest: dict[str, int] = {}
         by_physical: dict[tuple[str, str], tuple[object, ...]] = {}
         selected: dict[tuple[str, str], str] = {}
@@ -305,7 +300,7 @@ class CompiledExecutionPlan(_StrictModel):
     ) -> dict[str, object]:
         """Project this receipt-bound plan into the agent launch DTO.
 
-        ``CompiledExecutionPlan`` is deliberately the small receipt model used
+        ``VerifiedExecutionPlan`` is deliberately the small receipt model used
         by the Controller's cache and build boundaries.  Agents need that
         evidence together with the final, already compiled launch facts.  This
         method is the only production projection into that wire shape: it
@@ -497,7 +492,7 @@ def execution_identity_document(
 ) -> dict[str, object]:
     """Project every compiled launch-affecting fact into one identity.
 
-    The recipe revision remains provenance on ``CompiledExecutionPlan``.  This
+    The recipe revision remains provenance on ``VerifiedExecutionPlan``.  This
     projection instead covers the final runtime command, bound settings,
     environment, security, mounts, lifecycle, interface, topology and exact
     selected model files.  Editorial fields outside this projection do not
@@ -613,8 +608,8 @@ def compile_verified_execution_plan(
     *,
     model_artifact_set_sha256: str,
     model_objects: Sequence[object],
-    runtime_image: CompiledRuntimeImage | Mapping[str, object],
-) -> CompiledExecutionPlan:
+    runtime_image: VerifiedRuntimeImage | Mapping[str, object],
+) -> VerifiedExecutionPlan:
     """Bind canonical compiler output to verified cache/build receipts.
 
     ``model_objects`` must be the complete selected model object sequence for
@@ -764,8 +759,8 @@ def compile_verified_execution_plan(
     try:
         image = (
             runtime_image
-            if isinstance(runtime_image, CompiledRuntimeImage)
-            else CompiledRuntimeImage.model_validate(runtime_image)
+            if isinstance(runtime_image, VerifiedRuntimeImage)
+            else VerifiedRuntimeImage.model_validate(runtime_image)
         )
     except Exception as error:
         raise CompiledExecutionPlanError(
@@ -780,7 +775,7 @@ def compile_verified_execution_plan(
             "verified runtime image does not match the compiled runtime projection"
         )
     try:
-        return CompiledExecutionPlan.model_validate(
+        return VerifiedExecutionPlan.model_validate(
             {
                 "recipe_revision_sha256": recipe_revision_sha256,
                 "harness_sha256": harness_sha256,
@@ -811,7 +806,7 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
     if len(encoded) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
         raise CompiledExecutionPlanError("compiled launch plan is too large")
     try:
-        # This calls CompiledExecutionPlan.model_validate, including all nested
+        # This calls VerifiedExecutionPlan.model_validate, including all nested
         # schema, identity, path, mount, runtime and security validators.
         return validate_compiled_execution_plan(payload)
     except ValueError as error:
@@ -820,14 +815,14 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
 
 __all__ = [
     "EMPTY_SHA256",
-    "CompiledExecutionPlan",
     "CompiledExecutionPlanError",
     "CompiledModelArtifact",
-    "CompiledRuntimeImage",
     "DistributionObjectReceipt",
     "ExecutionMount",
     "ModelCatalogIdentity",
+    "VerifiedExecutionPlan",
     "VerifiedModelObject",
+    "VerifiedRuntimeImage",
     "compile_verified_execution_plan",
     "execution_identity_document",
     "execution_identity_sha256",

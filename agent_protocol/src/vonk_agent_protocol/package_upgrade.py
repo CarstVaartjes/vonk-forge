@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from .wire_model import Digest, WireModel
+from .wire_model import Digest, WireEnum, WireModel
 
 
 class PackageRollbackSource(WireModel):
@@ -25,6 +25,17 @@ class PackageRollbackAuthority(WireModel):
     )
 
 
+class PackageActivationPhase(WireEnum):
+    """Where a package activation transaction stands."""
+
+    ARMED = "armed"
+    ACTIVATION_FAILED = "activation_failed"
+    ACKNOWLEDGED = "acknowledged"
+    ROLLING_BACK = "rolling_back"
+    ROLLED_BACK = "rolled_back"
+    ROLLBACK_FAILED = "rollback_failed"
+
+
 class PackageActivationReceipt(WireModel):
     schema_version: Literal[2]
     node_id: Annotated[str, Field(pattern=r"^spk_[0-9a-f]{32}$")]
@@ -39,14 +50,7 @@ class PackageActivationReceipt(WireModel):
     ]
     candidate_binary_sha256: Digest
     attempt_nonce: Digest
-    phase: Literal[
-        "armed",
-        "activation_failed",
-        "acknowledged",
-        "rolling_back",
-        "rolled_back",
-        "rollback_failed",
-    ]
+    phase: PackageActivationPhase
     created_at: int = Field(
         strict=True, ge=1, le=2**63 - 1, json_schema_extra={"format": "int64"}
     )

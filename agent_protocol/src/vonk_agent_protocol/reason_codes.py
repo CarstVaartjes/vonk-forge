@@ -32,6 +32,28 @@ class AdmissionCode(WireEnum):
     CAPACITY_BUSY = "admission.capacity_busy"
 
 
+class AgentEvidenceCode(WireEnum):
+    """Optional agent evidence that was dropped so the mandatory report is kept.
+
+    An agent report carries a mandatory core (identity, lease, capacity, outcome)
+    and optional evidence (NICs, the NAS route, fabric details, readings,
+    progress, diagnostics). Invalid optional evidence is never a reason to refuse
+    the core: the evidence is dropped and one of these words names what was lost,
+    on the agent that dropped it and on the Controller that received it.
+    """
+
+    CLAIM_HINT_DROPPED = "agent_evidence.claim_hint_dropped"
+    FAILURE_DIAGNOSTICS_DROPPED = "agent_evidence.failure_diagnostics_dropped"
+    INVENTORY_FABRIC_DROPPED = "agent_evidence.inventory_fabric_dropped"
+    INVENTORY_NAS_ROUTE_DROPPED = "agent_evidence.inventory_nas_route_dropped"
+    INVENTORY_NETWORK_DROPPED = "agent_evidence.inventory_network_dropped"
+    INVENTORY_NETWORK_INTERFACE_DROPPED = (
+        "agent_evidence.inventory_network_interface_dropped"
+    )
+    PROGRESS_DROPPED = "agent_evidence.progress_dropped"
+    TELEMETRY_READING_DROPPED = "agent_evidence.telemetry_reading_dropped"
+
+
 class ArtifactLifecycleCode(WireEnum):
     """Why an artifact (model file, image archive, blob) cannot be removed, referenced or changed right now."""
 
@@ -675,6 +697,8 @@ class ReconcileCode(WireEnum):
 class ResourcePlanningCode(WireEnum):
     """Resource planning (memory, disk, parallelism) refusals and unknowns."""
 
+    ENVELOPE_EXCEEDS_CAPACITY = "resource.envelope_exceeds_capacity"
+    ENVELOPE_UNVERIFIED = "resource.envelope_unverified"
     ESTIMATE_UNCERTAIN = "resource.estimate_uncertain"
     EVIDENCE_INVALID = "resource.evidence_invalid"
     EVIDENCE_UNKNOWN = "resource.evidence_unknown"
@@ -944,6 +968,8 @@ class RunSwitchCode(WireEnum):
     CLEANUP_WAITING_WITHOUT_CHILD = "run-switch.cleanup-waiting-without-child"
     CLEANUP_RETURNED_NO_EVIDENCE = "run-switch.cleanup-returned-no-evidence"
     RESOURCE_CAPACITY_UNKNOWN = "run-switch.resource.capacity_unknown"
+    RESOURCE_ENVELOPE_EXCEEDS_CAPACITY = "run-switch.resource.envelope_exceeds_capacity"
+    RESOURCE_ENVELOPE_UNVERIFIED = "run-switch.resource.envelope_unverified"
     RESOURCE_ESTIMATE_UNCERTAIN = "run-switch.resource.estimate_uncertain"
     RESOURCE_EVIDENCE_INVALID = "run-switch.resource.evidence_invalid"
     RESOURCE_EVIDENCE_UNKNOWN = "run-switch.resource.evidence_unknown"
@@ -1323,6 +1349,7 @@ class UninstallPlanCode(WireEnum):
 #: Every domain enum, in the order the wire schema lists them.
 REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (
     AdmissionCode,
+    AgentEvidenceCode,
     ArtifactLifecycleCode,
     CacheReferenceReason,
     CatalogCode,
@@ -1498,6 +1525,7 @@ class ReasonCodeVocabulary(WireModel):
     """
 
     admission_code: AdmissionCode
+    agent_evidence_code: AgentEvidenceCode
     artifact_lifecycle_code: ArtifactLifecycleCode
     cache_reference_reason: CacheReferenceReason
     catalog_code: CatalogCode
@@ -1546,6 +1574,7 @@ __all__ = [
     "RETIRED_CODE_SPELLINGS",
     "RETIRED_FINDING_CODE_SPELLINGS",
     "AdmissionCode",
+    "AgentEvidenceCode",
     "ArtifactLifecycleCode",
     "CacheReferenceReason",
     "CatalogCode",

@@ -13,13 +13,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
-use vonk_agent_protocol::generated::EnrollmentBootstrapResponse;
+use vonk_agent_protocol::generated::{
+    EnrollmentBootstrapResponse, SparkApplyEnvelope, SparkApplyFresh, SparkApplyFreshOperation,
+    SparkApplyOperation, SparkApplyPair, SparkApplyPairOperation, SparkApplyRecover,
+    SparkApplyRecoverOperation, SparkApplyReenroll, SparkApplyReenrollOperation, SparkApplyUpgrade,
+    SparkApplyUpgradeOperation, SparkFirewallConfig, SparkHostMapping,
+};
 use wait_timeout::ChildExt;
 
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -48,15 +53,7 @@ const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
 const SITE_PORTS: &str =
     include_str!("../../../../control/src/vonk_control/resources/site-ports.json");
 
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SitePorts {
-    endpoint_host_ports: Vec<u16>,
-    host_endpoint_ports: Vec<u16>,
-    rendezvous_port: u16,
-}
-
-fn site_ports() -> SitePorts {
+fn site_ports() -> vonk_agent_protocol::generated::SitePorts {
     serde_json::from_str(SITE_PORTS).expect("packaged site ports are valid")
 }
 const FABRIC_BANDWIDTH_MBPS: u64 = 200_000;
@@ -375,8 +372,10 @@ impl CallerIdentity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
+/// The privileged phase's plan with parsed values. It crosses the process
+/// boundary as `SparkApplyOperation`, the generated wire form, through
+/// [`ApplyEnvelope::to_wire`] and [`ApplyEnvelope::from_wire`].
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ApplyOperation {
     Fresh {
         enrollment_url: Box<Url>,
@@ -403,8 +402,7 @@ enum ApplyOperation {
     Upgrade,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct HostMapping {
     address: String,
     hostnames: Vec<String>,
@@ -418,8 +416,7 @@ struct EnrollmentDiscovery {
     helper_authority: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct FirewallConfig {
     nas_management_ip: Ipv4Addr,
     node_management_ip: Ipv4Addr,
@@ -431,14 +428,145 @@ struct FirewallConfig {
     fabric_bandwidth_mbps: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone)]
 struct ApplyEnvelope {
     schema_version: u8,
     caller_uid: u32,
     release_manifest: Vec<u8>,
     release_signature: Vec<u8>,
     plan: ApplyOperation,
+}
+
+impl ApplyEnvelope {
+    fn to_wire(&self) -> SparkApplyEnvelope {
+        let plan = match &self.plan {
+            ApplyOperation::Fresh {
+                enrollment_url,
+                controller_url,
+                ca_sha256,
+                ca_pem,
+                node_id,
+                pairing_token,
+                host_mapping,
+                firewall,
+                helper_authority,
+            } => SparkApplyOperation::Fresh(SparkApplyFresh {
+                operation: SparkApplyFreshOperation::Fresh,
+                enrollment_url: enrollment_url.to_string(),
+                controller_url: controller_url.to_string(),
+                ca_sha256: ca_sha256.clone(),
+                ca_pem: hex::encode(ca_pem),
+                node_id: node_id.clone(),
+                pairing_token: pairing_token.clone(),
+                host_mapping: host_mapping.as_ref().map(|mapping| SparkHostMapping {
+                    address: mapping.address.clone(),
+                    hostnames: mapping.hostnames.clone(),
+                }),
+                firewall: SparkFirewallConfig {
+                    nas_management_ip: firewall.nas_management_ip.into(),
+                    node_management_ip: firewall.node_management_ip.into(),
+                    node_fabric_ip: firewall.node_fabric_ip.into(),
+                    peer_fabric_ip: firewall.peer_fabric_ip.into(),
+                    endpoint_host_ports: firewall.endpoint_host_ports.clone(),
+                    host_endpoint_ports: firewall.host_endpoint_ports.clone(),
+                    rendezvous_port: firewall.rendezvous_port,
+                    fabric_bandwidth_mbps: firewall.fabric_bandwidth_mbps,
+                },
+                helper_authority: hex::encode(helper_authority),
+            }),
+            ApplyOperation::Pair {
+                enrollment_url,
+                ca_sha256,
+                pairing_token,
+            } => SparkApplyOperation::Pair(SparkApplyPair {
+                operation: SparkApplyPairOperation::Pair,
+                enrollment_url: enrollment_url.to_string(),
+                ca_sha256: ca_sha256.clone(),
+                pairing_token: pairing_token.clone(),
+            }),
+            ApplyOperation::Reenroll {
+                enrollment_url,
+                ca_sha256,
+                pairing_token,
+            } => SparkApplyOperation::Reenroll(SparkApplyReenroll {
+                operation: SparkApplyReenrollOperation::Reenroll,
+                enrollment_url: enrollment_url.to_string(),
+                ca_sha256: ca_sha256.clone(),
+                pairing_token: pairing_token.clone(),
+            }),
+            ApplyOperation::Recover => SparkApplyOperation::Recover(SparkApplyRecover {
+                operation: SparkApplyRecoverOperation::Recover,
+            }),
+            ApplyOperation::Upgrade => SparkApplyOperation::Upgrade(SparkApplyUpgrade {
+                operation: SparkApplyUpgradeOperation::Upgrade,
+            }),
+        };
+        SparkApplyEnvelope {
+            schema_version: self.schema_version,
+            caller_uid: self.caller_uid,
+            release_manifest: hex::encode(&self.release_manifest),
+            release_signature: hex::encode(&self.release_signature),
+            plan,
+        }
+    }
+
+    fn from_wire(wire: SparkApplyEnvelope) -> Result<Self, SetupError> {
+        let invalid = |_| SetupError::PrivilegedInput;
+        let plan = match wire.plan {
+            SparkApplyOperation::Fresh(fresh) => ApplyOperation::Fresh {
+                enrollment_url: Box::new(Url::parse(&fresh.enrollment_url).map_err(invalid)?),
+                controller_url: Box::new(Url::parse(&fresh.controller_url).map_err(invalid)?),
+                ca_sha256: fresh.ca_sha256,
+                ca_pem: hex::decode(&fresh.ca_pem).map_err(|_| SetupError::PrivilegedInput)?,
+                node_id: fresh.node_id,
+                pairing_token: fresh.pairing_token,
+                host_mapping: fresh.host_mapping.map(|mapping| HostMapping {
+                    address: mapping.address,
+                    hostnames: mapping.hostnames,
+                }),
+                firewall: FirewallConfig {
+                    nas_management_ip: ipv4(fresh.firewall.nas_management_ip)?,
+                    node_management_ip: ipv4(fresh.firewall.node_management_ip)?,
+                    node_fabric_ip: ipv4(fresh.firewall.node_fabric_ip)?,
+                    peer_fabric_ip: ipv4(fresh.firewall.peer_fabric_ip)?,
+                    endpoint_host_ports: fresh.firewall.endpoint_host_ports,
+                    host_endpoint_ports: fresh.firewall.host_endpoint_ports,
+                    rendezvous_port: fresh.firewall.rendezvous_port,
+                    fabric_bandwidth_mbps: fresh.firewall.fabric_bandwidth_mbps,
+                },
+                helper_authority: hex::decode(&fresh.helper_authority)
+                    .map_err(|_| SetupError::PrivilegedInput)?,
+            },
+            SparkApplyOperation::Pair(pair) => ApplyOperation::Pair {
+                enrollment_url: Url::parse(&pair.enrollment_url).map_err(invalid)?,
+                ca_sha256: pair.ca_sha256,
+                pairing_token: pair.pairing_token,
+            },
+            SparkApplyOperation::Reenroll(reenroll) => ApplyOperation::Reenroll {
+                enrollment_url: Url::parse(&reenroll.enrollment_url).map_err(invalid)?,
+                ca_sha256: reenroll.ca_sha256,
+                pairing_token: reenroll.pairing_token,
+            },
+            SparkApplyOperation::Recover(_) => ApplyOperation::Recover,
+            SparkApplyOperation::Upgrade(_) => ApplyOperation::Upgrade,
+        };
+        Ok(Self {
+            schema_version: wire.schema_version,
+            caller_uid: wire.caller_uid,
+            release_manifest: hex::decode(&wire.release_manifest)
+                .map_err(|_| SetupError::PrivilegedInput)?,
+            release_signature: hex::decode(&wire.release_signature)
+                .map_err(|_| SetupError::PrivilegedInput)?,
+            plan,
+        })
+    }
+}
+
+fn ipv4(address: std::net::IpAddr) -> Result<Ipv4Addr, SetupError> {
+    match address {
+        std::net::IpAddr::V4(address) => Ok(address),
+        std::net::IpAddr::V6(_) => Err(SetupError::PrivilegedInput),
+    }
 }
 
 use vonk_agent_protocol::generated::{
@@ -1248,7 +1376,8 @@ pub fn prepare_setup_with_authority(
 }
 
 fn encode_apply_frame(envelope: &ApplyEnvelope) -> Result<Vec<u8>, SetupError> {
-    let payload = serde_json::to_vec(envelope).map_err(|_| SetupError::PrivilegedInput)?;
+    let payload =
+        serde_json::to_vec(&envelope.to_wire()).map_err(|_| SetupError::PrivilegedInput)?;
     if payload.is_empty() || payload.len() > MAX_APPLY_FRAME_BYTES {
         return Err(SetupError::PrivilegedInput);
     }
@@ -1293,7 +1422,9 @@ fn decode_apply_frame(input: impl Read) -> Result<ApplyEnvelope, SetupError> {
     if raw[digest_offset..] != Sha256::digest(payload)[..] {
         return Err(SetupError::PrivilegedInput);
     }
-    serde_json::from_slice(payload).map_err(|_| SetupError::PrivilegedInput)
+    let wire: SparkApplyEnvelope =
+        serde_json::from_slice(payload).map_err(|_| SetupError::PrivilegedInput)?;
+    ApplyEnvelope::from_wire(wire)
 }
 
 fn read_bounded_regular(path: &Path, maximum: usize) -> Result<Vec<u8>, SetupError> {

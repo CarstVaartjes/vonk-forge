@@ -1,11 +1,12 @@
 import {useEffect, useId, useRef, useState} from "react";
 import type {KeyboardEvent, MouseEvent as ReactMouseEvent} from "react";
 import {useToast} from "./toast";
+import type {CliTokenDownload} from "../api/types";
 
 const DOCS_URL = "https://github.com/CarstVaartjes/vonk-forge/blob/main/docs/README.md";
 
 type AdminMenuProps = {
-  onDownloadCliToken(): Promise<{expiresAt: string}>;
+  onDownloadCliToken(): Promise<CliTokenDownload>;
   logoutError: string;
   loggingOut: boolean;
   navigationLocked?: boolean;

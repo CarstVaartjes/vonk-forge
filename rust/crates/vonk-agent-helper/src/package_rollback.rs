@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use vonk_agent_protocol::{
     PackageActivationPhase as Phase, PackageActivationReceipt, PackageRollbackAuthority,
@@ -25,21 +24,7 @@ const PATH: &str = "/usr/sbin:/usr/bin:/sbin:/bin";
 const PROCESS_PROOF_TIMEOUT: Duration = Duration::from_secs(15);
 const PROCESS_PROOF_INTERVAL: Duration = Duration::from_millis(100);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Transaction {
-    pub schema_version: u8,
-    pub node_id: String,
-    pub candidate_sha256: String,
-    pub candidate_version: String,
-    pub candidate_binary_sha256: String,
-    pub candidate_helper_sha256: String,
-    pub rollback: PackageRollbackAuthority,
-    pub phase: Phase,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub outcome: String,
-}
+pub use vonk_agent_protocol::generated::PackageRollbackTransaction as Transaction;
 
 fn now() -> Result<i64, String> {
     SystemTime::now()

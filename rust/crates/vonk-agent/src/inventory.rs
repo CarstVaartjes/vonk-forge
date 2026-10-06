@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
 use thiserror::Error;
 use vonk_agent_protocol::MemoryPool;
 
@@ -136,16 +135,14 @@ mod disk_reserve_tests {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+/// What one collection pass observed. The wire document is `InventoryRequest`,
+/// built by the client; this value is never serialized itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Inventory {
-    #[serde(rename = "host_memory_total_bytes")]
     pub memory_total_bytes: u64,
-    #[serde(rename = "host_memory_free_bytes")]
     pub memory_available_bytes: u64,
     pub disk_total_bytes: u64,
-    #[serde(rename = "disk_free_bytes")]
     pub disk_available_bytes: u64,
-    #[serde(skip)]
     pub state_database_reserve_held: bool,
     pub gpu_count: u32,
     pub gpu_memory_total_bytes: u64,
@@ -160,6 +157,37 @@ pub struct Inventory {
     /// Filled by the caller from [`crate::network`]; `None` means unknown.
     pub network_interfaces: Option<Vec<vonk_agent_protocol::generated::NetworkInterface>>,
     pub nas_route_interface: Option<String>,
+}
+
+impl Inventory {
+    /// The wire document that reports this observation to the Controller.
+    pub fn to_request(
+        &self,
+        observed_at: chrono::DateTime<chrono::FixedOffset>,
+    ) -> vonk_agent_protocol::generated::InventoryRequest {
+        vonk_agent_protocol::generated::InventoryRequest {
+            schema_version: 1,
+            observed_at,
+            disk_total_bytes: self.disk_total_bytes,
+            disk_free_bytes: self.disk_available_bytes,
+            host_memory_total_bytes: self.memory_total_bytes,
+            host_memory_free_bytes: self.memory_available_bytes,
+            gpu_memory_total_bytes: self.gpu_memory_total_bytes,
+            gpu_memory_free_bytes: self.gpu_memory_free_bytes,
+            gpu_count: self.gpu_count,
+            memory_pool: self.memory_pool,
+            artifact_store_read_only: self.artifact_store_read_only,
+            capabilities: self.capabilities.clone(),
+            fabric_address: self.fabric_address.map(|value| value.to_string()),
+            fabric_bandwidth_mbps: self
+                .fabric_bandwidth_mbps
+                .and_then(|value| u32::try_from(value).ok()),
+            nvidia_driver_version: self.nvidia_driver_version.clone(),
+            container_runtime_version: self.container_runtime_version.clone(),
+            network_interfaces: self.network_interfaces.clone(),
+            nas_route_interface: self.nas_route_interface.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]

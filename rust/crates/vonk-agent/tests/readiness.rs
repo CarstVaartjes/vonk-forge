@@ -2,11 +2,11 @@ use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
 
 use chrono::{TimeZone, Utc};
 use vonk_agent::{
-    readiness::{ReadinessReceipt, verify_readiness_at},
+    readiness::{WriteSecure, readiness_receipt, verify_readiness_at},
     runtime_identity::AgentRuntimeIdentity,
 };
 use vonk_agent_protocol::generated::{
-    AgentRuntimeIdentityArchitecture, PackageActivationReceipt, PackageActivationReceiptPhase,
+    AgentRuntimeIdentityArchitecture, PackageActivationPhase, PackageActivationReceipt,
 };
 
 fn identity(build: char, binary: char) -> AgentRuntimeIdentity {
@@ -25,7 +25,7 @@ fn readiness_receipt_binds_controller_acceptance_to_exact_process_and_identity()
     let path = directory.path().join("readiness.json");
     let accepted_at = Utc.with_ymd_and_hms(2026, 8, 20, 12, 0, 0).unwrap();
     let runtime_identity = identity('b', 'c');
-    ReadinessReceipt::new(
+    readiness_receipt(
         runtime_identity.clone(),
         4242,
         998_877,
@@ -66,7 +66,7 @@ fn readiness_after_package_activation_matches_the_direct_self_test() {
         created_at: accepted_at.timestamp() - 3600,
         node_id: "spk_2818d189042b4c77aefa7796f4befd23".to_owned(),
         outcome: "controller_confirmed_activation".to_owned(),
-        phase: PackageActivationReceiptPhase::Acknowledged,
+        phase: PackageActivationPhase::Acknowledged,
         schema_version: 2,
         source_binary_sha256: "1".repeat(64),
         source_package_sha256: "2".repeat(64),
@@ -76,7 +76,7 @@ fn readiness_after_package_activation_matches_the_direct_self_test() {
 
     // The claim publishes upgrade history as well as the current executable.
     // The local readiness consumer obtains its identity from a fresh self-test.
-    ReadinessReceipt::new(
+    readiness_receipt(
         reported_identity,
         4242,
         998_877,
@@ -103,7 +103,7 @@ fn readiness_receipt_rejects_stale_process_or_identity_acceptance() {
     let path = directory.path().join("readiness.json");
     let accepted_at = Utc.with_ymd_and_hms(2026, 8, 20, 12, 0, 0).unwrap();
     let runtime_identity = identity('b', 'c');
-    ReadinessReceipt::new(
+    readiness_receipt(
         runtime_identity.clone(),
         4242,
         998_877,

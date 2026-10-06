@@ -118,6 +118,22 @@ binding.
 These are terminal launch rejections, not permission to select another network
 interface. Kernel observation I/O failures retain the helper I/O classification.
 
+## Optional agent evidence never fails a mandatory report
+
+An agent report is a mandatory core (identity, lease, capacity, the outcome of
+an operation) plus optional evidence (NICs, the NAS route, the fabric pair,
+sensor readings, progress, failure diagnostics). Invalid optional evidence is
+dropped, not refused: the producer clamps it and logs a typed
+`AgentEvidenceCode`, and the Controller's `OptionalEvidenceModel` drops what
+still fails validation and logs the same code (`agent.evidence_dropped`). Only
+evidence the Controller displays or ignores qualifies; identity, time, fences,
+signed-grant requests and every mandatory field stay strict, and a damaged part
+is removed, never rewritten into a different valid value.
+`control/tests/test_agent_ingress_fail_open.py` classifies every agent ingress
+body and injects invalid optional fields into each: a new ingress body or a new
+optional field needs a decision there. A NAS route through Tailscale or over
+IPv6 is reported as a `tunnel` interface and never produces a Wi-Fi finding.
+
 ## Implementation plan
 
 1. Use `ErrorContext` in the Python client for generated and direct HTTP

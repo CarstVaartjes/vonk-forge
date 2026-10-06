@@ -282,19 +282,6 @@ def test_the_contract_module_of_the_machines_may_spell_them(tmp_path: Path) -> N
     assert _python(tmp_path, 'state = "uninstalled"\n')
 
 
-def test_the_cli_copy_of_the_wait_words_equals_the_contract() -> None:
-    from vonk_agent_protocol import LifecycleState, StateAlias
-
-    from cluster_profiles import cli_states
-
-    assert cli_states.NEEDS_OPERATOR == LifecycleState.NEEDS_OPERATOR.value
-    assert cli_states.LEGACY_NEEDS_OPERATOR == StateAlias.WAITING_FOR_OPERATOR.value
-    assert cli_states.OPERATOR_WAIT_STATES == {
-        cli_states.NEEDS_OPERATOR,
-        cli_states.LEGACY_NEEDS_OPERATOR,
-    }
-
-
 def test_no_lifecycle_code_spells_a_retired_state_word() -> None:
     """The migration is finished: the old words live in the contract's alias table."""
 

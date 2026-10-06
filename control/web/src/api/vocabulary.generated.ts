@@ -534,6 +534,18 @@ export const AdmissionCode = {
 } as const;
 export type AdmissionCode = (typeof AdmissionCode)[keyof typeof AdmissionCode];
 
+export const AgentEvidenceCode = {
+  CLAIM_HINT_DROPPED: "agent_evidence.claim_hint_dropped",
+  FAILURE_DIAGNOSTICS_DROPPED: "agent_evidence.failure_diagnostics_dropped",
+  INVENTORY_FABRIC_DROPPED: "agent_evidence.inventory_fabric_dropped",
+  INVENTORY_NAS_ROUTE_DROPPED: "agent_evidence.inventory_nas_route_dropped",
+  INVENTORY_NETWORK_DROPPED: "agent_evidence.inventory_network_dropped",
+  INVENTORY_NETWORK_INTERFACE_DROPPED: "agent_evidence.inventory_network_interface_dropped",
+  PROGRESS_DROPPED: "agent_evidence.progress_dropped",
+  TELEMETRY_READING_DROPPED: "agent_evidence.telemetry_reading_dropped",
+} as const;
+export type AgentEvidenceCode = (typeof AgentEvidenceCode)[keyof typeof AgentEvidenceCode];
+
 export const ArtifactLifecycleCode = {
   ASSET_AVAILABILITY_UNKNOWN: "artifact.asset_availability_unknown",
   DELETION_BUSY: "artifact.deletion_busy",
@@ -1125,6 +1137,8 @@ export const ReconcileCode = {
 export type ReconcileCode = (typeof ReconcileCode)[keyof typeof ReconcileCode];
 
 export const ResourcePlanningCode = {
+  ENVELOPE_EXCEEDS_CAPACITY: "resource.envelope_exceeds_capacity",
+  ENVELOPE_UNVERIFIED: "resource.envelope_unverified",
   ESTIMATE_UNCERTAIN: "resource.estimate_uncertain",
   EVIDENCE_INVALID: "resource.evidence_invalid",
   EVIDENCE_UNKNOWN: "resource.evidence_unknown",
@@ -1336,6 +1350,8 @@ export const RunSwitchCode = {
   CLEANUP_WAITING_WITHOUT_CHILD: "run-switch.cleanup-waiting-without-child",
   CLEANUP_RETURNED_NO_EVIDENCE: "run-switch.cleanup-returned-no-evidence",
   RESOURCE_CAPACITY_UNKNOWN: "run-switch.resource.capacity_unknown",
+  RESOURCE_ENVELOPE_EXCEEDS_CAPACITY: "run-switch.resource.envelope_exceeds_capacity",
+  RESOURCE_ENVELOPE_UNVERIFIED: "run-switch.resource.envelope_unverified",
   RESOURCE_ESTIMATE_UNCERTAIN: "run-switch.resource.estimate_uncertain",
   RESOURCE_EVIDENCE_INVALID: "run-switch.resource.evidence_invalid",
   RESOURCE_EVIDENCE_UNKNOWN: "run-switch.resource.evidence_unknown",

@@ -613,7 +613,8 @@ impl InventoryRequest {
         let mut names = BTreeSet::new();
         interfaces.len() <= 16
             && interfaces.iter().all(|value| {
-                names.insert(value.name.as_str())
+                valid_interface_name(&value.name)
+                    && names.insert(value.name.as_str())
                     && value
                         .link_speed_mbps
                         .is_none_or(|speed| (1..=1_000_000).contains(&speed))
@@ -623,6 +624,17 @@ impl InventoryRequest {
                 .as_deref()
                 .is_none_or(|route| names.contains(route))
     }
+}
+
+/// The interface-name rule of the inventory wire contract: at most 15 ASCII
+/// characters, alphanumeric first, then alphanumerics and `._:-`.
+pub fn valid_interface_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 15
+        && value.starts_with(|first: char| first.is_ascii_alphanumeric())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
 }
 
 fn valid_inventory_capability(value: &str) -> bool {

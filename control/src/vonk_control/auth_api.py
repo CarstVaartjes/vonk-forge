@@ -46,6 +46,18 @@ class AuthSession(BaseModel):
     expires_at: datetime
 
 
+class CliTokenDownload(BaseModel):
+    """What the browser learns from a token download: when the token stops working.
+
+    The token itself is the response body, exact bytes; the expiry travels in the
+    ``X-Vonk-Token-Expires-At`` header, which the web client reads into this shape.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    expires_at: str
+
+
 class LoginRequestInvalid(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -189,6 +201,12 @@ def install_auth_routes(
                 "description": "A short-lived administrator bearer token download",
                 "content": {
                     "text/plain": {"schema": {"type": "string", "format": "binary"}}
+                },
+                "headers": {
+                    "X-Vonk-Token-Expires-At": {
+                        "description": "When the token stops working (CliTokenDownload.expires_at)",
+                        "schema": {"type": "string"},
+                    }
                 },
             },
         },

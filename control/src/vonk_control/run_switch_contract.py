@@ -13,7 +13,6 @@ from typing import Annotated, Literal
 
 from pydantic import (
     BeforeValidator,
-    ConfigDict,
     Field,
     StringConstraints,
     model_validator,
@@ -33,7 +32,7 @@ from .model_cache_contract import ModelCacheDownloadResult
 from .operation_blockers import OperationBlocker
 from .preparation_contract import RolloutPreparation
 from .runtime_image_preparation import RuntimeImageReceipt
-from .strict_json import StrictJSONModel
+from .strict_json import StrictModel
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -128,11 +127,7 @@ RunSwitchOperationKind = Literal[
 ]
 
 
-class _StrictModel(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-
-
-class InvocationMetadata(_StrictModel):
+class InvocationMetadata(StrictModel):
     """Context for audit and tracing which has no decision-making authority."""
 
     origin: Annotated[
@@ -151,14 +146,14 @@ class InvocationMetadata(_StrictModel):
     ] = Field(default_factory=dict, max_length=16)
 
 
-class SparkGroupNode(_StrictModel):
+class SparkGroupNode(StrictModel):
     node_id: NodeId
     rank: int = Field(ge=0, le=31)
     role: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     endpoint_owner: bool = False
 
 
-class SparkGroup(_StrictModel):
+class SparkGroup(StrictModel):
     """A complete, rank-labelled Spark group selected by the operator."""
 
     nodes: list[SparkGroupNode] = Field(min_length=1, max_length=32)
@@ -176,7 +171,7 @@ class SparkGroup(_StrictModel):
         return self
 
 
-class RunSwitchProfileStopScope(_StrictModel):
+class RunSwitchProfileStopScope(StrictModel):
     """Reviewed profile-only cleanup of the reachable ranks in a lost group.
 
     The full accepted topology remains visible even though only its reachable
@@ -204,7 +199,7 @@ class RunSwitchProfileStopScope(_StrictModel):
         return self
 
 
-class RunMemoryResidualRange(_StrictModel):
+class RunMemoryResidualRange(StrictModel):
     """Possible remaining bytes for one exact active run reservation."""
 
     run_id: UuidId
@@ -214,7 +209,7 @@ class RunMemoryResidualRange(_StrictModel):
     maximum_bytes: int = Field(ge=0)
 
 
-class MemoryUsageUncertainty(_StrictModel):
+class MemoryUsageUncertainty(StrictModel):
     """Fresh aggregate capacity lacks per-run resident usage evidence."""
 
     source: Literal["aggregate_inventory_without_run_usage"]
@@ -233,7 +228,7 @@ class MemoryUsageUncertainty(_StrictModel):
         return self
 
 
-class RunSwitchPreviewRequest(_StrictModel):
+class RunSwitchPreviewRequest(StrictModel):
     schema_version: Literal[2] = 2
     model_content_sha256: Digest
     recipe_revision_id: UuidId
@@ -255,7 +250,7 @@ class RunSwitchApplyRequest(RunSwitchPreviewRequest):
     request_key: UuidId | None = None
 
 
-class RunSwitchStopPreviewRequest(_StrictModel):
+class RunSwitchStopPreviewRequest(StrictModel):
     schema_version: Literal[2] = 2
     run_id: UuidId
     invocation: InvocationMetadata = Field(default_factory=InvocationMetadata)
@@ -266,7 +261,7 @@ class RunSwitchStopApplyRequest(RunSwitchStopPreviewRequest):
     request_key: UuidId | None = None
 
 
-class RunSwitchCleanupPreviewRequest(_StrictModel):
+class RunSwitchCleanupPreviewRequest(StrictModel):
     """Ask Run/Switch to remove one installation that is no longer desired.
 
     Cleanup is authorized by the installation's own uninstall assessment, so it
@@ -284,14 +279,14 @@ class RunSwitchCleanupApplyRequest(RunSwitchCleanupPreviewRequest):
     request_key: UuidId | None = None
 
 
-class InstallationReconcileRequest(_StrictModel):
+class InstallationReconcileRequest(StrictModel):
     """Reconcile the reviewed plan, or use the Controller's one-step decision."""
 
     request_key: UuidId
     plan_digest: Digest | None = None
 
 
-class RunSwitchReconciliationTarget(_StrictModel):
+class RunSwitchReconciliationTarget(StrictModel):
     """One exact rank and whether its cleanup already succeeded."""
 
     node_id: NodeId
@@ -301,7 +296,7 @@ class RunSwitchReconciliationTarget(_StrictModel):
     state: Literal["pending", "reconciled"]
 
 
-class RunSwitchReconciliationAuthority(_StrictModel):
+class RunSwitchReconciliationAuthority(StrictModel):
     """Controller-owned identity of the installation a repair removes.
 
     The accepted installation plan remains opaque; it never claims that
@@ -337,7 +332,7 @@ class RunSwitchReconciliationAuthority(_StrictModel):
         return self
 
 
-class RunSwitchReason(_StrictModel):
+class RunSwitchReason(StrictModel):
     code: Annotated[str, StringConstraints(min_length=1, max_length=96)]
     detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
     severity: RunSwitchReasonSeverity
@@ -346,7 +341,7 @@ class RunSwitchReason(_StrictModel):
     stale: bool = False
 
 
-class FreshnessEvidence(_StrictModel):
+class FreshnessEvidence(StrictModel):
     source: Annotated[str, StringConstraints(min_length=1, max_length=96)]
     state: Literal["fresh", "stale", "unknown"]
     observed_at: datetime | None = None
@@ -355,7 +350,7 @@ class FreshnessEvidence(_StrictModel):
     evidence_digest: Digest | None = None
 
 
-class ResourceDemandEvidence(_StrictModel):
+class ResourceDemandEvidence(StrictModel):
     """The evidence terms used for one selected rank's memory fit."""
 
     weights_bytes: int | None = Field(default=None, ge=0)
@@ -368,7 +363,7 @@ class ResourceDemandEvidence(_StrictModel):
     evidence_digest: Digest | None = None
 
 
-class EffectiveParallelism(_StrictModel):
+class EffectiveParallelism(StrictModel):
     """Derived from topology; never an editable settings field."""
 
     world_size: int = Field(ge=1, le=31)
@@ -384,7 +379,7 @@ class EffectiveParallelism(_StrictModel):
         return self
 
 
-class EffectiveSettingsSelection(_StrictModel):
+class EffectiveSettingsSelection(StrictModel):
     """Canonical effective settings bound into the Run/Switch plan digest."""
 
     kind: Literal["generation", "embedding", "job"]
@@ -397,7 +392,7 @@ class EffectiveSettingsSelection(_StrictModel):
     identity_sha256: Digest
 
 
-class SparkFitNode(_StrictModel):
+class SparkFitNode(StrictModel):
     node_id: NodeId
     rank: int = Field(ge=0, le=31)
     role: Annotated[str, StringConstraints(min_length=1, max_length=64)]
@@ -419,14 +414,14 @@ class SparkFitNode(_StrictModel):
     warnings: list[RunSwitchReason] = Field(default_factory=list, max_length=32)
 
 
-class SparkFit(_StrictModel):
+class SparkFit(StrictModel):
     allowed: bool
     nodes: list[SparkFitNode] = Field(min_length=1, max_length=32)
     blockers: list[RunSwitchReason] = Field(default_factory=list, max_length=64)
     warnings: list[RunSwitchReason] = Field(default_factory=list, max_length=64)
 
 
-class ArtifactStorageImpact(_StrictModel):
+class ArtifactStorageImpact(StrictModel):
     """Byte impact with unknown values preserved as unknown, never guessed."""
 
     # The model manifest is known before a source build produces an image.
@@ -450,13 +445,13 @@ class ArtifactStorageImpact(_StrictModel):
     reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
 
 
-class BuildSourceEvidence(_StrictModel):
+class BuildSourceEvidence(StrictModel):
     state: Literal["available", "missing", "unknown"]
     source_bundle_sha256: Digest | None = None
     detail: Annotated[str, StringConstraints(max_length=256)] | None = None
 
 
-class BuildCompatibilityEvidence(_StrictModel):
+class BuildCompatibilityEvidence(StrictModel):
     expected_architecture: Annotated[
         str, StringConstraints(min_length=1, max_length=64)
     ]
@@ -468,7 +463,7 @@ class BuildCompatibilityEvidence(_StrictModel):
     detail: Annotated[str, StringConstraints(max_length=256)] | None = None
 
 
-class RuntimeImageStorageImpact(_StrictModel):
+class RuntimeImageStorageImpact(StrictModel):
     build_id: UuidId | None
     preparation_required: bool
     image_digest: (
@@ -493,7 +488,7 @@ class RuntimeImageStorageImpact(_StrictModel):
     reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
 
 
-class RunSwitchBuildEvidence(_StrictModel):
+class RunSwitchBuildEvidence(StrictModel):
     state: RunSwitchBuildEvidenceState
     build_id: UuidId | None
     # A pending build is still bound to an immutable source/build input and a
@@ -512,7 +507,7 @@ class RunSwitchBuildEvidence(_StrictModel):
     detail: Annotated[str, StringConstraints(max_length=512)] | None = None
 
 
-class MappingSelection(_StrictModel):
+class MappingSelection(StrictModel):
     mapping_id: UuidId | None
     mapping_generation: int | None = Field(default=None, ge=1)
     topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
@@ -525,7 +520,7 @@ class MappingSelection(_StrictModel):
     nodes: list[SparkGroupNode] = Field(min_length=1, max_length=32)
 
 
-class StopImpact(_StrictModel):
+class StopImpact(StrictModel):
     run_id: UuidId
     run_plan_digest: Digest
     alias: Alias
@@ -535,7 +530,7 @@ class StopImpact(_StrictModel):
     plan_digest: Digest
 
 
-class ConditionalPostStopMemoryCheck(_StrictModel):
+class ConditionalPostStopMemoryCheck(StrictModel):
     """Fresh inventory and ordinary memory admission required after stops."""
 
     stop_run_ids: list[UuidId] = Field(min_length=1, max_length=128)
@@ -549,7 +544,7 @@ class ConditionalPostStopMemoryCheck(_StrictModel):
         return self
 
 
-class RunSwitchPhase(_StrictModel):
+class RunSwitchPhase(StrictModel):
     index: int = Field(ge=0, le=31)
     kind: RunSwitchPhaseKind
     # ``kind`` stays in the shared lifecycle vocabulary.  This typed purpose
@@ -562,7 +557,7 @@ class RunSwitchPhase(_StrictModel):
     detail: Annotated[str, StringConstraints(min_length=1, max_length=256)]
 
 
-class RunSwitchAssessment(_StrictModel):
+class RunSwitchAssessment(StrictModel):
     """Planner-owned admission and observations shared by operator reviews."""
 
     alias: Alias | None
@@ -758,7 +753,7 @@ class RunSwitchPlan(RunSwitchAssessment):
         )
 
 
-class RunSwitchMemberProgress(_StrictModel):
+class RunSwitchMemberProgress(StrictModel):
     node_id: NodeId
     phase: RunSwitchPhaseKind | None = None
     state: RunSwitchMemberState
@@ -767,7 +762,7 @@ class RunSwitchMemberProgress(_StrictModel):
     error: Annotated[str, StringConstraints(max_length=256)] | None = None
 
 
-class RunSwitchProgress(_StrictModel):
+class RunSwitchProgress(StrictModel):
     operation: OperationProgress | None = None
     startup_budget_seconds: int | None = Field(default=None, ge=1)
     start_deadline: datetime | None = None
@@ -795,7 +790,7 @@ _FailureText = Annotated[
 ]
 
 
-class ArtifactVerificationEvidence(_StrictModel):
+class ArtifactVerificationEvidence(StrictModel):
     """One node's immutable artifact handoff evidence."""
 
     node_id: NodeId
@@ -811,7 +806,7 @@ class ArtifactVerificationEvidence(_StrictModel):
     diagnostic: Annotated[str, StringConstraints(max_length=512)] | None = None
 
 
-class RunSwitchMemberReceipt(_StrictModel):
+class RunSwitchMemberReceipt(StrictModel):
     """Durable member projection emitted by a child distribution operation."""
 
     node_id: NodeId
@@ -826,7 +821,7 @@ class RunSwitchMemberReceipt(_StrictModel):
     diagnostic: Annotated[str, StringConstraints(max_length=512)] | None = None
 
 
-class RunSwitchRankReceipt(_StrictModel):
+class RunSwitchRankReceipt(StrictModel):
     node_id: NodeId
     rank: int = Field(ge=0, le=31)
     role: Annotated[str, StringConstraints(min_length=1, max_length=64)]
@@ -834,7 +829,7 @@ class RunSwitchRankReceipt(_StrictModel):
     fresh: bool | None = None
 
 
-class RunSwitchChildProgress(_StrictModel):
+class RunSwitchChildProgress(StrictModel):
     """Progress nested in a durable child receipt."""
 
     operation: OperationProgress | None = None
@@ -871,7 +866,7 @@ class RunSwitchChildProgress(_StrictModel):
         return self
 
 
-class ArtifactVerificationResult(_StrictModel):
+class ArtifactVerificationResult(StrictModel):
     """Canonical evidence returned by a completed artifact verify phase."""
 
     skipped: bool = False
@@ -887,7 +882,7 @@ class ArtifactVerificationResult(_StrictModel):
     evidence: list[ArtifactVerificationEvidence] = Field(default_factory=list)
 
 
-class _RunSwitchPhaseBase(_StrictModel):
+class _RunSwitchPhaseBase(StrictModel):
     # `subphase` is declared by each concrete result rather than here. A default
     # on this base makes every subclass that narrows the field to its own
     # Literal an override that drops the default, which pyright reports nine
@@ -1116,7 +1111,7 @@ class RunSwitchInstallationVerifyResult(_RunSwitchPhaseBase):
     ranks: list[RunSwitchRankReceipt] = Field(min_length=1, max_length=32)
 
 
-class RunSwitchDistributionChildResult(_StrictModel):
+class RunSwitchDistributionChildResult(StrictModel):
     """Durable projection of one target-copy child operation.
 
     A child Job has a different persisted shape from a parent phase receipt:
@@ -1159,14 +1154,14 @@ RunSwitchPhaseResult = (
 )
 
 
-class RunSwitchCancellation(_StrictModel):
+class RunSwitchCancellation(StrictModel):
     request_key: UuidId
     actor: Annotated[str, StringConstraints(min_length=1, max_length=256)]
     reason: Annotated[str, StringConstraints(min_length=1, max_length=512)]
     requested_at: datetime
 
 
-class RunSwitchRuntimeImageReferenceIntent(_StrictModel):
+class RunSwitchRuntimeImageReferenceIntent(StrictModel):
     """Exact image bytes provisionally protected by a current RunSwitch job."""
 
     schema_version: Literal[2] = 2
@@ -1196,7 +1191,7 @@ class RunSwitchRuntimeImageReferenceIntent(_StrictModel):
         return self
 
 
-class RunSwitchOperationResult(_StrictModel):
+class RunSwitchOperationResult(StrictModel):
     """Exact durable result tree stored in ``Job.result``."""
 
     phase_index: int = Field(default=0, ge=0, le=31)
@@ -1246,7 +1241,7 @@ class RunSwitchOperationResult(_StrictModel):
         return self
 
 
-class RunSwitchOperation(_StrictModel):
+class RunSwitchOperation(StrictModel):
     operation_id: UuidId
     kind: RunSwitchOperationKind
     action: RunSwitchAction
@@ -1291,13 +1286,13 @@ class RunSwitchOperation(_StrictModel):
         return self
 
 
-class RunSwitchCancelRequest(_StrictModel):
+class RunSwitchCancelRequest(StrictModel):
     schema_version: Literal[2] = 2
     request_key: UuidId
     reason: Annotated[str, StringConstraints(min_length=1, max_length=512)]
 
 
-class RunSwitchRetryRequest(_StrictModel):
+class RunSwitchRetryRequest(StrictModel):
     schema_version: Literal[2] = 2
     request_key: UuidId
 

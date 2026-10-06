@@ -84,3 +84,12 @@ def test_typescript_vocabulary_is_current() -> None:
     assert not _stale(target, module.typescript_vocabulary()), (
         "stale vocabulary.generated.ts; run scripts/generate-control-clients"
     )
+
+
+def test_python_vocabulary_modules_are_current() -> None:
+    stale = [
+        str(path.relative_to(ROOT))
+        for path, content in _script("generate-python-vocabulary").rendered().items()
+        if _stale(path, content)
+    ]
+    assert stale == [], "run scripts/generate-python-vocabulary"

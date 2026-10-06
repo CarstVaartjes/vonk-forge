@@ -148,11 +148,23 @@ class CatalogService:
                 if existing is None:
                     session.add(row)
                 else:
-                    if parse_source_bundle_manifest(existing.manifest) != manifest:
-                        raise CatalogValidationError(
-                            SourceBundleCode.METADATA_MISMATCH,
-                            "stored source manifest differs from verified bundle",
+                    try:
+                        consistent = (
+                            parse_source_bundle_manifest(existing.manifest) == manifest
                         )
+                    except SourceBundleError:
+                        consistent = False
+                    if not consistent:
+                        # The metadata row is derived from the bundle verified
+                        # just now at this ingress: damaged metadata is rewritten
+                        # from it, never a reason to refuse the verified bundle.
+                        existing.media_type = row.media_type
+                        existing.archive_bytes = row.archive_bytes
+                        existing.total_bytes = row.total_bytes
+                        existing.file_count = row.file_count
+                        existing.storage_key = row.storage_key
+                        existing.manifest = row.manifest
+                        existing.verified_at = row.verified_at
                     row = existing
         except IntegrityError as error:
             raise CatalogConflict(

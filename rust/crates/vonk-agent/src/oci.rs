@@ -8,10 +8,15 @@ use std::{
     time::Duration,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::FailureStage;
+use vonk_agent_protocol::generated::{
+    InstallationMetadataEntry, InstallationMetadataReceipt, InstallationReconciliationCheckpoint,
+    InstallationReconciliationCheckpointState as InstallationReconciliationState,
+    RunLifecycleRecord as RunLifecycle,
+};
 use vonk_agent_protocol::{
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES, RecipeReconciliationIdentity,
     canonical_json as canonical_protocol_json,
@@ -136,31 +141,12 @@ pub struct RecipeRunStartIdentity {
     pub run_generation: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum InstallationReconciliationState {
-    Prepared,
-    Removing,
-    Complete,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct InstallationReconciliationCheckpoint {
-    schema_version: u8,
-    state: InstallationReconciliationState,
-    identity: RecipeReconciliationIdentity,
-    installation_device: u64,
-    installation_inode: u64,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallationReconciliationProgress {
     pub complete: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobOutputState {
     pub output_path: &'static str,
     pub file_count: usize,
@@ -197,26 +183,6 @@ fn start_stage<T>(
     })
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct InstallationMetadataReceipt {
-    schema_version: u8,
-    entries: Vec<InstallationMetadataEntry>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(deny_unknown_fields)]
-struct InstallationMetadataEntry {
-    selection_id: String,
-    path: String,
-    sha256: String,
-    size_bytes: u64,
-    dev: u64,
-    ino: u64,
-    mtime_ns: i128,
-    ctime_ns: i128,
-}
-
 /// Open descriptors bind the agent's verified model custody across one
 /// authorized helper Start call. This token is process-local and never grants
 /// access to a different installation or helper operation.
@@ -237,16 +203,6 @@ struct RuntimePolicy {
 struct RuntimePolicyLabel {
     name: String,
     value: String,
-}
-
-// Tolerant of fields an older or newer agent wrote: an unknown field must not
-// make a retained run unreadable.
-#[derive(Debug, Serialize, Deserialize)]
-struct RunLifecycle {
-    installation_id: String,
-    placement: CompiledRuntimePlacement,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    run_generation: Option<u32>,
 }
 
 pub struct RuntimeStartPlan {
@@ -1683,7 +1639,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             // mTLS; size and trusted custody (checked above) are the check.
             refreshed.push(installation_metadata_entry(artifact, &metadata));
         }
-        refreshed.sort();
+        sort_metadata_entries(&mut refreshed);
         atomic_write(
             &installation,
             INSTALLATION_METADATA_FILE,
@@ -1933,7 +1889,7 @@ fn write_installation_metadata(
         )?;
         entries.push(installation_metadata_entry(artifact, &metadata));
     }
-    entries.sort();
+    sort_metadata_entries(&mut entries);
     atomic_write(
         installation,
         INSTALLATION_METADATA_FILE,
@@ -2154,10 +2110,32 @@ fn trusted_receipt_metadata(metadata: &fs::Metadata) -> bool {
         && metadata.mode() & 0o777 == 0o600
 }
 
-fn timestamp_ns(seconds: i64, nanoseconds: i64) -> i128 {
-    i128::from(seconds)
+/// Nanoseconds since the epoch, saturating at the i64 range the receipt's
+/// contract allows (year 2262).
+fn timestamp_ns(seconds: i64, nanoseconds: i64) -> i64 {
+    seconds
         .saturating_mul(1_000_000_000)
-        .saturating_add(i128::from(nanoseconds))
+        .saturating_add(nanoseconds)
+}
+
+/// The order a receipt lists its entries in: by selection, then path, then the
+/// remaining identity fields.
+fn sort_metadata_entries(entries: &mut [InstallationMetadataEntry]) {
+    entries.sort_by(|left, right| {
+        let key = |entry: &InstallationMetadataEntry| {
+            (
+                entry.selection_id.clone(),
+                entry.path.clone(),
+                entry.sha256.clone(),
+                entry.size_bytes,
+                entry.dev,
+                entry.ino,
+                entry.mtime_ns,
+                entry.ctime_ns,
+            )
+        };
+        key(left).cmp(&key(right))
+    });
 }
 
 fn materialize_compiled_models(

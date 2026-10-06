@@ -12,7 +12,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ring::signature;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::{
@@ -465,44 +464,15 @@ mod process_command_runner_tests {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct OperationOutcome {
-    pub schema_version: u8,
-    pub status: HostHelperResponseStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit_code: Option<i32>,
-}
+pub use vonk_agent_protocol::generated::HostOperationOutcome as OperationOutcome;
+use vonk_agent_protocol::generated::{
+    HostArchiveRuntimeImageReceipt as LegacyRuntimeImageReceipt,
+    HostRuntimeImageReceipt as RuntimeImageReceipt, InstallationReconciliationReceipt,
+    RuntimeGenerationFence,
+};
 
 struct RuntimeRequestOutcome {
     exit_code: Option<i32>,
-}
-
-/// The helper's durable proof that one pinned runtime image was pulled into
-/// one exact local image reference. The manifest digest identifies the image
-/// in the Controller's layered store; the daemon image ID identifies the
-/// pulled object (the config digest on Docker's classic store, the manifest
-/// digest on its containerd store), so later uses compare it live.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct RuntimeImageReceipt {
-    schema_version: u8,
-    platform_manifest_digest: String,
-    image_config_id: String,
-    local_image_reference: String,
-}
-
-/// The receipt an agent before the layered image store wrote when it loaded
-/// an image from a Docker archive. Only the identity fields are read; the
-/// archive itself is no longer consulted.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-struct LegacyRuntimeImageReceipt {
-    schema_version: u8,
-    registry_index_digest: String,
-    platform_manifest_digest: String,
-    archive_sha256: String,
-    image_config_id: String,
-    local_image_reference: String,
 }
 
 const LEGACY_RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION: u8 = 2;
@@ -547,27 +517,8 @@ enum RuntimeStartLaunch {
     TimedOut,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct InstallationReconciliationReceipt {
-    schema_version: u8,
-    identity: RecipeReconciliationIdentity,
-    installation_device: u64,
-    installation_inode: u64,
-}
-
 const INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION: u8 = 3;
 const RUNTIME_GENERATION_FENCE_SCHEMA_VERSION: u8 = 2;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct RuntimeGenerationFence {
-    schema_version: u8,
-    installation_id: uuid::Uuid,
-    runtime_id: uuid::Uuid,
-    highest_generation: u32,
-    cancelled: bool,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct RuntimeEffectIdentity {
@@ -920,7 +871,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(OperationOutcome {
             schema_version: 1,
             status,
-            exit_code,
+            exit_code: exit_code.map(i64::from),
         })
     }
 

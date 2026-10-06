@@ -10,6 +10,8 @@ from ..types import UNSET, Unset
 
 from ..models.admission_code import AdmissionCode
 from ..models.admission_code import check_admission_code
+from ..models.agent_evidence_code import AgentEvidenceCode
+from ..models.agent_evidence_code import check_agent_evidence_code
 from ..models.artifact_lifecycle_code import ArtifactLifecycleCode
 from ..models.artifact_lifecycle_code import check_artifact_lifecycle_code
 from ..models.cache_reference_reason import CacheReferenceReason
@@ -113,6 +115,14 @@ class ReasonCodeVocabulary:
 
         Attributes:
             admission_code (AdmissionCode): The shared admission lock refused because capacity is held by another admission.
+            agent_evidence_code (AgentEvidenceCode): Optional agent evidence that was dropped so the mandatory report is
+                kept.
+
+                An agent report carries a mandatory core (identity, lease, capacity, outcome)
+                and optional evidence (NICs, the NAS route, fabric details, readings,
+                progress, diagnostics). Invalid optional evidence is never a reason to refuse
+                the core: the evidence is dropped and one of these words names what was lost,
+                on the agent that dropped it and on the Controller that received it.
             artifact_lifecycle_code (ArtifactLifecycleCode): Why an artifact (model file, image archive, blob) cannot be
                 removed, referenced or changed right now.
             cache_reference_reason (CacheReferenceReason): What keeps a cached artifact from being removed.
@@ -170,6 +180,7 @@ class ReasonCodeVocabulary:
      """
 
     admission_code: AdmissionCode
+    agent_evidence_code: AgentEvidenceCode
     artifact_lifecycle_code: ArtifactLifecycleCode
     cache_reference_reason: CacheReferenceReason
     catalog_code: CatalogCode
@@ -218,6 +229,8 @@ class ReasonCodeVocabulary:
 
     def to_dict(self) -> dict[str, Any]:
         admission_code: str = self.admission_code
+
+        agent_evidence_code: str = self.agent_evidence_code
 
         artifact_lifecycle_code: str = self.artifact_lifecycle_code
 
@@ -306,6 +319,7 @@ class ReasonCodeVocabulary:
 
         field_dict.update({
             "admission_code": admission_code,
+            "agent_evidence_code": agent_evidence_code,
             "artifact_lifecycle_code": artifact_lifecycle_code,
             "cache_reference_reason": cache_reference_reason,
             "catalog_code": catalog_code,
@@ -357,6 +371,11 @@ class ReasonCodeVocabulary:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         admission_code = check_admission_code(d.pop("admission_code"))
+
+
+
+
+        agent_evidence_code = check_agent_evidence_code(d.pop("agent_evidence_code"))
 
 
 
@@ -568,6 +587,7 @@ class ReasonCodeVocabulary:
 
         reason_code_vocabulary = cls(
             admission_code=admission_code,
+            agent_evidence_code=agent_evidence_code,
             artifact_lifecycle_code=artifact_lifecycle_code,
             cache_reference_reason=cache_reference_reason,
             catalog_code=catalog_code,
