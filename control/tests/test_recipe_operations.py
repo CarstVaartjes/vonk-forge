@@ -3971,6 +3971,44 @@ def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
     assert final_dependent.model_impact.retained_node_ids == ()
 
 
+def test_installations_removed_together_do_not_keep_each_others_model_files(
+    tmp_path: Path,
+) -> None:
+    """The storage sweep removes every installation of a model at once. Each one
+    asks the Spark to reclaim the shared files (the Spark removes only what no
+    other installation still links), so the last to go frees them: catches an
+    eviction that removes installations and frees none of the model bytes."""
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    first = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="9" * 35 + "1"
+    )
+    second = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="9" * 35 + "2"
+    )
+
+    alone = service.preview_uninstall(first.owner_id)
+    together = service.preview_uninstall(
+        first.owner_id, also_removing=(second.owner_id,)
+    )
+
+    assert alone.model_impact.cleanup_node_ids == ()
+    assert together.model_impact.cleanup_node_ids == nodes
+    operation = service.uninstall(
+        first.owner_id,
+        plan_digest=together.plan_digest,
+        actor="admin",
+        request_id="9" * 35 + "3",
+        also_removing=(second.owner_id,),
+    )
+    with sessions() as session:
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == operation.id)
+        )
+        assert child is not None
+        assert child.payload["cleanup_model_content_sha256"] is not None
+
+
 def test_uninstall_cleans_model_per_spark_when_dependency_is_node_local(
     tmp_path: Path,
 ) -> None:

@@ -4848,6 +4848,18 @@
             "title": "Step Results",
             "type": "object"
           },
+          "storage_wait_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Wait Since"
+          },
           "supersede_code": {
             "anyOf": [
               {
@@ -23090,7 +23102,8 @@
         "description": "Storage demand outcomes of an admission.",
         "enum": [
           "storage.evicting",
-          "storage.insufficient_after_eviction"
+          "storage.insufficient_after_eviction",
+          "storage.eviction_timed_out"
         ],
         "title": "StorageDemandCode",
         "type": "string"

@@ -2586,6 +2586,8 @@ export interface components {
             step_results?: {
                 [key: string]: components["schemas"]["FleetProfileStepResult"];
             };
+            /** Storage Wait Since */
+            storage_wait_since?: string | null;
             supersede_code?: components["schemas"]["SupersedeCode"] | null;
             /** Superseded By */
             superseded_by?: string | null;
@@ -8223,7 +8225,7 @@ export interface components {
          * @description Storage demand outcomes of an admission.
          * @enum {string}
          */
-        StorageDemandCode: "storage.evicting" | "storage.insufficient_after_eviction";
+        StorageDemandCode: "storage.evicting" | "storage.insufficient_after_eviction" | "storage.eviction_timed_out";
         /** StringParameter */
         StringParameter: {
             /** Allowed Values */

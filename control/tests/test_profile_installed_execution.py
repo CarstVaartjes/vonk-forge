@@ -31,7 +31,17 @@ from vonk_control.run_switch_contract import (
     RunSwitchInstallationVerifyResult,
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.storage_demands import STORAGE_INSUFFICIENT, StorageDemands
+from vonk_control.settings import (
+    STORAGE_ADMISSION_RETRY_SECONDS,
+    STORAGE_ADMISSION_WAIT_SECONDS,
+)
+from vonk_control.storage_demands import (
+    STORAGE_EVICTING,
+    STORAGE_EVICTION_TIMED_OUT,
+    STORAGE_INSUFFICIENT,
+    StorageDemands,
+    StorageRelief,
+)
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 
 from cluster_profiles.control_client import validate_control_document
@@ -315,11 +325,96 @@ def test_a_load_waiting_for_disk_names_it_and_resumes_when_space_appears(
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
         snapshot.disk_free_bytes = snapshot.disk_total_bytes
-    later = lifecycle._clock() + timedelta(seconds=30)
+    # Space appeared within the bound: the next retry admits the load.
+    later = lifecycle._clock() + timedelta(seconds=STORAGE_ADMISSION_RETRY_SECONDS + 1)
     for clocked in (service, planner, lifecycle):
         clocked._clock = lambda: later
     _drive_to_job(service, planner, sessions, "recipe.install")
     assert service.application(waiting.id).state == "running"
+
+
+def _disk_starved_load(tmp_path: Path, relief=None):
+    sessions, lifecycle, _, _, _, nodes = setup_services(tmp_path)
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+    service, planner = _profile_service(sessions, lifecycle)
+    if relief is None:
+        collector = UnusedStorageCollector(
+            sessions,
+            clock=lifecycle._clock,
+            lifecycle=lifecycle,
+            demands=StorageDemands(lifecycle._clock),
+        )
+        relief = collector.relief_for_spark
+    service.bind_storage_relief(relief)
+    profile = _installed_profile(service, sessions, nodes)
+    waiting = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    assert waiting.state == "queued", waiting
+    return sessions, lifecycle, service, planner, waiting, nodes
+
+
+def _after(lifecycle, service, planner, seconds: int) -> None:
+    later = lifecycle._clock() + timedelta(seconds=seconds)
+    for clocked in (service, planner, lifecycle):
+        clocked._clock = lambda: later
+    for _ in range(4):
+        planner.tick()
+        service.tick()
+
+
+def test_a_load_waiting_for_disk_that_never_comes_ends_naming_what_holds_it(
+    tmp_path: Path,
+) -> None:
+    """The wait for space is bounded: when nothing frees the disk within
+    STORAGE_ADMISSION_WAIT_SECONDS the load is refused with the reason that
+    holds the space, not parked for ever."""
+
+    _sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(
+        tmp_path
+    )
+    # Still waiting well inside the bound.
+    _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS // 2)
+    assert service.application(waiting.id).state == "queued"
+
+    _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS + 120)
+
+    ended = service.application(waiting.id)
+    assert ended.state == "failed", ended
+    refusal = next(item for item in ended.blockers if item.code == STORAGE_INSUFFICIENT)
+    assert refusal.severity == "error"
+    assert refusal.node_ids == [nodes[0]]
+    assert "only 0 bytes" in refusal.detail
+    assert STORAGE_INSUFFICIENT in (ended.status_reason or "")
+
+
+def test_a_load_whose_eviction_never_finishes_times_out_with_a_typed_refusal(
+    tmp_path: Path,
+) -> None:
+    """Eviction that is always still under way does not hold a load for ever:
+    after the bound it ends with storage.eviction_timed_out."""
+
+    def evicting(node_id, required, *, source, subject, reason):
+        return StorageRelief(
+            STORAGE_EVICTING, required, required, "Removing unused installations."
+        )
+
+    _sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(
+        tmp_path, evicting
+    )
+    _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS // 2)
+    assert service.application(waiting.id).state == "queued"
+
+    _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS + 120)
+
+    ended = service.application(waiting.id)
+    assert ended.state == "failed", ended
+    refusal = next(
+        item for item in ended.blockers if item.code == STORAGE_EVICTION_TIMED_OUT
+    )
+    assert refusal.node_ids == [nodes[0]]
+    assert str(STORAGE_ADMISSION_WAIT_SECONDS) in refusal.detail
 
 
 @pytest.mark.parametrize(

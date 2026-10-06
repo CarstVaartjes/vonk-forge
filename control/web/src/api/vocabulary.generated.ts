@@ -1343,6 +1343,7 @@ export type StopPlanCode = (typeof StopPlanCode)[keyof typeof StopPlanCode];
 export const StorageDemandCode = {
   EVICTING: "storage.evicting",
   INSUFFICIENT_AFTER_EVICTION: "storage.insufficient_after_eviction",
+  EVICTION_TIMED_OUT: "storage.eviction_timed_out",
 } as const;
 export type StorageDemandCode = (typeof StorageDemandCode)[keyof typeof StorageDemandCode];
 

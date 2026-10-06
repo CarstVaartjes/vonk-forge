@@ -37,6 +37,11 @@ from vonk_control.models import (
 )
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS, RENDEZVOUS_PORT
 from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.settings import STORAGE_ADMISSION_WAIT_SECONDS
+from vonk_control.storage_demands import (
+    STORAGE_EVICTION_TIMED_OUT,
+    STORAGE_INSUFFICIENT,
+)
 
 from cluster_profiles.cli_render import render_payload
 
@@ -1141,3 +1146,149 @@ def test_late_admission_outcome_preserves_concurrent_winner(
         assert current.state == ("queued" if winner == "admitted" else "cancelled")
         assert current.progress["admission_pending"] == (winner != "admitted")
         assert current.status_reason == "concurrent owner won"
+
+
+# -- disk the load waits for ----------------------------------------------------
+
+
+class _Relief:
+    """A storage reclaimer's answer, recording what the waiting load asked for."""
+
+    def __init__(self, code: str, *, paused: bool = False) -> None:
+        self.code = code
+        self.paused = paused
+        self.asked: list[tuple[str, int, str]] = []
+
+    def __call__(self, node_id, required_free_bytes, *, source, subject, reason):
+        from vonk_control.storage_demands import StorageRelief
+
+        self.asked.append((node_id, required_free_bytes, source))
+        return StorageRelief(
+            self.code,
+            required_free_bytes,
+            0,
+            f"Needs {required_free_bytes} more free bytes; the loaded profile "
+            "holds the rest.",
+            paused=self.paused,
+        )
+
+
+def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief):
+    """A load whose Spark loses its free disk after the review accepted it."""
+
+    sessions, profiles, _, profile, api, headers, _review, nodes = _capacity_profile(
+        tmp_path, None
+    )
+    profiles.bind_storage_relief(relief)
+    original_queue = FleetProfileService._queue_application
+
+    def lose_disk(service, reviewed, **kwargs):
+        with sessions.begin() as session:
+            snapshot = session.scalar(select(NodeInventorySnapshot))
+            assert snapshot is not None
+            snapshot.disk_free_bytes = 0
+        return original_queue(service, reviewed, **kwargs)
+
+    monkeypatch.setattr(FleetProfileService, "_queue_application", lose_disk)
+    response = api.post(
+        f"/api/profile/{profile.number}/load",
+        headers=headers,
+        json={"request_key": str(uuid4())},
+    )
+    assert response.status_code == 202, response.text
+    monkeypatch.setattr(FleetProfileService, "_queue_application", original_queue)
+    return sessions, profiles, nodes
+
+
+def _only_application(sessions) -> FleetProfileApplication:
+    with sessions() as session:
+        (application,) = tuple(session.scalars(select(FleetProfileApplication)))
+        return application
+
+
+def _later(profiles, seconds: int) -> None:
+    moved = profiles._clock() + timedelta(seconds=seconds)
+    profiles._clock = lambda: moved
+
+
+def test_admission_short_of_disk_asks_for_the_bytes_and_names_what_it_waits_for(
+    tmp_path, monkeypatch
+) -> None:
+    """The parked load asks the collector for exactly the shortfall (it used to
+    only retry), shows eviction as its typed blocker, and resumes alone once the
+    Spark has room."""
+
+    relief = _Relief("storage.evicting")
+    sessions, profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
+
+    parked = _only_application(sessions)
+    assert parked.state == "queued" and parked.current_operation_id is None
+    assert parked.progress["admission_pending"] is True
+    (blocker,) = cast(list[dict[str, object]], parked.progress["blockers"])
+    assert blocker["code"] == "storage.evicting"
+    assert blocker["node_ids"] == [nodes[0]]
+    assert parked.progress["storage_wait_since"] is not None
+    ((node_id, needed, source),) = relief.asked
+    assert (node_id, source) == (nodes[0], "profile-load") and needed > 0
+
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = snapshot.disk_total_bytes
+    _later(profiles, 90)
+    for _ in range(6):
+        profiles.tick()
+        if _only_application(sessions).current_operation_id is not None:
+            break
+    admitted = _only_application(sessions)
+    assert admitted.current_operation_id is not None, admitted.status_reason
+    assert admitted.progress["blockers"] == []
+    assert admitted.progress["storage_wait_since"] is None
+
+
+def test_admission_ends_with_a_typed_refusal_when_nothing_more_can_be_freed(
+    tmp_path, monkeypatch
+) -> None:
+    """Catches retrying for ever (86 attempts and counting) against a Spark
+    whose space eviction cannot free: the load fails once, naming what holds it."""
+
+    relief = _Relief(STORAGE_INSUFFICIENT)
+    sessions, _profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
+
+    refused = _only_application(sessions)
+    assert refused.state == "failed"
+    assert refused.progress["admission_pending"] is False
+    assert refused.progress["admission_retry_at"] is None
+    (blocker,) = cast(list[dict[str, object]], refused.progress["blockers"])
+    assert blocker["code"] == STORAGE_INSUFFICIENT and blocker["severity"] == "error"
+    assert blocker["node_ids"] == [nodes[0]]
+    assert "the loaded profile holds the rest" in str(blocker["detail"])
+    assert STORAGE_INSUFFICIENT in (refused.status_reason or "")
+    assert refused.current_operation_id is None
+
+
+def test_admission_keeps_waiting_while_eviction_is_paused_then_refuses_after_the_bound(
+    tmp_path, monkeypatch
+) -> None:
+    """A paused eviction ends by itself, so it is waited out; the wait is bounded
+    and ends in a typed refusal that says the space did not come."""
+
+    relief = _Relief(STORAGE_INSUFFICIENT, paused=True)
+    sessions, profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
+    assert _only_application(sessions).state == "queued"
+
+    _later(profiles, 600)
+    profiles.tick()
+    still = _only_application(sessions)
+    assert (
+        still.state == "queued" and cast(int, still.progress["admission_attempt"]) >= 2
+    )
+
+    _later(profiles, STORAGE_ADMISSION_WAIT_SECONDS + 600)
+    profiles.tick()
+    refused = _only_application(sessions)
+    assert refused.state == "failed"
+    (blocker,) = cast(list[dict[str, object]], refused.progress["blockers"])
+    assert blocker["code"] == STORAGE_EVICTION_TIMED_OUT
+    assert blocker["node_ids"] == [nodes[0]]
+    assert "did not free" in str(blocker["detail"])

@@ -10897,11 +10897,14 @@ impl ::std::convert::TryFrom<::std::string::String> for StopPlanCode {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
 pub enum StorageDemandCode {
     #[serde(rename = "storage.evicting")]
     StorageEvicting,
     #[serde(rename = "storage.insufficient_after_eviction")]
     StorageInsufficientAfterEviction,
+    #[serde(rename = "storage.eviction_timed_out")]
+    StorageEvictionTimedOut,
 }
 impl ::std::fmt::Display for StorageDemandCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -10910,6 +10913,7 @@ impl ::std::fmt::Display for StorageDemandCode {
             Self::StorageInsufficientAfterEviction => {
                 f.write_str("storage.insufficient_after_eviction")
             }
+            Self::StorageEvictionTimedOut => f.write_str("storage.eviction_timed_out"),
         }
     }
 }
@@ -10919,6 +10923,7 @@ impl ::std::str::FromStr for StorageDemandCode {
         match value {
             "storage.evicting" => Ok(Self::StorageEvicting),
             "storage.insufficient_after_eviction" => Ok(Self::StorageInsufficientAfterEviction),
+            "storage.eviction_timed_out" => Ok(Self::StorageEvictionTimedOut),
             _ => Err("invalid value".into()),
         }
     }
@@ -24012,6 +24017,7 @@ impl StorageDemandCode {
         match self {
             Self::StorageEvicting => "storage.evicting",
             Self::StorageInsufficientAfterEviction => "storage.insufficient_after_eviction",
+            Self::StorageEvictionTimedOut => "storage.eviction_timed_out",
         }
     }
 }
@@ -24048,17 +24054,21 @@ impl<'de> ::serde::Deserialize<'de> for StorageDemandCode {
             PartialEq,
             PartialOrd,
         )]
+        #[allow(clippy::enum_variant_names)]
         enum Raw {
             #[serde(rename = "storage.evicting")]
             StorageEvicting,
             #[serde(rename = "storage.insufficient_after_eviction")]
             StorageInsufficientAfterEviction,
+            #[serde(rename = "storage.eviction_timed_out")]
+            StorageEvictionTimedOut,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::StorageEvicting => Self::StorageEvicting,
             Raw::StorageInsufficientAfterEviction => Self::StorageInsufficientAfterEviction,
+            Raw::StorageEvictionTimedOut => Self::StorageEvictionTimedOut,
         })
     }
 }

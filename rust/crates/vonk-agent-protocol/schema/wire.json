@@ -8146,7 +8146,8 @@
       "description": "Storage demand outcomes of an admission.",
       "enum": [
         "storage.evicting",
-        "storage.insufficient_after_eviction"
+        "storage.insufficient_after_eviction",
+        "storage.eviction_timed_out"
       ],
       "title": "StorageDemandCode",
       "type": "string"
