@@ -44,6 +44,8 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .parsed_sources import memoized_scan, parsed_tree
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
 ALLOWLIST_PATH = REPO_ROOT / "tools" / "content-identity-allowlist.json"
@@ -256,13 +258,17 @@ def _filters_on_provenance(func: ast.Attribute, call: ast.Call) -> bool:
     return False
 
 
-def scan_source(source: str, *, path: str) -> list[Site]:
-    """Return every provenance site in one module's source."""
+def scan_source(
+    source: str, *, path: str, tree: ast.Module | None = None
+) -> list[Site]:
+    """Return every provenance site in one module's source.
+
+    ``tree`` is the already parsed ``source`` (read-only) when the caller has it."""
 
     if path == OWNER_MODULE:
         return []
     collector = _Collector(path)
-    collector.visit(ast.parse(source))
+    collector.visit(tree if tree is not None else ast.parse(source))
     unique = {tuple(site.identity.values()): site for site in collector.sites}
     return sorted(unique.values(), key=lambda site: (site.line, site.expression))
 
@@ -270,11 +276,14 @@ def scan_source(source: str, *, path: str) -> list[Site]:
 def scan_provenance_sites(root: Path = CONTROL_SOURCE_ROOT) -> list[Site]:
     """Return every provenance site under ``root``."""
 
-    sites: list[Site] = []
-    for module in sorted(root.rglob("*.py")):
-        relative = module.relative_to(REPO_ROOT).as_posix()
-        sites.extend(scan_source(module.read_text(encoding="utf-8"), path=relative))
-    return sites
+    def compute() -> list[Site]:
+        sites: list[Site] = []
+        for module, parsed in parsed_tree(root):
+            relative = module.relative_to(REPO_ROOT).as_posix()
+            sites.extend(scan_source(parsed.source, path=relative, tree=parsed.tree))
+        return sites
+
+    return memoized_scan(("identity", root), [root], compute)
 
 
 def _key(identity: dict[str, object]) -> tuple[object, ...]:

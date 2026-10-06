@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
+use vonk_agent_protocol::generated::HostHelperResponseStatus;
 use vonk_agent_protocol::{
     PackageActivationPhase, PackageActivationReceipt, canonical_json, parse_strict,
 };
@@ -66,7 +67,7 @@ pub async fn acknowledge(
         .await
         .map_err(|_| AgentUpgradeError::HelperResponseInvalid)??;
     validate_helper_response(&response, &request_id)?;
-    if response.status != "package-activation-confirmed" {
+    if response.status != HostHelperResponseStatus::PackageActivationConfirmed {
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     let acknowledged =

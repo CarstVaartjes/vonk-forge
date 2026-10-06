@@ -13,10 +13,11 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
-    ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, ControllerErrorCode,
-    HostHelperGrantResponse, HostRuntimeGrantRequest, HostRuntimeGrantRequestAction,
-    IssuedCertificateResponse, PackageActivationGrantRequest, RenewRequest, SecurityRefusalReason,
-    TelemetryRequest,
+    ActivateRequest, AgentUpgradeGrantRequest, BoundedErrorResponse, ClaimRequest,
+    ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse, HostRuntimeGrantRequest,
+    HostRuntimeGrantRequestAction, IssuedCertificateResponse, PackageActivationGrantRequest,
+    ProgressPhase, RenewRequest, RequestValidationIssueLocItem, RequestValidationProblem,
+    SecurityRefusalReason, TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
@@ -437,7 +438,7 @@ pub struct DistributionDownloadEvidence {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DistributionProgress {
-    pub phase: &'static str,
+    pub phase: ProgressPhase,
     pub completed_items: u64,
     pub total_items: u64,
     pub object_sha256: String,
@@ -472,7 +473,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
         self.object_bytes[index] = self.object_bytes[index].max(bytes);
         self.completed_items += u64::from(completed);
         (self.callback)(DistributionProgress {
-            phase: "copying",
+            phase: ProgressPhase::Copying,
             completed_items: self.completed_items,
             total_items: self.object_bytes.len() as u64,
             object_sha256: object.sha256.clone(),
@@ -485,7 +486,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
 
 struct ProgressSnapshot {
     fence: uuid::Uuid,
-    phase: String,
+    phase: ProgressPhase,
     counters: Option<(u64, u64)>,
 }
 
@@ -661,13 +662,13 @@ impl AgentHttpClient {
         }
     }
 
-    pub(crate) fn set_progress_phase(&self, fence: uuid::Uuid, phase: &str) {
+    pub(crate) fn set_progress_phase(&self, fence: uuid::Uuid, phase: ProgressPhase) {
         *self
             .progress_phase
             .lock()
             .expect("progress phase lock poisoned") = Some(ProgressSnapshot {
             fence,
-            phase: phase.to_owned(),
+            phase,
             counters: None,
         });
     }
@@ -692,7 +693,7 @@ impl AgentHttpClient {
     pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         let mut progress = progress.clone();
         if let Some(measured) = progress.progress.as_mut()
-            && measured.phase == "executing"
+            && crate::vocabulary::is(&measured.phase, ProgressPhase::Executing)
             && let Some(snapshot) = self
                 .progress_phase
                 .lock()
@@ -700,7 +701,7 @@ impl AgentHttpClient {
                 .as_ref()
             && snapshot.fence == progress.fence
         {
-            measured.phase.clone_from(&snapshot.phase);
+            measured.phase = snapshot.phase.to_string();
             if let Some((bytes, total)) = snapshot.counters {
                 measured.completed_bytes = bytes;
                 measured.total_bytes = Some(total);
@@ -1268,7 +1269,7 @@ impl AgentHttpClient {
         mut progress: F,
     ) -> Result<(), ClientError>
     where
-        F: FnMut(u64, &'static str),
+        F: FnMut(u64, ProgressPhase),
     {
         let ObjectPlacement {
             destination,
@@ -1314,7 +1315,7 @@ impl AgentHttpClient {
         preallocate(&output, offset, expected_bytes);
         let mut output = BufWriter::with_capacity(1024 * 1024, output);
         let mut write_behind = WriteBehind::new(offset);
-        progress(offset, "copying");
+        progress(offset, ProgressPhase::Copying);
         let mut last_progress = tokio::time::Instant::now();
         let mut retries = 0_u32;
         while offset < expected_bytes {
@@ -1363,7 +1364,7 @@ impl AgentHttpClient {
                     governor.record_bytes(chunk.len() as u64);
                     write_behind.written(&mut output, offset).await?;
                     if last_progress.elapsed() >= Duration::from_millis(200) {
-                        progress(offset, "copying");
+                        progress(offset, ProgressPhase::Copying);
                         last_progress = tokio::time::Instant::now();
                     }
                 }
@@ -1377,14 +1378,14 @@ impl AgentHttpClient {
                 Ok(()) => retries = 0,
                 Err(error) if error.retryable() && retries < 4 => {
                     governor.throttled();
-                    progress(offset, "copying");
+                    progress(offset, ProgressPhase::Copying);
                     tokio::time::sleep(Duration::from_millis(500 * (1 << retries))).await;
                     retries += 1;
                 }
                 Err(error) => return Err(error),
             }
         }
-        progress(offset, "copying");
+        progress(offset, ProgressPhase::Copying);
         write_behind.finish().await?;
         output.flush().await?;
         output.get_ref().sync_all().await?;
@@ -1402,7 +1403,7 @@ impl AgentHttpClient {
         // not re-hashed. The digest names the object; ingress hashing happens
         // once, where the Controller's cache first receives the bytes. The
         // object is flushed and about to be renamed into place.
-        progress(expected_bytes, "finalizing");
+        progress(expected_bytes, ProgressPhase::Finalizing);
         let before_rename = tokio::fs::symlink_metadata(&partial).await?;
         if !same_file_metadata(&synced_metadata, &before_rename) {
             return Err(ClientError::Protocol);
@@ -1956,47 +1957,39 @@ fn response_controller_error(response: &reqwest::Response) -> ControllerError {
 /// bounded number of issues is kept, and the rest are counted.  Anything that
 /// does not match the declared shape yields `None` rather than a guess.
 fn controller_rejection_digest(body: &[u8]) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
-    let object = value.as_object()?;
-    let detail = object
-        .get("detail")
-        .and_then(serde_json::Value::as_str)
+    // A request-validation problem carries issues; any other bounded refusal
+    // carries only its detail line.
+    let (detail, issues) = match parse_strict::<RequestValidationProblem>(body) {
+        Ok(problem) => (problem.detail, problem.issues),
+        Err(_) => (
+            parse_strict::<BoundedErrorResponse>(body).ok()?.detail,
+            Vec::new(),
+        ),
+    };
+    let detail = Some(detail)
         .filter(|detail| !detail.is_empty() && detail.len() <= MAX_REJECTION_CONTEXT_CHARS)
-        .map(sanitize_text);
+        .map(|detail| sanitize_text(&detail));
     let mut specific = Vec::new();
     let mut structural = Vec::new();
-    let mut reported = 0_usize;
-    if let Some(issues) = object.get("issues").and_then(serde_json::Value::as_array) {
-        reported = issues.len();
-        for issue in issues {
-            let Some(issue) = issue.as_object() else {
-                continue;
-            };
-            let Some(location) = issue
-                .get("loc")
-                .and_then(serde_json::Value::as_array)
-                .map(|segments| {
-                    segments
-                        .iter()
-                        .map(render_rejection_location)
-                        .collect::<Vec<_>>()
-                        .join(".")
-                })
-                .filter(|location| !location.is_empty())
-            else {
-                continue;
-            };
-            let kind = issue
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .filter(|kind| valid_error_token(kind))
-                .unwrap_or("invalid");
-            let rendered = format!("{location} ({kind})");
-            if STRUCTURAL_ERROR_TYPES.contains(&kind) {
-                structural.push(rendered);
-            } else {
-                specific.push(rendered);
-            }
+    let reported = issues.len();
+    for issue in &issues {
+        let location = issue
+            .loc
+            .iter()
+            .map(render_rejection_location)
+            .collect::<Vec<_>>()
+            .join(".");
+        if location.is_empty() {
+            continue;
+        }
+        let kind = Some(issue.type_.as_str())
+            .filter(|kind| valid_error_token(kind))
+            .unwrap_or("invalid");
+        let rendered = format!("{location} ({kind})");
+        if STRUCTURAL_ERROR_TYPES.contains(&kind) {
+            structural.push(rendered);
+        } else {
+            specific.push(rendered);
         }
     }
     // A union payload fails every branch at once, so a shape mismatch against
@@ -2029,12 +2022,8 @@ fn controller_rejection_digest(body: &[u8]) -> Option<String> {
 }
 
 /// Render one reported location segment as bounded, sanitized text.
-fn render_rejection_location(segment: &serde_json::Value) -> String {
-    let text = match segment {
-        serde_json::Value::String(text) => text.clone(),
-        serde_json::Value::Number(number) => number.to_string(),
-        _ => return "?".to_owned(),
-    };
+fn render_rejection_location(segment: &RequestValidationIssueLocItem) -> String {
+    let text = segment.to_string();
     sanitize_text(&text)
         .chars()
         .take(MAX_REJECTION_LOCATION_CHARS)
@@ -2147,20 +2136,26 @@ fn valid_error_code(value: &str) -> bool {
 }
 
 fn is_rotation_conflict(body: &[u8]) -> bool {
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return false;
-    };
-    let code = value.get("code").and_then(serde_json::Value::as_str);
-    let detail = value.get("detail").and_then(serde_json::Value::as_str);
-    code.is_some_and(|code| {
-        vocabulary::is(
-            code,
-            SecurityRefusalReason::AgentCertificateRotationConflict,
-        ) || code == "agent_certificate_rotation_conflict"
-    }) || matches!(
-        detail,
-        Some("a different certificate rotation is already staged")
-    )
+    const STAGED: &str = "a different certificate rotation is already staged";
+    if let Ok(refusal) = parse_strict::<BoundedErrorResponse>(body) {
+        return refusal.detail == STAGED
+            || refusal.context.is_some_and(|context| {
+                vocabulary::is(
+                    &context.code,
+                    SecurityRefusalReason::AgentCertificateRotationConflict,
+                )
+            });
+    }
+    // An older Controller answered with a bare code and/or detail.
+    parse_strict::<ControllerRefusalBody>(body).is_ok_and(|refusal| {
+        refusal.detail.as_deref() == Some(STAGED)
+            || refusal.code.as_deref().is_some_and(|code| {
+                vocabulary::is(
+                    code,
+                    SecurityRefusalReason::AgentCertificateRotationConflict,
+                ) || code == "agent_certificate_rotation_conflict"
+            })
+    })
 }
 
 async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
@@ -2397,6 +2392,7 @@ mod tests {
     use uuid::Uuid;
     use vonk_agent_protocol::generated::{
         AgentClaimPayload, AgentOperation, ArtifactDistributionPayload, OperationProgress,
+        ProgressPhase,
     };
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, HostRuntimeRequest,
@@ -3221,7 +3217,11 @@ mod tests {
             .unwrap();
         // One operation-wide phase for the whole transfer: a per-object step
         // must not make it flip while other objects are still moving.
-        assert!(snapshots.iter().all(|item| item.phase == "copying"));
+        assert!(
+            snapshots
+                .iter()
+                .all(|item| item.phase == ProgressPhase::Copying)
+        );
         assert!(
             snapshots
                 .windows(2)
@@ -3566,7 +3566,7 @@ mod tests {
                     governor: &StreamGovernor::default(),
                 },
                 |_, phase| {
-                    if phase == "finalizing" && !swapped {
+                    if phase == ProgressPhase::Finalizing && !swapped {
                         std::fs::write(&replacement, &corrupt).unwrap();
                         std::fs::set_permissions(
                             &replacement,
@@ -3699,7 +3699,10 @@ mod tests {
                 .contains("range: bytes=5-")
         );
         assert!(updates.windows(2).all(|pair| pair[0].0 <= pair[1].0));
-        assert_eq!(updates.last(), Some(&(model.len() as u64, "finalizing")));
+        assert_eq!(
+            updates.last(),
+            Some(&(model.len() as u64, ProgressPhase::Finalizing))
+        );
     }
 
     #[tokio::test]
@@ -3966,7 +3969,7 @@ mod tests {
             fence: progress.fence,
         };
         let (client, server) = heartbeat_client(directive);
-        client.set_progress_phase(progress.fence, "uploading");
+        client.set_progress_phase(progress.fence, ProgressPhase::Uploading);
         client.set_progress_bytes(progress.fence, 512, 1024);
         client.heartbeat(&progress).await.unwrap();
         let request = server.join().unwrap();

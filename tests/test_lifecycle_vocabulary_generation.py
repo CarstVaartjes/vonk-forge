@@ -21,6 +21,8 @@ from vonk_agent_protocol import (
     BlockerCategory,
     ErrorCategory,
     FailureCode,
+    FailureStage,
+    HostHelperResponseStatus,
     InvalidRequestReason,
     LifecycleEffect,
     LifecycleEventKind,
@@ -30,6 +32,7 @@ from vonk_agent_protocol import (
     OperatorActionName,
     OperatorSurface,
     OutcomeKind,
+    ProgressPhase,
     ResourceBlockerCode,
     RunAdmissionCode,
     SecurityRefusalReason,
@@ -68,6 +71,9 @@ VOCABULARY: tuple[type[Enum], ...] = (
     FailureCode,
     RunAdmissionCode,
     ResourceBlockerCode,
+    ProgressPhase,
+    FailureStage,
+    HostHelperResponseStatus,
 )
 
 

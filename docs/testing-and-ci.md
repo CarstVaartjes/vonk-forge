@@ -72,11 +72,23 @@ with at most 60 seconds and a comment saying why. Tests that drive the
 installed `vonkctl` as separate processes against an HTTPS Controller peer get
 20 seconds from one rule in `control/tests/conftest.py`. Keep that set small: first
 remove repeated work (build or start once per session, inject clocks instead
-of sleeping, shrink fixtures to the boundary under test). On a machine that is
-knowingly overloaded, `--test-budget-scale=2` (or `0` to disable) relaxes the
-check locally. CI runs at the default scale but, because shared runners vary in
-speed, fails a test only above twice its budget and reports one between the
-budget and twice it as a warning (summary line and `::warning::` annotation).
+of sleeping, shrink fixtures to the boundary under test).
+
+A budget is wall time on a reference machine: the plugin scales it by a
+calibration measured at session start (a short pure-Python benchmark, between
+1x and 5x; `VONK_TEST_BUDGET_CALIBRATION` pins it), so a slow
+or loaded host gets proportionally more time. `--test-budget-scale=2` (or `0`
+to disable) multiplies it further on a machine that is knowingly overloaded.
+One overrun never fails a run: at the end of the session every test over its
+scaled budget is rerun once, together in one fresh process, and fails the run
+only if the overrun reproduces there or it was more than five times its budget
+when first measured (the rerun applies locally too, not only in CI). Otherwise
+the run reports a warning (summary line and `::warning::` annotation).
+
+The repository scanners (vocabulary, blocker, lifecycle, coordination, content
+identity) parse each Python file once per session through
+`control/tests/parsed_sources.py`; a new scanner reads the tree through it and
+treats the trees as read-only.
 
 No test builds a container image. Checks that need the real Controller or
 worker image carry `@pytest.mark.built_image` and take the image from
@@ -473,7 +485,14 @@ including `RuntimePreflightFindingCode` and `HelperErrorCode`) in a string liter
 the agent, helper or protocol crates, no `json!` result body outside tests, and one
 struct literal of the runtime preflight finding (the constructor that takes a
 `RuntimePreflightFindingCode` member), so a new free-string finding code fails.
-Its two residues (`VOCABULARY_RESIDUE`, `TOOL_OUTPUT_WORDS`) only fall.
+`ProgressPhase` and `HostHelperResponseStatus` are guarded in every spelling, plain
+words included; `FailureStage` is guarded by its type (every stage parameter takes the
+enum). A `#[cfg(test)]` item is skipped wherever it stands, so code after an early test
+module is scanned too. `VOCABULARY_RESIDUE` is empty; a word that is a tool's output or
+a file's content goes to `FOREIGN_MEANINGS` with its reason. The Python ratchet has a
+flat `progress_phase` tier: a phase spelled by hand in the `phase=` of
+`OperationProgress`/`OperationMemberProgress`, in a progress-shaped dict or in a
+comparison with a progress phase fails.
 
 The lifecycle also has a hardware canary that nothing in CI runs:
 `scripts/lifecycle-canary` drives one load, one cancel during start and one

@@ -8,7 +8,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
-use vonk_agent_protocol::generated::{AgentOperation, WaitReason};
+use vonk_agent_protocol::generated::{AgentOperation, FailureStage, WaitReason};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
 };
@@ -260,9 +260,8 @@ impl StateStore {
         // The wire schema is the contract: a message that its own generated
         // deserializer refuses (a bound, a pattern, an empty reason) never
         // becomes a durable result.
-        let document = serde_json::to_value(&result).map_err(|_| StateError::ResultState)?;
         let result: AgentResult =
-            serde_json::from_value(document).map_err(|_| StateError::ResultState)?;
+            vonk_agent_protocol::revalidate(&result).map_err(|_| StateError::ResultState)?;
         result.validate_for_operation(&claim.operation)?;
         let body = canonical_json(&result)?;
         let changed = transaction.execute(
@@ -570,7 +569,7 @@ impl StateStore {
             let finished = ExecutionResult::unknown(
                 WaitReason::AgentRestartInterrupted,
                 "agent restarted with an operation in progress",
-                UnknownEvidence::at("agent-restart")
+                UnknownEvidence::at(FailureStage::AgentRestart)
                     .because("the agent restarted before the operation's result was recorded"),
             )
             .finish_for(&operation);

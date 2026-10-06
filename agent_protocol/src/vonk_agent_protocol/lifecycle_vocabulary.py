@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, NamedTuple
 
+from .agent_words import FailureStage, HostHelperResponseStatus, ProgressPhase
 from .state_machines import (
     AssetAvailability,
     CatalogSyncState,
@@ -782,6 +783,9 @@ class LifecycleVocabulary(WireModel):
     placement_install_state: PlacementInstallState
     placement_load_state: PlacementLoadState
     model_cache_operator_status: ModelCacheOperatorStatus
+    progress_phase: ProgressPhase
+    failure_stage: FailureStage
+    host_helper_response_status: HostHelperResponseStatus
 
 
 __all__ = [

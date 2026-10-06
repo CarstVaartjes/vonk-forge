@@ -32,8 +32,12 @@ from ..models.error_category import check_error_category
 from ..models.error_category import ErrorCategory
 from ..models.failure_code import check_failure_code
 from ..models.failure_code import FailureCode
+from ..models.failure_stage import check_failure_stage
+from ..models.failure_stage import FailureStage
 from ..models.gateway_route_state import check_gateway_route_state
 from ..models.gateway_route_state import GatewayRouteState
+from ..models.host_helper_response_status import check_host_helper_response_status
+from ..models.host_helper_response_status import HostHelperResponseStatus
 from ..models.installation_node_state import check_installation_node_state
 from ..models.installation_node_state import InstallationNodeState
 from ..models.installation_state import check_installation_state
@@ -68,6 +72,8 @@ from ..models.placement_install_state import check_placement_install_state
 from ..models.placement_install_state import PlacementInstallState
 from ..models.placement_load_state import check_placement_load_state
 from ..models.placement_load_state import PlacementLoadState
+from ..models.progress_phase import check_progress_phase
+from ..models.progress_phase import ProgressPhase
 from ..models.reservation_state import check_reservation_state
 from ..models.reservation_state import ReservationState
 from ..models.resource_blocker_code import check_resource_blocker_code
@@ -146,11 +152,13 @@ class LifecycleVocabulary:
                 :func:`error_category_of`).
             event_kind (LifecycleEventKind): The kinds of event the pure transition function accepts.
             failure_code (FailureCode): Closed codes of a definite failed outcome reported by the agent.
+            failure_stage (FailureStage): The step an operation stopped at: a short, stable, secret-free word.
             gateway_route_state (GatewayRouteState): What the inference gateway currently serves: published routes, or
                 maintenance.
 
                 ``unavailable`` is the Controller's own word for a gateway whose marker it
                 cannot read; the gateway never writes it.
+            host_helper_response_status (HostHelperResponseStatus): The verdict a privileged-helper reply carries.
             installation_node_state (InstallationNodeState): The condition of one rank of an installation on its Spark.
             installation_state (InstallationState): The condition of a recipe installation across its Sparks.
             invalid_request_reason (InvalidRequestReason): Closed reason codes of an invalid request (submit-time input
@@ -186,6 +194,7 @@ class LifecycleVocabulary:
             placement_install_state (PlacementInstallState): How much of a placement's installation is already on its
                 Sparks.
             placement_load_state (PlacementLoadState): Whether a placement's recipe is loaded on its Sparks.
+            progress_phase (ProgressPhase): What an operation is doing, as the measured progress names it.
             reservation_state (ReservationState): The standing of a resource reservation.
             resource_blocker_code (ResourceBlockerCode): The capacity-fit codes the resource planner gives a node that
                 cannot fit.
@@ -246,7 +255,9 @@ class LifecycleVocabulary:
     error_category: ErrorCategory
     event_kind: LifecycleEventKind
     failure_code: FailureCode
+    failure_stage: FailureStage
     gateway_route_state: GatewayRouteState
+    host_helper_response_status: HostHelperResponseStatus
     installation_node_state: InstallationNodeState
     installation_state: InstallationState
     invalid_request_reason: InvalidRequestReason
@@ -261,6 +272,7 @@ class LifecycleVocabulary:
     outcome_kind: OutcomeKind
     placement_install_state: PlacementInstallState
     placement_load_state: PlacementLoadState
+    progress_phase: ProgressPhase
     reservation_state: ReservationState
     resource_blocker_code: ResourceBlockerCode
     route_publication_state: RoutePublicationState
@@ -308,7 +320,11 @@ class LifecycleVocabulary:
 
         failure_code: str = self.failure_code
 
+        failure_stage: str = self.failure_stage
+
         gateway_route_state: str = self.gateway_route_state
+
+        host_helper_response_status: str = self.host_helper_response_status
 
         installation_node_state: str = self.installation_node_state
 
@@ -337,6 +353,8 @@ class LifecycleVocabulary:
         placement_install_state: str = self.placement_install_state
 
         placement_load_state: str = self.placement_load_state
+
+        progress_phase: str = self.progress_phase
 
         reservation_state: str = self.reservation_state
 
@@ -382,7 +400,9 @@ class LifecycleVocabulary:
             "error_category": error_category,
             "event_kind": event_kind,
             "failure_code": failure_code,
+            "failure_stage": failure_stage,
             "gateway_route_state": gateway_route_state,
+            "host_helper_response_status": host_helper_response_status,
             "installation_node_state": installation_node_state,
             "installation_state": installation_state,
             "invalid_request_reason": invalid_request_reason,
@@ -397,6 +417,7 @@ class LifecycleVocabulary:
             "outcome_kind": outcome_kind,
             "placement_install_state": placement_install_state,
             "placement_load_state": placement_load_state,
+            "progress_phase": progress_phase,
             "reservation_state": reservation_state,
             "resource_blocker_code": resource_blocker_code,
             "route_publication_state": route_publication_state,
@@ -489,7 +510,17 @@ class LifecycleVocabulary:
 
 
 
+        failure_stage = check_failure_stage(d.pop("failure_stage"))
+
+
+
+
         gateway_route_state = check_gateway_route_state(d.pop("gateway_route_state"))
+
+
+
+
+        host_helper_response_status = check_host_helper_response_status(d.pop("host_helper_response_status"))
 
 
 
@@ -560,6 +591,11 @@ class LifecycleVocabulary:
 
 
         placement_load_state = check_placement_load_state(d.pop("placement_load_state"))
+
+
+
+
+        progress_phase = check_progress_phase(d.pop("progress_phase"))
 
 
 
@@ -644,7 +680,9 @@ class LifecycleVocabulary:
             error_category=error_category,
             event_kind=event_kind,
             failure_code=failure_code,
+            failure_stage=failure_stage,
             gateway_route_state=gateway_route_state,
+            host_helper_response_status=host_helper_response_status,
             installation_node_state=installation_node_state,
             installation_state=installation_state,
             invalid_request_reason=invalid_request_reason,
@@ -659,6 +697,7 @@ class LifecycleVocabulary:
             outcome_kind=outcome_kind,
             placement_install_state=placement_install_state,
             placement_load_state=placement_load_state,
+            progress_phase=progress_phase,
             reservation_state=reservation_state,
             resource_blocker_code=resource_blocker_code,
             route_publication_state=route_publication_state,

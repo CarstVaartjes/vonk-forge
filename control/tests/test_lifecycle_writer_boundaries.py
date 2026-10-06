@@ -28,6 +28,9 @@ from .lifecycle_writer_boundaries import (
     scan_unresolved,
 )
 
+#: The repository parse is shared setup, not the first test's own time.
+pytestmark = pytest.mark.usefixtures("parsed_repository")
+
 OWNER = "control/src/vonk_control/agent_jobs.py"
 OTHER = "control/src/vonk_control/sample.py"
 
@@ -183,14 +186,15 @@ def test_no_unresolved_state_write_hides_in_a_lifecycle_module() -> None:
 
     unexplained: list[str] = []
     from .lifecycle_writer_boundaries import CONTROL_SOURCE_ROOT, REPO_ROOT
+    from .parsed_sources import parsed_tree
 
-    for module in sorted(CONTROL_SOURCE_ROOT.rglob("*.py")):
+    for module, parsed in parsed_tree(CONTROL_SOURCE_ROOT):
         relative = module.relative_to(REPO_ROOT).as_posix()
         if relative not in DICT_STATE_OWNERS:
             continue
         known = NON_LIFECYCLE_STATE_VARIABLES.get(relative, frozenset())
         for function, variable, line in scan_unresolved(
-            module.read_text(encoding="utf-8"), path=relative
+            parsed.source, path=relative, tree=parsed.tree
         ):
             if variable not in known:
                 unexplained.append(f"{relative}:{line}: {variable}.state in {function}")

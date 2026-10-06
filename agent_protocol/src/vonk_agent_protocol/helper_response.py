@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
+from .agent_words import HostHelperResponseStatus
 from .failure_evidence import FailureLogTail
 from .host_helper import Uuid4Text
 from .wire_model import ErrorCode, WireModel
@@ -27,13 +28,7 @@ class HostHelperResponse(WireModel):
 
     schema_version: Literal[1]
     request_id: Uuid4Text | None
-    status: Literal[
-        "rejected",
-        "package-installed",
-        "package-activation-confirmed",
-        "container-runtime-request-executed",
-        "container-runtime-stop-uncertain",
-    ]
+    status: HostHelperResponseStatus
     exit_code: Annotated[int, Field(ge=0, le=255)] | None = None
     error_code: ErrorCode | None = None
     # Set only in the reply to a RecipeRunInspectionRequest.

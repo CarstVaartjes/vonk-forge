@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     DistributionObject,
     OperationMemberProgress,
     OperationProgress,
+    ProgressPhase,
     canonical_message,
 )
 
@@ -415,7 +416,7 @@ class DurableDistributionPhaseExecutor:
                 members.append(
                     {
                         "node_id": node_id,
-                        "phase": "transfer",
+                        "phase": ProgressPhase.TRANSFER,
                         "state": "succeeded",
                         "completed_bytes": total or 0,
                         "total_bytes": total,
@@ -449,7 +450,7 @@ class DurableDistributionPhaseExecutor:
                 members.append(
                     {
                         "node_id": operation.node_id,
-                        "phase": "transfer",
+                        "phase": ProgressPhase.TRANSFER,
                         "state": member_state,
                         # The agent's terminal distribution evidence reports the
                         # aggregate payload under ``downloaded_bytes``. Preserve
@@ -509,9 +510,9 @@ class DurableDistributionPhaseExecutor:
                     measured_members.append(
                         OperationMemberProgress(
                             member_id=operation.node_id,
-                            phase="pending"
+                            phase=ProgressPhase.PENDING
                             if member_state == "pending"
-                            else "transfer",
+                            else ProgressPhase.TRANSFER,
                             state=member_state,
                             completed_bytes=members[-1]["completed_bytes"],
                             total_bytes=members[-1]["total_bytes"],
@@ -551,7 +552,7 @@ class DurableDistributionPhaseExecutor:
             )
             payload = {
                 "progress": {
-                    "phase": "transfer",
+                    "phase": ProgressPhase.TRANSFER,
                     "completed_bytes": completed,
                     "total_bytes": total,
                     "total_bytes_known": total is not None,
@@ -565,7 +566,7 @@ class DurableDistributionPhaseExecutor:
                 measured_members.append(
                     OperationMemberProgress(
                         member_id=node_id,
-                        phase="transfer",
+                        phase=ProgressPhase.TRANSFER,
                         state="succeeded",
                         completed_bytes=item["completed_bytes"],
                         total_bytes=item["total_bytes"],
@@ -1409,7 +1410,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                         "downloaded_bytes": 0,
                         "total_bytes": 0,
                         "progress": {
-                            "phase": "model-download",
+                            "phase": ProgressPhase.MODEL_DOWNLOAD,
                             "completed_bytes": 0,
                             "total_bytes": 0,
                             "total_bytes_known": True,
@@ -1637,7 +1638,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             "phase": "transfer",
             "subphase": "model-download",
             "progress": {
-                "phase": "model-download",
+                "phase": ProgressPhase.MODEL_DOWNLOAD,
                 "completed_bytes": downloaded,
                 "total_bytes": expected,
                 "total_bytes_known": expected is not None,

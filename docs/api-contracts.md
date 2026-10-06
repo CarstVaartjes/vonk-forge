@@ -343,6 +343,23 @@ reads as `preflight_finding.unclassified` and is shown as reported; the finding 
 never refused. It is scoped to the finding (not folded into `RETIRED_CODE_SPELLINGS`)
 because the old bare word `helper_grant_invalid` is also a member of another domain.
 
+How far work has got is closed the same way. `ProgressPhase` (`downloading`,
+`building`, `reconciling-installation`, `transfer`, `completed`, ...) is the one set of
+words that `OperationProgress.phase` and `OperationMemberProgress.phase` say, and both
+the Spark agent and the Controller write only its members. `FailureStage` is the step
+a failed or unconfirmed operation stopped at (`OutcomeEvidence.stage`), and
+`HostHelperResponseStatus` is the verdict word of a privileged-helper reply; all three
+are published through `LifecycleVocabulary` and generated into Rust and TypeScript. The
+wire fields stay strings so that an older agent's free text still reads: the Controller
+reads a phase through the one adapter, `adopt_progress_phase` (`RETIRED_PROGRESS_PHASE_SPELLINGS`
+maps `download`, `verify`, `cleanup`, `prepare`, `upload`, `transferring`, `distribution`,
+`update` and `complete` to their members), and a word no member spells is shown as
+reported and counts as neither a transfer nor a wait. The agent's source-policy recheck
+reports `SourcePolicyCode` members (the Controller's findings, not its own spellings),
+and the kebab-case podman build diagnostic is derived from the finding code
+(`PodmanBuildDiagnostic::finding_code`), so one fact has one spelling; the `diagnostic`
+sentence stays text.
+
 The vocabulary ratchet keeps this flat at zero: a literal equal to a member, and
 any string constant in a code position (see [testing and CI](testing-and-ci.md)),
 fails. A new code is added to its domain enum first.

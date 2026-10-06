@@ -65,6 +65,7 @@ from pathlib import Path
 from vonk_agent_protocol import (
     LEGACY_WAIT_STATE,
     REASON_CODE_ENUMS,
+    RETIRED_PROGRESS_PHASE_SPELLINGS,
     AgentResultState,
     ErrorCategory,
     FailureCode,
@@ -72,6 +73,7 @@ from vonk_agent_protocol import (
     LifecycleEventKind,
     LifecycleState,
     OperatorActionName,
+    ProgressPhase,
     ResourceBlockerCode,
     RunAdmissionCode,
     SecurityRefusalReason,
@@ -79,6 +81,8 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.state_machines import MACHINES, ModelCacheOperatorStatus
+
+from .parsed_sources import memoized_scan, parse_file
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = REPO_ROOT / "tools" / "vocabulary-literals-baseline.json"
@@ -93,6 +97,7 @@ PYTHON_EXCLUDED_PREFIXES = ("src/cluster_profiles/generated_control/",)
 #: The contract itself, and the one place that still reads an untyped agent body.
 ALLOWED_FILES = frozenset(
     {
+        "agent_protocol/src/vonk_agent_protocol/agent_words.py",
         "agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py",
         "agent_protocol/src/vonk_agent_protocol/reason_codes.py",
         "agent_protocol/src/vonk_agent_protocol/outcome.py",
@@ -131,7 +136,9 @@ TIERS = (DISTINCTIVE, STORED_STATE, LEGACY_STATE, MACHINE_STATE)
 #: Tiers without a baseline: any occurrence fails.
 REASON_CODE = "reason_code"
 CODE_POSITION = "code_position"
-FLAT_TIERS = (REASON_CODE, CODE_POSITION)
+#: A progress phase spelled by hand where measured progress is built or read.
+PROGRESS_PHASE = "progress_phase"
+FLAT_TIERS = (REASON_CODE, CODE_POSITION, PROGRESS_PHASE)
 
 
 #: The lifecycle state words that persisted rows of the legacy kinds still carry.
@@ -241,6 +248,109 @@ DISTINCTIVE_WORDS = frozenset(
     if word not in STORED_STATE_WORDS
     and (any(mark in word for mark in _SEPARATORS) or word in _CORE_ONLY_WORDS)
 )
+
+
+#: Every word a measured progress phase can be, including the retired spellings an
+#: older agent or Controller wrote (read through ``adopt_progress_phase``).
+PROGRESS_PHASE_WORDS = frozenset(
+    {member.value for member in ProgressPhase} | set(RETIRED_PROGRESS_PHASE_SPELLINGS)
+)
+_PROGRESS_CALLS = frozenset({"OperationProgress", "OperationMemberProgress"})
+_PROGRESS_OWNER = re.compile(r"progress|measurement|member", re.IGNORECASE)
+
+
+def _constant_strings(node: ast.AST | None) -> Iterator[ast.Constant]:
+    """String constants an expression can evaluate to, or be compared with."""
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        yield node
+    elif isinstance(node, ast.IfExp):
+        yield from _constant_strings(node.body)
+        yield from _constant_strings(node.orelse)
+    elif isinstance(node, ast.BoolOp):
+        for value in node.values:
+            yield from _constant_strings(value)
+    elif isinstance(node, (ast.Set, ast.Tuple, ast.List)):
+        for element in node.elts:
+            yield from _constant_strings(element)
+
+
+def _is_phase_of_progress(node: ast.expr) -> bool:
+    """``progress.phase``, ``member["phase"]``, ``measurement.get("phase")``."""
+
+    if isinstance(node, ast.Attribute) and node.attr == "phase":
+        return bool(_PROGRESS_OWNER.search(ast.unparse(node.value)))
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.slice, ast.Constant)
+        and node.slice.value == "phase"
+    ):
+        return bool(_PROGRESS_OWNER.search(ast.unparse(node.value)))
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and bool(node.args)
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "phase"
+        and bool(_PROGRESS_OWNER.search(ast.unparse(node.func.value)))
+    )
+
+
+def _progress_phase_literals(tree: ast.Module) -> Iterator[ast.Constant]:
+    """Phase words spelled where measured progress is built or read.
+
+    A phase word is plain English and the same words name other things (a plan
+    phase kind, a start phase), so the scan reads only the places that are
+    measured progress: the ``phase=`` of ``OperationProgress`` and
+    ``OperationMemberProgress``, the ``"phase"`` of a progress-shaped dict (one that
+    also carries ``completed_bytes``) or of a ``model_copy(update=...)``, and a
+    comparison with the phase of a progress, measurement or member.
+    """
+
+    for node in ast.walk(tree):
+        leaves: list[ast.Constant] = []
+        if isinstance(node, ast.Call):
+            function = node.func
+            name = (
+                function.id
+                if isinstance(function, ast.Name)
+                else function.attr
+                if isinstance(function, ast.Attribute)
+                else None
+            )
+            for keyword in node.keywords:
+                if name in _PROGRESS_CALLS and keyword.arg == "phase":
+                    leaves.extend(_constant_strings(keyword.value))
+                if name == "model_copy" and keyword.arg == "update":
+                    leaves.extend(
+                        leaf
+                        for key, value in _dict_items(keyword.value)
+                        if key == "phase"
+                        for leaf in _constant_strings(value)
+                    )
+        elif isinstance(node, ast.Dict):
+            keys = {key for key, _ in _dict_items(node)}
+            if {"phase", "completed_bytes"} <= keys:
+                for key, value in _dict_items(node):
+                    if key == "phase":
+                        leaves.extend(_constant_strings(value))
+        elif isinstance(node, ast.Compare) and any(
+            isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)) for op in node.ops
+        ):
+            if _is_phase_of_progress(node.left):
+                for comparator in node.comparators:
+                    leaves.extend(_constant_strings(comparator))
+        for leaf in leaves:
+            if leaf.value in PROGRESS_PHASE_WORDS:
+                yield leaf
+
+
+def _dict_items(node: ast.AST) -> Iterator[tuple[object, ast.expr]]:
+    if isinstance(node, ast.Dict):
+        for key, value in zip(node.keys, node.values, strict=True):
+            if isinstance(key, ast.Constant):
+                yield key.value, value
 
 
 def tier_of(word: str) -> str | None:
@@ -362,15 +472,26 @@ def _is_reason_code_text(text: str) -> bool:
 def scan_python(
     files: Iterable[Path] | None = None, root: Path = REPO_ROOT
 ) -> Counter[tuple[str, str]]:
-    """Literal counts per ``(tier, repository-relative path)``."""
+    """Literal counts per ``(tier, repository-relative path)``.
 
+    The whole-repository scan (no ``files``) runs once while the tree is unchanged."""
+
+    if files is not None:
+        return _scan_python(files, root)
+    return memoized_scan(
+        ("vocabulary", root),
+        [root / path for path in PYTHON_ROOTS],
+        lambda: _scan_python(None, root),
+    )
+
+
+def _scan_python(files: Iterable[Path] | None, root: Path) -> Counter[tuple[str, str]]:
     counts: Counter[tuple[str, str]] = Counter()
     for path in files if files is not None else _python_files():
         relative = path.relative_to(root).as_posix()
         if relative in ALLOWED_FILES or relative.startswith(PYTHON_EXCLUDED_PREFIXES):
             continue
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=relative)
+        source, tree = parse_file(path)
         docstrings = _docstring_ids(tree)
         for node in ast.walk(tree):
             if (
@@ -388,6 +509,10 @@ def scan_python(
                 and _is_reason_code_text(node.value)
             ):
                 counts[(REASON_CODE, relative)] += 1
+        if relative.startswith(REASON_CODE_ROOT):
+            found_phase = sum(1 for _ in _progress_phase_literals(tree))
+            if found_phase:
+                counts[(PROGRESS_PHASE, relative)] += found_phase
         for tier, words in (
             (LEGACY_STATE, LEGACY_STATE_WORDS),
             (MACHINE_STATE, MACHINE_STATE_WORDS),
@@ -473,17 +598,26 @@ def _code_parameter_index(
 def scan_code_positions(
     files: Iterable[Path] | None = None, root: Path = REPO_ROOT
 ) -> list[str]:
-    """Every string constant in a position that names a code, as ``path:line: why``."""
+    """Every string constant in a position that names a code, as ``path:line: why``.
 
+    The whole-tree scan (no ``files``) runs once while the tree is unchanged."""
+
+    if files is not None:
+        return _scan_code_positions(files, root)
+    return memoized_scan(
+        ("code-positions", root),
+        [REPO_ROOT / CODE_POSITION_ROOT],
+        lambda: _scan_code_positions(None, root),
+    )
+
+
+def _scan_code_positions(files: Iterable[Path] | None, root: Path) -> list[str]:
     paths = (
         list(files)
         if files is not None
         else sorted((REPO_ROOT / CODE_POSITION_ROOT).rglob("*.py"))
     )
-    trees = {
-        path: ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for path in paths
-    }
+    trees = {path: parse_file(path).tree for path in paths}
     class_index: dict[str, int] = {}
     class_bases: dict[str, list[str]] = {}
     own_init: set[str] = set()
@@ -634,6 +768,13 @@ def flat_problems(
         for (tier, path), n in sorted(counts.items())
         if tier == REASON_CODE
     ]
+    found.extend(
+        f"{path}: {n} progress phase literal(s); use the "
+        f"vonk_agent_protocol.ProgressPhase member (and adopt_progress_phase to read "
+        f"an agent's word) instead of spelling the phase"
+        for (tier, path), n in sorted(counts.items())
+        if tier == PROGRESS_PHASE
+    )
     found.extend(
         f"{position} (a code is a member of a vonk_agent_protocol.reason_codes "
         f"enum, never a string; add the code to its domain enum first)"

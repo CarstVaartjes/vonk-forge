@@ -2,7 +2,7 @@
 //!
 //! No field rules live here: bounds, presence, nullability, defaults and tagged
 //! unions come from the checked-in export of the canonical Pydantic graph.
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     collections::BTreeMap,
     sync::{Arc, LazyLock, Mutex},
@@ -33,10 +33,10 @@ fn validator(pointer: &str) -> Result<Arc<jsonschema::Validator>, String> {
     if SCHEMA.pointer(pointer.trim_start_matches('#')).is_none() {
         return Err("unknown generated wire model".into());
     }
-    let schema = json!({
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$ref": format!("{SCHEMA_URI}{pointer}"),
-    });
+    let schema = serde_json::from_str(&format!(
+        r#"{{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"{SCHEMA_URI}{pointer}"}}"#
+    ))
+    .map_err(|_| "generated wire schema reference is invalid")?;
     let validator = Arc::new(
         jsonschema::options()
             .with_registry(&REGISTRY)

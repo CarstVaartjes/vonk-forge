@@ -20,9 +20,9 @@ use crate::failure_evidence::{self, FailureProcessLogs, sanitize_text};
 use vonk_agent_protocol::AgentClaim;
 use vonk_agent_protocol::generated::{
     AgentFailureKind, AgentOperation, AgentResultResult, AgentResultState, FailureCode,
-    HelperErrorCode, OutcomeDone, OutcomeDoneKind, OutcomeDoneResult, OutcomeEvidence,
-    OutcomeFailed, OutcomeFailedKind, OutcomeUnknown, OutcomeUnknownKind, RecipeJobRunResult,
-    WaitReason,
+    FailureStage, HelperErrorCode, OutcomeDone, OutcomeDoneKind, OutcomeDoneResult,
+    OutcomeEvidence, OutcomeFailed, OutcomeFailedKind, OutcomeUnknown, OutcomeUnknownKind,
+    RecipeJobRunResult, WaitReason,
 };
 
 /// The rule a refused request broke and the bound it was measured against.
@@ -42,7 +42,7 @@ pub struct Failure {
     pub code: Option<FailureCode>,
     pub failure_kind: Option<AgentFailureKind>,
     pub retry_after_seconds: Option<u32>,
-    pub stage: Option<String>,
+    pub stage: Option<FailureStage>,
     pub diagnostic: Option<String>,
     pub helper_error_code: Option<HelperErrorCode>,
     pub helper_exit_code: Option<u32>,
@@ -85,8 +85,8 @@ impl Failure {
         self
     }
 
-    pub fn stage(mut self, stage: impl Into<String>) -> Self {
-        self.stage = Some(stage.into());
+    pub fn stage(mut self, stage: FailureStage) -> Self {
+        self.stage = Some(stage);
         self
     }
 
@@ -128,7 +128,7 @@ impl Failure {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownEvidence {
     /// The step that could not be confirmed (a short, stable word).
-    pub stage: &'static str,
+    pub stage: FailureStage,
     /// A bounded, non-sensitive cause: an error category or helper code.
     pub diagnostic: Option<String>,
     /// The privileged helper's own verdict, when it gave one.
@@ -136,7 +136,7 @@ pub struct UnknownEvidence {
 }
 
 impl UnknownEvidence {
-    pub fn at(stage: &'static str) -> Self {
+    pub fn at(stage: FailureStage) -> Self {
         Self {
             stage,
             diagnostic: None,
@@ -166,7 +166,7 @@ impl UnknownEvidence {
             helper_error_code: self.helper_error_code.map(|code| code.to_string()),
             helper_exit_code: None,
             package_activation: None,
-            stage: Some(self.stage.to_owned()),
+            stage: Some(self.stage.to_string()),
         }
     }
 }
@@ -365,7 +365,7 @@ fn finish_failure(operation: &AgentOperation, failure: Failure) -> OutcomeFailed
             helper_error_code: helper_code.map(|code| code.to_string()),
             helper_exit_code,
             package_activation: None,
-            stage: failure.stage.as_deref().map(sanitize_text),
+            stage: failure.stage.map(|stage| stage.to_string()),
         }),
         receipt: None,
     }

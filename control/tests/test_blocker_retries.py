@@ -26,6 +26,9 @@ from .blocker_retries import (
     unproven_sites,
 )
 
+#: The repository parse is shared setup, not the first test's own time.
+pytestmark = pytest.mark.usefixtures("parsed_repository")
+
 PATH = "control/src/vonk_control/fleet_profiles.py"
 
 

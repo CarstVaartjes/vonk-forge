@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator
 
+from .agent_words import HostHelperResponseStatus
 from .claims import AgentRuntimeIdentity
 from .compiled_execution_plan import CompiledPlacement
 from .host_helper import RecipeReconciliationIdentity, Uuid4Text
@@ -107,7 +108,7 @@ class HostOperationOutcome(WireModel):
     """The privileged helper's durable result for one operation."""
 
     schema_version: Literal[1]
-    status: str
+    status: HostHelperResponseStatus
     exit_code: I64 | None = None
 
 

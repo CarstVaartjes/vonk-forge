@@ -46,6 +46,9 @@ from .blocker_boundaries import (
     write_counts,
 )
 
+#: The repository parse is shared setup, not the first test's own time.
+pytestmark = pytest.mark.usefixtures("parsed_repository")
+
 PATH = "control/src/vonk_control/sample.py"
 AUDITED_PATH = "control/src/vonk_control/audited_sample.py"
 

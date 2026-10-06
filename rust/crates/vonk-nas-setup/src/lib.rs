@@ -1072,7 +1072,7 @@ fn secret_file_content(value: String) -> Vec<u8> {
     content
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 struct PublicJwk {
     alg: String,
     crv: String,
@@ -1303,45 +1303,155 @@ fn generate_es256_jwks() -> Result<(PublicJwk, PrivateJwk), SetupError> {
     Ok((public, private))
 }
 
+/// The Step CA configuration this setup writes. Field order is the file's
+/// key order, so an existing install re-renders byte-identically.
+#[derive(Serialize)]
+struct StepCaConfig<'a> {
+    root: &'static str,
+    crt: &'static str,
+    key: &'static str,
+    address: &'static str,
+    #[serde(rename = "insecureAddress")]
+    insecure_address: &'static str,
+    #[serde(rename = "dnsNames")]
+    dns_names: [&'static str; 1],
+    logger: StepCaLogger,
+    db: StepCaDatabase,
+    crl: StepCaRevocationList,
+    authority: StepCaAuthority<'a>,
+}
+
+#[derive(Serialize)]
+struct StepCaLogger {
+    format: &'static str,
+}
+
+#[derive(Serialize)]
+struct StepCaDatabase {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    #[serde(rename = "dataSource")]
+    data_source: &'static str,
+}
+
+#[derive(Serialize)]
+struct StepCaRevocationList {
+    enabled: bool,
+    #[serde(rename = "generateOnRevoke")]
+    generate_on_revoke: bool,
+    #[serde(rename = "cacheDuration")]
+    cache_duration: &'static str,
+    #[serde(rename = "renewPeriod")]
+    renew_period: &'static str,
+}
+
+#[derive(Serialize)]
+struct StepCaAuthority<'a> {
+    provisioners: [StepCaProvisioner<'a>; 1],
+}
+
+#[derive(Serialize)]
+struct StepCaProvisioner<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    name: &'a str,
+    key: &'a PublicJwk,
+    claims: StepCaClaims,
+    options: StepCaOptions,
+}
+
+#[derive(Serialize)]
+struct StepCaClaims {
+    #[serde(rename = "minTLSCertDuration")]
+    min_tls_cert_duration: &'static str,
+    #[serde(rename = "maxTLSCertDuration")]
+    max_tls_cert_duration: &'static str,
+    #[serde(rename = "defaultTLSCertDuration")]
+    default_tls_cert_duration: &'static str,
+    #[serde(rename = "disableRenewal")]
+    disable_renewal: bool,
+    #[serde(rename = "disableSmallstepExtensions")]
+    disable_smallstep_extensions: bool,
+}
+
+#[derive(Serialize)]
+struct StepCaOptions {
+    x509: StepCaX509Options,
+}
+
+#[derive(Serialize)]
+struct StepCaX509Options {
+    template: &'static str,
+}
+
+/// The parts of an existing Step CA configuration that must still describe the
+/// imported authority. Anything else in the file is Step CA's own business.
+#[derive(Deserialize)]
+struct StepCaConfigIdentity {
+    root: Option<String>,
+    crt: Option<String>,
+    key: Option<String>,
+    authority: Option<StepCaAuthorityIdentity>,
+}
+
+#[derive(Deserialize)]
+struct StepCaAuthorityIdentity {
+    #[serde(default)]
+    provisioners: Vec<StepCaProvisionerIdentity>,
+}
+
+#[derive(Deserialize)]
+struct StepCaProvisionerIdentity {
+    name: Option<String>,
+    key: Option<PublicJwk>,
+}
+
+const STEP_CA_ROOT: &str = "/run/vonk-normalized-secrets/step-ca/root-certificate";
+const STEP_CA_CRT: &str = "/run/vonk-normalized-secrets/step-ca/intermediate-certificate";
+const STEP_CA_KEY: &str = "/run/vonk-normalized-secrets/step-ca/intermediate-key";
+
 fn render_ca_config(
     request: &StepCaControllerRequest,
     public_jwk: &PublicJwk,
 ) -> Result<String, SetupError> {
-    let document = serde_json::json!({
-        "root": "/run/vonk-normalized-secrets/step-ca/root-certificate",
-        "crt": "/run/vonk-normalized-secrets/step-ca/intermediate-certificate",
-        "key": "/run/vonk-normalized-secrets/step-ca/intermediate-key",
-        "address": ":9000",
-        "insecureAddress": "",
-        "dnsNames": ["step-ca"],
-        "logger": {"format": "json"},
-        "db": {"type": "badgerv2", "dataSource": "/home/step/db"},
-        "crl": {
-            "enabled": true,
-            "generateOnRevoke": true,
-            "cacheDuration": "1h",
-            "renewPeriod": "30m"
+    let document = StepCaConfig {
+        root: STEP_CA_ROOT,
+        crt: STEP_CA_CRT,
+        key: STEP_CA_KEY,
+        address: ":9000",
+        insecure_address: "",
+        dns_names: ["step-ca"],
+        logger: StepCaLogger { format: "json" },
+        db: StepCaDatabase {
+            kind: "badgerv2",
+            data_source: "/home/step/db",
         },
-        "authority": {
-            "provisioners": [{
-                "type": "JWK",
-                "name": request.provisioner_name,
-                "key": public_jwk,
-                "claims": {
-                    "minTLSCertDuration": "720h",
-                    "maxTLSCertDuration": "720h",
-                    "defaultTLSCertDuration": "720h",
-                    "disableRenewal": true,
-                    "disableSmallstepExtensions": true
+        crl: StepCaRevocationList {
+            enabled: true,
+            generate_on_revoke: true,
+            cache_duration: "1h",
+            renew_period: "30m",
+        },
+        authority: StepCaAuthority {
+            provisioners: [StepCaProvisioner {
+                kind: "JWK",
+                name: &request.provisioner_name,
+                key: public_jwk,
+                claims: StepCaClaims {
+                    min_tls_cert_duration: "720h",
+                    max_tls_cert_duration: "720h",
+                    default_tls_cert_duration: "720h",
+                    disable_renewal: true,
+                    disable_smallstep_extensions: true,
                 },
-                "options": {
-                    "x509": {
-                        "template": "{\"subject\":{\"commonName\":{{ toJson .Subject.CommonName }}},\"sans\":{{ toJson .SANs }},\"keyUsage\":[\"digitalSignature\"],\"extKeyUsage\":[\"clientAuth\"]}"
-                    }
-                }
-            }]
-        }
-    });
+                options: StepCaOptions {
+                    x509: StepCaX509Options {
+                        template: "{\"subject\":{\"commonName\":{{ toJson .Subject.CommonName }}},\"sans\":{{ toJson .SANs }},\"keyUsage\":[\"digitalSignature\"],\"extKeyUsage\":[\"clientAuth\"]}",
+                    },
+                },
+            }],
+        },
+    };
     serde_json::to_string_pretty(&document)
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))
 }
@@ -1504,15 +1614,18 @@ fn validate_pki_material_at(
     let private: PrivateJwk = serde_json::from_str(value(&paths.provisioner_private_jwk)?)
         .map_err(|_| invalid_pki("private provisioner JWK is invalid"))?;
     validate_es256_jwks(&public, &private)?;
-    let config: serde_json::Value = serde_json::from_str(value(&paths.ca_config)?)
+    let config: StepCaConfigIdentity = serde_json::from_str(value(&paths.ca_config)?)
         .map_err(|_| invalid_pki("Step CA configuration is invalid JSON"))?;
-    let public_json = serde_json::to_value(&public)
-        .map_err(|_| invalid_pki("public provisioner JWK cannot be represented"))?;
-    if config["root"] != "/run/vonk-normalized-secrets/step-ca/root-certificate"
-        || config["crt"] != "/run/vonk-normalized-secrets/step-ca/intermediate-certificate"
-        || config["key"] != "/run/vonk-normalized-secrets/step-ca/intermediate-key"
-        || config["authority"]["provisioners"][0]["name"] != request.provisioner_name
-        || config["authority"]["provisioners"][0]["key"] != public_json
+    let provisioner = config
+        .authority
+        .as_ref()
+        .and_then(|authority| authority.provisioners.first());
+    if config.root.as_deref() != Some(STEP_CA_ROOT)
+        || config.crt.as_deref() != Some(STEP_CA_CRT)
+        || config.key.as_deref() != Some(STEP_CA_KEY)
+        || provisioner.and_then(|item| item.name.as_deref())
+            != Some(request.provisioner_name.as_str())
+        || provisioner.and_then(|item| item.key.as_ref()) != Some(&public)
     {
         return Err(invalid_pki(
             "Step CA configuration does not describe the imported authority",

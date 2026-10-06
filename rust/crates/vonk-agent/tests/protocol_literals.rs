@@ -16,7 +16,12 @@
 //!   new free-string finding code does not compile and a second struct literal
 //!   of the finding fails the ceiling below;
 //! * the helper and protocol crates spell no vocabulary word either (their code
-//!   builds from the same generated enums).
+//!   builds from the same generated enums);
+//! * the words of the agent's progress phase and helper response status
+//!   (`ProgressPhase`, `HostHelperResponseStatus`) are guarded in every spelling,
+//!   plain words included, because a phase is a plain English word:
+//!   `"downloading"` is a member, not prose. A failure stage (`FailureStage`) is
+//!   guarded by its type: every stage parameter takes the enum.
 //!
 //! The vocabulary is read from the exported wire schema, so a word added to the
 //! contract is guarded without editing this test: besides the lifecycle enums
@@ -28,7 +33,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const VOCABULARY_ENUMS: [&str; 9] = [
+const VOCABULARY_ENUMS: [&str; 11] = [
     "AgentResultState",
     "LifecycleState",
     "LifecycleEventKind",
@@ -38,7 +43,19 @@ const VOCABULARY_ENUMS: [&str; 9] = [
     "InvalidRequestReason",
     "SecurityRefusalReason",
     "FailureCode",
+    "ProgressPhase",
+    "HostHelperResponseStatus",
 ];
+
+/// The enums whose every member is guarded, plain words included: how far work
+/// has got and what the helper answered are short English words, so the separator
+/// rule that finds the other enums' words would miss them.
+///
+/// `FailureStage` is guarded by its type instead: `Failure::stage`,
+/// `UnknownEvidence::at` and every stage parameter take the enum, so a string
+/// does not compile. A word scan would only flag the stage words that are also
+/// a tool's argument (`stop`) or a directory (`runtime-cache`).
+const PLAIN_WORD_ENUMS: [&str; 2] = ["ProgressPhase", "HostHelperResponseStatus"];
 
 /// Words that are plain prose; only separated words are specific to the contract.
 const PLAIN_WORDS_THAT_ARE_SPECIFIC: [&str; 2] = ["observing", "backoff"];
@@ -78,7 +95,10 @@ fn vocabulary() -> BTreeSet<String> {
             .unwrap_or_else(|| panic!("{name} is not a contract enum"));
         for member in members {
             let word = member.as_str().unwrap();
-            if word.contains(['-', '_', '.']) || PLAIN_WORDS_THAT_ARE_SPECIFIC.contains(&word) {
+            if word.contains(['-', '_', '.'])
+                || PLAIN_WORDS_THAT_ARE_SPECIFIC.contains(&word)
+                || PLAIN_WORD_ENUMS.contains(&name)
+            {
                 words.insert(word.to_owned());
             }
         }
@@ -87,17 +107,78 @@ fn vocabulary() -> BTreeSet<String> {
     words
 }
 
-/// The module's code without its test module, comments and doc comments.
+/// The module's code without its test modules, comments and doc comments.
+///
+/// Every `#[cfg(test)]` item is removed, wherever it stands: a file can carry a
+/// small test module early and production code after it (the helper's
+/// `operations.rs` does), and cutting at the first one would leave the rest of the
+/// file unguarded.
 fn production_code(source: &str) -> String {
-    let production = source
-        .split("\n#[cfg(test)]\nmod ")
-        .next()
-        .unwrap_or(source);
-    production
-        .lines()
-        .map(strip_comment)
-        .collect::<Vec<_>>()
-        .join("\n")
+    let lines: Vec<&str> = source.lines().map(strip_comment).collect();
+    let mut kept = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        if lines[index].trim() != "#[cfg(test)]" {
+            kept.push(lines[index]);
+            index += 1;
+            continue;
+        }
+        // The attribute applies to the next item: skip it through its closing
+        // brace, or through its semicolon when it has no body.
+        let mut depth = 0_i64;
+        let mut opened = false;
+        index += 1;
+        while index < lines.len() {
+            let (delta, ended) = brace_delta(lines[index]);
+            depth += delta;
+            opened |= lines[index].contains('{');
+            index += 1;
+            if (opened && depth <= 0) || (!opened && ended) {
+                break;
+            }
+        }
+    }
+    kept.join("\n")
+}
+
+/// The change in brace depth of one line, outside string and char literals, and
+/// whether a body-less item ended on it (a trailing `;` at depth zero).
+fn brace_delta(line: &str) -> (i64, bool) {
+    let mut delta = 0_i64;
+    let mut quoted = false;
+    let mut escaped = false;
+    let chars: Vec<char> = line.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        let character = chars[index];
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                quoted = false;
+            }
+        } else if character == '"' {
+            quoted = true;
+        } else if character == '\'' {
+            // A char literal (`'{'`, `'\\''`) or a lifetime (`'a`): skip a literal.
+            if chars.get(index + 2) == Some(&'\'') {
+                index += 2;
+            } else if chars.get(index + 1) == Some(&'\\') && chars.get(index + 3) == Some(&'\'') {
+                index += 3;
+            }
+        } else if character == '{' {
+            delta += 1;
+        } else if character == '}' {
+            delta -= 1;
+        }
+        index += 1;
+    }
+    (
+        delta,
+        !quoted && delta == 0 && line.trim_end().ends_with(';'),
+    )
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -200,10 +281,7 @@ const PROTOCOL_CRATES: [&str; 2] = ["vonk-agent-helper", "vonk-agent-protocol"];
 
 /// `json!` that remains in a protocol crate's non-test code, with a ceiling that
 /// only falls. Each entry builds a document that is not a protocol message.
-const JSON_RESIDUE: [(&str, usize); 1] = [
-    // The exported JSON Schema document itself, assembled once at build time.
-    ("vonk-agent-protocol/src/wire_schema.rs", 1),
-];
+const JSON_RESIDUE: [(&str, usize); 0] = [];
 
 fn protocol_crate_sources() -> Vec<(String, String)> {
     fn walk(directory: &Path, found: &mut Vec<PathBuf>) {
@@ -256,11 +334,11 @@ fn the_protocol_crates_build_no_message_from_loose_json_beyond_the_listed_residu
 }
 
 /// Vocabulary-equal literals that remain in the agent, per file, with a ceiling
-/// that only falls. The source-policy recheck keeps its own finding codes: its
-/// report never reaches a protocol message (a rejected build reports a reason,
-/// not the findings), and some of its words differ from the contract's
-/// `SourcePolicyCode`, so it is a separate drift to close, not a message to guard.
-const VOCABULARY_RESIDUE: [(&str, usize); 1] = [("src/source_policy.rs", 21)];
+/// that only falls. It is empty: the source-policy recheck builds its findings from
+/// the contract's `SourcePolicyCode` like the Controller's, and no other file
+/// spells a word. A word that is a tool's own output goes to `FOREIGN_MEANINGS`
+/// with the reason, never here.
+const VOCABULARY_RESIDUE: [(&str, usize); 0] = [];
 
 fn offenders_by_file(
     files: Vec<(String, String)>,
@@ -268,7 +346,11 @@ fn offenders_by_file(
 ) -> std::collections::BTreeMap<String, usize> {
     let mut observed = std::collections::BTreeMap::new();
     for (name, code) in files {
-        let words = vocabulary_literals(&code, vocabulary).len();
+        let crate_path = format!("vonk-agent/{name}");
+        let words = vocabulary_literals(&code, vocabulary)
+            .into_iter()
+            .filter(|word| !FOREIGN_MEANINGS.contains(&(crate_path.as_str(), word.as_str())))
+            .count();
         if words > 0 {
             observed.insert(name, words);
         }
@@ -299,10 +381,16 @@ fn handwritten_protocol_sources() -> Vec<(String, String)> {
         .collect()
 }
 
-/// A tool's own output that happens to equal a word of the vocabulary:
-/// systemd's `LoadState` is `not-found` for a unit that is not installed.
-const TOOL_OUTPUT_WORDS: [(&str, &str); 1] =
-    [("vonk-agent-helper/src/package_rollback.rs", "not-found")];
+/// A word that is not the contract's but happens to equal one, with the file it
+/// is in and why: a tool's own output (systemd's `LoadState` is `not-found` for a
+/// unit that is not installed, its `ActiveState` is `failed`) or a file's own
+/// content (the helper's claim ledger marks a claim `pending`). A path is relative
+/// to the crates directory.
+const FOREIGN_MEANINGS: [(&str, &str); 3] = [
+    ("vonk-agent-helper/src/package_rollback.rs", "not-found"),
+    ("vonk-agent-helper/src/main.rs", "pending"),
+    ("vonk-agent/src/recipe_builder.rs", "failed"),
+];
 
 #[test]
 fn the_protocol_crates_spell_no_vocabulary_word_by_hand() {
@@ -310,7 +398,7 @@ fn the_protocol_crates_spell_no_vocabulary_word_by_hand() {
     let mut offenders = Vec::new();
     for (name, code) in handwritten_protocol_sources() {
         for word in vocabulary_literals(&code, &vocabulary) {
-            if !TOOL_OUTPUT_WORDS.contains(&(name.as_str(), word.as_str())) {
+            if !FOREIGN_MEANINGS.contains(&(name.as_str(), word.as_str())) {
                 offenders.push(format!("{name}: {word:?}"));
             }
         }
@@ -375,6 +463,10 @@ fn a_runtime_preflight_finding_is_built_in_one_place_from_the_contract_enum() {
 fn the_guard_finds_what_it_forbids() {
     let vocabulary = vocabulary();
     let seeded = r#"
+#[cfg(test)]
+mod early_tests {
+    fn fixture() { let _ = "waiting-for-operator"; let _ = serde_json::json!({}); }
+}
 fn wait() {
     let state = "waiting-for-operator"; // "stop-unconfirmed" in a comment is prose
     let body = serde_json::json!({"reason": state});
@@ -398,7 +490,25 @@ mod tests {
     assert_eq!(finding_literal_sites(&code), 2);
     assert_eq!(
         vocabulary_literals(&code, &vocabulary),
-        ["waiting-for-operator", "operation_cancelled"]
+        ["waiting-for-operator", "operation_cancelled", "failed"]
+    );
+    // The phase, stage and helper-status words are guarded plain as well.
+    let seeded = r#"let a = "downloading"; let b = "reconciling-installation"; let c = "rejected"; let d = "package-installed"; let e = "nothing";"#;
+    assert_eq!(
+        vocabulary_literals(seeded, &vocabulary),
+        [
+            "downloading",
+            "reconciling-installation",
+            "rejected",
+            "package-installed"
+        ]
+    );
+    // The finding code enum and the helper's codes are guarded like the rest.
+    let seeded =
+        r#"let a = "preflight_finding.available"; let b = "operation_io"; let c = "available";"#;
+    assert_eq!(
+        vocabulary_literals(seeded, &vocabulary),
+        ["preflight_finding.available", "operation_io"]
     );
     // The finding code enum and the helper's codes are guarded like the rest.
     let seeded =

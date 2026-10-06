@@ -3733,6 +3733,58 @@
         "title": "FailureProperty",
         "type": "object"
       },
+      "FailureStage": {
+        "description": "The step an operation stopped at: a short, stable, secret-free word.",
+        "enum": [
+          "agent-restart",
+          "agent-upgrade-installed",
+          "artifact-distribution",
+          "base-image-import",
+          "bounded-build-process",
+          "egress-address",
+          "egress-image-import",
+          "egress-network-create",
+          "egress-readiness",
+          "egress-service-start",
+          "helper-runtime-reconciliation",
+          "helper-runtime-reconciliation-lock",
+          "image-build",
+          "image-upload",
+          "image-verification",
+          "installation-checkpoint-storage",
+          "installation-directory",
+          "installation-metadata",
+          "installation-path",
+          "installation-receipt",
+          "installation-reconciliation-lock",
+          "installation-removal",
+          "installation-validation",
+          "job-cancel-stop",
+          "job-inputs",
+          "job-state",
+          "job-stop",
+          "lifecycle-metadata",
+          "model-custody",
+          "model-materialization",
+          "observation-identity",
+          "output-storage",
+          "retained-container",
+          "run-storage",
+          "runtime-adapter",
+          "runtime-cache",
+          "runtime-cache-cleanup",
+          "runtime-metadata",
+          "runtime-projection",
+          "source-bundle-fetch",
+          "stop",
+          "stop-cleanup",
+          "stop-metadata",
+          "stop-plan",
+          "unknown"
+        ],
+        "title": "FailureStage",
+        "type": "string"
+      },
       "FleetActionResponse": {
         "properties": {
           "action": {
@@ -8205,6 +8257,18 @@
         "title": "HelperErrorCode",
         "type": "string"
       },
+      "HostHelperResponseStatus": {
+        "description": "The verdict a privileged-helper reply carries.",
+        "enum": [
+          "rejected",
+          "package-installed",
+          "package-activation-confirmed",
+          "container-runtime-request-executed",
+          "container-runtime-stop-uncertain"
+        ],
+        "title": "HostHelperResponseStatus",
+        "type": "string"
+      },
       "ImageStoreCode": {
         "description": "Refusals and damage found by the Controller OCI image store.",
         "enum": [
@@ -10331,8 +10395,14 @@
           "failure_code": {
             "$ref": "#/components/schemas/FailureCode"
           },
+          "failure_stage": {
+            "$ref": "#/components/schemas/FailureStage"
+          },
           "gateway_route_state": {
             "$ref": "#/components/schemas/GatewayRouteState"
+          },
+          "host_helper_response_status": {
+            "$ref": "#/components/schemas/HostHelperResponseStatus"
           },
           "installation_node_state": {
             "$ref": "#/components/schemas/InstallationNodeState"
@@ -10375,6 +10445,9 @@
           },
           "placement_load_state": {
             "$ref": "#/components/schemas/PlacementLoadState"
+          },
+          "progress_phase": {
+            "$ref": "#/components/schemas/ProgressPhase"
           },
           "reservation_state": {
             "$ref": "#/components/schemas/ReservationState"
@@ -10458,7 +10531,10 @@
           "asset_availability",
           "placement_install_state",
           "placement_load_state",
-          "model_cache_operator_status"
+          "model_cache_operator_status",
+          "progress_phase",
+          "failure_stage",
+          "host_helper_response_status"
         ],
         "title": "LifecycleVocabulary",
         "type": "object"
@@ -13667,6 +13743,36 @@
           "profile.asset_reservation_unavailable"
         ],
         "title": "ProfileReasonCode",
+        "type": "string"
+      },
+      "ProgressPhase": {
+        "description": "What an operation is doing, as the measured progress names it.",
+        "enum": [
+          "queued",
+          "pending",
+          "waiting",
+          "preparing",
+          "downloading",
+          "model-download",
+          "verifying",
+          "finalizing",
+          "building",
+          "pulling",
+          "transfer",
+          "copying",
+          "uploading",
+          "installing",
+          "reconciling-installation",
+          "starting",
+          "stopping",
+          "uninstalling",
+          "reclaiming",
+          "updating",
+          "executing",
+          "completed",
+          "failed"
+        ],
+        "title": "ProgressPhase",
         "type": "string"
       },
       "ProjectionCode": {

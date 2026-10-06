@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
 use futures_util::{StreamExt, stream};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
@@ -36,6 +35,7 @@ use vonk_agent_protocol::generated::{
     DistributionCode, FailureCode, HelperErrorCode, RecipeReconcileResult, RecipeStartResult,
     RecipeStopResult, RecipeUninstallResult, RuntimePreflightFindingCode, WaitReason,
 };
+use vonk_agent_protocol::generated::{FailureStage, ProgressPhase};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, OperationProgress,
     ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
@@ -70,8 +70,9 @@ struct HeartbeatSchedule {
 const JOB_CANCEL_EXIT_CODE: u32 = 130;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
 
-pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionPlan, OciError> {
-    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone())?;
+/// Parse and validate one compiled execution plan document.
+pub fn parse_compiled_execution_plan(document: &[u8]) -> Result<CompiledExecutionPlan, OciError> {
+    let plan: CompiledExecutionPlan = serde_json::from_slice(document)?;
     plan.validate()?;
     Ok(plan)
 }
@@ -231,7 +232,7 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
                 Ok(()) => ExecutionResult::unknown(
                     WaitReason::AgentUpgradeAwaitingIdentity,
                     crate::agent_upgrade::UPGRADE_AWAITING_IDENTITY_REASON,
-                    UnknownEvidence::at("agent-upgrade-installed").because(
+                    UnknownEvidence::at(FailureStage::AgentUpgradeInstalled).because(
                         "the package is installed; the new agent's identity is not yet confirmed",
                     ),
                 ),
@@ -307,7 +308,7 @@ async fn report_complete_recipe_run_observations(
 }
 
 impl<R> RecipeExecutor<'_, R> {
-    async fn report_phase(&self, claim: &AgentClaim, phase: &str) {
+    async fn report_phase(&self, claim: &AgentClaim, phase: ProgressPhase) {
         self.client.set_progress_phase(claim.fence, phase);
     }
 
@@ -525,10 +526,10 @@ impl<R> RecipeExecutor<'_, R> {
         self.report_phase(
             claim,
             match action {
-                HostRuntimeAction::ImagePull => "pulling",
-                HostRuntimeAction::Start => "starting",
-                HostRuntimeAction::Stop => "stopping",
-                _ => "verifying",
+                HostRuntimeAction::ImagePull => ProgressPhase::Pulling,
+                HostRuntimeAction::Start => ProgressPhase::Starting,
+                HostRuntimeAction::Stop => ProgressPhase::Stopping,
+                _ => ProgressPhase::Verifying,
             },
         )
         .await;
@@ -587,8 +588,8 @@ impl<R> RecipeExecutor<'_, R> {
         plan: HostRuntimePlan,
     ) -> Result<HostRuntimeOutcome, crate::host_runtime::HostRuntimeError> {
         let phase = match &plan {
-            HostRuntimePlan::Start(_) | HostRuntimePlan::JobRun(_) => "starting",
-            HostRuntimePlan::Stop(_) => "stopping",
+            HostRuntimePlan::Start(_) | HostRuntimePlan::JobRun(_) => ProgressPhase::Starting,
+            HostRuntimePlan::Stop(_) => ProgressPhase::Stopping,
         };
         self.report_phase(claim, phase).await;
         let request_root = self.runtime_root.join("runtime-requests");
@@ -702,7 +703,7 @@ impl<R> RecipeExecutor<'_, R> {
             return Err(StopStall::unproven(unconfirmed(
                 WaitReason::StopUnconfirmed,
                 "workload stop remains unconfirmed",
-                UnknownEvidence::at("stop-plan")
+                UnknownEvidence::at(FailureStage::StopPlan)
                     .because("no exact stop plan could be derived from the claim"),
             )));
         };
@@ -715,7 +716,7 @@ impl<R> RecipeExecutor<'_, R> {
             return Err(StopStall::unproven(unconfirmed(
                 WaitReason::StopUnconfirmed,
                 "workload stop remains unconfirmed",
-                UnknownEvidence::at("stop-plan")
+                UnknownEvidence::at(FailureStage::StopPlan)
                     .because("the stop timeout differs from the authorized plan"),
             )));
         }
@@ -732,7 +733,7 @@ impl<R> RecipeExecutor<'_, R> {
                 result: unconfirmed(
                     WaitReason::StopUnconfirmed,
                     "workload stop remains unconfirmed",
-                    host_runtime_evidence("stop", &error),
+                    host_runtime_evidence(FailureStage::Stop, &error),
                 ),
             });
         }
@@ -740,7 +741,7 @@ impl<R> RecipeExecutor<'_, R> {
             return Err(StopStall::unproven(unconfirmed(
                 WaitReason::CleanupUnconfirmed,
                 "workload local cleanup remains unconfirmed",
-                UnknownEvidence::at("stop-cleanup").because(error.safe_category()),
+                UnknownEvidence::at(FailureStage::StopCleanup).because(error.safe_category()),
             )));
         }
         Ok(())
@@ -1029,7 +1030,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             if request.validate().is_err() {
                 return failed("artifact distribution plan identity is invalid");
             }
-            self.report_phase(claim, "preparing").await;
+            self.report_phase(claim, ProgressPhase::Preparing).await;
             let destination = self.runtime.data_root.join("distribution");
             let (progress_sender, mut progress_receiver) =
                 tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
@@ -1231,7 +1232,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Build(request) => {
-                self.report_phase(claim, "downloading").await;
+                self.report_phase(claim, ProgressPhase::Downloading).await;
                 let archive = match self
                     .client
                     .source_bundle(
@@ -1244,7 +1245,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Err(error) => {
                         return recipe_build_client_failure_result(
                             &error,
-                            "source-bundle-fetch",
+                            FailureStage::SourceBundleFetch,
                             "authorized source bundle could not be fetched",
                         );
                     }
@@ -1255,11 +1256,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     runtime_root: self.runtime_root,
                     egress_binary: Path::new("/usr/lib/vonk-forge/vonk-build-egress"),
                 };
-                self.report_phase(claim, "building").await;
+                self.report_phase(claim, ProgressPhase::Building).await;
                 let cancelled = || *cancellation.borrow();
                 match builder.build_cancellable(&request, request.build_id, &archive, &cancelled) {
                     Ok(evidence) => {
-                        self.report_phase(claim, "uploading").await;
+                        self.report_phase(claim, ProgressPhase::Uploading).await;
                         let (sender, mut receiver) = tokio::sync::watch::channel(0_u64);
                         let progress_client = self.client.clone();
                         let progress_claim = claim.clone();
@@ -1278,7 +1279,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                         completed_bytes,
                                         total_bytes: Some(total_bytes),
                                         total_bytes_known: true,
-                                        ..phase_progress("uploading")
+                                        ..phase_progress(ProgressPhase::Uploading)
                                     }),
                                 };
                                 let _ = progress_client.heartbeat(&progress).await;
@@ -1310,7 +1311,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         if let Err(error) = result {
                             return recipe_build_client_failure_result(
                                 &error,
-                                "image-upload",
+                                FailureStage::ImageUpload,
                                 "Controller did not confirm the built OCI image upload",
                             );
                         }
@@ -1324,7 +1325,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::JobRun(request) => {
-                self.report_phase(claim, "preparing").await;
+                self.report_phase(claim, ProgressPhase::Preparing).await;
                 let started = Instant::now();
                 let installation_id = request.installation_id.to_string();
                 let job_scope = request.job_id.to_string();
@@ -1549,7 +1550,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             &request,
                             started,
                             WaitReason::JobStopUnconfirmed,
-                            "job-cancel-stop",
+                            FailureStage::JobCancelStop,
                             "controller cancellation could not stop the active job",
                             None,
                         );
@@ -1561,7 +1562,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         &request,
                         started,
                         WaitReason::JobStopUnconfirmed,
-                        "job-stop",
+                        FailureStage::JobStop,
                         "job runtime could not be stopped safely",
                         None,
                     );
@@ -1572,7 +1573,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         &request,
                         started,
                         WaitReason::JobStateUncertain,
-                        "job-state",
+                        FailureStage::JobState,
                         "job runtime execution or cleanup state is uncertain",
                         Some(error.preflight_code()),
                     );
@@ -1699,7 +1700,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Install(request) => {
-                self.report_phase(claim, "installing").await;
+                self.report_phase(claim, ProgressPhase::Installing).await;
                 if *cancellation.borrow() {
                     return cancelled("controller cancelled before installation began");
                 }
@@ -1731,7 +1732,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 // long step that follows is a local copy of the model files
                 // into this installation, measured in bytes. Say so instead
                 // of showing a stale phase with no progress for minutes.
-                self.report_phase(claim, "copying").await;
+                self.report_phase(claim, ProgressPhase::Copying).await;
                 let progress_client = self.client.clone();
                 let fence = claim.fence;
                 let installed = self.runtime.install_with_space_check_observed(
@@ -1778,7 +1779,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 recipe_install_success(installed_bytes)
             }
             RecipeOperationRequest::Reconcile(request) => {
-                self.report_phase(claim, "reconciling-installation").await;
+                self.report_phase(claim, ProgressPhase::ReconcilingInstallation)
+                    .await;
                 if *cancellation.borrow() {
                     return cancelled("controller cancelled before installation reconciliation");
                 }
@@ -1787,14 +1789,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(progress) => progress,
                     Err(OciError::ReconciliationBusy) => {
                         return temporary_reconciliation_failure(
-                            "installation-reconciliation-lock",
+                            FailureStage::InstallationReconciliationLock,
                             FailureCode::InstallationReconciliationBusy,
                             FailureCode::InstallationReconciliationBusy.to_string(),
                         );
                     }
                     Err(error) if retryable_reconciliation_storage_error(&error) => {
                         return temporary_reconciliation_failure(
-                            "installation-checkpoint-storage",
+                            FailureStage::InstallationCheckpointStorage,
                             FailureCode::RecipeReconciliationDependencyUnavailable,
                             "installation_storage_temporarily_unavailable",
                         );
@@ -1802,7 +1804,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Err(error) => {
                         return failed_stage(
                             "managed installation does not match the reconciliation authority",
-                            "installation-validation",
+                            FailureStage::InstallationValidation,
                             error.safe_category(),
                         );
                     }
@@ -1827,21 +1829,21 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             if *code == HelperErrorCode::InstallationReconciliationBusy
                     ) {
                         return temporary_reconciliation_failure(
-                            "helper-runtime-reconciliation-lock",
+                            FailureStage::HelperRuntimeReconciliationLock,
                             FailureCode::InstallationReconciliationBusy,
                             FailureCode::InstallationReconciliationBusy.to_string(),
                         );
                     }
                     if temporary_observation_error(&error) {
                         return temporary_reconciliation_failure(
-                            "helper-runtime-reconciliation",
+                            FailureStage::HelperRuntimeReconciliation,
                             FailureCode::RecipeReconciliationDependencyUnavailable,
                             error.preflight_code(),
                         );
                     }
                     return failed_stage_owned(
                         "managed runtime effects could not be reconciled for installation removal",
-                        "helper-runtime-reconciliation",
+                        FailureStage::HelperRuntimeReconciliation,
                         error.preflight_code(),
                     );
                 }
@@ -1854,14 +1856,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(progress) => progress,
                     Err(OciError::ReconciliationBusy) => {
                         return temporary_reconciliation_failure(
-                            "installation-reconciliation-lock",
+                            FailureStage::InstallationReconciliationLock,
                             FailureCode::InstallationReconciliationBusy,
                             FailureCode::InstallationReconciliationBusy.to_string(),
                         );
                     }
                     Err(error) if retryable_reconciliation_storage_error(&error) => {
                         return temporary_reconciliation_failure(
-                            "installation-checkpoint-storage",
+                            FailureStage::InstallationCheckpointStorage,
                             FailureCode::RecipeReconciliationDependencyUnavailable,
                             "installation_storage_temporarily_unavailable",
                         );
@@ -1869,7 +1871,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Err(error) => {
                         return failed_stage(
                             "reconciled installation cleanup could not be completed",
-                            "installation-removal",
+                            FailureStage::InstallationRemoval,
                             error.safe_category(),
                         );
                     }
@@ -1877,14 +1879,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if !completed.complete {
                     return failed_stage(
                         "installation cleanup did not reach its durable terminal state",
-                        "installation-receipt",
+                        FailureStage::InstallationReceipt,
                         "receipt-incomplete",
                     );
                 }
                 ExecutionResult::done(RecipeReconcileResult::default())
             }
             RecipeOperationRequest::Start(request) => {
-                self.report_phase(claim, "starting").await;
+                self.report_phase(claim, ProgressPhase::Starting).await;
                 let installation_id = request.installation_id.to_string();
                 let phase_deadline = match request
                     .start_deadline
@@ -2143,7 +2145,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             return unconfirmed(
                                 WaitReason::ModelCustodyUnconfirmed,
                                 "cancelled workload model custody remains unconfirmed",
-                                UnknownEvidence::at("model-custody").because(error.safe_category()),
+                                UnknownEvidence::at(FailureStage::ModelCustody)
+                                    .because(error.safe_category()),
                             );
                         }
                         return stopped;
@@ -2165,7 +2168,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 return unconfirmed(
                                     WaitReason::ModelCustodyUnconfirmed,
                                     "cancelled workload model custody remains unconfirmed",
-                                    UnknownEvidence::at("model-custody")
+                                    UnknownEvidence::at(FailureStage::ModelCustody)
                                         .because(error.safe_category()),
                                 );
                             }
@@ -2395,7 +2398,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 success
             }
             RecipeOperationRequest::Stop(request) => {
-                self.report_phase(claim, "stopping").await;
+                self.report_phase(claim, ProgressPhase::Stopping).await;
                 let run_id = request.run_id.to_string();
                 if self.runtime.prepare_stop(&run_id).is_err() {
                     return failed("container runtime could not prepare workload stop");
@@ -2411,14 +2414,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     unconfirmed(
                         WaitReason::StopUnconfirmed,
                         "container runtime stop remains unconfirmed",
-                        host_runtime_evidence("stop", &error),
+                        host_runtime_evidence(FailureStage::Stop, &error),
                     )
                 } else {
                     if let Err(error) = self.runtime.complete_stop(&run_id) {
                         return unconfirmed(
                             WaitReason::StopMetadataUnconfirmed,
                             "container runtime stop metadata remains unconfirmed",
-                            UnknownEvidence::at("stop-metadata").because(error.safe_category()),
+                            UnknownEvidence::at(FailureStage::StopMetadata)
+                                .because(error.safe_category()),
                         );
                     }
                     if *cancellation.borrow() {
@@ -2431,7 +2435,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Uninstall(request) => {
-                self.report_phase(claim, "uninstalling").await;
+                self.report_phase(claim, ProgressPhase::Uninstalling).await;
                 if *cancellation.borrow() {
                     return cancelled("controller cancelled before uninstallation began");
                 }
@@ -2469,7 +2473,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if let Err(error) = validated {
                     return failed_stage(
                         "installed recipe could not be safely removed",
-                        "installation-validation",
+                        FailureStage::InstallationValidation,
                         error.safe_category(),
                     );
                 }
@@ -2485,7 +2489,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         {
                             return failed_stage_owned(
                                 "installed recipe could not be safely removed",
-                                "runtime-cache-cleanup",
+                                FailureStage::RuntimeCacheCleanup,
                                 error.preflight_code(),
                             );
                         }
@@ -2493,7 +2497,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Err(error) => {
                         return failed_stage(
                             "installed recipe could not be safely removed",
-                            "runtime-cache-cleanup",
+                            FailureStage::RuntimeCacheCleanup,
                             error.safe_category(),
                         );
                     }
@@ -2525,7 +2529,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     return failed_stage(
                         "installed recipe could not be safely removed",
-                        "installation-removal",
+                        FailureStage::InstallationRemoval,
                         error.safe_category(),
                     );
                 }
@@ -2551,7 +2555,7 @@ fn cancelled(reason: &'static str) -> ExecutionResult {
 }
 
 fn temporary_reconciliation_failure(
-    stage: &'static str,
+    stage: FailureStage,
     code: FailureCode,
     diagnostic: impl Into<String>,
 ) -> ExecutionResult {
@@ -2610,7 +2614,7 @@ fn retained_container_foreign(run_id: &str) -> ExecutionResult {
         .code(FailureCode::RetainedContainerForeign)
         .kind(AgentFailureKind::ResourcePrerequisite)
         .retry_after(Some(RETAINED_FOREIGN_RETRY_SECONDS))
-        .stage("retained-container")
+        .stage(FailureStage::RetainedContainer)
         .diagnostic(format!("container=\"vonk-{run_id}\"")),
     )
 }
@@ -2621,7 +2625,7 @@ fn retained_container_removed(run_id: &str) -> ExecutionResult {
         Failure::new("a retained container of this order was removed; the start is re-issued")
             .kind(AgentFailureKind::TemporaryDependency)
             .retry_after(Some(2))
-            .stage("retained-container")
+            .stage(FailureStage::RetainedContainer)
             .diagnostic(format!("removed=\"vonk-{run_id}\"")),
     )
 }
@@ -2645,7 +2649,7 @@ const ACL_SETTLE_RETRIES: u32 = 3;
 /// Where a privileged runtime call stopped: the helper's own code when it gave
 /// one, otherwise the bounded category of the failure.
 fn host_runtime_evidence(
-    stage: &'static str,
+    stage: FailureStage,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> UnknownEvidence {
     let evidence = UnknownEvidence::at(stage).because(error.preflight_code());
@@ -2731,7 +2735,7 @@ fn failed_owned(reason: String) -> ExecutionResult {
 
 fn failed_stage(
     reason: &'static str,
-    stage: &'static str,
+    stage: FailureStage,
     diagnostic: &'static str,
 ) -> ExecutionResult {
     ExecutionResult::Failed(Failure::new(reason).stage(stage).diagnostic(diagnostic))
@@ -2739,7 +2743,7 @@ fn failed_stage(
 
 fn failed_stage_owned(
     reason: &'static str,
-    stage: &'static str,
+    stage: FailureStage,
     diagnostic: String,
 ) -> ExecutionResult {
     ExecutionResult::Failed(Failure::new(reason).stage(stage).diagnostic(diagnostic))
@@ -2797,7 +2801,7 @@ fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
     let mut failure = Failure::new("Controller distribution could not be verified and retained")
         .kind(failure_kind)
         .retry_after(error.retry_after_seconds())
-        .stage("artifact-distribution");
+        .stage(FailureStage::ArtifactDistribution);
     let diagnostic = controller_denial_diagnostic(error);
     if !diagnostic.is_empty() {
         failure = failure.diagnostic(diagnostic);
@@ -2835,7 +2839,7 @@ fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFailureKind {
 
 fn recipe_build_client_failure_result(
     error: &ClientError,
-    stage: &'static str,
+    stage: FailureStage,
     reason: &'static str,
 ) -> ExecutionResult {
     let failure_kind = recipe_build_client_failure_kind(error);
@@ -2992,7 +2996,7 @@ fn unconfirmed_job(
     request: &vonk_agent_protocol::RecipeJobRunRequest,
     started: Instant,
     wait_reason: WaitReason,
-    stage: &'static str,
+    stage: FailureStage,
     reason: &'static str,
     cause: Option<String>,
 ) -> ExecutionResult {
@@ -3452,9 +3456,9 @@ fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
     ))
 }
 
-fn phase_progress(phase: &str) -> OperationProgress {
+fn phase_progress(phase: ProgressPhase) -> OperationProgress {
     OperationProgress {
-        phase: phase.to_owned(),
+        phase: phase.to_string(),
         completed_bytes: 0,
         total_bytes: None,
         total_bytes_known: false,
@@ -3671,8 +3675,8 @@ mod tests {
     use uuid::Uuid;
     use vonk_agent_protocol::generated::AgentClaimPayload;
     use vonk_agent_protocol::generated::{
-        AgentFailureKind, AgentResultResult, AgentResultState, FailureCode, OutcomeDoneResult,
-        OutcomeEvidence, OutcomeFailed,
+        AgentFailureKind, AgentResultResult, AgentResultState, FailureCode, FailureStage,
+        OutcomeDoneResult, OutcomeEvidence, OutcomeFailed,
     };
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, AgentResult, RecipeJobOutputMapping,
@@ -3706,12 +3710,12 @@ mod tests {
             "../../../../control/tests/fixtures/compiled_workload_v2.json"
         ))
         .unwrap();
-        assert!(parse_compiled_execution_plan(&value).is_ok());
+        assert!(parse_compiled_execution_plan(value.to_string().as_bytes()).is_ok());
         value["security"]["mounts"][0]["target"] = json!("/etc");
-        assert!(parse_compiled_execution_plan(&value).is_err());
+        assert!(parse_compiled_execution_plan(value.to_string().as_bytes()).is_err());
         value["security"]["mounts"][0]["target"] = json!("/models");
         value["runtime"].as_object_mut().unwrap().remove("argv");
-        assert!(parse_compiled_execution_plan(&value).is_err());
+        assert!(parse_compiled_execution_plan(value.to_string().as_bytes()).is_err());
     }
 
     struct NoProcess;
@@ -4293,7 +4297,7 @@ mod tests {
             "Podman could not import the verified base image (temporary-storage-exhausted)";
         let result = ExecutionResult::Failed(
             Failure::new(reason)
-                .stage("base-image-import")
+                .stage(FailureStage::BaseImageImport)
                 .diagnostic("temporary-storage-exhausted"),
         );
 
@@ -4325,37 +4329,37 @@ mod tests {
         let cases = [
             (
                 ClientError::Controller(Box::new(unavailable)),
-                "source-bundle-fetch",
+                FailureStage::SourceBundleFetch,
                 AgentFailureKind::TemporaryDependency,
                 Some(19),
             ),
             (
                 ClientError::Controller(Box::new(denied)),
-                "source-bundle-fetch",
+                FailureStage::SourceBundleFetch,
                 AgentFailureKind::InvalidAuthority,
                 None,
             ),
             (
                 ClientError::Controller(Box::new(invalid_contract)),
-                "source-bundle-fetch",
+                FailureStage::SourceBundleFetch,
                 AgentFailureKind::InvalidContract,
                 None,
             ),
             (
                 ClientError::Protocol,
-                "image-upload",
+                FailureStage::ImageUpload,
                 AgentFailureKind::InvalidContract,
                 None,
             ),
             (
                 ClientError::Controller(Box::new(conflict)),
-                "image-upload",
+                FailureStage::ImageUpload,
                 AgentFailureKind::IntegrityFailure,
                 None,
             ),
             (
                 ClientError::Retryable,
-                "image-upload",
+                FailureStage::ImageUpload,
                 AgentFailureKind::TemporaryDependency,
                 None,
             ),
@@ -4372,7 +4376,10 @@ mod tests {
             let failure = failed_outcome(&build_claim, result);
 
             assert_eq!(failure.code, FailureCode::RecipeBuildFailed);
-            assert_eq!(evidence_of(&failure).stage.as_deref(), Some(stage));
+            assert_eq!(
+                evidence_of(&failure).stage.as_deref(),
+                Some(stage.to_string().as_str())
+            );
             assert_eq!(failure.failure_kind, Some(expected_kind));
             assert_eq!(failure.retry_after_seconds, expected_retry_after);
             assert_eq!(failure.reason, "build dependency could not be confirmed");
@@ -5156,7 +5163,7 @@ mod tests {
         let mut start_claim = claim();
         start_claim.operation = "recipe.start".parse().unwrap();
         let error = OciError::Start {
-            stage: "output-storage",
+            stage: FailureStage::OutputStorage,
             source: Box::new(OciError::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "/private/secret-credential-value",
@@ -5255,9 +5262,9 @@ mod tests {
             diagnostic: None,
             process_logs: None,
         };
-        let evidence = super::host_runtime_evidence("stop", &error);
+        let evidence = super::host_runtime_evidence(FailureStage::Stop, &error);
 
-        assert_eq!(evidence.stage, "stop");
+        assert_eq!(evidence.stage, FailureStage::Stop);
         assert_eq!(evidence.helper_error_code.as_deref(), Some("operation_io"));
         assert_eq!(evidence.diagnostic.as_deref(), Some("helper_operation_io"));
     }

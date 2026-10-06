@@ -20,6 +20,9 @@ from .blocker_classifier import (
     propose_families,
 )
 
+#: The repository parse is shared setup, not the first test's own time.
+pytestmark = pytest.mark.usefixtures("parsed_repository")
+
 PATH = "control/src/vonk_control/sample.py"
 
 # The retry proof walks the repository call graph; build it once per session.
