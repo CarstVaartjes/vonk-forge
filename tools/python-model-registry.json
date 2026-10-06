@@ -171,6 +171,11 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/cluster_mappings.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
       "module": "control/src/vonk_control/compiled_artifact_contract.py",
       "kind": "controller-contract"
     },
@@ -234,6 +239,11 @@
     },
     {
       "module": "control/src/vonk_control/lifecycle_preflight.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/litellm.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -314,6 +324,10 @@
       "module": "control/src/vonk_control/recipe_update_notice.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/route_bundle_contract.py",
+      "kind": "controller-contract"
     },
     {
       "module": "control/src/vonk_control/run_switch_contract.py",

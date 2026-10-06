@@ -87,6 +87,7 @@ from .operation_contract import (
     sanitize_failure_evidence,
 )
 from .operation_progress import aggregate_progress, project_progress
+from .route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
 from .route_runtime import verify_active_route_bundle
 from .state_filters import state_filter
 from .strict_json import (
@@ -153,7 +154,7 @@ class OperationProjectionError(RuntimeError):
 
 @dataclass(frozen=True)
 class _ActiveRouteSnapshot:
-    marker: Mapping[str, object]
+    marker: ActivationMarker
     marker_digest: str
     route_digest: str
     litellm_digest: str | None
@@ -1431,7 +1432,7 @@ class _DurableOperationProjection:
             or publication.bundle_digest is None
         ):
             raise RuntimeError("active publication is unavailable")
-        marker = _stored_activation_marker(publication.activation_marker).model_dump()
+        marker = _stored_activation_marker(publication.activation_marker)
         return _ActiveRouteSnapshot(
             marker=marker,
             marker_digest=publication.activation_marker_digest,
@@ -1446,11 +1447,11 @@ class _DurableOperationProjection:
 
     def _verified_routes(
         self, snapshot: _ActiveRouteSnapshot
-    ) -> tuple[Mapping[str, object], Mapping[str, object]]:
+    ) -> tuple[ActivationMarker, RouteBundleDocument]:
         bundle = verify_active_route_bundle(self._route_root)
         active_marker = bundle.marker
         if (
-            active_marker.model_dump() != snapshot.marker
+            active_marker != snapshot.marker
             or active_marker.digest != snapshot.marker_digest
             or active_marker.state != GatewayRouteState.PUBLISHED
             or active_marker.authority_id != snapshot.authority_id
@@ -1464,60 +1465,38 @@ class _DurableOperationProjection:
         ):
             raise RuntimeError("activation marker does not match durable state")
         routes = bundle.routes
-        route_document = routes.get("routes")
         if (
-            routes.get("generation") != snapshot.publication_generation
-            or routes.get("state") != GatewayRouteState.PUBLISHED
-            or not isinstance(route_document, Mapping)
+            routes is None
+            or routes.generation != snapshot.publication_generation
+            or routes.state != GatewayRouteState.PUBLISHED
         ):
             raise RuntimeError("active route state does not match publication")
-        return active_marker.model_dump(), route_document
+        return active_marker, routes
 
     @staticmethod
     def _endpoint_payload(
         alias: str,
-        raw: Mapping[str, object],
-        active_marker: Mapping[str, object],
+        raw: RouteEndpointDocument,
+        active_marker: ActivationMarker,
         gateway_api_base: str,
     ) -> EndpointResponse:
-        scheme = raw.get("scheme")
-        address = raw.get("address")
-        port = raw.get("port")
-        path = raw.get("path")
-        node_id = raw.get("node_id")
-        observed_at = raw.get("observed_at")
-        if (
-            scheme not in {"http", "https"}
-            or not isinstance(address, str)
-            or not isinstance(port, int)
-            or isinstance(port, bool)
-            or not 1 <= port <= 65535
-            or not isinstance(path, str)
-            or not path.startswith("/")
-            or not isinstance(node_id, str)
-            or re.fullmatch(NODE_PATTERN, node_id) is None
-            or not isinstance(observed_at, str)
-        ):
+        if re.fullmatch(NODE_PATTERN, raw.node_id) is None:
             raise RuntimeError("active endpoint is invalid")
-        generation = active_marker.get("generation")
-        plan_digest = active_marker.get("plan_digest")
-        if not isinstance(generation, int) or not isinstance(plan_digest, str):
-            raise TypeError("active endpoint marker is invalid")
         return EndpointResponse(
             alias=alias,
             api_base=gateway_api_base,
-            backend_api_base=f"{scheme}://{address}:{port}{path.rstrip('/')}",
-            generation=generation,
-            node_id=node_id,
-            observed_at=observed_at,
-            plan_digest=plan_digest,
+            backend_api_base=(
+                f"{raw.scheme}://{raw.address}:{raw.port}{raw.path.rstrip('/')}"
+            ),
+            generation=active_marker.generation,
+            node_id=raw.node_id,
+            observed_at=raw.observed_at,
+            plan_digest=active_marker.plan_digest,
         )
 
     @staticmethod
-    def _route_run_id(raw: Mapping[str, object]) -> str | None:
-        operation_id = raw.get("operation_id")
-        if not isinstance(operation_id, str):
-            return None
+    def _route_run_id(raw: RouteEndpointDocument) -> str | None:
+        operation_id = raw.operation_id
         match = re.fullmatch(
             r"recipe:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
             r"[89ab][0-9a-f]{3}-[0-9a-f]{12}):rank:(?:0|[1-9][0-9]*)",
@@ -1582,8 +1561,8 @@ class _DurableOperationProjection:
                 for item in assignments:
                     if item.expected_run_id is None or item.alias is None:
                         continue
-                    raw = route_document.get(item.alias)
-                    if not isinstance(raw, Mapping):
+                    raw = route_document.routes.get(item.alias)
+                    if raw is None:
                         states[item.assignment_id] = EndpointState.WITHDRAWN
                         continue
                     route_run_id = self._route_run_id(raw)

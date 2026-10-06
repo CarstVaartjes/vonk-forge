@@ -138,7 +138,9 @@ def _walk_payload(value: object) -> None:
             _walk_payload(nested)
 
 
-def _stored_payload(draft: FleetEventDraft):
+def _stored_payload(
+    draft: FleetEventDraft,
+) -> dict[str, str | int | bool | None]:
     """The JSON document of a draft's typed payload, checked before it is stored."""
 
     if draft.event_type not in EVENT_TYPES:

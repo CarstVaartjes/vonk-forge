@@ -185,6 +185,7 @@ module defines its own.
 | `control/src/vonk_control/catalog_api.py` | declared | 3 | Strict authenticated HTTP surface for the local database recipe catalog. |
 | `control/src/vonk_control/catalog_revision_contract.py` | controller-contract | 9 | Typed readers and writers for immutable catalog revision JSON columns. |
 | `control/src/vonk_control/catalog_sync_contract.py` | controller-contract | 4 | Canonical durable catalog synchronization evidence shared with the API. |
+| `control/src/vonk_control/cluster_mappings.py` | declared | 2 | The identity document whose digest binds a cluster mapping plan to its exact placement. |
 | `control/src/vonk_control/compiled_artifact_contract.py` | controller-contract | 12 | Canonical compiled contract for artifact-producing recipe jobs. |
 | `control/src/vonk_control/compiled_execution_plan.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
 | `control/src/vonk_control/distribution_assignment.py` | declared | 1 | The Controller's record of one node's artifact distribution grant. |
@@ -200,6 +201,7 @@ module defines its own.
 | `control/src/vonk_control/job_documents.py` | controller-contract | 41 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
 | `control/src/vonk_control/library_contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
 | `control/src/vonk_control/lifecycle_preflight.py` | declared | 1 | Durable, recipe-bound admission probes without replaying expensive phases. |
+| `control/src/vonk_control/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
 | `control/src/vonk_control/model_cache.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |
 | `control/src/vonk_control/model_cache_contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
 | `control/src/vonk_control/operation_api.py` | declared | 21 | Strict, secret-free representations for routine administrative operations. |
@@ -217,6 +219,7 @@ module defines its own.
 | `control/src/vonk_control/recipe_packages.py` | declared | 2 | Schema-2 recipe package reader for the Controller catalog sync. |
 | `control/src/vonk_control/recipe_update_contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
 | `control/src/vonk_control/recipe_update_notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
+| `control/src/vonk_control/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/run_switch_contract.py` | controller-contract | 66 | Strict, transport-neutral contracts for high-level Run and Switch work. |
 | `control/src/vonk_control/runtime_image_preparation.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |
 | `control/src/vonk_control/runtime_spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |

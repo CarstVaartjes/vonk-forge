@@ -265,7 +265,7 @@
     },
     {
       "path": "control/src/vonk_control/cluster_mappings.py",
-      "count": 12
+      "count": 3
     },
     {
       "path": "control/src/vonk_control/compiled_artifact_contract.py",
@@ -364,10 +364,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/litellm.py",
-      "count": 2
-    },
-    {
       "path": "control/src/vonk_control/model_cache.py",
       "count": 86
     },
@@ -385,7 +381,7 @@
     },
     {
       "path": "control/src/vonk_control/operation_api.py",
-      "count": 35
+      "count": 29
     },
     {
       "path": "control/src/vonk_control/operation_blockers.py",
@@ -406,10 +402,6 @@
     {
       "path": "control/src/vonk_control/profile_stop_authority.py",
       "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/recipe_action_plans.py",
-      "count": 3
     },
     {
       "path": "control/src/vonk_control/recipe_build_cancellation.py",
@@ -452,10 +444,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/recipe_routes.py",
-      "count": 4
-    },
-    {
       "path": "control/src/vonk_control/recipe_runtime_specs.py",
       "count": 2
     },
@@ -482,10 +470,6 @@
     {
       "path": "control/src/vonk_control/resource_planning.py",
       "count": 13
-    },
-    {
-      "path": "control/src/vonk_control/route_runtime.py",
-      "count": 3
     },
     {
       "path": "control/src/vonk_control/run_admission.py",

@@ -5,17 +5,17 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ClusterMappingCode
-from vonk_forge_contracts import RecipeOptionError, read_recipe
-from vonk_forge_contracts.recipe import RecipeTopology
+from vonk_forge_contracts import RecipeDefinition, RecipeOptionError, read_recipe
+from vonk_forge_contracts.recipe import RecipeTopology, Scalar
 
 from .mapping_parameters import MappingParameters
 from .models import (
@@ -31,6 +31,7 @@ from .recipe_runtime_specs import (
     recipe_topology,
     split_option_choices,
 )
+from .strict_json import StrictModel
 from .topology import Placement, TopologyError, validate_topology
 
 
@@ -128,7 +129,7 @@ class ClusterMappingService:
         self,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
-        parameters: Mapping[str, object],
+        parameters: object,
         actor: str,
     ) -> ClusterMappingPlan:
         _mapping_actor(actor)
@@ -150,7 +151,9 @@ class ClusterMappingService:
             raise ClusterMappingError(
                 ClusterMappingCode.TOPOLOGY_INVALID, str(error)
             ) from error
-        effective = _effective_parameters(document, parameters)
+        effective = _effective_parameters(
+            _recipe_definition(document), validate_mapping_parameters(parameters)
+        )
         placements = candidate_placements(
             topology, tuple(node.node_id for node in nodes)
         )
@@ -361,45 +364,64 @@ def _mapping_actor(actor: str) -> str:
     return actor
 
 
+class MappingPlacementIdentity(StrictModel):
+    node_id: str
+    rank: int
+    role: str
+    endpoint_owner: bool
+
+
+class MappingPlanIdentity(StrictModel):
+    """The document whose digest binds a mapping plan to its exact placement."""
+
+    schema_version: Literal[1] = 1
+    recipe_revision_id: str
+    recipe_content_sha256: str
+    topology_name: str
+    generation: int
+    parameters: MappingParameters
+    nodes: list[MappingPlacementIdentity]
+
+
 def _plan_identity(
     recipe_revision_id: str,
     recipe_content_sha256: str,
     topology_name: str,
     generation: int,
-    parameters: Mapping[str, object],
+    parameters: MappingParameters,
     nodes: tuple[ClusterMappingPlacement, ...],
-) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "recipe_revision_id": recipe_revision_id,
-        "recipe_content_sha256": recipe_content_sha256,
-        "topology_name": topology_name,
-        "generation": generation,
-        "parameters": dict(parameters),
-        "nodes": [
-            {
-                "node_id": item.node_id,
-                "rank": item.rank,
-                "role": item.role,
-                "endpoint_owner": item.endpoint_owner,
-            }
+) -> MappingPlanIdentity:
+    return MappingPlanIdentity(
+        recipe_revision_id=recipe_revision_id,
+        recipe_content_sha256=recipe_content_sha256,
+        topology_name=topology_name,
+        generation=generation,
+        parameters=dict(parameters),
+        nodes=[
+            MappingPlacementIdentity(
+                node_id=item.node_id,
+                rank=item.rank,
+                role=item.role,
+                endpoint_owner=item.endpoint_owner,
+            )
             for item in nodes
         ],
-    }
+    )
 
 
 def effective_option_choices(
-    document: Mapping[str, object], choices: Mapping[str, str] | None
+    document: Mapping[str, object] | RecipeDefinition, choices: Mapping[str, str] | None
 ) -> dict[str, str]:
     """The choice for every option a recipe declares (its default where none
     was given); empty for a recipe without options. An unknown option or value
     raises ``ClusterMappingError`` listing the valid ones."""
 
     supplied = dict(choices or {})
-    if not supplied and not document.get("options"):
+    recipe = _recipe_definition(document)
+    if not supplied and not recipe.options:
         return {}
     try:
-        return read_recipe(document).resolve_options(supplied)
+        return recipe.resolve_options(supplied)
     except (RecipeOptionError, ValidationError) as error:
         raise ClusterMappingError(
             ClusterMappingCode.OPTION_INVALID, str(error)
@@ -413,10 +435,27 @@ def mapping_option_choices(parameters: Mapping[str, object]) -> dict[str, str]:
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
+def _recipe_definition(
+    document: Mapping[str, object] | RecipeDefinition,
+) -> RecipeDefinition:
+    if isinstance(document, RecipeDefinition):
+        return document
+    if not isinstance(document, Mapping):
+        raise ClusterMappingError(
+            ClusterMappingCode.RECIPE_UNRESOLVED, "the recipe document is invalid"
+        )
+    try:
+        return read_recipe(document)
+    except ValidationError as error:
+        raise ClusterMappingError(
+            ClusterMappingCode.RECIPE_UNRESOLVED, "the recipe document is invalid"
+        ) from error
+
+
 def _effective_parameters(
-    document: Mapping[str, object],
-    supplied: Mapping[str, object],
-) -> dict[str, object]:
+    document: RecipeDefinition,
+    supplied: MappingParameters,
+) -> MappingParameters:
     """Setting values plus, when the recipe declares options, the effective
     choice for every option (the recipe default where none was supplied)."""
 
@@ -427,104 +466,44 @@ def _effective_parameters(
             ClusterMappingCode.OPTION_INVALID, str(error)
         ) from error
     resolved = effective_option_choices(document, choices)
-    effective = _effective_settings(document, settings)
+    effective: MappingParameters = dict(_effective_settings(document, settings))
     if resolved:
-        effective[OPTION_CHOICES_KEY] = resolved
+        effective[OPTION_CHOICES_KEY] = dict(resolved)
     return dict(sorted(effective.items()))
 
 
 def _effective_settings(
-    document: Mapping[str, object],
-    supplied: Mapping[str, object],
-) -> dict[str, object]:
-    raw_parameters = document.get("parameters")
-    if raw_parameters is None:
-        # Canonical RecipeDefinition v2 carries launch-affecting settings in
-        # ``settings``.  Mapping identity must bind those values directly;
-        # the retired schema-one parameter list is not an authority for a
-        # canonical recipe.
-        raw_settings = document.get("settings")
-        if not isinstance(raw_settings, Mapping):
-            raise ClusterMappingError(
-                ClusterMappingCode.PARAMETERS_INVALID, "recipe settings are invalid"
-            )
-        effective: dict[str, object] = {}
-        for name in ("context_tokens", "concurrency", "max_batch_tokens"):
-            setting = raw_settings.get(name)
-            if isinstance(setting, Mapping) and "value" in setting:
-                effective[name] = copy.deepcopy(setting["value"])
-        knobs = raw_settings.get("knobs")
-        if isinstance(knobs, Mapping):
-            for name, setting in knobs.items():
-                if isinstance(setting, Mapping) and "value" in setting:
-                    effective[str(name)] = copy.deepcopy(setting["value"])
-        unknown = set(supplied) - set(effective)
-        if unknown:
-            raise ClusterMappingError(
-                ClusterMappingCode.PARAMETER_UNKNOWN,
-                "mapping contains an unknown setting",
-            )
-        effective.update(copy.deepcopy(dict(supplied)))
-        return effective
-    if not isinstance(raw_parameters, list):
-        raise ClusterMappingError(
-            ClusterMappingCode.PARAMETERS_INVALID, "recipe parameters are invalid"
-        )
-    definitions = {
-        str(item["name"]): item for item in raw_parameters if isinstance(item, Mapping)
-    }
-    if set(supplied) - set(definitions):
+    document: RecipeDefinition,
+    supplied: dict[str, Scalar],
+) -> dict[str, Scalar]:
+    """The value of every setting and knob the recipe declares, with the
+    supplied overrides; a supplied name the recipe does not declare is refused.
+
+    Canonical RecipeDefinition v2 carries launch-affecting settings in
+    ``settings``, so mapping identity binds those values directly.
+    """
+
+    settings = document.settings
+    effective: dict[str, Scalar] = {}
+    for name in ("context_tokens", "concurrency", "max_batch_tokens"):
+        setting = getattr(settings, name, None)
+        if setting is not None:
+            effective[name] = setting.value
+    for name, knob in settings.knobs.items():
+        effective[name] = knob.value
+    unknown = set(supplied) - set(effective)
+    if unknown:
         raise ClusterMappingError(
             ClusterMappingCode.PARAMETER_UNKNOWN,
-            "mapping contains an unknown parameter",
+            "mapping contains an unknown setting",
         )
-    effective = {
-        name: copy.deepcopy(definition["default"])
-        for name, definition in definitions.items()
-    }
-    effective.update(copy.deepcopy(dict(supplied)))
-    for name, value in effective.items():
-        definition = definitions[name]
-        kind = definition["type"]
-        valid_type = (
-            kind == "integer"
-            and isinstance(value, int)
-            and not isinstance(value, bool)
-            or kind == "boolean"
-            and isinstance(value, bool)
-            or kind in {"string", "enum"}
-            and isinstance(value, str)
-        )
-        if not valid_type:
-            raise ClusterMappingError(
-                ClusterMappingCode.PARAMETER_TYPE,
-                f"parameter {name} has the wrong type",
-            )
-        minimum = definition.get("minimum")
-        maximum = definition.get("maximum")
-        allowed = definition.get("allowed_values")
-        pattern = definition.get("pattern")
-        if (
-            isinstance(minimum, int)
-            and isinstance(value, int)
-            and value < minimum
-            or isinstance(maximum, int)
-            and isinstance(value, int)
-            and value > maximum
-            or isinstance(allowed, list)
-            and value not in allowed
-            or isinstance(pattern, str)
-            and isinstance(value, str)
-            and re.fullmatch(pattern, value) is None
-        ):
-            raise ClusterMappingError(
-                ClusterMappingCode.PARAMETER_VALUE,
-                f"parameter {name} is outside its bounds",
-            )
+    effective.update(supplied)
     return dict(sorted(effective.items()))
 
 
-def _digest(value: object) -> str:
+def _digest(value: MappingPlanIdentity) -> str:
     return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            value.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        ).encode()
     ).hexdigest()
