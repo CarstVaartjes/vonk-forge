@@ -14,7 +14,13 @@ import httpx2
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentResult, LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    AgentResult,
+    InvalidRequestError,
+    LifecycleState,
+    UnknownOutcomeError,
+    canonical_message,
+)
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.package_source import AgentPackageSource
 
@@ -100,14 +106,14 @@ def _request_intent(
             "selectors": None if node_ids is None else list(node_ids),
         }
     if not isinstance(value, Mapping):
-        raise AgentUpgradeConflict("agent upgrade request intent is invalid")
+        raise AgentUpgradeInvalid("agent upgrade request intent is invalid")
     if set(value) != {"all", "selectors"} or type(value.get("all")) is not bool:
-        raise AgentUpgradeConflict("agent upgrade request intent is invalid")
+        raise AgentUpgradeInvalid("agent upgrade request intent is invalid")
     all_nodes = value["all"]
     selectors = value["selectors"]
     if all_nodes:
         if selectors is not None:
-            raise AgentUpgradeConflict("agent upgrade request intent is invalid")
+            raise AgentUpgradeInvalid("agent upgrade request intent is invalid")
         return {"all": True, "selectors": None}
     if (
         not isinstance(selectors, list)
@@ -115,7 +121,7 @@ def _request_intent(
         or len(selectors) > 64
         or not all(isinstance(selector, str) and selector for selector in selectors)
     ):
-        raise AgentUpgradeConflict("agent upgrade request intent is invalid")
+        raise AgentUpgradeInvalid("agent upgrade request intent is invalid")
     return {"all": False, "selectors": list(selectors)}
 
 
@@ -135,6 +141,18 @@ class AgentUpgradeConflict(RuntimeError):
                 else "agent upgrade target is invalid"
             )
         super().__init__(detail)
+
+
+class AgentUpgradeInvalid(InvalidRequestError, AgentUpgradeConflict):
+    """The request, package or target list it names is not an upgrade the
+    Controller can plan.  Refused before anything is persisted; a stored plan is
+    never refused as this class (a damaged one ends its rollout, see
+    ``_advance_rollout``)."""
+
+
+class AgentUpgradeRetryLater(UnknownOutcomeError, AgentUpgradeConflict):
+    """The release channel did not answer consistently (a release is being
+    published).  Nothing was persisted; the caller asks again and converges."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,7 +255,7 @@ class AgentUpgradeService:
             != hashlib.sha256(signature_response.content).hexdigest()
             or signature_record.get("size") != len(signature_response.content)
         ):
-            raise AgentUpgradeConflict("current agent release is inconsistent")
+            raise AgentUpgradeRetryLater("current agent release is inconsistent")
         return self._package(
             {
                 "architecture": artifact.get("architecture"),
@@ -270,7 +288,7 @@ class AgentUpgradeService:
         if repair is not None and (
             node_ids is None or tuple(node_ids) != (repair["node_id"],)
         ):
-            raise AgentUpgradeConflict(
+            raise AgentUpgradeInvalid(
                 "agent repair requires exactly its explicit Spark"
             )
         # The agent wire requires a 64-hex authority revision on every
@@ -282,7 +300,7 @@ class AgentUpgradeService:
             or len(requested) != len(set(requested))
             or len(requested) > 64
         ):
-            raise AgentUpgradeConflict("agent upgrade targets are invalid")
+            raise AgentUpgradeInvalid("agent upgrade targets are invalid")
         skipped: dict[str, str] = {}
         installed: list[tuple[str, str, str]] = []
         with self._sessions() as session:
@@ -1011,10 +1029,9 @@ class AgentUpgradeService:
             if self._ineligible_reason(node, package, now) is not None:
                 deferred.append(node_id)
                 continue
-            try:
-                self._enqueue_node(session, parent, node_id)
-            except AgentUpgradeConflict as error:
-                skipped[node_id] = str(error)
+            not_queued = self._enqueue_node(session, parent, node_id)
+            if not_queued is not None:
+                skipped[node_id] = not_queued
                 continue
             self._record(parent, result, skipped)
             self._rollouts.project(parent, now, reason=None)
@@ -1111,26 +1128,35 @@ class AgentUpgradeService:
             and evidence.get("status") == "upgraded"
         )
 
-    def _enqueue_node(self, session: Session, parent: Job, node_id: str) -> None:
+    def _enqueue_node(self, session: Session, parent: Job, node_id: str) -> str | None:
+        """Queue the upgrade order for one Spark.
+
+        Returns why this Spark is skipped instead (a stored package or rollback
+        source that cannot be used, a Spark whose installed agent no longer matches
+        its rollback source), else ``None`` once the order is queued.  The rollout
+        records the reason and goes on to the next Spark; nothing is raised.
+        """
+
         package = parent.payload.get("package")
         if not isinstance(package, dict):
-            raise AgentUpgradeConflict("stored agent upgrade package is invalid")
+            return "stored agent upgrade package is invalid"
         stored_sources = parent.payload.get("sources")
         stored_source = (
             stored_sources.get(node_id) if isinstance(stored_sources, Mapping) else None
         )
         if stored_source is None:
-            raise AgentUpgradeConflict("stored rollback sources are invalid")
-        source = read_stored_model(AgentPackageSource, stored_source)
+            return "stored rollback sources are invalid"
+        try:
+            source = read_stored_model(AgentPackageSource, stored_source)
+        except (TypeError, ValueError):
+            return "stored rollback sources are invalid"
         node = session.get(AgentNode, node_id)
         if (
             node is None
             or node.binary_digest != source.package.binary_sha256
             or node.build_digest != source.build_digest
         ):
-            raise AgentUpgradeConflict(
-                "rollback source no longer matches installed agent"
-            )
+            return "rollback source no longer matches installed agent"
         payload = {
             **package,
             "source_package_bytes": source.package_bytes,
@@ -1150,6 +1176,7 @@ class AgentUpgradeService:
             payload,
             operation_id=str(uuid.uuid4()),
         )
+        return None
 
     @staticmethod
     def _package(value: Mapping[str, object]) -> dict[str, object]:
@@ -1190,7 +1217,7 @@ class AgentUpgradeService:
             or not url.endswith("/vonk-forge-agent.deb")
             or any(marker in url for marker in ("?", "#", "@"))
         ):
-            raise AgentUpgradeConflict("agent upgrade package is invalid")
+            raise AgentUpgradeInvalid("agent upgrade package is invalid")
         return document
 
     @classmethod

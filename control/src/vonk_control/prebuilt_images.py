@@ -719,9 +719,18 @@ class PrebuiltImageImporter:
                 for key, value in job.payload.items()
                 if key not in {"prebuilt_claim_owner", "prebuilt_claim_until"}
             }
+            if evidence is not None and not record_build_evidence(
+                session, build, evidence.model_dump(mode="json"), now=now
+            ):
+                # The pulled image's evidence does not hold: the import fails
+                # like a failed pull (it is retried), it is never raised.
+                evidence = None
+                failure = (
+                    PREBUILT_EVIDENCE_INVALID,
+                    "the pulled image evidence does not match the build",
+                )
             if evidence is not None:
                 document = evidence.model_dump(mode="json")
-                record_build_evidence(session, build, document, now=now)
                 self._lifecycle.finish(job, ok=True, now=now)
                 job.result = {
                     "successful_nodes": [node_id],
@@ -757,6 +766,7 @@ class PrebuiltImageImporter:
 # tries the pull again, so a registry outage heals without anyone acting.
 PREBUILT_RETRY_AFTER = timedelta(hours=1)
 PREBUILT_PULL_FAILED = "prebuilt_image_pull_failed"
+PREBUILT_EVIDENCE_INVALID = "prebuilt_image_evidence_invalid"
 
 
 def prebuilt_failed(
