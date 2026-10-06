@@ -8328,9 +8328,7 @@ class ModelCacheService:
             payload = self._payload_or_none(operation)
             selector = None if payload is None else payload.selector
             if not isinstance(selector, str) or not selector:
-                model_digest = (
-                    None if payload is None else payload.get("model_content_sha256")
-                )
+                model_digest = None if payload is None else payload.model_content_sha256
                 selector = self._observed_selector(
                     session,
                     operation,
