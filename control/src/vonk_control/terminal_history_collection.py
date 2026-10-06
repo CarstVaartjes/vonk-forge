@@ -318,23 +318,21 @@ class TerminalHistoryCollector:
 
     def _publications(self, cutoff: datetime) -> int:
         # Publication rows have no clock; their owning authority supplies it.
-        with self._sessions.begin() as session:
-            ids = tuple(
-                session.scalars(
-                    select(RoutePublication.authority_id)
-                    .join(RecipeRouteAuthority)
-                    .where(
-                        RecipeRouteAuthority.updated_at <= cutoff,
-                        RoutePublication.state == "completed",
-                        ~exists().where(
-                            RoutePublicationOwner.authority_id
-                            == RoutePublication.authority_id
-                        ),
-                    )
-                    .limit(self._batch)
-                    .with_for_update(of=RoutePublication, skip_locked=True)
-                )
+        statement = (
+            select(RoutePublication.authority_id)
+            .join(RecipeRouteAuthority)
+            .where(
+                RecipeRouteAuthority.updated_at <= cutoff,
+                RoutePublication.state == "completed",
+                ~exists().where(
+                    RoutePublicationOwner.authority_id == RoutePublication.authority_id
+                ),
             )
+            .limit(self._batch)
+            .with_for_update(of=RoutePublication, skip_locked=True)
+        )
+        with self._sessions.begin() as session:
+            ids = tuple(session.scalars(statement))
             protected = live_tokens(session, self._clock())
             removed = 0
             for identity in ids:
