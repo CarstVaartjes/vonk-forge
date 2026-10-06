@@ -16,6 +16,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchRuntimeImageResult,
     RunSwitchTargetTransferEvidenceResult,
 )
+from vonk_control.runtime_image_preparation import RuntimeImageReceipt
 
 NODE = "spk_" + "1" * 32
 IMAGE = "sha256:" + "a" * 64
@@ -49,7 +50,7 @@ def test_terminal_handoff_retains_diagnostic_and_verifies_after_restart() -> Non
     executor = object.__new__(DurableDistributionPhaseExecutor)
     result = executor._verify_evidence(_plan(), restored, (NODE,), ())
     assert result.verified is True
-    assert [item.model_dump() for item in result.evidence] == [
+    assert result.model_dump(mode="json")["evidence"] == [
         {
             "node_id": NODE,
             "downloaded_bytes": 7,
@@ -83,11 +84,32 @@ def test_missing_terminal_handoff_never_implies_success() -> None:
 
 
 def test_runtime_identity_refuses_retained_image_drift() -> None:
-    receipt = RunSwitchRuntimeImageResult.model_construct(
+    runtime = RuntimeImageReceipt(
+        schema_version=2,
+        distribution_publisher="vonk",
+        distribution_slug="fixture",
+        distribution_content_sha256="c" * 64,
         image_digest="sha256:" + "d" * 64,
-        oci_layout_sha256=LAYOUT,
+        oci_archive_sha256=LAYOUT,
         image_bytes=11,
-        build_id=None,
+        local_image_config_id="sha256:" + "e" * 64,
+        architecture="linux-arm64",
+        runtime_interface="vonk.runtime.v1",
+        archive_path="/managed/fixture",
+        recorded_at="2026-10-06T12:00:00Z",
+        build_id=str(uuid4()),
+        runtime_interface_label="v1",
+        runtime_adapter="fixture",
+        runtime_adapter_sha256="f" * 64,
+    )
+    receipt = RunSwitchRuntimeImageResult(
+        phase="prepare",
+        subphase="runtime-image",
+        runtime_image=runtime,
+        image_digest=runtime.image_digest,
+        oci_layout_sha256=runtime.oci_archive_sha256,
+        image_bytes=runtime.image_bytes,
+        build_id=runtime.build_id,
     )
     with pytest.raises(RuntimeError, match="differs from the exact build"):
         DurableDistributionPhaseExecutor._runtime_identity(
