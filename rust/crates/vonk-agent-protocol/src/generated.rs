@@ -4197,6 +4197,7 @@ pub struct RequestValidationProblem {
     pub issues: ::std::vec::Vec<RequestValidationIssue>,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
 pub enum ResourceBlockerCode {
     #[serde(rename = "resource.capacity_unknown")]
     ResourceCapacityUnknown,
@@ -4260,6 +4261,7 @@ impl ::std::convert::TryFrom<::std::string::String> for ResourceBlockerCode {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
 pub enum RunAdmissionCode {
     #[serde(rename = "run.plan_invalid")]
     RunPlanInvalid,
@@ -10608,6 +10610,7 @@ impl<'de> ::serde::Deserialize<'de> for ResourceBlockerCode {
             PartialEq,
             PartialOrd,
         )]
+        #[allow(clippy::enum_variant_names)]
         enum Raw {
             #[serde(rename = "resource.capacity_unknown")]
             ResourceCapacityUnknown,
@@ -10692,6 +10695,7 @@ impl<'de> ::serde::Deserialize<'de> for RunAdmissionCode {
             PartialEq,
             PartialOrd,
         )]
+        #[allow(clippy::enum_variant_names)]
         enum Raw {
             #[serde(rename = "run.plan_invalid")]
             RunPlanInvalid,
