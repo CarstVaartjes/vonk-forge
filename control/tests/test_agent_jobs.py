@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_payload
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import (
     AgentJobService,
     StaleAgentAttempt,
@@ -1114,7 +1115,7 @@ def test_expired_attempt_cannot_publish_success(service) -> None:
         jobs.succeed(first, STOP_RESULT)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "waiting-for-operator"
+        assert stored is not None and stored.state in aos.PARKED
 
 
 def test_lease_expiry_records_reason_and_last_contact_facts(service) -> None:
@@ -1151,7 +1152,7 @@ def test_lease_expiry_records_reason_and_last_contact_facts(service) -> None:
         assert node is not None
         last_seen = node.last_seen_at
 
-    assert stored is not None and stored.state == "waiting-for-operator"
+    assert stored is not None and stored.state in aos.PARKED
     reason = stored.status_reason
     assert reason is not None
     assert "attempt 1 lease expired" in reason
@@ -1902,7 +1903,7 @@ def test_attempt_expiring_exactly_at_claim_time_requires_operator_retry(
     assert second is None
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "waiting-for-operator"
+        assert stored is not None and stored.state in aos.PARKED
 
 
 def test_parent_job_becomes_succeeded_only_after_every_operation_succeeds(
@@ -2026,7 +2027,7 @@ def test_transient_start_failure_retries_automatically_without_operator(
     )
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "waiting-for-operator"
+        assert stored is not None and stored.state in aos.PARKED
         assert stored.next_action_at is not None
         assert stored.next_action_at is not None
         due = stored.next_action_at.replace(tzinfo=UTC)
@@ -2037,6 +2038,60 @@ def test_transient_start_failure_retries_automatically_without_operator(
         NODE_A,
         "serial-a",
     )
+    assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
+
+
+def test_a_foreign_container_refusal_waits_visibly_and_the_start_resumes_when_it_is_gone(
+    service,
+) -> None:
+    """The typed refusal is a prerequisite wait, not an invalid contract.
+
+    Catches the refusal read as ``invalid-contract``: the start order ended
+    failed and the load with it, although the container may be removed a moment
+    later.  The order stays re-issuable, names the container in its reason, and
+    its parent stays open so the same intent starts once the name is free.
+    """
+
+    from vonk_agent_protocol import AgentResult
+
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            json.dumps(
+                {
+                    "fence": claim.model_dump(mode="json")["fence"],
+                    "state": "failed",
+                    "result": {
+                        "kind": "failed",
+                        "code": "retained_container_foreign",
+                        "reason": "container vonk-x occupies the name this start needs",
+                        "failure_kind": "resource-prerequisite",
+                        "retry_after_seconds": 30,
+                        "evidence": {
+                            "stage": "retained-container",
+                            "diagnostic": "container=vonk-x",
+                        },
+                    },
+                }
+            )
+        )
+    )
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state in aos.PARKED
+        assert "vonk-x" in (stored.status_reason or "")
+        assert stored.next_action_at is not None
+        due = stored.next_action_at.replace(tzinfo=UTC)
+    assert due >= clock.now + timedelta(seconds=30)
+    assert job_state(sessions, operation.parent_job_id).state == "queued"
+    clock.now = due + timedelta(seconds=1)
+    retry = claim_agent(jobs, NODE_A, "serial-a")
     assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
 
 
@@ -2159,7 +2214,7 @@ def test_an_agent_reported_waiting_body_is_retried_not_parked(service, body) -> 
     )
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "waiting-for-operator"
+        assert stored is not None and stored.state in aos.PARKED
         assert stored.next_action_at is not None  # the retry is scheduled
         assert stored.status_reason is not None
         assert "retry scheduled at" in stored.status_reason
@@ -2209,9 +2264,9 @@ def test_a_typed_and_a_legacy_unknown_store_the_same_order(
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None
-        assert stored.state == "waiting-for-operator"
+        assert stored.state in aos.PARKED
         attempt = fenced_attempt(sessions, claim)
-        assert attempt.state == "waiting-for-operator"
+        assert aos.attempt_is_observing(attempt)
         # The attempt stores the legacy-shaped body whichever way it arrived.
         assert attempt.result is not None
         assert attempt.result["reason"] == "workload stop remains unconfirmed"
@@ -2391,8 +2446,8 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert stored.state == "waiting-for-operator"
-        assert attempt.state == "expired"
+        assert stored.state in aos.PARKED
+        assert aos.attempt_lapsed(attempt)
         assert attempt.result == STOP_RESULT
     assert jobs.record_late_result(late) is True
 
@@ -2431,7 +2486,7 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
     assert jobs.record_late_result(late) is True
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "waiting-for-operator"
+        assert stored is not None and stored.state in aos.PARKED
     resumed = None
     for _ in range(4):
         resumed = claim_agent(jobs, NODE_A, "serial-a")
@@ -2454,7 +2509,7 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert previous is not None and previous.state == "expired"
+        assert previous is not None and aos.attempt_lapsed(previous)
         assert previous.result is not None
     jobs.succeed(resumed, STOP_RESULT)
     assert job_state(sessions, operation.parent_job_id).state == "succeeded"
@@ -2797,7 +2852,7 @@ def test_non_idempotent_operation_interrupted_by_restart_still_waits_for_operato
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         # parked for a person (being observed, never scheduled for a retry)
-        assert stored.state == "waiting-for-operator"
+        assert stored.state in aos.PARKED
         assert retry_scheduled(stored) is None
         assert stored.current_attempt == 1
 
@@ -2852,7 +2907,7 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
             stored = session.get(AgentOperation, operation.id)
             due = stored.next_action_at
             assert stored.current_attempt == attempt_number
-            assert stored.state == "waiting-for-operator"
+            assert stored.state in aos.PARKED
         jobs = AgentJobService(sessions, clock=clock)
         assert (
             claim_agent(
@@ -3198,7 +3253,7 @@ def test_live_cancellation_still_blocks_later_work(service) -> None:
         blocked = session.get(AgentOperation, new.id)
         waiting = session.get(AgentOperation, old.id)
         assert blocked is not None and blocked.state == "queued"
-        assert waiting is not None and waiting.state == "waiting-for-operator"
+        assert waiting is not None and waiting.state in aos.PARKED
 
 
 def test_live_prior_mutation_still_blocks_later_work(service) -> None:
@@ -3265,7 +3320,7 @@ def test_dead_running_mutation_is_reconciled_and_stops_blocking(
     with sessions() as session:
         parked = session.get(AgentOperation, old.id)
         successor = session.get(AgentOperation, new.id)
-        assert parked is not None and parked.state == "waiting-for-operator"
+        assert parked is not None and parked.state in aos.PARKED
         assert parked.status_reason is not None
         assert "the effect is unobserved" in parked.status_reason
         assert (

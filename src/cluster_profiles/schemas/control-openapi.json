@@ -3186,7 +3186,8 @@
           "recipe_uninstall_failed",
           "runtime_observation_unavailable",
           "installation_reconciliation_busy",
-          "recipe_reconciliation_dependency_unavailable"
+          "recipe_reconciliation_dependency_unavailable",
+          "retained_container_foreign"
         ],
         "title": "FailureCode",
         "type": "string"
@@ -9208,9 +9209,10 @@
             "enum": [
               "queued",
               "running",
-              "partial",
+              "backoff",
               "succeeded",
-              "failed"
+              "failed",
+              "cancelled"
             ],
             "title": "State",
             "type": "string"
@@ -9885,6 +9887,9 @@
           "migration_step": {
             "$ref": "#/components/schemas/MigrationStep"
           },
+          "observation_cause": {
+            "$ref": "#/components/schemas/ObservationCause"
+          },
           "operator_action": {
             "$ref": "#/components/schemas/OperatorActionName"
           },
@@ -9929,6 +9934,7 @@
           "wait_verdict",
           "lifecycle_subject",
           "state_alias",
+          "observation_cause",
           "state_write_kind",
           "migration_step",
           "error_category",
@@ -10779,18 +10785,27 @@
             "type": "string"
           },
           "state": {
-            "enum": [
-              "accepted",
-              "queued",
-              "running",
-              "partial",
-              "cancelling",
-              "succeeded",
-              "failed",
-              "cancelled"
+            "anyOf": [
+              {
+                "enum": [
+                  "accepted",
+                  "cancelling"
+                ],
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "queued",
+                  "running",
+                  "backoff",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ],
+                "type": "string"
+              }
             ],
-            "title": "State",
-            "type": "string"
+            "title": "State"
           },
           "total_bytes": {
             "anyOf": [
@@ -11791,6 +11806,15 @@
         ],
         "title": "NodeProfilePayload",
         "type": "object"
+      },
+      "ObservationCause": {
+        "description": "Why an attempt is being observed rather than settled.\n\nAn attempt that ended without a definite answer is ``observing``; this says\nwhat left it unanswered.  ``reported-unknown``: the executor said it could not\nconfirm the effect.  ``lease-lapsed``: the executor stopped reporting.  The old\nspellings carried this in the state word itself (``waiting-for-operator`` and\n``expired``), which is why an adopted attempt also yields its cause.",
+        "enum": [
+          "reported-unknown",
+          "lease-lapsed"
+        ],
+        "title": "ObservationCause",
+        "type": "string"
       },
       "OperationBlocker": {
         "description": "One reason an operation is waiting or blocked, with the Sparks it concerns.",

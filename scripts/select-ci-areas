@@ -111,7 +111,6 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
             ),
             (
                 "tools/blocker-allowlist.json",
-                "tools/lifecycle-writers-allowlist.json",
                 "tests/acceptance/recipe-library-revision.txt",
                 "scripts/tests/run_agent_wire_contracts.py",
                 "scripts/export-agent-wire-schema",

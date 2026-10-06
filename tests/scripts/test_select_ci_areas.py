@@ -197,7 +197,6 @@ def test_product_code_and_other_workflows_do_not_need_a_lane_proof() -> None:
     "path",
     [
         "tools/blocker-allowlist.json",
-        "tools/lifecycle-writers-allowlist.json",
         "rust/crates/vonk-agent/src/executor.rs",
     ],
 )

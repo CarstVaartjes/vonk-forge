@@ -331,16 +331,12 @@ the rules of the blocker audit (retry never-executed and idempotent work,
 observe an uncertain effect first, no operator wait without an advertised
 action, a cancel always completes, supersede instead of block, fail open and
 fence closed), one `KindAdapter` protocol per kind, and one reconcile loop that
-is off until a kind has moved onto the core. Two ratchets guard the migration,
-both run by the control suite and both listing what still has to move, so the
-numbers only fall.
+is off until a kind has moved onto the core. Two scanners guard it, both run by the control suite.
 `control/tests/lifecycle_writer_boundaries.py` finds every write to a
 lifecycle state (`x.state = ...` on a lifecycle row, a `["state"]` store in a
 module that owns one, `update(Model).values(state=...)`, a constructor,
-`_set_application_state`) outside the core and compares it with
-`tools/lifecycle-writers-allowlist.json`, where each entry carries the
-migration step (`migrating_in`) that removes it; a new writer, a stale entry, a
-moved count or a higher `max_writes` fails. `control/tests/blocker_boundaries.py`
+`_set_application_state`) outside the core and allows none: there is no
+allowlist, and a new writer fails with the place to move it. `control/tests/blocker_boundaries.py`
 finds every place that produces `waiting-for-operator` (Python and the Rust
 agent) and every fail-closed raise in all of `control/src` (a raise of any
 exception class defined there, found through the class bases), and compares them
@@ -351,7 +347,7 @@ family, and `max_debt` / `debt_ceiling.total` only fall. The ten audited modules
 (`scope.audited_paths`), where the debt is being paid down, keep
 `debt_ceiling.total`; the bookkeeping debt of every other module has its own
 `debt_ceiling.unaudited`, which also only falls. Both scanners take
-`--list`, and `--write-baseline` lowers the recorded counts after a fix; a new
+`--list`; the blocker scanner's `--write-baseline` lowers the recorded counts after a fix; a new
 site always needs a reviewed entry by hand.
 `control/tests/blocker_classifier.py` proposes the category of a new raise by
 rule (exception class, then message): `--classify-new` appends one family per
@@ -359,6 +355,15 @@ module and category for the sites the allowlist does not list, `--summary` count
 every raise in `control/src` by category and names the ones that are not a family
 (builtin `ValueError`/`KeyError`/`TypeError`, `HTTPException`, factory functions).
 Read the proposal and move any site it got wrong before committing it.
+The same scanner guards the error categories: a `raise` in a lifecycle or
+operation path (`scope.guard_paths`: `control/src/vonk_control/lifecycle/` and the
+modules that own an operation) must use a class derived from
+`SecurityRefusalError`, `InvalidRequestError` or `UnknownOutcomeError`
+(`vonk_agent_protocol`), not a bare `RuntimeError`, `ValueError` or a family
+`Conflict`. Raises that predate the rule are grandfathered per module in
+`categorized_raises.grandfathered`; a module's count and
+`categorized_raises.ceiling` only fall, and an unlisted module may not raise an
+uncategorized error. Converting a raise lowers the count (`--write-baseline`).
 
 A PR that touches lifecycle, raise or allowlist files reports the movement.
 `scripts/lifecycle-counts` prints the four numbers (writers, operator waits,

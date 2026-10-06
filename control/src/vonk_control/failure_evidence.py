@@ -17,9 +17,10 @@ from urllib.parse import quote
 
 from pydantic import ConfigDict, Field, TypeAdapter
 from sqlalchemy import String, and_, cast, or_, select
-from vonk_agent_protocol import FailureCode
+from vonk_agent_protocol import FailureCode, LifecycleState, StateAlias
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
+from . import agent_operation_states
 from .bounded_json import BoundedJSONError, mapping, require_integer, sequence
 from .logging import redact_text
 from .models import (
@@ -122,14 +123,20 @@ class FailureEvidenceBundle(EvidenceModel):
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
 
-#: The attempt states whose own terminal failure receipt must stay readable.
-#: ``expired`` is not among them by itself: a lease lapse or a supersession owns
-#: no receipt, and its operation-level reason may already describe a later
-#: attempt.  Only a receipt the attempt actually kept, or the park that still
-#: names it, qualifies.
-FAILED_ATTEMPT_STATES = ("failed", "waiting-for-operator")
-#: The one state a superseded or lapsed attempt keeps while owning no receipt.
-EXPIRED_ATTEMPT_STATE = "expired"
+#: The states of an operation (of any kind) whose failure evidence is downloadable:
+#: a failure, or a wait for a person in either spelling.
+FAILED_ATTEMPT_STATES = (
+    LifecycleState.FAILED.value,
+    LifecycleState.NEEDS_OPERATOR.value,
+    StateAlias.WAITING_FOR_OPERATOR.value,
+)
+
+# The attempts whose own terminal failure receipt must stay readable are the failed
+# ones and those whose executor reported the effect unknown.  A lapsed lease or a
+# supersession is not among them by itself: it owns no receipt, and its
+# operation-level reason may already describe a later attempt.  Only a receipt the
+# attempt actually kept, or the park that still names it, qualifies.  The typed
+# ``observation_cause`` tells the two kinds of observed attempt apart.
 
 
 def _aware(value: datetime) -> datetime:
@@ -373,16 +380,16 @@ def failed_attempt_condition(operation, attempt):
     """
 
     return or_(
-        attempt.state.in_(FAILED_ATTEMPT_STATES),
+        agent_operation_states.sql_attempt_failed_or_unknown(attempt),
         and_(
-            attempt.state == EXPIRED_ATTEMPT_STATE,
+            agent_operation_states.sql_attempt_lapsed(attempt),
             # A receipt is a JSON object.  An absent one is stored as the JSON
             # ``null`` value rather than SQL NULL, so the plain ``IS NOT NULL``
             # test would read every bare lapse as if it had kept a receipt.
             cast(attempt.result, String) != "null",
         ),
         and_(
-            operation.state == "waiting-for-operator",
+            operation.state.in_(agent_operation_states.PARKED),
             attempt.attempt == operation.current_attempt,
         ),
     )

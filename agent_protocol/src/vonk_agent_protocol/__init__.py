@@ -48,6 +48,9 @@ from .distribution import (
 )
 from .failure_evidence import FailureDiagnostics
 from .lifecycle_vocabulary import (
+    ATTEMPT_ALIAS_CAUSE,
+    ObservationCause,
+    legacy_observation_cause,
     INPUT_ALIASES,
     LEGACY_WAIT_STATE,
     LIVE_LIFECYCLE_STATES,
@@ -86,8 +89,11 @@ from .lifecycle_vocabulary import (
     stored_words,
 )
 from .outcome import (
+    CATEGORIZED_ERROR_BASES,
+    CategorizedError,
     ErrorCatalog,
     InvalidRequest,
+    InvalidRequestError,
     OperationError,
     OperationOutcome,
     OutcomeCatalog,
@@ -97,7 +103,9 @@ from .outcome import (
     OutcomeResult,
     OutcomeUnknown,
     SecurityRefusal,
+    SecurityRefusalError,
     UnknownError,
+    UnknownOutcomeError,
     outcome_body,
     outcome_state,
 )
@@ -180,6 +188,8 @@ HostRuntimeRequest.model_rebuild(
 )
 
 __all__ = [
+    "ATTEMPT_ALIAS_CAUSE",
+    "CATEGORIZED_ERROR_BASES",
     "ERROR_CODE_PATTERN",
     "INPUT_ALIASES",
     "LEGACY_WAIT_STATE",
@@ -209,6 +219,7 @@ __all__ = [
     "ArtifactDistributionPayload",
     "ArtifactDistributionResult",
     "BlockerCategory",
+    "CategorizedError",
     "CompiledExecutionPlan",
     "CompiledExecutionPlanError",
     "CompiledJobInput",
@@ -230,6 +241,7 @@ __all__ = [
     "HostRuntimeRequest",
     "InstallVonkDebOperation",
     "InvalidRequest",
+    "InvalidRequestError",
     "InvalidRequestReason",
     "InventoryRequest",
     "LifecycleEffect",
@@ -239,6 +251,7 @@ __all__ = [
     "LifecycleVocabulary",
     "MigrationStep",
     "NetworkInterface",
+    "ObservationCause",
     "OperationCheckpoint",
     "OperationError",
     "OperationMemberProgress",
@@ -284,6 +297,7 @@ __all__ = [
     "RecipeUninstallResult",
     "RestartUnit",
     "SecurityRefusal",
+    "SecurityRefusalError",
     "SecurityRefusalReason",
     "SignedHostHelperGrant",
     "StateAlias",
@@ -293,6 +307,7 @@ __all__ = [
     "TelemetryRequest",
     "TelemetrySample",
     "UnknownError",
+    "UnknownOutcomeError",
     "WaitReason",
     "WaitVerdict",
     "WireModel",
@@ -306,6 +321,7 @@ __all__ = [
     "input_state",
     "is_live",
     "is_state",
+    "legacy_observation_cause",
     "live_words",
     "normalize_operation_progress",
     "outcome_body",

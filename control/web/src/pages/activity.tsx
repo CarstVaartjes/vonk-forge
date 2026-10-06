@@ -1,6 +1,11 @@
 import {availabilityProgress, LibraryAvailabilityProgress} from "../components/library-availability-progress";
 import {availabilityFailure, LibraryAvailabilityFeedback} from "../components/library-availability-feedback";
-import {LEGACY_WAIT_STATE} from "../api/vocabulary.generated";
+import {LEGACY_WAIT_STATE, LifecycleState} from "../api/vocabulary.generated";
+
+/** A wait for a person, under the core word or the one older Controllers still send. */
+export function isOperatorWait(state: string | undefined): boolean {
+  return state === LifecycleState.NEEDS_OPERATOR || state === LEGACY_WAIT_STATE;
+}
 import {useCallback, useEffect, useId, useMemo, useRef, useState} from "react";
 import type {SyntheticEvent} from "react";
 import type {ActivityFilters, ControlApi, JobDetail, OperationDetail, VisualFleetSnapshot} from "../api/types";
@@ -63,6 +68,9 @@ export function activityActionLabel(action: string): string {
       uncertain: "Needs review",
       waiting: "Waiting to recheck",
       [LEGACY_WAIT_STATE]: "Waiting for operator",
+      [LifecycleState.NEEDS_OPERATOR]: "Waiting for operator",
+      [LifecycleState.BACKOFF]: "Retrying",
+      [LifecycleState.OBSERVING]: "Checking",
     };
     return `${kind} · ${stateLabels[state] ?? titleCase(state)}`;
   }
@@ -89,6 +97,9 @@ export function activityStatus(event: ActivitySummary): ActivityStatus {
       uncertain: "attention",
       waiting: "in_progress",
       [LEGACY_WAIT_STATE]: "attention",
+      [LifecycleState.NEEDS_OPERATOR]: "attention",
+      [LifecycleState.BACKOFF]: "in_progress",
+      [LifecycleState.OBSERVING]: "in_progress",
       compensating: "in_progress",
       pending: "in_progress",
       planned: "in_progress",
@@ -125,7 +136,7 @@ function statusTone(status: ActivityStatus): "neutral" | "healthy" | "warning" |
   return "healthy";
 }
 
-const OPERATION_STATES = ["queued", "running", "waiting", LEGACY_WAIT_STATE, "compensating", "uncertain", "failed", "cancelled", "superseded", "succeeded"];
+const OPERATION_STATES = ["queued", "running", LifecycleState.BACKOFF, LifecycleState.OBSERVING, "waiting", LEGACY_WAIT_STATE, LifecycleState.NEEDS_OPERATOR, "compensating", "uncertain", "failed", "cancelled", "superseded", "succeeded"];
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /** Filters live in the URL so a filtered view can be linked and reloaded, like `vonkctl fleet activity --state --target --request-id`. */
@@ -222,7 +233,9 @@ function TargetSummary({compact = false, event}: {compact?: boolean; event: Acti
   return compact ? <small className="activity-target-summary">{content}</small> : <span className="activity-target-summary">{content}</span>;
 }
 
-const LIVE_JOB_STATES = new Set([
+const LIVE_JOB_STATES = new Set<string>([
+  LifecycleState.BACKOFF,
+  LifecycleState.OBSERVING,
   "compensating",
   "pending",
   "planned",
@@ -235,13 +248,15 @@ const LIVE_JOB_STATES = new Set([
 
 export function activityStateLabel(state: string): string {
   if (state === "waiting") return "Waiting to recheck";
-  if (state === LEGACY_WAIT_STATE) return "Waiting for operator";
+  if (isOperatorWait(state)) return "Waiting for operator";
+  if (state === LifecycleState.BACKOFF) return "Retrying automatically";
+  if (state === LifecycleState.OBSERVING) return "Checking the outcome";
   return titleCase(state);
 }
 
 function jobUpdatesAutomatically(detail: JobDetail): boolean {
   return LIVE_JOB_STATES.has(detail.state) || (
-    detail.state === LEGACY_WAIT_STATE
+    isOperatorWait(detail.state)
     && (detail.agent_upgrade_diagnostics?.targets.some(target => target.retry_queued) ?? false)
   );
 }
@@ -330,7 +345,7 @@ function JobProgressDetails({
   }
 
   async function resume(): Promise<void> {
-    if (!detail || detail.state !== LEGACY_WAIT_STATE || resuming) return;
+    if (!detail || !isOperatorWait(detail.state) || resuming) return;
     setResuming(true);
     setResumeError("");
     setResumeNotice("");
@@ -381,7 +396,7 @@ function JobProgressDetails({
         {visibleTargets.length > 0 && <section className="activity-job-targets" aria-label="Affected targets"><h3>Affected targets</h3><ul>{visibleTargets.map((target, index) => <li key={`${detail.targets[index]}:${index}`}>{target}</li>)}</ul>{detail.target_total > detail.targets.length && <p>Showing {detail.targets.length} of {detail.target_total} affected targets.</p>}</section>}
         {"operation" in detail.progress && detail.progress.operation != null && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress.operation)}/>}
         {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{operation.kind === "artifact.distribution.v1" ? "Model distribution" : titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{activityStateLabel(operation.state)}</StatusPill>{operation.progress && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>} {operation.evidence_download && <DiagnosticDownload id={operation.id} attempt={operation.attempt}/>}</li>)}</ul>{detail.operation_total > detail.operations.length && <p>Showing {detail.operations.length} of {detail.operation_total} operation steps.</p>}</section>}
-        {detail.state === LEGACY_WAIT_STATE && (agentRetryQueued ? <section className="activity-job-resume"><div><strong>Retry queued behind safety delay</strong><p>{detail.agent_upgrade_diagnostics?.next_action}</p></div></section> : <section className="activity-job-resume"><div><strong>Operator action required</strong><p>{detail.agent_upgrade_diagnostics?.next_action || "This operation can be returned to the queue. Review the state reason and affected targets first."}</p></div><button type="button" className="button" disabled={resuming || loading} onClick={() => void resume()}>{resuming ? detail.kind === "agent-upgrade" ? "Queuing…" : "Resuming…" : detail.kind === "agent-upgrade" ? "Queue retry after inspection" : "Resume operation"}</button></section>)}
+        {isOperatorWait(detail.state) && (agentRetryQueued ? <section className="activity-job-resume"><div><strong>Retry queued behind safety delay</strong><p>{detail.agent_upgrade_diagnostics?.next_action}</p></div></section> : <section className="activity-job-resume"><div><strong>Operator action required</strong><p>{detail.agent_upgrade_diagnostics?.next_action || "This operation can be returned to the queue. Review the state reason and affected targets first."}</p></div><button type="button" className="button" disabled={resuming || loading} onClick={() => void resume()}>{resuming ? detail.kind === "agent-upgrade" ? "Queuing…" : "Resuming…" : detail.kind === "agent-upgrade" ? "Queue retry after inspection" : "Resume operation"}</button></section>)}
         {resumeNotice && <p className="activity-job-message is-success" role="status">{resumeNotice}</p>}
         {resumeError && <p className="activity-job-message is-error" role="alert">Operation was not resumed. {resumeError}</p>}
         <details className="activity-job-technical"><summary>Operation identifiers</summary><dl><CopyableValue label="Operation ID" value={detail.id}/><CopyableValue label="Authority revision" value={detail.authority_revision}/> {detail.targets.map((target, index) => <CopyableValue key={`${target}:${index}`} label={detail.targets.length === 1 ? "Target ID" : `Target ID ${index + 1}`} value={target}/>)}</dl></details>

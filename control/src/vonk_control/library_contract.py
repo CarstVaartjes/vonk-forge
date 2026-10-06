@@ -11,6 +11,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
 from .cursor_contract import MAX_CURSOR_LENGTH
+from .model_cache_contract import ModelCacheOperationState
 from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
 from .strict_json import StrictJSONModel
 
@@ -138,7 +139,7 @@ class LibraryLocalProgress(_StrictModel):
     """Observable progress for a Controller-local preparation operation."""
 
     operation_id: UuidId | None = None
-    state: Literal["queued", "running", "partial", "succeeded", "failed"]
+    state: ModelCacheOperationState
     phase: Text64 | None = None
     completed_bytes: int = Field(default=0, ge=0, le=_MAX_SIGNED_BIGINT)
     total_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)

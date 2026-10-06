@@ -37,3 +37,14 @@ def test_unclassified_distribution_failure_does_not_become_automatic_retry() -> 
         is RecoveryDecision.RETRY
     )
     assert classify(FailureKind.UNCERTAIN_EFFECT) is RecoveryDecision.OBSERVE
+
+
+def test_a_foreign_container_is_a_prerequisite_not_an_invalid_contract() -> None:
+    # Wrong implementation: a failed start with only its code read as an invalid
+    # contract, which blocks the load instead of waiting for the name to be free.
+    body = {"error_code": "retained_container_foreign", "status": "failed"}
+    assert kind_for_agent_error(body) is FailureKind.RESOURCE_PREREQUISITE
+    assert (
+        kind_for_agent_error({**body, "failure_kind": "invalid-contract"})
+        is FailureKind.INVALID_CONTRACT
+    ), "an explicit kind from the agent still wins"

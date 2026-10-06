@@ -6,13 +6,19 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import (
+    BeforeValidator,
     ConfigDict,
     Field,
     ValidationError,
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    LifecycleState,
+    LifecycleSubject,
+    canonical_message,
+    state_adopter,
+)
 from vonk_forge_contracts.model import ModelReference
 
 from .operation_blockers import OperationBlocker
@@ -33,19 +39,19 @@ Digest = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 # produces or consumes the value share the alias, so the vocabulary cannot
 # drift apart.
 ModelCacheOperationKind = Literal["download", "repair", "remove"]
-ModelCacheOperationState = Literal[
-    "queued", "running", "partial", "succeeded", "failed", "cancelled"
+ModelCacheOperationState = Annotated[
+    Literal[
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+    ],
+    # A row written before the rename may still say ``partial``.
+    BeforeValidator(state_adopter(LifecycleSubject.MODEL_CACHE_OPERATION)),
 ]
-ModelCacheOperatorState = Literal[
-    "accepted",
-    "queued",
-    "running",
-    "partial",
-    "cancelling",
-    "succeeded",
-    "failed",
-    "cancelled",
-]
+ModelCacheOperatorState = Literal["accepted", "cancelling"] | ModelCacheOperationState
 ModelCacheOperatorAction = Literal["download", "remove"]
 ModelCacheOperationPhase = Literal[
     "queued",

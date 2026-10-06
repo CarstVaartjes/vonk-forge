@@ -21,6 +21,7 @@ from vonk_control.fleet_profiles import (
     FleetProfileService,
     FleetProfileStalePlanConflict,
 )
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -747,6 +748,7 @@ def test_pending_admission_reports_constraint_failure_and_recovers_same_request(
         assert row.request_key == pending.request_key
         assert row.plan_digest == pending.plan_digest
         intended = profiles._intended_profile(row, session=session)
+        assert not isinstance(intended, Residue)
         assert intended.reviewed_plan_digest == review.plan_digest
 
 
@@ -921,6 +923,7 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
         assert recovered.plan_digest == pending_plan_digest
         assert recovered.progress["admission_pending"] is False
         intended = restarted._intended_profile(recovered, session=session)
+        assert not isinstance(intended, Residue)
         assert intended.reviewed_plan_digest == review["plan_digest"]
         switch_state = recovered.progress["switch_adapter"]
         assert isinstance(switch_state, dict)
@@ -963,10 +966,9 @@ def test_queued_admission_survives_submitter_death_before_first_attempt(
         assert row is not None
         assert row.progress["admission_pending"] is False
         assert row.plan_digest == pending.plan_digest
-        assert (
-            restarted._intended_profile(row, session=session).reviewed_plan_digest
-            == review.plan_digest
-        )
+        restarted_intent = restarted._intended_profile(row, session=session)
+        assert not isinstance(restarted_intent, Residue)
+        assert restarted_intent.reviewed_plan_digest == review.plan_digest
         assert row.state == "running", row.status_reason
         assert row.current_operation_id is not None
 

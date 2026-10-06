@@ -72,6 +72,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
+from . import model_cache_states
 from .artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -1531,7 +1532,7 @@ def _model_removal_in_flight(session: Session) -> bool:
             select(ModelCacheOperation.id)
             .where(
                 ModelCacheOperation.kind == "remove",
-                ModelCacheOperation.state.in_(("queued", "running", "partial")),
+                ModelCacheOperation.state.in_(model_cache_states.LIVE),
             )
             .limit(1)
         )

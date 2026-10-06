@@ -88,7 +88,8 @@ def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
         )
 
     assert set(child.nodes) == set(nodes)
-    # A parent failure must not free disk already handed to its installation.
+    # A parent ended by unreadable evidence (retired as unknown, effect unknown)
+    # must not free disk already handed to its installation.
     with sessions.begin() as session:
         application = session.get(FleetProfileApplication, application_id)
         assert application is not None
@@ -97,7 +98,7 @@ def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
     with sessions() as session:
         application = session.get(FleetProfileApplication, application_id)
         claim = session.get(ResourceReservation, claim_id)
-        assert application is not None and application.state == "failed"
+        assert application is not None and application.state == "cancelled"
         assert claim is not None and claim.state == "active"
         assert claim.owner_id == child.owner_id
 

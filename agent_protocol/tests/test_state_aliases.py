@@ -70,6 +70,10 @@ def test_old_rows_are_adopted_on_read() -> None:
     assert adopt_state(
         LifecycleSubject.MODEL_CACHE_OPERATION, "partial"
     ) == AdoptedState(LifecycleState.BACKOFF)
+    # An attempt is a record of one try, never a wait for a person.
+    assert adopt_state(
+        LifecycleSubject.AGENT_OPERATION_ATTEMPT, "waiting-for-operator"
+    ) == AdoptedState(LifecycleState.OBSERVING)
     # An expired attempt was interrupted (observed); an expired job is over.
     assert adopt_state(
         LifecycleSubject.AGENT_OPERATION_ATTEMPT, "expired"
@@ -142,3 +146,13 @@ def test_a_model_validates_an_old_row_as_the_word_it_means_now() -> None:
     )
     with pytest.raises(ValueError):
         View(state="succeeded")
+
+
+def test_an_old_attempt_word_also_yields_why_it_is_observed() -> None:
+    from vonk_agent_protocol import ObservationCause, legacy_observation_cause
+
+    assert legacy_observation_cause("waiting-for-operator") is (
+        ObservationCause.REPORTED_UNKNOWN
+    )
+    assert legacy_observation_cause("expired") is ObservationCause.LEASE_LAPSED
+    assert legacy_observation_cause("failed") is None

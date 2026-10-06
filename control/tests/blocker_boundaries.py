@@ -37,6 +37,16 @@ a new one must choose a category in a PR a reviewer can see.  Builtin
 ``ValueError`` / ``KeyError`` / ``TypeError`` raises, ``HTTPException`` and
 raises through a factory function are not families (``--summary`` counts them).
 
+**Categorized raises (the guard).**  In a lifecycle or operation path
+(``scope.guard_paths``: ``control/src/vonk_control/lifecycle/`` and the modules
+that own an operation) a ``raise`` must use an error type of the contract's three
+categories: a class that derives from ``SecurityRefusalError``,
+``InvalidRequestError`` or ``UnknownOutcomeError``, not a bare ``RuntimeError``,
+``ValueError`` or a family ``Conflict``.  What predates the rule is grandfathered
+per module in ``categorized_raises.grandfathered``; a module's count may only
+fall, an unlisted module may not raise at all, and ``categorized_raises.ceiling``
+is their sum.  Converting a raise to a categorized type lowers it.
+
 ``python -m control.tests.blocker_boundaries --list`` prints both scans;
 ``--write-baseline`` rewrites the counts after a site was removed (a new site is
 never written automatically: it needs a verdict, a category and a reason).
@@ -56,11 +66,13 @@ from functools import cache
 from pathlib import Path
 
 from vonk_agent_protocol import (
+    CATEGORIZED_ERROR_BASES,
     LEGACY_WAIT_STATE,
     AgentResultState,
     BlockerCategory,
     FailureCode,
     InvalidRequestReason,
+    LifecycleState,
     OperatorSurface,
     SecurityRefusalReason,
     WaitReason,
@@ -100,8 +112,22 @@ _STATE_CALLS = frozenset({"_finish", "_set_application_state", "_set_state"})
 
 CATEGORIES = frozenset(category.value for category in BlockerCategory)
 _RAISE_SUFFIXES = ("Conflict", "Error", "Refused", "Busy", "Invalid", "NotFound")
+#: The raisable error categories of the contract (``SecurityRefusalError`` ...).
+CATEGORIZED_BASE_NAMES = frozenset(base.__name__ for base in CATEGORIZED_ERROR_BASES)
 #: Exception bases that are not builtins but make a local class an error type.
-_EXTERNAL_EXCEPTION_BASES = frozenset({"HTTPException", "StarletteHTTPException"})
+_EXTERNAL_EXCEPTION_BASES = (
+    frozenset({"HTTPException", "StarletteHTTPException"}) | CATEGORIZED_BASE_NAMES
+)
+#: Raises that state a programming or protocol fact, not a refusal or a wait.
+GUARD_EXEMPT_CLASSES = frozenset(
+    {
+        "AssertionError",
+        "CancelledError",
+        "NotImplementedError",
+        "StopAsyncIteration",
+        "StopIteration",
+    }
+)
 _BUILTIN_EXCEPTIONS = frozenset(
     name
     for name, value in vars(builtins).items()
@@ -152,6 +178,8 @@ class RaiseSite:
 #: ``LEGACY_WAIT_STATE`` and ``AgentResultState.WAITING_FOR_OPERATOR[.value]``.
 _WAIT_CONTRACT_NAME = "LEGACY_WAIT_STATE"
 _WAIT_CONTRACT_MEMBER = AgentResultState.WAITING_FOR_OPERATOR.name
+#: The stored wait word of a kind on the core vocabulary (``LifecycleState.NEEDS_OPERATOR``).
+_STORED_WAIT_MEMBER = LifecycleState.NEEDS_OPERATOR.name
 
 
 def _is_wait_literal(node: ast.AST) -> bool:
@@ -160,10 +188,16 @@ def _is_wait_literal(node: ast.AST) -> bool:
     if isinstance(node, ast.Constant):
         return node.value == WAIT_STATE
     if isinstance(node, ast.Name):
-        return node.id == _WAIT_CONTRACT_NAME
+        return node.id in {_WAIT_CONTRACT_NAME, _STORED_WAIT_MEMBER}
     if isinstance(node, ast.Attribute):
         if node.attr == "value":
             return _is_wait_literal(node.value)
+        if node.attr == _STORED_WAIT_MEMBER:
+            # ``aos.NEEDS_OPERATOR``: the stored word of a kind that has moved onto
+            # the core vocabulary, spelled through its ``*_states`` module.
+            return isinstance(node.value, ast.Name) and (
+                node.value.id == "aos" or node.value.id.endswith("_states")
+            )
         return node.attr == _WAIT_CONTRACT_MEMBER
     return False
 
@@ -539,6 +573,175 @@ def scan_raise_source(
     return collector.sites
 
 
+# ---------------------------------------------------------------------- guard
+
+
+@dataclass(frozen=True)
+class UncategorizedRaise:
+    """A raise in a guarded path of a class outside the three error categories."""
+
+    path: str
+    exception_class: str
+    function: str
+    line: int
+
+    def render(self) -> str:
+        return (
+            f"{self.path}:{self.line}: raise {self.exception_class} in {self.function}"
+        )
+
+
+def categorized_classes(trees: Sequence[ast.Module]) -> frozenset[str]:
+    """Local classes whose bases lead to a category base of the contract."""
+
+    bases: dict[str, set[str]] = {}
+    for tree in trees:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                names = bases.setdefault(node.name, set())
+                for base in node.bases:
+                    if isinstance(base, ast.Name):
+                        names.add(base.id)
+                    elif isinstance(base, ast.Attribute):
+                        names.add(base.attr)
+    categorized: set[str] = set(CATEGORIZED_BASE_NAMES)
+    grew = True
+    while grew:
+        grew = False
+        for name, names in bases.items():
+            if name not in categorized and names & categorized:
+                categorized.add(name)
+                grew = True
+    return frozenset(categorized)
+
+
+class _GuardCollector(ast.NodeVisitor):
+    def __init__(self, path: str, categorized: frozenset[str]) -> None:
+        self.path = path
+        self.categorized = categorized
+        self.scope: list[str] = []
+        self.sites: list[UncategorizedRaise] = []
+
+    def _enter(self, node: ast.AST, name: str) -> None:
+        self.scope.append(name)
+        self.generic_visit(node)
+        self.scope.pop()
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._enter(node, node.name)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._enter(node, node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._enter(node, node.name)
+
+    def visit_Raise(self, node: ast.Raise) -> None:
+        call = node.exc
+        if isinstance(call, ast.Call):
+            func = call.func
+            name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else "?"
+            )
+            if name not in self.categorized and name not in GUARD_EXEMPT_CLASSES:
+                self.sites.append(
+                    UncategorizedRaise(
+                        self.path,
+                        name,
+                        ".".join(self.scope) or "<module>",
+                        node.lineno,
+                    )
+                )
+        self.generic_visit(node)
+
+
+def _in_guard_scope(path: str, guard_paths: Sequence[str]) -> bool:
+    return any(
+        path.startswith(entry) if entry.endswith("/") else path == entry
+        for entry in guard_paths
+    )
+
+
+def guard_paths(document: dict[str, object]) -> list[str]:
+    """The lifecycle and operation paths a raise must be categorized in."""
+
+    scope = document["scope"]
+    return [str(entry) for entry in scope["guard_paths"]]  # type: ignore[index, attr-defined]
+
+
+def scan_guard_raises(
+    paths: Sequence[str], root: Path = CONTROL_SOURCE_ROOT
+) -> list[UncategorizedRaise]:
+    """Raises in ``paths`` whose class is not of the three error categories."""
+
+    trees = parsed_modules(root)
+    categorized = categorized_classes(list(trees.values()))
+    sites: list[UncategorizedRaise] = []
+    for module, tree in trees.items():
+        relative = module.relative_to(REPO_ROOT).as_posix()
+        if _in_guard_scope(relative, paths):
+            collector = _GuardCollector(relative, categorized)
+            collector.visit(tree)
+            sites.extend(collector.sites)
+    return sorted(sites, key=lambda site: (site.path, site.line))
+
+
+def scan_guard_source(
+    source: str, *, path: str, categorized: frozenset[str]
+) -> list[UncategorizedRaise]:
+    collector = _GuardCollector(path, categorized)
+    collector.visit(ast.parse(source))
+    return collector.sites
+
+
+def evaluate_guard_gate(
+    sites: Sequence[UncategorizedRaise], document: dict[str, object]
+) -> list[str]:
+    """A raise in a guarded path must be categorized; the grandfathered count falls."""
+
+    section = document["categorized_raises"]
+    grandfathered: dict[str, int] = section["grandfathered"]  # type: ignore[index, assignment]
+    current = Counter(site.path for site in sites)
+    first = {site.path: site for site in reversed(sites)}
+    messages: list[str] = []
+    for path, count in sorted(current.items()):
+        if path not in grandfathered:
+            messages.append(
+                "raise in a lifecycle or operation path outside the three error "
+                "categories; raise SecurityRefusalError, InvalidRequestError or "
+                f"UnknownOutcomeError (or a subclass): {first[path].render()}"
+            )
+        elif count > grandfathered[path]:
+            messages.append(
+                f"uncategorized raises in {path} rose from {grandfathered[path]} to "
+                f"{count}; categorize the new one: {first[path].render()}"
+            )
+        elif count < grandfathered[path]:
+            messages.append(
+                f"uncategorized raises in {path} fell from {grandfathered[path]} to "
+                f"{count}; lower the recorded count"
+            )
+    for path in sorted(grandfathered):
+        if path not in current:
+            messages.append(f"grandfathered module has none left; delete it: {path}")
+    total = sum(grandfathered.values())
+    ceiling = int(section["ceiling"])  # type: ignore[index, call-overload]
+    if total > ceiling:
+        messages.append(
+            f"grandfathered uncategorized raises are {total}, above the ceiling {ceiling}"
+        )
+    elif total < ceiling:
+        messages.append(
+            f"grandfathered uncategorized raises are {total}; lower "
+            f"categorized_raises.ceiling from {ceiling}"
+        )
+    return messages
+
+
 # ------------------------------------------------------------------ allowlist
 
 
@@ -557,9 +760,16 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict) or document.get("schema") != 1:
         raise ValueError(f"{path}: allowlist must be a schema-1 object")
-    for required in ("max_debt", "debt_ceiling", "scope"):
+    for required in ("max_debt", "debt_ceiling", "scope", "categorized_raises"):
         if required not in document:
             raise ValueError(f"{path}: missing {required}")
+    guard = document["categorized_raises"]
+    if not isinstance(guard.get("grandfathered"), dict) or not isinstance(
+        guard.get("ceiling"), int
+    ):
+        raise TypeError(f"{path}: categorized_raises needs grandfathered and ceiling")
+    if not document["scope"].get("guard_paths"):
+        raise ValueError(f"{path}: scope.guard_paths must list the guarded paths")
     waits = document.get("operator_waits")
     families = document.get("fail_closed")
     if not isinstance(waits, list) or not isinstance(families, list):
@@ -737,15 +947,36 @@ def evaluate_blocker_gate(
     waits: Sequence[WaitSite],
     raises: Sequence[RaiseSite],
     document: dict[str, object],
+    guard: Sequence[UncategorizedRaise] | None = None,
 ) -> list[str]:
     return [
         *evaluate_wait_gate(waits, document),
         *evaluate_raise_gate(raises, document),
+        *([] if guard is None else evaluate_guard_gate(guard, document)),
     ]
 
 
+def _lowered_guard(
+    document: dict[str, object], guard: Sequence[UncategorizedRaise] | None
+) -> dict[str, object]:
+    section: dict[str, object] = document["categorized_raises"]  # type: ignore[assignment]
+    if guard is None:
+        return section
+    current = Counter(site.path for site in guard)
+    recorded: dict[str, int] = section["grandfathered"]  # type: ignore[assignment]
+    lowered = {
+        path: min(count, current[path])
+        for path, count in recorded.items()
+        if current[path]
+    }
+    return {**section, "grandfathered": lowered, "ceiling": sum(lowered.values())}
+
+
 def write_counts(
-    document: dict[str, object], waits: Sequence[WaitSite], raises: Sequence[RaiseSite]
+    document: dict[str, object],
+    waits: Sequence[WaitSite],
+    raises: Sequence[RaiseSite],
+    guard: Sequence[UncategorizedRaise] | None = None,
 ) -> dict[str, object]:
     """Lower recorded counts and drop vanished entries; never add a site."""
 
@@ -780,6 +1011,7 @@ def write_counts(
         **document,
         "max_debt": sum(1 for entry in kept_waits if entry["verdict"] != "KEEP"),
         "debt_ceiling": {**document["debt_ceiling"], **debt},  # type: ignore[dict-item]
+        "categorized_raises": _lowered_guard(document, guard),
         "operator_waits": kept_waits,
         "fail_closed": families,
     }
@@ -820,25 +1052,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     document = load_allowlist()
     waits = scan_waits()
     raises = scan_raises()
+    guard = scan_guard_raises(guard_paths(document))
     if arguments and arguments[0] == "--list":
         for site in waits:
             print(site.render())
         for raise_site in raises:
             print(raise_site.render())
+        for uncategorized in guard:
+            print(uncategorized.render())
         return 0
     if arguments and arguments[0] == "--write-baseline":
-        updated = write_counts(document, waits, raises)
+        updated = write_counts(document, waits, raises, guard)
         ALLOWLIST_PATH.write_text(dump_document(updated), encoding="utf-8")
         print("lowered the recorded counts; new sites are never written")
         return 0
-    messages = evaluate_blocker_gate(waits, raises, document)
+    messages = evaluate_blocker_gate(waits, raises, document, guard)
     if messages:
         for message in messages:
             print(message, file=sys.stderr)
         return 1
     print(
         f"blockers hold at {len(waits)} operator-wait sites and "
-        f"{len(raises)} fail-closed raises"
+        f"{len(raises)} fail-closed raises, with {len(guard)} uncategorized raises "
+        "grandfathered in lifecycle and operation paths"
     )
     return 0
 

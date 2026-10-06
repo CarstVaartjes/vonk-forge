@@ -10,8 +10,10 @@ from ..types import UNSET, Unset
 
 from ..models.model_cache_operator_response_action import check_model_cache_operator_response_action
 from ..models.model_cache_operator_response_action import ModelCacheOperatorResponseAction
-from ..models.model_cache_operator_response_state import check_model_cache_operator_response_state
-from ..models.model_cache_operator_response_state import ModelCacheOperatorResponseState
+from ..models.model_cache_operator_response_state_type_0 import check_model_cache_operator_response_state_type_0
+from ..models.model_cache_operator_response_state_type_0 import ModelCacheOperatorResponseStateType0
+from ..models.model_cache_operator_response_state_type_1 import check_model_cache_operator_response_state_type_1
+from ..models.model_cache_operator_response_state_type_1 import ModelCacheOperatorResponseStateType1
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -41,7 +43,7 @@ class ModelCacheOperatorResponse:
             progress (OperationProgress): Canonical durable progress payload shared by Controller and agents.
             request_key (str):
             selector (str):
-            state (ModelCacheOperatorResponseState):
+            state (ModelCacheOperatorResponseStateType0 | ModelCacheOperatorResponseStateType1):
             transferred_bytes (int):
             blockers (list[OperationBlocker] | Unset):
             cancellation (ModelCacheCancellation | None | Unset):
@@ -62,7 +64,7 @@ class ModelCacheOperatorResponse:
     progress: OperationProgress
     request_key: str
     selector: str
-    state: ModelCacheOperatorResponseState
+    state: ModelCacheOperatorResponseStateType0 | ModelCacheOperatorResponseStateType1
     transferred_bytes: int
     blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: ModelCacheCancellation | None | Unset = UNSET
@@ -98,7 +100,12 @@ class ModelCacheOperatorResponse:
 
         selector = self.selector
 
-        state: str = self.state
+        state: str
+        if isinstance(self.state, str):
+            state = self.state
+        else:
+            state = self.state
+
 
         transferred_bytes = self.transferred_bytes
 
@@ -251,9 +258,26 @@ class ModelCacheOperatorResponse:
 
         selector = d.pop("selector")
 
-        state = check_model_cache_operator_response_state(d.pop("state"))
+        def _parse_state(data: object) -> ModelCacheOperatorResponseStateType0 | ModelCacheOperatorResponseStateType1:
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                state_type_0 = check_model_cache_operator_response_state_type_0(data)
 
 
+
+                return state_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, str):
+                raise TypeError()
+            state_type_1 = check_model_cache_operator_response_state_type_1(data)
+
+
+
+            return state_type_1
+
+        state = _parse_state(d.pop("state"))
 
 
         transferred_bytes = d.pop("transferred_bytes")

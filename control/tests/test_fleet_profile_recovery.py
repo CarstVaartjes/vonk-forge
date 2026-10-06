@@ -7,6 +7,7 @@ import json
 import pytest
 from sqlalchemy import select
 from vonk_control.fleet_profiles import FleetProfileConflict
+from vonk_control.lifecycle.evidence import Residue
 
 from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import _uuid
@@ -39,6 +40,7 @@ def test_profile_edit_does_not_replace_accepted_retry_snapshot(
         row = session.get(FleetProfileApplication, retry.id)
         assert row is not None
         intended = service._intended_profile(row, session=session)
+        assert not isinstance(intended, Residue)
         assert intended.assignments[0].alias == "recover-chat"
         assert (
             len(

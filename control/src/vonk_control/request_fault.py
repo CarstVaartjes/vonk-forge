@@ -9,6 +9,8 @@ unreadable stored state.
 
 from __future__ import annotations
 
+from vonk_agent_protocol import InvalidRequestError
 
-class RequestFault(ValueError):
+
+class RequestFault(InvalidRequestError, ValueError):
     """A request the caller can correct: a bad selector, limit, sort or filter."""

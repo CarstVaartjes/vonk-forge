@@ -37,6 +37,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
+from . import model_cache_states
 from .admission_locking import is_admission_contention
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -2268,7 +2269,7 @@ class RecipeImageAvailabilityService:
                 detail="model-removal child identity does not match its accepted recipe owner",
                 retryable=False,
             )
-        if operation.state in {"queued", "running", "partial", "cancelling"}:
+        if operation.state in {*model_cache_states.LIVE, "cancelling"}:
             return self._record_recipe_removal_failure(
                 operation_id,
                 code="model_cache.removal_child_pending",
@@ -2875,7 +2876,7 @@ class RecipeImageAvailabilityService:
                         for item in candidates
                         if item.id == child_id
                         and item.request_key in request_keys
-                        and item.state in {"queued", "running", "partial"}
+                        and item.state in model_cache_states.LIVE
                     ),
                     None,
                 )
@@ -2885,7 +2886,7 @@ class RecipeImageAvailabilityService:
                             item
                             for item in candidates
                             if item.request_key in request_keys
-                            and item.state in {"queued", "running", "partial"}
+                            and item.state in model_cache_states.LIVE
                         ),
                         None,
                     )
@@ -2900,7 +2901,7 @@ class RecipeImageAvailabilityService:
                 if (
                     model_child is None
                     or model_child.request_key not in request_keys
-                    or model_child.state not in {"queued", "running", "partial"}
+                    or model_child.state not in model_cache_states.LIVE
                 ):
                     return False, False
                 shared = session.scalar(
@@ -3668,7 +3669,7 @@ class RecipeImageAvailabilityService:
                     if (
                         candidate.artifact_set_sha256 == artifact_set_sha256
                         and candidate.state
-                        in {"queued", "running", "partial", "succeeded", "failed"}
+                        in {*model_cache_states.LIVE, "succeeded", "failed"}
                         and not (candidate.state == "succeeded" and new_bytes > 0)
                     )
                 ]
@@ -3676,7 +3677,7 @@ class RecipeImageAvailabilityService:
                     "succeeded": 0,
                     "queued": 1,
                     "running": 1,
-                    "partial": 1,
+                    model_cache_states.BACKOFF: 1,
                     "failed": 2,
                 }
                 operation = min(
@@ -3803,14 +3804,14 @@ class RecipeImageAvailabilityService:
                             and candidate.artifact_set_sha256
                             == operation.artifact_set_sha256
                             and candidate.state
-                            in {"queued", "running", "partial", "succeeded"}
+                            in {*model_cache_states.LIVE, "succeeded"}
                         )
                     ]
                     state_rank = {
                         "succeeded": 0,
                         "queued": 1,
                         "running": 1,
-                        "partial": 1,
+                        model_cache_states.BACKOFF: 1,
                     }
                     reused = min(
                         candidates,
@@ -4228,7 +4229,7 @@ class RecipeImageAvailabilityService:
             state = self._model_cache.get_operation(str(child["id"])).state
         except Exception:  # noqa: BLE001 - dispatch falls back to a normal claim
             return False
-        if state not in {"queued", "running", "partial"}:
+        if state not in model_cache_states.LIVE:
             return False
         updated = dict(payload) | {
             "retry_after_at": _iso(now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS))
@@ -4585,7 +4586,7 @@ class RecipeImageAvailabilityService:
                 child_state = model_child.get("state")
                 if not self._update_model_progress(claim, model_child):
                     raise _AvailabilityClaimLost()
-                if child_state in {"queued", "running", "partial"}:
+                if child_state in model_cache_states.LIVE:
                     model_pending = True
                 elif child_state != "succeeded":
                     model_failure = mapping(model_child.get("failure"))

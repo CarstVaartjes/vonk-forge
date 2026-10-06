@@ -8,16 +8,18 @@ that the core asks (nothing here is irreversible, the retry fence, a stop), and
 the **only** projection of a core decision back onto the stored row
 (:meth:`ModelCacheAdapter.apply`).  No other code writes an operation's ``state``.
 
-Stored encoding.  The stored ``state`` vocabulary is read by the API, the
-library projection, the collectors and the removal worker, so it does not
-change; the core's states are projected onto it:
+Stored encoding.  The stored ``state`` is a word of the core vocabulary
+(``vonk_agent_protocol.LifecycleState``); a row written before the rename may still
+say ``partial``, which the contract adopts as ``backoff`` (readers select by
+``model_cache_states.LIVE`` and friends, never by a hand-spelled word).  The core's
+states are projected onto it:
 
 =====================  ========================================================
 core state             stored operation
 =====================  ========================================================
 ``queued``             ``queued``, ``next_action_at`` NULL (claimable now)
 ``backoff``            ``queued`` (a failure's retry, a busy writer) or
-                       ``partial`` (interrupted, removal deferral) with
+                       ``backoff`` (interrupted, removal deferral) with
                        ``next_action_at`` set (the one retry clock)
 ``running``            ``running`` with ``fence`` (the claiming process) and
                        ``lease_deadline`` (replaces the payload ``claim``)
@@ -60,6 +62,7 @@ from typing import Any, Protocol
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from .. import model_cache_states
 from ..agent_operation_facts import aware
 from ..models import ModelCacheOperation
 from .adapter import Dispatch
@@ -84,7 +87,7 @@ from .types import (
 
 _LOGGER = logging.getLogger(__name__)
 #: States an operation is active in (everything that is not an end).
-ACTIVE_STORED_STATES = ("queued", "running", "partial")
+ACTIVE_STORED_STATES = model_cache_states.LIVE
 _ENDED = frozenset({"succeeded", "failed", "cancelled"})
 _MAX_REASON = 512
 #: How many active operations one sweep looks at.  Active cache operations number
@@ -409,29 +412,36 @@ class ModelCacheAdapter:
         label_partial = (
             interrupted
             if interrupted is not None
-            else (operation.state == "partial" or before.state is State.RUNNING)
+            else (
+                model_cache_states.operation_is_backoff(operation.state)
+                or before.state is State.RUNNING
+            )
         )
         state: str
         next_action: datetime | None = None
         lease: datetime | None = None
         match after.state:
             case State.QUEUED:
-                state = "partial" if operation.state == "partial" else "queued"
+                state = (
+                    model_cache_states.BACKOFF
+                    if model_cache_states.operation_is_backoff(operation.state)
+                    else "queued"
+                )
             case State.BACKOFF:
-                state = "partial" if label_partial else "queued"
+                state = model_cache_states.BACKOFF if label_partial else "queued"
                 next_action = after.next_action_at
             case State.OBSERVING:
                 state = (
                     operation.state
                     if operation.state in ACTIVE_STORED_STATES
-                    else "partial"
+                    else model_cache_states.BACKOFF
                 )
                 next_action = after.next_action_at
             case State.RUNNING:
                 state = "running"
                 lease = after.lease_deadline
             case State.NEEDS_OPERATOR:
-                state = "partial"
+                state = model_cache_states.BACKOFF
             case State.SUCCEEDED:
                 state = "succeeded"
             case State.FAILED:
@@ -649,7 +659,7 @@ class ModelCacheAdapter:
         a terminal failure; the core then decides what happens to it.
         """
 
-        operation.state = "partial"
+        operation.state = model_cache_states.BACKOFF
         operation.next_action_at = None
         operation.lease_deadline = None
         operation.observe_count = 0

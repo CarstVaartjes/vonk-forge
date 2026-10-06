@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     RecipeReconcilePayload,
     canonical_message,
 )
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import AgentOperation, AgentOperationAttempt, Job
 
@@ -131,7 +132,7 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
         stored = session.get(AgentOperation, operation.id)
         parent_row = session.get(Job, parent_job.id)
         assert stored is not None and parent_row is not None
-        assert stored.state == "waiting-for-operator"
+        assert stored.state in aos.PARKED
         assert stored.current_attempt == fenced_attempt(sessions, first).attempt
         assert stored.workload_intent_ordinal == 1
         assert stored.next_action_at is not None
@@ -147,11 +148,14 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
         )
         assert first_attempt is not None
         if failure is None:
-            assert first_attempt.state == "expired"
+            assert aos.attempt_lapsed(first_attempt)
             assert first_attempt.result is None
         else:
             assert failure_state is not None
-            assert first_attempt.state == failure_state
+            if failure_state == aos.WIRE_UNKNOWN:
+                assert aos.attempt_reported_unknown(first_attempt)
+            else:
+                assert first_attempt.state == failure_state
             assert isinstance(first_attempt.result, dict)
             assert first_attempt.result["error_code"] == failure["error_code"]
 
@@ -216,7 +220,10 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
         expected_first_state = (
             "failed" if interruption == "temporary-failure" else "expired"
         )
-        assert first_attempt.state == expected_first_state
+        if expected_first_state == "expired":
+            assert aos.attempt_lapsed(first_attempt)
+        else:
+            assert first_attempt.state == expected_first_state
         if failure is None:
             assert first_attempt.result is None
         else:

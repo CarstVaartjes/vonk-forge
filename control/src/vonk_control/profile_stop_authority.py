@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import SecurityRefusalError, canonical_message
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
@@ -174,7 +174,7 @@ class ProfileJobRunStopJob(StrictJSONModel):
         return parent
 
 
-class ProfileStopAuthorityError(ValueError):
+class ProfileStopAuthorityError(SecurityRefusalError, ValueError):
     """A current profile or exact one-shot Stop link cannot be proved."""
 
 
@@ -194,6 +194,7 @@ def validate_profile_stop_owner(
         _persisted_profile_plan,
         _persisted_profile_progress,
     )
+    from .lifecycle.evidence import Residue
     from .run_switch_contract import RunSwitchPlan
 
     application = session.get(
@@ -261,6 +262,14 @@ def validate_profile_stop_owner(
         raise ProfileStopAuthorityError(
             "current profile Stop plan is invalid"
         ) from error
+    # A Stop is a destructive effect: evidence that cannot be read proves no
+    # authority, so it is refused here (the load itself retires as unknown).
+    if (
+        isinstance(current_plan, Residue)
+        or isinstance(intended, Residue)
+        or isinstance(reviewed, Residue)
+    ):
+        raise ProfileStopAuthorityError("current profile Stop plan is invalid")
 
     switch_adapter = progress.switch_adapter
     if (

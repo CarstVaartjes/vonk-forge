@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperationProgress, SecurityRefusalReason
+from vonk_agent_protocol import (
+    LifecycleSubject,
+    OperationProgress,
+    SecurityRefusalReason,
+)
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -49,6 +53,7 @@ from .revision_images import revision_images
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
+from .state_filters import state_filter
 from .strict_json import serialize_json_value
 from .user_authority import serialize_user_authority
 
@@ -655,7 +660,7 @@ class RecipeUpdateBatches:
             return OperationListPage((), None, 0)
         filters = [Job.kind == UPDATE_KIND]
         if query.state is not None:
-            filters.append(Job.state == query.state)
+            filters.append(state_filter(Job.state, LifecycleSubject.JOB, query.state))
         if query.request_id is not None:
             filters.append(Job.request_id == query.request_id)
         with self.sessions() as session:

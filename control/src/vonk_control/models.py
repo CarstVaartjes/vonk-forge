@@ -39,6 +39,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql.functions import FunctionElement
+from vonk_agent_protocol import LifecycleState, LifecycleSubject, check_words
 from vonk_agent_protocol.inventory import MemoryPool
 
 
@@ -61,6 +62,18 @@ def _compile_sqlite_utf8_byte_length(element, compiler, **kwargs) -> str:
 def _compile_utf8_byte_length(element, compiler, **kwargs) -> str:
     value = compiler.process(next(iter(element.clauses)), **kwargs)
     return f"octet_length(CAST({value} AS TEXT))"
+
+
+def _state_in(subject: LifecycleSubject, *states: LifecycleState) -> str:
+    """The CHECK of a lifecycle subject's ``state``: its words, and the old spellings.
+
+    Generated from the contract, so the words the column admits cannot drift from
+    the ones the rest of the Controller speaks.  An old spelling stays admitted for
+    one release so a row written before the rename is still valid.
+    """
+
+    words = ",".join(f"'{word}'" for word in check_words(subject, states))
+    return f"state IN ({words})"
 
 
 def _lower_hex(column: str, length: int) -> str:
@@ -795,6 +808,8 @@ class AgentOperationAttempt(Base):
         ForeignKey("agent_certificates.serial"), nullable=False, index=True
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Why an ``observing`` attempt has no definite answer (``ObservationCause``).
+    observation_cause: Mapped[str | None] = mapped_column(String(24))
     progress: Mapped[dict[str, object] | None] = mapped_column(JSON)
     result: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
@@ -1200,7 +1215,15 @@ class ModelCacheOperation(Base):
             name="ck_model_cache_operations_kind",
         ),
         CheckConstraint(
-            "state IN ('queued','running','partial','succeeded','failed','cancelled')",
+            _state_in(
+                LifecycleSubject.MODEL_CACHE_OPERATION,
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.BACKOFF,
+                LifecycleState.SUCCEEDED,
+                LifecycleState.FAILED,
+                LifecycleState.CANCELLED,
+            ),
             name="ck_model_cache_operations_state",
         ),
         CheckConstraint("attempt >= 1", name="ck_model_cache_operations_attempt"),

@@ -54,6 +54,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LEGACY_WAIT_STATE
 
+from .. import agent_operation_states as aos
 from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactJob, Job
@@ -683,7 +684,9 @@ class ArtifactJobAdapter:
                     .where(
                         ArtifactJob.state.in_(LIVE_STATES),
                         or_(
-                            StoredOperation.state.in_({WAITING, "cancelled", "failed"}),
+                            StoredOperation.state.in_(
+                                {*aos.PARKED, "cancelled", "failed"}
+                            ),
                             (ArtifactJob.state == "queued")
                             & (StoredOperation.state == "running"),
                         ),

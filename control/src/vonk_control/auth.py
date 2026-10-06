@@ -14,6 +14,7 @@ from typing import Any, Final, Literal
 
 from starlette.responses import Response
 from starlette.types import Scope
+from vonk_agent_protocol import InvalidRequestError, SecurityRefusalError
 
 from .cursor_contract import MAX_CURSOR_LENGTH
 
@@ -98,7 +99,7 @@ MUTATION_ROLES = {
 }
 
 
-class AuthError(ValueError):
+class AuthError(SecurityRefusalError, ValueError):
     pass
 
 
@@ -324,7 +325,7 @@ class TokenCodec:
         return CursorCodec(key)
 
 
-class CursorError(ValueError):
+class CursorError(InvalidRequestError, ValueError):
     """A presented cursor is not a valid signed cursor for this query.
 
     Separated from a plain ``ValueError`` so a caller can tell a rejected

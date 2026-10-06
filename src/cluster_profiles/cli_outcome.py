@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, cast
 
+from .cli_states import OPERATOR_WAIT_STATES
+
 OutcomeContext = Literal["read", "preview", "mutation", "await"]
 
 
@@ -146,7 +148,7 @@ class CommandOutcome:
             "cancelled",
             "superseded",
             "rejected",
-            "waiting-for-operator",
+            *OPERATOR_WAIT_STATES,
         }:
             return 2
         return 0

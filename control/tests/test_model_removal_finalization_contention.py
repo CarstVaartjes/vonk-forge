@@ -8,6 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.model_cache import CacheOperationView, ModelCacheService
 from vonk_control.model_cache_contract import ModelCacheRemovalResult
@@ -123,7 +124,7 @@ def test_finalization_gate_contention_defers_without_blocking_unrelated_removal(
             # and membership checkpoints remain committed under A's same fence.
             assert service.advance_removals(limit=1) == 0
             deferred_a = service.get_operation(removal_a.id)
-            assert deferred_a.state == "partial"
+            assert deferred_a.state == LifecycleState.BACKOFF
             assert deferred_a.retryable is True
             assert deferred_a.failure is not None
             assert deferred_a.failure.get("artifact_key") == "removal-finalization"
@@ -135,7 +136,7 @@ def test_finalization_gate_contention_defers_without_blocking_unrelated_removal(
             # the real removal worker while A's unrelated gate row remains locked.
             settled_b: CacheOperationView = _settle_removal(service, removal_b)
             assert settled_b.state == "succeeded"
-            assert service.get_operation(removal_a.id).state == "partial"
+            assert service.get_operation(removal_a.id).state == LifecycleState.BACKOFF
             assert gate.removal_owner_id == removal_a.id
         finally:
             gate_holder.rollback()

@@ -2100,7 +2100,7 @@ export interface components {
          * @description Closed codes of a definite failed outcome reported by the agent.
          * @enum {string}
          */
-        FailureCode: "operation_failed" | "operation_cancelled" | "agent_upgrade_failed" | "artifact_distribution_failed" | "recipe_build_failed" | "recipe_job_run_failed" | "recipe_install_failed" | "recipe_start_failed" | "recipe_stop_failed" | "recipe_uninstall_failed" | "runtime_observation_unavailable" | "installation_reconciliation_busy" | "recipe_reconciliation_dependency_unavailable";
+        FailureCode: "operation_failed" | "operation_cancelled" | "agent_upgrade_failed" | "artifact_distribution_failed" | "recipe_build_failed" | "recipe_job_run_failed" | "recipe_install_failed" | "recipe_start_failed" | "recipe_stop_failed" | "recipe_uninstall_failed" | "runtime_observation_unavailable" | "installation_reconciliation_busy" | "recipe_reconciliation_dependency_unavailable" | "retained_container_foreign";
         /** FailureDiagnostics */
         FailureDiagnostics: {
             /**
@@ -3959,7 +3959,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "partial" | "succeeded" | "failed";
+            state: "queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled";
             /** Total Bytes */
             total_bytes?: number | null;
         };
@@ -4186,6 +4186,7 @@ export interface components {
             invalid_request_reason: components["schemas"]["InvalidRequestReason"];
             lifecycle_subject: components["schemas"]["LifecycleSubject"];
             migration_step: components["schemas"]["MigrationStep"];
+            observation_cause: components["schemas"]["ObservationCause"];
             operator_action: components["schemas"]["OperatorActionName"];
             operator_surface: components["schemas"]["OperatorSurface"];
             outcome_kind: components["schemas"]["OutcomeKind"];
@@ -4485,11 +4486,8 @@ export interface components {
             result?: components["schemas"]["ModelCacheDownloadResult"] | components["schemas"]["ModelCacheRemovalResult"] | null;
             /** Selector */
             selector: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "accepted" | "queued" | "running" | "partial" | "cancelling" | "succeeded" | "failed" | "cancelled";
+            /** State */
+            state: ("accepted" | "cancelling") | ("queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled");
             /** Total Bytes */
             total_bytes?: number | null;
             /** Transferred Bytes */
@@ -4817,6 +4815,18 @@ export interface components {
             /** Profile Changed */
             profile_changed?: boolean | null;
         };
+        /**
+         * ObservationCause
+         * @description Why an attempt is being observed rather than settled.
+         *
+         *     An attempt that ended without a definite answer is ``observing``; this says
+         *     what left it unanswered.  ``reported-unknown``: the executor said it could not
+         *     confirm the effect.  ``lease-lapsed``: the executor stopped reporting.  The old
+         *     spellings carried this in the state word itself (``waiting-for-operator`` and
+         *     ``expired``), which is why an adopted attempt also yields its cause.
+         * @enum {string}
+         */
+        ObservationCause: "reported-unknown" | "lease-lapsed";
         /**
          * OperationBlocker
          * @description One reason an operation is waiting or blocked, with the Sparks it concerns.

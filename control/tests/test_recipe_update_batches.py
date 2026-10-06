@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     Base,
@@ -842,7 +843,7 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     assert first_view.state == "partial" and first_view.model_child is not None
     shared_child_id = str(first_view.model_child["id"])
     shared_child = cache.get_operation(shared_child_id)
-    assert shared_child.state == "partial"
+    assert shared_child.state == LifecycleState.BACKOFF
     shared_artifact_set = shared_child.artifact_set_sha256
     assert isinstance(shared_artifact_set, str)
     downloaded_bytes = shared_child.progress.get("downloaded_bytes")
@@ -919,7 +920,7 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     assert unchanged.model_child["id"] == shared_child_id
     assert unchanged.model_child["artifact_set_sha256"] == shared_artifact_set
     shared_after_cancel = cache.get_operation(shared_child_id)
-    assert shared_after_cancel.state == "partial"
+    assert shared_after_cancel.state == LifecycleState.BACKOFF
     assert shared_after_cancel.cancellation is None
     remaining_bytes = shared_after_cancel.progress.get("downloaded_bytes")
     assert isinstance(remaining_bytes, int) and remaining_bytes >= downloaded_bytes

@@ -102,6 +102,10 @@ NON_LIFECYCLE_STATE_SITES: dict[str, tuple[int, str]] = {
     ),
     "control/src/vonk_control/library_projection.py": (1, "installation state"),
     "control/src/vonk_control/metrics.py": (1, "certificate state"),
+    "control/src/vonk_control/model_cache.py": (
+        9,
+        "model file, asset and installation state",
+    ),
     "control/src/vonk_control/model_cache_contract.py": (1, "model file state"),
     "control/src/vonk_control/recipe_action_plans.py": (1, "installation state"),
     "control/src/vonk_control/unused_storage_collection.py": (1, "installation state"),
@@ -112,6 +116,9 @@ ALLOWED_FILES = frozenset(
         "agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py",
         "agent_protocol/src/vonk_agent_protocol/outcome.py",
         "control/src/vonk_control/agent_outcome.py",
+        # The CLI ships without the contract package; this is its one copy of the
+        # words, and test_vocabulary_literals keeps it equal to the contract.
+        "src/cluster_profiles/cli_states.py",
     }
 )
 

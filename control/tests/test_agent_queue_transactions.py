@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.jobs import JobService
 from vonk_control.models import (
@@ -242,8 +243,14 @@ def test_result_consumer_receives_exact_canonical_message_in_finish_transaction(
         message: AgentResult,
     ) -> None:
         assert session.in_transaction()
-        assert operation.state == state
-        assert attempt.state == state
+        # The agent's own word for "unknown" is stored as an observed attempt
+        # whose cause says the executor reported it, and the order is parked.
+        if state == aos.WIRE_UNKNOWN:
+            assert operation.state in aos.PARKED
+            assert aos.attempt_reported_unknown(attempt)
+        else:
+            assert operation.state == state
+            assert attempt.state == state
         assert attempt.result == result
         received.append(message)
         parent = session.get(Job, operation.parent_job_id)

@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import object_session
 from vonk_agent_protocol import AgentOperation
 
+from . import agent_operation_states
 from .models import AgentOperation as StoredOperation
 from .models import AgentOperationAttempt
 
@@ -89,7 +90,7 @@ def stalled_interruptions(operation: StoredOperation) -> int:
     stalled = 0
     for index, attempt in enumerate(attempts):
         result = attempt.result
-        interrupted = attempt.state in {"expired", "waiting-for-operator"} and (
+        interrupted = agent_operation_states.attempt_is_observing(attempt) and (
             result is None or result.get("error_code") in INTERRUPTION_CODES
         )
         previous = attempts[index + 1] if index + 1 < len(attempts) else None

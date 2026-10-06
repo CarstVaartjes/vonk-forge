@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
 from .cli_files import read_json_document
+from .cli_states import OPERATOR_WAIT_STATES
 from .control_client import (
     ControlClientError,
     ControlHTTPError,
@@ -43,7 +44,7 @@ _CREATE_FIELDS = {
     "timeout_seconds",
 }
 _INPUT_FIELDS = {"slot", "name", "media_type"}
-_JOB_TERMINAL_STATES = {"succeeded", "failed", "cancelled", "waiting-for-operator"}
+_JOB_TERMINAL_STATES = {"succeeded", "failed", "cancelled", *OPERATOR_WAIT_STATES}
 
 
 @runtime_checkable
@@ -343,7 +344,7 @@ def _create_receipt(
         "cancelled",
         "succeeded",
         "failed",
-        "waiting-for-operator",
+        *OPERATOR_WAIT_STATES,
     }:
         raise ControlMalformedResponse("artifact create receipt has an invalid state")
     return job

@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import event, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import (
     AgentCertificate,
@@ -203,7 +204,7 @@ def test_dual_node_reconcile_passes_share_the_claim_lock_order(queue, postgres_e
                 select(AgentOperation).where(AgentOperation.parent_job_id == parent.id)
             )
         )
-        assert {row.state for row in rows} == {"waiting-for-operator"}
+        assert {row.state for row in rows} <= set(aos.PARKED)
         assert all(row.next_action_at is not None for row in rows)  # each retried
 
 

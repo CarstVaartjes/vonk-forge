@@ -600,6 +600,7 @@ def accepted_profile_runtime_image(
     # Keep intent/reference validation with its existing owner. Import at the
     # call boundary because profile orchestration also consumes capacity helpers.
     from .fleet_profiles import FleetProfileConflict, FleetProfileService
+    from .lifecycle.evidence import Residue
 
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
@@ -621,6 +622,11 @@ def accepted_profile_runtime_image(
         intended = FleetProfileService._intended_profile(application, session=session)
     except FleetProfileConflict as error:
         raise ValueError(str(error)) from error
+    if isinstance(intended, Residue):
+        # (A ValueError like its siblings: the caller maps that to its own refusal.)
+        raise ValueError(  # noqa: TRY004
+            intended.note or "profile image intent is unavailable"
+        )
     root = session.get(FleetProfileApplication, intended.reviewed_application_id)
     if root is None:
         raise ValueError("profile image review source is unavailable")

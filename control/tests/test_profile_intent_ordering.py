@@ -157,17 +157,19 @@ def test_acceptance_order_overflow_fails_closed_without_receipt(
         profiles, selector, nodes, "Receipt beyond timestamp boundary"
     )
     request_key = str(uuid4())
-    with pytest.raises(FleetProfileConflict, match="timestamp range"):
-        _pending(profiles, second_review, request_key)
+    # A saturated persisted timestamp is damaged ordering evidence: it must not
+    # wrap or refuse the new request. The receipt is admitted and ordered after
+    # the saturated one by the intent ordinal.
+    second = _pending(profiles, second_review, request_key)
+    assert second.id != first.id
     with sessions() as session:
-        assert (
-            session.scalar(
-                select(FleetProfileApplication).where(
-                    FleetProfileApplication.request_key == request_key
-                )
+        stored = session.scalar(
+            select(FleetProfileApplication).where(
+                FleetProfileApplication.request_key == request_key
             )
-            is None
         )
+        assert stored is not None
+        assert stored.state in {"queued", "running"}
 
 
 def test_malformed_sibling_retry_root_does_not_block_new_pending_admission(
