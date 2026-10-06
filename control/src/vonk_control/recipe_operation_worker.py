@@ -10,7 +10,7 @@ from typing import Protocol
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .categorized_faults import RequestFault
+from .categorized_errors import InvalidValue
 from .models import RecipeRun, RunNode
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -160,7 +160,7 @@ class RecipeOperationWorker:
     def _expire_initial_observation_deadline(self) -> bool:
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
-            raise RequestFault("recipe operation worker clock must be timezone-aware")
+            raise InvalidValue("recipe operation worker clock must be timezone-aware")
         now = now.astimezone(UTC)
         with self._sessions.begin() as session:
             runs = tuple(

@@ -46,11 +46,8 @@ from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from .categorized_faults import (
-    RequestKeyFault,
-    RequestTypeFault,
-    security_reason,
-)
+from .categorized_errors import InvalidType, MissingRecord
+from .categorized_faults import security_reason
 from .content_identity import reusable_build
 from .disk_reservations import outstanding_disk_reservation_bytes
 from .inventory_repository import InventoryRepository, InventorySnapshotView
@@ -218,7 +215,7 @@ def _build_effective_settings(value: object | None) -> dict[str, object] | None:
 def _canonical_recipe_document(value: object) -> dict[str, object]:
     try:
         if not isinstance(value, Mapping):
-            raise RequestTypeFault("stored recipe is not a JSON object")
+            raise InvalidType("stored recipe is not a JSON object")
         read_recipe(value)
     except (TypeError, ValueError) as error:
         raise RecipeBuildUnknown(
@@ -258,7 +255,7 @@ def _canonical_model_build_inputs(
             or not isinstance(size, int)
             or isinstance(size, bool)
         ):
-            raise RequestTypeFault(
+            raise InvalidType(
                 "model build inputs require canonical path, sha256, and size"
             )
         projected.append({"path": path, "sha256": digest, "download_bytes": size})
@@ -671,7 +668,7 @@ class RecipeBuildService:
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
             if revision is None:
-                raise RequestKeyFault(recipe_revision_id)
+                raise MissingRecord(recipe_revision_id)
             if revision.kind != "recipe" or revision.state != "active":
                 raise RecipeBuildInvalid(
                     "build.recipe_unresolved", "only a resolved recipe can be checked"
@@ -706,7 +703,7 @@ class RecipeBuildService:
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
             if revision is None:
-                raise RequestKeyFault(recipe_revision_id)
+                raise MissingRecord(recipe_revision_id)
             if revision.kind != "recipe" or revision.state != "active":
                 raise RecipeBuildInvalid(
                     "build.recipe_unresolved", "only a resolved recipe can be built"
@@ -1041,7 +1038,7 @@ class RecipeBuildService:
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
             if revision is None:
-                raise RequestKeyFault(recipe_revision_id)
+                raise MissingRecord(recipe_revision_id)
             if revision.kind != "recipe" or revision.state != "active":
                 raise RecipeBuildInvalid(
                     "build.recipe_unresolved", "only a resolved recipe can be built"
@@ -1459,7 +1456,7 @@ class RecipeBuildService:
         with self._sessions.begin() as session:
             build = session.get(RecipeBuild, build_id, with_for_update=True)
             if build is None:
-                raise RequestKeyFault(build_id)
+                raise MissingRecord(build_id)
             if build.build_input_sha256 != build_input_sha256:
                 raise RecipeBuildRefused(
                     "build.input_mismatch", "build result does not match its inputs"

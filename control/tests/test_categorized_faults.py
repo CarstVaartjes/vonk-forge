@@ -12,11 +12,13 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_control import model_cache
+from vonk_control.categorized_errors import (
+    BookkeepingUnknown,
+    InvalidType,
+    MissingRecord,
+)
 from vonk_control.categorized_faults import (
     OperationInterrupted,
-    RequestKeyFault,
-    RequestTypeFault,
-    StoredStateDamaged,
     StoredStateKeyMissing,
     StoredStateTypeDamaged,
 )
@@ -25,12 +27,12 @@ from vonk_control.categorized_faults import (
 @pytest.mark.parametrize(
     ("error", "builtin", "category"),
     [
-        (StoredStateDamaged("x"), ValueError, UnknownOutcomeError),
+        (BookkeepingUnknown("x"), ValueError, UnknownOutcomeError),
         (StoredStateTypeDamaged("x"), TypeError, UnknownOutcomeError),
         (StoredStateKeyMissing("x"), KeyError, UnknownOutcomeError),
         (OperationInterrupted("x"), InterruptedError, UnknownOutcomeError),
-        (RequestTypeFault("x"), TypeError, InvalidRequestError),
-        (RequestKeyFault("x"), KeyError, InvalidRequestError),
+        (InvalidType("x"), TypeError, InvalidRequestError),
+        (MissingRecord("x"), KeyError, InvalidRequestError),
     ],
 )
 def test_builtin_faults_keep_their_builtin_and_one_category(
@@ -45,7 +47,7 @@ def test_builtin_faults_keep_their_builtin_and_one_category(
 
 
 def test_stored_state_is_unknown_with_a_contract_reason() -> None:
-    error = StoredStateDamaged("persisted payload is invalid")
+    error = StoredStateTypeDamaged("persisted payload is invalid")
     typed = error.typed_error()
     assert typed is not None
     assert typed.reason is WaitReason.OBSERVATION_UNAVAILABLE

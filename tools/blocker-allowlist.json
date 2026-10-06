@@ -2014,14 +2014,14 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class RecipeSourcePolicyError validates a contract or request.",
       "sites": [
+        ["control/src/vonk_control/recipe_builds.py", "InvalidType", "_canonical_model_build_inputs", "model-build-inputs-require-canonical-path-sha256-and-size", 1],
+        ["control/src/vonk_control/recipe_builds.py", "InvalidType", "_canonical_recipe_document", "stored-recipe-is-not-a-json-object", 1],
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.check_source", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.prepare_plan", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.record_success", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.resolve", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService.prepare_plan", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService.resolve", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RequestKeyFault", "RecipeBuildService.check_source", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RequestKeyFault", "RecipeBuildService.prepare_plan", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RequestKeyFault", "RecipeBuildService.record_success", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RequestKeyFault", "RecipeBuildService.resolve", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RequestTypeFault", "_canonical_model_build_inputs", "model-build-inputs-require-canonical-path-sha256-and-size", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RequestTypeFault", "_canonical_recipe_document", "stored-recipe-is-not-a-json-object", 1]
+        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService.resolve", "message", 1]
       ]
     },
     {
@@ -2058,6 +2058,24 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
       "sites": [
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.__init__", "availability-claim-lease-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.__init__", "availability-parallelism-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService._read_removal_owner", "stored-recipe-removal-owner-exceeds-the-scan-byte-budget", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService._view", "failed-image-availability-requires-failure-evidence", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService._view", "image-availability-result-requires-success", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService._view", "successful-image-availability-requires-a-result-and-no-failu", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.advance_removals", "recipe-removal-batch-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.claim_pending", "availability-claim-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.list_page", "availability-list-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.reconcile_cancellations", "cancellation-reconciliation-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.resume_operations", "availability-operation-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.run_pending", "availability-worker-batch-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "_canonical_cancellation_id", "noncanonical-uuid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.cancel", "message", 2],
+        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.get", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.get_operator_operation", "message", 2],
+        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.get_operator_request", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.retry", "message", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._matching_request", "recipe_image.request_key_reused", 2],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._recipe_removal_selection_in_session", "recipe_image.selector_missing", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._replay_removal", "recipe_image.request_key_reused", 2],
@@ -2070,25 +2088,7 @@
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.remove_selector", "recipe_image.selector_invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.retry", "recipe_image.not_retryable", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.review_removal", "recipe_image.removal_choice_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.review_removal", "recipe_image.selector_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService.__init__", "availability-claim-lease-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService.__init__", "availability-parallelism-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService._read_removal_owner", "stored-recipe-removal-owner-exceeds-the-scan-byte-budget", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService._view", "failed-image-availability-requires-failure-evidence", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService._view", "image-availability-result-requires-success", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService._view", "successful-image-availability-requires-a-result-and-no-failu", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService.advance_removals", "recipe-removal-batch-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService.claim_pending", "availability-claim-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService.list_page", "availability-list-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService.reconcile_cancellations", "cancellation-reconciliation-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService.resume_operations", "availability-operation-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "RecipeImageAvailabilityService.run_pending", "availability-worker-batch-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestFault", "_canonical_cancellation_id", "noncanonical-uuid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestKeyFault", "RecipeImageAvailabilityService.cancel", "message", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestKeyFault", "RecipeImageAvailabilityService.get", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestKeyFault", "RecipeImageAvailabilityService.get_operator_operation", "message", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestKeyFault", "RecipeImageAvailabilityService.get_operator_request", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RequestKeyFault", "RecipeImageAvailabilityService.retry", "message", 1]
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.review_removal", "recipe_image.selector_invalid", 1]
       ]
     },
     {
@@ -2247,15 +2247,15 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityUnknown", "durable_run_stop_payloads", "recipe-start-payload-is-invalid", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityUnknown", "durable_run_stop_payloads", "recipe-start-phase-materialization-is-incomplete", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityUnknown", "durable_run_stop_payloads", "recipe-start-phases-are-invalid", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityUnknown", "durable_run_stop_payloads", "recipe-start-phases-are-missing", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityUnknown", "durable_run_stop_payloads", "recipe-stop-lacks-an-exact-start-target-for-every-node", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityUnknown", "durable_run_stop_payloads", "recipe-stop-lacks-durable-start-authority", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityUnknown", "durable_run_stop_payloads", "recipe-stop-run-plan-is-invalid", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityUnknown", "stop_payload_from_job_run", "recipe-jobrun-payload-is-invalid", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityUnknown", "stop_payload_from_start", "recipe-start-payload-is-invalid", 1]
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-start-payload-is-invalid", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-start-phase-materialization-is-incomplete", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-start-phases-are-invalid", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-start-phases-are-missing", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-stop-lacks-an-exact-start-target-for-every-node", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-stop-lacks-durable-start-authority", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-stop-run-plan-is-invalid", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "stop_payload_from_job_run", "recipe-jobrun-payload-is-invalid", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "stop_payload_from_start", "recipe-start-payload-is-invalid", 1]
       ]
     },
     {
@@ -2263,9 +2263,9 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
       "sites": [
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityInvalid", "durable_run_stop_payloads", "recipe-start-target-has-ambiguous-durable-plans", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityInvalid", "durable_run_stop_payloads", "recipe-stop-generation-is-invalid", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityInvalid", "durable_run_stop_payloads", "recipe-stop-target-set-is-empty", 1]
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadInvalid", "durable_run_stop_payloads", "recipe-start-target-has-ambiguous-durable-plans", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadInvalid", "durable_run_stop_payloads", "recipe-stop-generation-is-invalid", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadInvalid", "durable_run_stop_payloads", "recipe-stop-target-set-is-empty", 1]
       ]
     },
     {
@@ -2332,18 +2332,18 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class RunPlanConflict validates a contract or request.",
       "sites": [
-        ["control/src/vonk_control/run_admission.py", "RequestFault", "RunAdmissionService.plan_run", "cluster-mapping-generation-changed-after-installation", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestFault", "RunAdmissionService.plan_run", "exact-model-license-authority-is-unavailable", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestFault", "RunAdmissionService.plan_run", "exact-recipe-dependencies-are-unavailable", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestFault", "RunAdmissionService.plan_run", "recipe-installation-is-not-complete", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestFault", "RunAdmissionService.plan_run", "recipe-revision-is-unavailable", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestFault", "RunAdmissionService.plan_run", "run-memory-demand-is-unavailable-for-the-selected-settings", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestKeyFault", "RunAdmissionService.plan_run", "message", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestTypeFault", "RunAdmissionService.plan_run", "mapping-endpoint-owner-is-missing", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestTypeFault", "RunAdmissionService.plan_run", "topology-role-memory-is-invalid", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestTypeFault", "run_port_demand", "artifact-job-recipes-currently-require-one-node", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestTypeFault", "run_port_demand", "recipe-interface-port-is-invalid", 1],
-        ["control/src/vonk_control/run_admission.py", "RequestTypeFault", "run_port_demand", "recipe-interfaces-are-invalid", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidType", "RunAdmissionService.plan_run", "mapping-endpoint-owner-is-missing", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidType", "RunAdmissionService.plan_run", "topology-role-memory-is-invalid", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidType", "run_port_demand", "artifact-job-recipes-currently-require-one-node", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidType", "run_port_demand", "recipe-interface-port-is-invalid", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidType", "run_port_demand", "recipe-interfaces-are-invalid", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "cluster-mapping-generation-changed-after-installation", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "exact-model-license-authority-is-unavailable", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "exact-recipe-dependencies-are-unavailable", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "recipe-installation-is-not-complete", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "recipe-revision-is-unavailable", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "run-memory-demand-is-unavailable-for-the-selected-settings", 1],
+        ["control/src/vonk_control/run_admission.py", "MissingRecord", "RunAdmissionService.plan_run", "message", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.dependencies_stale", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.plan_invalid", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.plan_stale", 1],
@@ -3059,6 +3059,12 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end.",
       "sites": [
+        ["control/src/vonk_control/model_cache.py", "BookkeepingUnknown", "ModelCacheService._stored_manifest.rebuild", "message", 1],
+        ["control/src/vonk_control/model_cache.py", "BookkeepingUnknown", "_manifest_of_document", "message", 1],
+        ["control/src/vonk_control/model_cache.py", "BookkeepingUnknown", "_parse_operation_envelope", "persisted-cache-operation-payload-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "BookkeepingUnknown", "_parse_operation_envelope", "persisted-model-removal-intent-no-longer-matches-its-accepte", 1],
+        ["control/src/vonk_control/model_cache.py", "BookkeepingUnknown", "_read_operation_progress", "persisted-cache-operation-progress-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "BookkeepingUnknown", "_read_removal_checkpoint", "model-removal-payload-is-invalid", 1],
         ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._append_part", "model-download-stopped-partial-files-preserved", 1],
         ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-cancelled-during-verification", 1],
         ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-stopped-partial-files-preserved", 1],
@@ -3072,12 +3078,6 @@
         ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._require_transfer_running", "model-download-stopped-partial-files-preserved", 1],
         ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._run_download", "model-download-was-removed-before-publication", 1],
         ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._sample_transfer.observe", "model-download-stopped-partial-files-preserved", 1],
-        ["control/src/vonk_control/model_cache.py", "StoredStateDamaged", "ModelCacheService._stored_manifest.rebuild", "message", 1],
-        ["control/src/vonk_control/model_cache.py", "StoredStateDamaged", "_manifest_of_document", "message", 1],
-        ["control/src/vonk_control/model_cache.py", "StoredStateDamaged", "_parse_operation_envelope", "persisted-cache-operation-payload-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "StoredStateDamaged", "_parse_operation_envelope", "persisted-model-removal-intent-no-longer-matches-its-accepte", 1],
-        ["control/src/vonk_control/model_cache.py", "StoredStateDamaged", "_read_operation_progress", "persisted-cache-operation-progress-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "StoredStateDamaged", "_read_removal_checkpoint", "model-removal-payload-is-invalid", 1],
         ["control/src/vonk_control/model_cache.py", "StoredStateTypeDamaged", "_read_removal_checkpoint", "model-removal-payload-is-invalid", 1],
         ["control/src/vonk_control/model_cache.py", "StoredStateTypeDamaged", "_reject_non_json_containers", "manifest-json-must-use-arrays-not-tuples", 1]
       ]
@@ -3087,29 +3087,29 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
       "sites": [
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.__init__", "model-cache-download-streams-must-be-between-1-and-32", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.__init__", "model-cache-parallel-downloads-must-be-between-1-and-32", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.__init__", "model-cache-reserve-must-be-a-non-negative-integer", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.__init__", "model-cache-root-must-be-an-absolute-normalized-path", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.__init__", "model-cache-root-must-not-be-a-symlink", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.__init__", "model-cache-storage-directory-must-not-be-a-symlink", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService._accept_model_removal", "model-removal-scope-contains-duplicate-sets", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.accept_removal_for_sets_in_session", "model-removal-child-requires-an-exact-non-empty-scope", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.accept_removal_for_sets_in_session", "model-removal-child-scope-contains-duplicate-sets", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.activity_operations", "operation-provider-page-limit-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.activity_operations", "operation-state-filter-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.advance_removals", "model-removal-batch-limit-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.discover_updates", "cache-update-limit-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.inventory", "cache-entry-limit-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.list_operations", "cache-operation-limit-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.operations_page", "cache-operation-limit-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.read_verified_artifact", "verified-artifact-read-bounds-are-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.resume_operations", "cache-operation-limit-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.run_pending", "cache-worker-batch-limit-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestFault", "ModelCacheService.tick", "cache-worker-batch-limit-is-invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestTypeFault", "ModelCacheService._collect_model_definitions", "catalog-revision-is-not-a-model", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestTypeFault", "ModelCacheService._recipe_document", "catalog-revision-is-not-a-recipe", 1],
-        ["control/src/vonk_control/model_cache.py", "RequestTypeFault", "_canonical_model_artifacts", "catalog-revision-is-not-a-model", 1]
+        ["control/src/vonk_control/model_cache.py", "InvalidType", "ModelCacheService._collect_model_definitions", "catalog-revision-is-not-a-model", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidType", "ModelCacheService._recipe_document", "catalog-revision-is-not-a-recipe", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidType", "_canonical_model_artifacts", "catalog-revision-is-not-a-model", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.__init__", "model-cache-download-streams-must-be-between-1-and-32", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.__init__", "model-cache-parallel-downloads-must-be-between-1-and-32", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.__init__", "model-cache-reserve-must-be-a-non-negative-integer", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.__init__", "model-cache-root-must-be-an-absolute-normalized-path", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.__init__", "model-cache-root-must-not-be-a-symlink", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.__init__", "model-cache-storage-directory-must-not-be-a-symlink", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService._accept_model_removal", "model-removal-scope-contains-duplicate-sets", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.accept_removal_for_sets_in_session", "model-removal-child-requires-an-exact-non-empty-scope", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.accept_removal_for_sets_in_session", "model-removal-child-scope-contains-duplicate-sets", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.activity_operations", "operation-provider-page-limit-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.activity_operations", "operation-state-filter-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.advance_removals", "model-removal-batch-limit-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.discover_updates", "cache-update-limit-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.inventory", "cache-entry-limit-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.list_operations", "cache-operation-limit-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.operations_page", "cache-operation-limit-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.read_verified_artifact", "verified-artifact-read-bounds-are-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.resume_operations", "cache-operation-limit-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.run_pending", "cache-worker-batch-limit-is-invalid", 1],
+        ["control/src/vonk_control/model_cache.py", "InvalidValue", "ModelCacheService.tick", "cache-worker-batch-limit-is-invalid", 1]
       ]
     },
     {
@@ -3117,9 +3117,9 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end.",
       "sites": [
-        ["control/src/vonk_control/profile_stop_authority.py", "StoredStateDamaged", "ProfileJobRunStopAuthorization.identities_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "StoredStateDamaged", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-child-set-is-inconsistent", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "StoredStateDamaged", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-parent-identity-is-inconsistent", 1]
+        ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopAuthorization.identities_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-child-set-is-inconsistent", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-parent-identity-is-inconsistent", 1]
       ]
     },
     {
@@ -3127,7 +3127,7 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end.",
       "sites": [
-        ["control/src/vonk_control/recipe_operation_phases.py", "StoredStateDamaged", "decode_stored_phases", "stored-operation-phases-are-invalid", 4],
+        ["control/src/vonk_control/recipe_operation_phases.py", "BookkeepingUnknown", "decode_stored_phases", "stored-operation-phases-are-invalid", 4],
         ["control/src/vonk_control/recipe_operation_phases.py", "StoredStateTypeDamaged", "decode_stored_phases", "stored-operation-phases-are-invalid", 1]
       ]
     },
@@ -3136,7 +3136,7 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
       "sites": [
-        ["control/src/vonk_control/recipe_operation_worker.py", "RequestFault", "RecipeOperationWorker._expire_initial_observation_deadline", "recipe-operation-worker-clock-must-be-timezone-aware", 1]
+        ["control/src/vonk_control/recipe_operation_worker.py", "InvalidValue", "RecipeOperationWorker._expire_initial_observation_deadline", "recipe-operation-worker-clock-must-be-timezone-aware", 1]
       ]
     },
     {
@@ -3153,13 +3153,13 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "RequestFault", "_receipt_runtime_identity", "runtime-image-architecture-is-not-supported", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RequestFault", "_receipt_runtime_identity", "runtime-image-interface-is-not-supported", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RequestFault", "_receipt_runtime_identity", "runtime-image-interface-label-is-not-supported", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RequestFault", "make_runtime_image_receipt_preparer.prepare", "source-build-receipt-is-unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RequestFault", "stored_runtime_image_resolver.resolve", "runtime-image-preparation-is-required-before-compile-install", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RequestTypeFault", "make_runtime_image_receipt_preparer.prepare", "compiled-runtime-projection-is-unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RequestTypeFault", "stored_runtime_image_resolver.resolve", "runtime-image-preparation-is-required-runtime-projection-is", 1]
+        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidType", "make_runtime_image_receipt_preparer.prepare", "compiled-runtime-projection-is-unavailable", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidType", "stored_runtime_image_resolver.resolve", "runtime-image-preparation-is-required-runtime-projection-is", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-architecture-is-not-supported", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-interface-is-not-supported", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-interface-label-is-not-supported", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "make_runtime_image_receipt_preparer.prepare", "source-build-receipt-is-unavailable", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "stored_runtime_image_resolver.resolve", "runtime-image-preparation-is-required-before-compile-install", 1]
       ]
     },
     {
@@ -3176,18 +3176,18 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
       "sites": [
+        ["control/src/vonk_control/recipe_update_batches.py", "InvalidValue", "RecipeUpdateBatches._activity_list", "operation-provider-page-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_update_batches.py", "InvalidValue", "RecipeUpdateBatches.claim", "update-worker-owner-must-contain-1-to-95-characters", 1],
+        ["control/src/vonk_control/recipe_update_batches.py", "InvalidValue", "RecipeUpdateBatches.reconcile_cancellations", "update-cancellation-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_update_batches.py", "MissingRecord", "RecipeUpdateBatches._activity_get", "message", 1],
+        ["control/src/vonk_control/recipe_update_batches.py", "MissingRecord", "RecipeUpdateBatches.cancel", "message", 1],
+        ["control/src/vonk_control/recipe_update_batches.py", "MissingRecord", "RecipeUpdateBatches.get", "message", 1],
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches._document", "recipe_update.operation_invalid", 3],
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches._matching", "recipe_update.request_key_reused", 2],
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches._reserve_document_budget", "recipe_update.scope_invalid", 1],
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches.authorize_child", "recipe_update.operation_invalid", 2],
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches.run", "recipe_update.operation_invalid", 1],
-        ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches.start", "recipe_update.scope_invalid", 1],
-        ["control/src/vonk_control/recipe_update_batches.py", "RequestFault", "RecipeUpdateBatches._activity_list", "operation-provider-page-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_update_batches.py", "RequestFault", "RecipeUpdateBatches.claim", "update-worker-owner-must-contain-1-to-95-characters", 1],
-        ["control/src/vonk_control/recipe_update_batches.py", "RequestFault", "RecipeUpdateBatches.reconcile_cancellations", "update-cancellation-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_update_batches.py", "RequestKeyFault", "RecipeUpdateBatches._activity_get", "message", 1],
-        ["control/src/vonk_control/recipe_update_batches.py", "RequestKeyFault", "RecipeUpdateBatches.cancel", "message", 1],
-        ["control/src/vonk_control/recipe_update_batches.py", "RequestKeyFault", "RecipeUpdateBatches.get", "message", 1]
+        ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches.start", "recipe_update.scope_invalid", 1]
       ]
     },
     {
@@ -3211,10 +3211,10 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
       "sites": [
-        ["control/src/vonk_control/recipe_build_cancellation.py", "RequestFault", "build_cancellation", "build-cancellation-requires-a-build-job", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "RequestFault", "lock_profile_build_dependencies", "reviewed-profile-build-disappeared", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "RequestFault", "lock_profile_build_dependencies", "reviewed-profile-build-is-missing", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "RequestFault", "read_build_intent", "build-intent-requires-a-build-job", 1]
+        ["control/src/vonk_control/recipe_build_cancellation.py", "InvalidValue", "build_cancellation", "build-cancellation-requires-a-build-job", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "InvalidValue", "lock_profile_build_dependencies", "reviewed-profile-build-disappeared", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "InvalidValue", "lock_profile_build_dependencies", "reviewed-profile-build-is-missing", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "InvalidValue", "read_build_intent", "build-intent-requires-a-build-job", 1]
       ]
     },
     {
@@ -3222,14 +3222,14 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end.",
       "sites": [
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateDamaged", "_availability_consumer", "availability-build-consumer-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateDamaged", "_availability_consumer", "availability-receipt-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateDamaged", "_profile_consumer", "profile-build-consumer-child-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateDamaged", "_profile_consumer", "profile-build-consumer-identity-is-invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateDamaged", "_profile_consumer", "profile-build-consumer-scope-is-missing", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateDamaged", "_run_switch_consumer", "build-consumer-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateDamaged", "_run_switch_consumer", "build-consumer-workload-scope-is-invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateDamaged", "_run_switch_consumer", "build-consumer-workload-scope-is-missing", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_availability_consumer", "availability-build-consumer-identity-changed", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_availability_consumer", "availability-receipt-identity-changed", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_profile_consumer", "profile-build-consumer-child-identity-changed", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_profile_consumer", "profile-build-consumer-identity-is-invalid", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_profile_consumer", "profile-build-consumer-scope-is-missing", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-identity-changed", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-workload-scope-is-invalid", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-workload-scope-is-missing", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateTypeDamaged", "_availability_consumer", "availability-recipe-is-invalid", 1]
       ]
     },
@@ -3238,8 +3238,8 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end.",
       "sites": [
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StoredStateDamaged", "stop_payload_from_job_run", "job-run-generation-is-missing", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StoredStateDamaged", "stop_payload_from_start", "start-generation-is-missing", 1]
+        ["control/src/vonk_control/recipe_stop_payloads.py", "BookkeepingUnknown", "stop_payload_from_job_run", "job-run-generation-is-missing", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "BookkeepingUnknown", "stop_payload_from_start", "start-generation-is-missing", 1]
       ]
     },
     {
@@ -3247,15 +3247,15 @@
       "category": "security-edge",
       "reason": "Destructive-effect fence: a Stop is projected only from durable Start evidence that agrees with the run, the mapping and the plan. A mismatch is refused because stopping a workload the Controller cannot prove it owns could stop another; the owner re-derives the evidence from the run and retries.",
       "sites": [
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityRefused", "durable_run_stop_payloads", "recipe-start-child-differs-from-retained-phase", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityRefused", "durable_run_stop_payloads", "recipe-start-children-differ-from-retained-phases", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityRefused", "durable_run_stop_payloads", "recipe-start-parent-is-inconsistent", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityRefused", "durable_run_stop_payloads", "recipe-start-phase-identities-overlap", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityRefused", "durable_run_stop_payloads", "recipe-start-run-identity-differs", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityRefused", "durable_run_stop_payloads", "recipe-start-target-identity-differs", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityRefused", "durable_run_stop_payloads", "recipe-stop-identity-is-stale", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityRefused", "durable_run_stop_payloads", "recipe-stop-mapping-membership-differs", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "RecipeStopAuthorityRefused", "durable_run_stop_payloads", "recipe-stop-run-plan-identity-differs", 1]
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-child-differs-from-retained-phase", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-children-differ-from-retained-phases", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-parent-is-inconsistent", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-phase-identities-overlap", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-run-identity-differs", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-target-identity-differs", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-stop-identity-is-stale", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-stop-mapping-membership-differs", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-stop-run-plan-identity-differs", 1]
       ]
     }
   ]

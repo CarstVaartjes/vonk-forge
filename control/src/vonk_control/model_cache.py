@@ -95,13 +95,8 @@ from .catalog_revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
 )
-from .categorized_faults import (
-    OperationInterrupted,
-    RequestFault,
-    RequestTypeFault,
-    StoredStateDamaged,
-    StoredStateTypeDamaged,
-)
+from .categorized_errors import BookkeepingUnknown, InvalidType, InvalidValue
+from .categorized_faults import OperationInterrupted, StoredStateTypeDamaged
 from .failure_classification import is_security_failure
 from .lifecycle import (
     CancelRequested,
@@ -817,7 +812,7 @@ def _parse_operation_envelope(
         ) and operation.plan_digest != _model_removal_intent_digest(
             parsed, actor=operation.actor, request_key=operation.request_key
         ):
-            raise StoredStateDamaged(
+            raise BookkeepingUnknown(
                 "persisted model removal intent no longer matches its accepted plan"
             )
         if isinstance(parsed, (ModelCacheDownloadPayload, ModelCacheRepairPayload)):
@@ -826,7 +821,7 @@ def _parse_operation_envelope(
             require_mapping(serialize_json_value(parsed), "cache operation payload")
         )
     except ValidationError as error:
-        raise StoredStateDamaged(
+        raise BookkeepingUnknown(
             "persisted cache operation payload is invalid"
         ) from error
 
@@ -842,7 +837,7 @@ def _manifest_of_document(document: object) -> ArtifactSetManifest:
     try:
         return ArtifactSetManifest.from_document(document)
     except ModelCacheResolutionError as error:
-        raise StoredStateDamaged(error.detail) from error
+        raise BookkeepingUnknown(error.detail) from error
 
 
 def _default_retry_state() -> dict[str, object]:
@@ -955,7 +950,7 @@ def _read_removal_checkpoint(payload: Mapping[str, object]) -> ModelCacheRemoval
     try:
         parsed = parse_model_cache_payload("remove", payload)
     except ValidationError as error:
-        raise StoredStateDamaged("model removal payload is invalid") from error
+        raise BookkeepingUnknown("model removal payload is invalid") from error
     if not isinstance(parsed, ModelCacheRemovalPayload):
         raise StoredStateTypeDamaged("model removal payload is invalid")
     return parsed
@@ -1006,7 +1001,7 @@ def _read_operation_progress(
             from_json=True,
         )
     except ValidationError as error:
-        raise StoredStateDamaged(
+        raise BookkeepingUnknown(
             "persisted cache operation progress is invalid"
         ) from error
 
@@ -1702,7 +1697,7 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[dict[str, o
     try:
         definition = read_catalog_document(row)
         if not isinstance(definition, ModelDefinition):
-            raise RequestTypeFault("catalog revision is not a model")
+            raise InvalidType("catalog revision is not a model")
     except (TypeError, ValueError) as error:
         raise ModelCacheResolutionInvalid(
             "model_cache.model_definition_invalid",
@@ -1823,21 +1818,21 @@ class ModelCacheService:
         if not root.is_absolute() or any(
             part in {"", ".", ".."} for part in root.parts
         ):
-            raise RequestFault("model cache root must be an absolute normalized path")
+            raise InvalidValue("model cache root must be an absolute normalized path")
         if root.is_symlink():
-            raise RequestFault("model cache root must not be a symlink")
+            raise InvalidValue("model cache root must not be a symlink")
         if (
             not isinstance(reserve_bytes, int)
             or isinstance(reserve_bytes, bool)
             or reserve_bytes < 0
         ):
-            raise RequestFault("model cache reserve must be a non-negative integer")
+            raise InvalidValue("model cache reserve must be a non-negative integer")
         if (
             not isinstance(max_parallel_downloads, int)
             or isinstance(max_parallel_downloads, bool)
             or not 1 <= max_parallel_downloads <= _MAX_PARALLEL_DOWNLOADS
         ):
-            raise RequestFault(
+            raise InvalidValue(
                 "model cache parallel downloads must be between 1 and 32"
             )
         if (
@@ -1845,12 +1840,12 @@ class ModelCacheService:
             or isinstance(max_download_streams, bool)
             or not 1 <= max_download_streams <= _MAX_PARALLEL_DOWNLOADS
         ):
-            raise RequestFault("model cache download streams must be between 1 and 32")
+            raise InvalidValue("model cache download streams must be between 1 and 32")
         root.mkdir(parents=True, exist_ok=True, mode=0o750)
         for child in ("objects", "partials", "quarantine", "manifests", "locks"):
             directory = root / child
             if directory.is_symlink():
-                raise RequestFault(
+                raise InvalidValue(
                     "model cache storage directory must not be a symlink"
                 )
             directory.mkdir(mode=0o750, exist_ok=True)
@@ -2079,7 +2074,7 @@ class ModelCacheService:
                     recipe_revision_sha256=row.recipe_revision_sha256,
                 )
             except ModelCacheError as error:
-                raise StoredStateDamaged(error.detail) from error
+                raise BookkeepingUnknown(error.detail) from error
             return candidate if candidate.digest == row.artifact_set_sha256 else None
 
         value = read_or_rebuild(
@@ -3162,9 +3157,9 @@ class ModelCacheService:
 
         supplied_sets = tuple(selected_sets)
         if not supplied_sets:
-            raise RequestFault("model removal child requires an exact non-empty scope")
+            raise InvalidValue("model removal child requires an exact non-empty scope")
         if len(supplied_sets) != len(set(supplied_sets)):
-            raise RequestFault("model removal child scope contains duplicate sets")
+            raise InvalidValue("model removal child scope contains duplicate sets")
         normalized_sets = tuple(sorted(supplied_sets))
         for digest in normalized_sets:
             ArtifactIdentity("model-set", digest)
@@ -3528,7 +3523,7 @@ class ModelCacheService:
         else:
             supplied = tuple(selected_sets)
             if len(supplied) != len(set(supplied)):
-                raise RequestFault("model removal scope contains duplicate sets")
+                raise InvalidValue("model removal scope contains duplicate sets")
             selected = tuple(sorted(supplied))
         # Read and validate exact SQL membership before the ordered gate
         # acquisition, then re-read it after the fences are held.
@@ -4028,7 +4023,7 @@ class ModelCacheService:
         """Advance bounded durable model removals without holding transfer slots."""
 
         if not 1 <= limit <= 100:
-            raise RequestFault("model removal batch limit is invalid")
+            raise InvalidValue("model removal batch limit is invalid")
         now = self._clock()
         with self._session() as session:
             operation_ids = tuple(
@@ -4470,7 +4465,7 @@ class ModelCacheService:
         try:
             recipe = read_catalog_document(revision)
             if not isinstance(recipe, RecipeDefinition):
-                raise RequestTypeFault("catalog revision is not a recipe")
+                raise InvalidType("catalog revision is not a recipe")
         except (TypeError, ValueError) as error:
             raise ModelCacheResolutionInvalid(
                 "model_cache.recipe_invalid", "canonical recipe definition is invalid"
@@ -4540,7 +4535,7 @@ class ModelCacheService:
         try:
             definition = read_catalog_document(row)
             if not isinstance(definition, ModelDefinition):
-                raise RequestTypeFault("catalog revision is not a model")
+                raise InvalidType("catalog revision is not a model")
             rows[digest] = row
             for dependency in definition.dependencies:
                 self._collect_model_definitions(
@@ -8147,7 +8142,7 @@ class ModelCacheService:
 
     def list_operations(self, *, limit: int = 100) -> tuple[CacheOperationView, ...]:
         if not 1 <= limit <= 100:
-            raise RequestFault("cache operation limit is invalid")
+            raise InvalidValue("cache operation limit is invalid")
         with self._session() as session:
             rows = session.scalars(
                 select(ModelCacheOperation)
@@ -8166,7 +8161,7 @@ class ModelCacheService:
     ) -> dict[str, object]:
         """Return a stable created-at/id ordered page and raw next boundary."""
         if not 1 <= limit <= 100:
-            raise RequestFault("cache operation limit is invalid")
+            raise InvalidValue("cache operation limit is invalid")
         with self._session() as session:
             rows = list(
                 session.scalars(
@@ -8294,7 +8289,7 @@ class ModelCacheService:
         API restart only discovers outstanding work here.
         """
         if not 1 <= limit <= 100:
-            raise RequestFault("cache operation limit is invalid")
+            raise InvalidValue("cache operation limit is invalid")
         with self._session() as session:
             count = require_integer(
                 session.scalar(
@@ -8318,7 +8313,7 @@ class ModelCacheService:
         callers and fixture tests.
         """
         if not 1 <= limit <= 16:
-            raise RequestFault("cache worker batch limit is invalid")
+            raise InvalidValue("cache worker batch limit is invalid")
         self._reconcile_pending_cancellations()
         self._resume_after_credential_change()
         rows = self._claim_operations(limit=limit, respect_backoff=False)
@@ -8346,7 +8341,7 @@ class ModelCacheService:
             return self.run_pending(limit=1)
         requested = self._max_parallel_downloads if limit is None else limit
         if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
-            raise RequestFault("cache worker batch limit is invalid")
+            raise InvalidValue("cache worker batch limit is invalid")
         self._streams.tick()
         self._reconcile_pending_cancellations()
         self._resume_after_credential_change()
@@ -9135,9 +9130,9 @@ class ModelCacheService:
         from .operation_api import _activity_keyset_filter
 
         if not 1 <= limit <= 101:
-            raise RequestFault("operation provider page limit is invalid")
+            raise InvalidValue("operation provider page limit is invalid")
         if state is not None and (not isinstance(state, str) or not state.strip()):
-            raise RequestFault("operation state filter is invalid")
+            raise InvalidValue("operation state filter is invalid")
         if node_id is not None:
             return {"operations": (), "total": 0, "_next_boundary": None}
         # A filter may still name a retired spelling (one release).
@@ -9426,7 +9421,7 @@ class ModelCacheService:
             or isinstance(maximum_bytes, bool)
             or not 0 < maximum_bytes <= 8 * 1024 * 1024
         ):
-            raise RequestFault("verified artifact read bounds are invalid")
+            raise InvalidValue("verified artifact read bounds are invalid")
         path, size, _digest = self.cached_artifact_file(
             artifact_set_sha256, artifact_sha256, artifact_path
         )
@@ -9524,7 +9519,7 @@ class ModelCacheService:
         boundary: tuple[str, str] | None = None,
     ) -> dict[str, object]:
         if not 1 <= limit <= 100:
-            raise RequestFault("cache entry limit is invalid")
+            raise InvalidValue("cache entry limit is invalid")
         self.reconcile_storage()
         with self._session() as session:
             rows = list(
@@ -9983,7 +9978,7 @@ class ModelCacheService:
         becoming an unbounded response.
         """
         if not 1 <= limit <= 100:
-            raise RequestFault("cache update limit is invalid")
+            raise InvalidValue("cache update limit is invalid")
         requested_set = _optional_digest(artifact_set_sha256)
         self.reconcile_storage()
         with self._session() as session:

@@ -20,7 +20,8 @@ from vonk_forge_contracts import read_recipe
 
 from . import job_states
 from .agent_jobs import _JsonFlagIsTrue
-from .categorized_faults import RequestFault, StoredStateDamaged, StoredStateTypeDamaged
+from .categorized_errors import BookkeepingUnknown, InvalidValue
+from .categorized_faults import StoredStateTypeDamaged
 from .fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileAssignment,
@@ -53,7 +54,7 @@ class RecipeBuildIntent(StrictJSONModel):
 def read_build_intent(job: Job) -> RecipeBuildIntent:
     try:
         if job.kind != "recipe.build.v1":
-            raise RequestFault(
+            raise InvalidValue(
                 "build intent requires a build job",
                 reason=InvalidRequestReason.INCOMPLETE,
             )
@@ -157,7 +158,7 @@ def lock_profile_build_dependencies(
         for assignment, build_id in sorted(dependencies, key=lambda item: item[1]):
             build = session.get(RecipeBuild, build_id)
             if build is None:
-                raise RequestFault(
+                raise InvalidValue(
                     "reviewed profile build is missing",
                     reason=InvalidRequestReason.NOT_FOUND,
                 )
@@ -169,7 +170,7 @@ def lock_profile_build_dependencies(
                 build_id=build_id,
             )
             if locked is None:
-                raise RequestFault("reviewed profile build disappeared")
+                raise InvalidValue("reviewed profile build disappeared")
     except (KeyError, TypeError, ValueError) as error:
         raise BuildConsumerError(
             "build.consumer_invalid", "reviewed profile build identity is invalid"
@@ -357,13 +358,13 @@ def _profile_consumer(
         or review.plan_digest != application.plan_digest
         or progress.workload_intent_ordinal is None
     ):
-        raise StoredStateDamaged("profile build consumer identity is invalid")
+        raise BookkeepingUnknown("profile build consumer identity is invalid")
     scope = {node_id for step in review.steps for node_id in step.node_ids}
     nodes = tuple(
         session.scalars(select(AgentNode).where(AgentNode.node_id.in_(scope)))
     )
     if len(nodes) != len(scope):
-        raise StoredStateDamaged("profile build consumer scope is missing")
+        raise BookkeepingUnknown("profile build consumer scope is missing")
     if any(
         node.workload_intent_ordinal != progress.workload_intent_ordinal
         for node in nodes
@@ -408,7 +409,7 @@ def _profile_consumer(
                 != {node.node_id for node in assignment.nodes}
                 or child_plan.build.build_id != build.id
             ):
-                raise StoredStateDamaged(
+                raise BookkeepingUnknown(
                     "profile build consumer child identity changed"
                 )
             # The exact committed child now owns this dependency. Its current
@@ -434,12 +435,12 @@ def _run_switch_consumer(session: Session, parent: Job, build: RecipeBuild) -> b
         or progress.workload_intent_ordinal != ordinal
         or set(targets) != set(parent.targets)
     ):
-        raise StoredStateDamaged("build consumer workload scope is invalid")
+        raise BookkeepingUnknown("build consumer workload scope is invalid")
     nodes = tuple(
         session.scalars(select(AgentNode).where(AgentNode.node_id.in_(targets)))
     )
     if len(nodes) != len(targets):
-        raise StoredStateDamaged("build consumer workload scope is missing")
+        raise BookkeepingUnknown("build consumer workload scope is missing")
     if any(node.workload_intent_ordinal != ordinal for node in nodes):
         return False
     if (
@@ -448,7 +449,7 @@ def _run_switch_consumer(session: Session, parent: Job, build: RecipeBuild) -> b
         or plan.build.build_input_sha256 != build.build_input_sha256
         or plan.build.builder_node_id != build.builder_node_id
     ):
-        raise StoredStateDamaged("build consumer identity changed")
+        raise BookkeepingUnknown("build consumer identity changed")
     return needs_container_build(plan, progress.phase_index)
 
 
@@ -466,21 +467,21 @@ def _availability_consumer(parent: Job, build: RecipeBuild) -> bool:
         not isinstance(runtime, Mapping)
         or runtime.get("build_input_sha256") != build.build_input_sha256
     ):
-        raise StoredStateDamaged("availability build consumer identity changed")
+        raise BookkeepingUnknown("availability build consumer identity changed")
     image = payload.get("image_result")
     if image is not None:
         receipt = read_stored_model(
             RuntimeImageReceipt, canonical_message(image), from_json=True
         )
         if receipt.build_input_sha256 != build.build_input_sha256:
-            raise StoredStateDamaged("availability receipt identity changed")
+            raise BookkeepingUnknown("availability receipt identity changed")
         return False
     return True
 
 
 def build_cancellation(job: Job) -> RecipeOperationCancellationResult | None:
     if job.kind != "recipe.build.v1":
-        raise RequestFault(
+        raise InvalidValue(
             "build cancellation requires a build job",
             reason=InvalidRequestReason.INCOMPLETE,
         )

@@ -30,7 +30,7 @@ from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from . import job_states
 from .auth import MUTATION_ROLES
 from .catalog_queries import active_head_revision
-from .categorized_faults import RequestFault, RequestKeyFault
+from .categorized_errors import InvalidValue, MissingRecord
 from .lifecycle import State
 from .lifecycle.recipe_update_batch import RecipeUpdateBatchAdapter
 from .logging import redact_text
@@ -374,7 +374,7 @@ class RecipeUpdateBatches:
         with self.sessions() as session:
             job = session.get(Job, operation_id)
             if job is None or job.kind != UPDATE_KIND:
-                raise RequestKeyFault(operation_id)
+                raise MissingRecord(operation_id)
             return self._view(job, self._document(job))
 
     def cancel(
@@ -390,7 +390,7 @@ class RecipeUpdateBatches:
                 .with_for_update(nowait=True)
             )
             if job is None:
-                raise RequestKeyFault(operation_id)
+                raise MissingRecord(operation_id)
             self.owner._request_cancellation(
                 session,
                 job,
@@ -410,7 +410,7 @@ class RecipeUpdateBatches:
         )
 
         if not 1 <= limit <= 100:
-            raise RequestFault(
+            raise InvalidValue(
                 "update cancellation limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
@@ -687,12 +687,12 @@ class RecipeUpdateBatches:
         with self.sessions() as session:
             job = session.get(Job, operation_id)
             if job is None or job.kind != UPDATE_KIND:
-                raise RequestKeyFault(operation_id)
+                raise MissingRecord(operation_id)
             return self._activity_item(job)
 
     def _activity_list(self, query: OperationQuery) -> OperationListPage:
         if not 1 <= query.limit <= 101:
-            raise RequestFault(
+            raise InvalidValue(
                 "operation provider page limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
@@ -725,7 +725,7 @@ class RecipeUpdateBatches:
         from .recipe_image_availability import RecipeImageAvailabilityError
 
         if not owner or len(owner) > 95:
-            raise RequestFault("update worker owner must contain 1 to 95 characters")
+            raise InvalidValue("update worker owner must contain 1 to 95 characters")
         now = _now(self.owner._clock())
         with self.sessions() as session:
             candidates = list(

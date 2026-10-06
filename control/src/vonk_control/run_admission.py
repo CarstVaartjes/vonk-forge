@@ -30,7 +30,7 @@ from .admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from .categorized_faults import RequestFault, RequestKeyFault, RequestTypeFault
+from .categorized_errors import InvalidType, InvalidValue, MissingRecord
 from .install_admission import AdmissionReason
 from .inventory_repository import InventoryRepository
 from .legal_admission import territorial_admission
@@ -132,7 +132,7 @@ def run_port_demand(
 ) -> RunPortDemand:
     interfaces = document.get("interfaces")
     if not isinstance(interfaces, list):
-        raise RequestTypeFault("recipe interfaces are invalid")
+        raise InvalidType("recipe interfaces are invalid")
     interface = next(
         (
             item
@@ -150,11 +150,11 @@ def run_port_demand(
     ]
     if interface is None and len(artifact_interfaces) == 1:
         if node_count != 1:
-            raise RequestTypeFault("artifact job recipes currently require one node")
+            raise InvalidType("artifact job recipes currently require one node")
         return RunPortDemand((), None)
     port = interface.get("port") if interface is not None else None
     if type(port) is not int or not 1 <= port <= 65535:
-        raise RequestTypeFault("recipe interface port is invalid")
+        raise InvalidType("recipe interface port is invalid")
     return RunPortDemand(
         service_host_port_candidates(port, node_count=node_count),
         RENDEZVOUS_PORT if node_count > 1 and endpoint_owner else None,
@@ -461,9 +461,9 @@ class RunAdmissionService:
         ) as session:
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
-                raise RequestKeyFault(installation_id)
+                raise MissingRecord(installation_id)
             if installation.state != "installed":
-                raise RequestFault(
+                raise InvalidValue(
                     "recipe installation is not complete",
                     reason=InvalidRequestReason.NOT_READY,
                 )
@@ -473,20 +473,20 @@ class RunAdmissionService:
                 or mapping.state != "ready"
                 or mapping.generation != installation.mapping_generation
             ):
-                raise RequestFault(
+                raise InvalidValue(
                     "cluster mapping generation changed after installation",
                     reason=InvalidRequestReason.CONFLICT,
                 )
             revision = _active_recipe_revision(session, installation.recipe_revision_id)
             if revision is None or revision.state != "active":
-                raise RequestFault(
+                raise InvalidValue(
                     "recipe revision is unavailable",
                     reason=InvalidRequestReason.NOT_FOUND,
                 )
             try:
                 resolved_entities = resolve_recipe_entities(session, revision.document)
             except RecipeRuntimeSpecError as error:
-                raise RequestFault(
+                raise InvalidValue(
                     "exact recipe dependencies are unavailable",
                     reason=InvalidRequestReason.NOT_FOUND,
                 ) from error
@@ -509,7 +509,7 @@ class RunAdmissionService:
             )
             model_document = getattr(model_version, "document", None)
             if not isinstance(model_document, Mapping):
-                raise RequestFault(
+                raise InvalidValue(
                     "exact model license authority is unavailable",
                     reason=InvalidRequestReason.NOT_FOUND,
                 )
@@ -582,7 +582,7 @@ class RunAdmissionService:
             (item for item in mapping_nodes if item.endpoint_owner), None
         )
         if endpoint_owner is None:
-            raise RequestTypeFault(
+            raise InvalidType(
                 "mapping endpoint owner is missing",
                 reason=InvalidRequestReason.NOT_FOUND,
             )
@@ -632,7 +632,7 @@ class RunAdmissionService:
                 )
             role = role_by_name.get(placement.role)
             if role is None:
-                raise RequestTypeFault("topology role memory is invalid")
+                raise InvalidType("topology role memory is invalid")
             memory_need = memory_requirement(
                 revision.document,
                 role.resources.memory,
@@ -642,7 +642,7 @@ class RunAdmissionService:
             )
             required = memory_need.demand.total_bytes
             if required is None:
-                raise RequestFault(
+                raise InvalidValue(
                     "run memory demand is unavailable for the selected settings",
                     reason=InvalidRequestReason.NOT_FOUND,
                 )
