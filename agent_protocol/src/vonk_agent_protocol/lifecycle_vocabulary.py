@@ -318,7 +318,29 @@ TERMINAL_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(
 )
 
 
-def adopt_state(subject: LifecycleSubject, stored: str) -> AdoptedState | None:
+#: A kind of the generic job table that spells a word differently from the rest of
+#: the table.  A recipe update batch ends ``partial`` when some of its children
+#: succeeded and some failed: a definite failed outcome, not a retry (which is what
+#: ``partial`` means to the image-availability jobs that share the table).
+JOB_KIND_ALIASES: Mapping[str, Mapping[StateAlias, AdoptedState]] = {
+    "recipe.cache.update.v2": {
+        StateAlias.PARTIAL: AdoptedState(LifecycleState.FAILED),
+    },
+}
+
+
+def _aliases(
+    subject: LifecycleSubject, kind: str | None
+) -> Mapping[StateAlias, AdoptedState]:
+    rows = STATE_ALIASES.get(subject, {})
+    if subject is LifecycleSubject.JOB and kind in JOB_KIND_ALIASES:
+        return {**rows, **JOB_KIND_ALIASES[kind]}
+    return rows
+
+
+def adopt_state(
+    subject: LifecycleSubject, stored: str, kind: str | None = None
+) -> AdoptedState | None:
     """The core meaning of a stored ``state`` word, or ``None`` for a foreign word.
 
     Every reader of a stored lifecycle state goes through this one function: a
@@ -335,7 +357,7 @@ def adopt_state(subject: LifecycleSubject, stored: str) -> AdoptedState | None:
         alias = StateAlias(stored)
     except ValueError:
         return None
-    return STATE_ALIASES.get(subject, {}).get(alias)
+    return _aliases(subject, kind).get(alias)
 
 
 #: The states of a row that has not ended.
@@ -345,20 +367,24 @@ LIVE_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(LifecycleState) - (
 
 
 def stored_words(
-    subject: LifecycleSubject, states: Iterable[LifecycleState]
+    subject: LifecycleSubject,
+    states: Iterable[LifecycleState],
+    kind: str | None = None,
 ) -> tuple[str, ...]:
     """Every word a row of ``subject`` may carry for any of ``states``.
 
     The core words themselves, then the retired spellings that adopt into them.
     A query that selects rows by state uses this, so a row written before the
     rename is found as well as one written after it, and nothing spells a word.
+    ``kind`` names the kind of a generic job when the query is scoped to one, whose
+    own spelling of a word may differ (see :data:`JOB_KIND_ALIASES`).
     """
 
     wanted = frozenset(states)
     words = [state.value for state in LifecycleState if state in wanted]
     words.extend(
         alias.value
-        for alias, adopted in STATE_ALIASES.get(subject, {}).items()
+        for alias, adopted in _aliases(subject, kind).items()
         if adopted.state in wanted
     )
     return tuple(words)
@@ -371,13 +397,16 @@ def live_words(subject: LifecycleSubject) -> tuple[str, ...]:
 
 
 def is_state(
-    subject: LifecycleSubject, stored: str | None, *states: LifecycleState
+    subject: LifecycleSubject,
+    stored: str | None,
+    *states: LifecycleState,
+    kind: str | None = None,
 ) -> bool:
     """Whether a stored word means one of ``states`` (adopting an old spelling)."""
 
     if stored is None:
         return False
-    adopted = adopt_state(subject, stored)
+    adopted = adopt_state(subject, stored, kind)
     return adopted is not None and adopted.state in states
 
 
@@ -664,6 +693,7 @@ class LifecycleVocabulary(WireModel):
 __all__ = [
     "ATTEMPT_ALIAS_CAUSE",
     "INPUT_ALIASES",
+    "JOB_KIND_ALIASES",
     "LEGACY_WAIT_STATE",
     "LIVE_LIFECYCLE_STATES",
     "SECURITY_REFUSAL_SUFFIXES",

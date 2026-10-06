@@ -32,7 +32,9 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Text, cast, func, select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import LifecycleState
 
+from . import job_states
 from .fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from .models import (
@@ -47,7 +49,9 @@ from .models import (
     ResourceReservation,
 )
 
-_TERMINAL_JOB_STATES = ("succeeded", "failed", "expired", "cancelled")
+_TERMINAL_JOB_STATES = job_states.words(
+    LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+)
 _ENDED_APPLICATION_STATES = FLEET_PROFILE_ENDED_STATES
 # How long an unowned plan waits for the next attempt to adopt it.
 ADOPTION_WINDOW = timedelta(minutes=15)

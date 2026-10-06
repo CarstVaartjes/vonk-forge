@@ -33,8 +33,9 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from vonk_agent_protocol import LEGACY_WAIT_STATE
+from vonk_agent_protocol import LEGACY_WAIT_STATE, LifecycleState
 
+from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
 from ..recipe_update_contract import RecipeUpdateChild, RecipeUpdateDocument
@@ -155,7 +156,7 @@ class RecipeUpdateBatchAdapter:
             state = State.OBSERVING
         elif stored == "succeeded":
             state = State.SUCCEEDED
-        elif stored in {"failed", "partial"}:
+        elif stored in job_states.words(LifecycleState.FAILED, kind=KIND):
             state = State.FAILED
         elif stored == "cancelled":
             state = State.CANCELLED

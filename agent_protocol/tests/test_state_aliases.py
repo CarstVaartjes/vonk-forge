@@ -165,3 +165,16 @@ def test_draft_and_ready_are_preparation_not_lifecycle_state() -> None:
     assert legacy_preparation("ready") is ArtifactPreparation.READY
     assert legacy_preparation("queued") is None and legacy_preparation(None) is None
     assert adopt_state(LifecycleSubject.ARTIFACT_JOB, "draft") is None
+
+
+def test_a_kind_of_the_job_table_may_spell_a_word_differently() -> None:
+    from vonk_agent_protocol import JOB_KIND_ALIASES, stored_words
+
+    job = LifecycleSubject.JOB
+    # Image-availability jobs retry as ``partial``; an update batch ends ``partial``.
+    assert adopt_state(job, "partial") == AdoptedState(LifecycleState.BACKOFF)
+    batch = next(iter(JOB_KIND_ALIASES))
+    assert adopt_state(job, "partial", batch) == AdoptedState(LifecycleState.FAILED)
+    assert "partial" in stored_words(job, [LifecycleState.FAILED], batch)
+    assert "partial" not in stored_words(job, [LifecycleState.FAILED])
+    assert "partial" in stored_words(job, [LifecycleState.BACKOFF])

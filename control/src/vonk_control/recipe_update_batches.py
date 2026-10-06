@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    LifecycleState,
     LifecycleSubject,
     OperationProgress,
     SecurityRefusalReason,
@@ -24,6 +25,7 @@ from vonk_agent_protocol import (
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
+from . import job_states
 from .auth import MUTATION_ROLES
 from .catalog_queries import active_head_revision
 from .lifecycle import State
@@ -319,9 +321,12 @@ class RecipeUpdateBatches:
 
     def _view(self, job: Job, document: RecipeUpdateDocument) -> RecipeUpdateResponse:
         complete = sum(child.state in _SETTLED for child in document.children)
-        waiting = job.state in {"queued", "running", "cancelling"} and bool(
-            document.children
-        )
+        waiting = job.state in job_states.words(
+            LifecycleState.QUEUED,
+            LifecycleState.RUNNING,
+            LifecycleState.OBSERVING,
+            kind=UPDATE_KIND,
+        ) and bool(document.children)
         return RecipeUpdateResponse(
             id=job.id,
             request_id=job.request_id,
@@ -392,7 +397,12 @@ class RecipeUpdateBatches:
             operation_ids = tuple(
                 session.scalars(
                     select(Job.id)
-                    .where(Job.kind == UPDATE_KIND, Job.state == "cancelling")
+                    .where(
+                        Job.kind == UPDATE_KIND,
+                        Job.state.in_(
+                            job_states.words(LifecycleState.OBSERVING, kind=UPDATE_KIND)
+                        ),
+                    )
                     .order_by(Job.updated_at, Job.id)
                     .limit(limit)
                 )
@@ -401,7 +411,9 @@ class RecipeUpdateBatches:
         for operation_id in operation_ids:
             with self.sessions() as session:
                 parent = session.get(Job, operation_id)
-                if parent is None or parent.state != "cancelling":
+                if parent is None or parent.state not in job_states.words(
+                    LifecycleState.OBSERVING, kind=UPDATE_KIND
+                ):
                     continue
                 try:
                     document = self._document(parent)
@@ -479,7 +491,9 @@ class RecipeUpdateBatches:
                         .where(Job.id == operation_id, Job.kind == UPDATE_KIND)
                         .with_for_update(nowait=True)
                     )
-                    if parent is None or parent.state != "cancelling":
+                    if parent is None or parent.state not in job_states.words(
+                        LifecycleState.OBSERVING, kind=UPDATE_KIND
+                    ):
                         continue
                     current = self._document(parent)
                     if (
@@ -576,7 +590,9 @@ class RecipeUpdateBatches:
                     .where(Job.id == operation_id, Job.kind == UPDATE_KIND)
                     .with_for_update(nowait=True)
                 )
-                if parent is None or parent.state != "cancelling":
+                if parent is None or parent.state not in job_states.words(
+                    LifecycleState.OBSERVING, kind=UPDATE_KIND
+                ):
                     return False
                 self._lifecycle.cancel_unreadable(parent, _now(self.owner._clock()))
                 return True

@@ -55,8 +55,9 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LEGACY_WAIT_STATE
+from vonk_agent_protocol import LEGACY_WAIT_STATE, LifecycleState
 
+from .. import job_states
 from ..agent_operation_facts import aware
 from ..models import AgentOperation as StoredOperation
 from ..models import Job
@@ -465,7 +466,12 @@ class RunSwitchAdapter:
                 # A cancel being driven keeps showing what the operation was doing.
                 options["visible"] = (
                     job.state
-                    if job.state in {"queued", "running", "waiting"}
+                    if job.state
+                    in job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.OBSERVING,
+                    )
                     else "running"
                 )
             if after.state is State.CANCELLED:

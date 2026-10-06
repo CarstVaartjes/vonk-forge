@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
     FailureCode,
+    LifecycleState,
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
@@ -39,7 +40,7 @@ from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
-from . import agent_operation_states
+from . import agent_operation_states, job_states
 from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -196,7 +197,12 @@ _WORKLOAD_INTENT_OPERATIONS = frozenset(
     }
 )
 _TERMINAL_PARENT_STATES = frozenset(
-    {"succeeded", "failed", "waiting-for-operator", "expired", "cancelled"}
+    job_states.words(
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.NEEDS_OPERATOR,
+        LifecycleState.CANCELLED,
+    )
 )
 #: An outcome that has already concluded, so the work it belongs to will not
 #: proceed and no refusal can describe it.  A refusal note written afterwards
@@ -217,7 +223,9 @@ _ABANDONABLE_OPERATIONS = frozenset(
         AgentOperation.RUNTIME_PREFLIGHT.value,
     }
 )
-_ENDED_PARENT_STATES = _CONCLUDED_OUTCOMES | {"expired"}
+_ENDED_PARENT_STATES = _CONCLUDED_OUTCOMES | set(
+    job_states.words(LifecycleState.FAILED)
+)
 _DATABASE_REPOLL_SECONDS = 0.25
 
 
@@ -566,7 +574,9 @@ def operator_resume_candidates_in_session(
     """
 
     job = session.get(Job, job_id)
-    if job is None or job.state not in {"queued", "running", "waiting-for-operator"}:
+    if job is None or job.state not in job_states.words(
+        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+    ):
         return ()
     if job.result is not None:
         if not isinstance(job.result, Mapping):
@@ -645,7 +655,7 @@ def operator_resume_eligible_operations_in_session(
     """Return the current-owner resume action for parked, unscheduled work."""
 
     job = session.get(Job, job_id)
-    if job is None or job.state != "waiting-for-operator":
+    if job is None or job.state not in job_states.words(LifecycleState.NEEDS_OPERATOR):
         return ()
     return tuple(
         operation
@@ -682,7 +692,7 @@ def authorize_operator_resume_in_session(
     )
     parent = session.get(Job, job_id)
     if parent is None or (
-        parent.state != "waiting-for-operator"
+        parent.state not in job_states.words(LifecycleState.NEEDS_OPERATOR)
         and any(
             not _retry_authorized_for_current_attempt(operation)
             for operation in operations
@@ -735,7 +745,7 @@ def retire_exhausted_operations_in_session(
         session, {"retire": (job_id, scope)}, scope[0]
     ):
         raise OperatorRetirementRefused(job_id, "its target scope changed")
-    if job.state != "waiting-for-operator":
+    if job.state not in job_states.words(LifecycleState.NEEDS_OPERATOR):
         raise OperatorRetirementRefused(job_id, "job is not waiting for operator")
     if (
         session.scalar(
@@ -1914,7 +1924,13 @@ class AgentJobService:
                             .is_(None),
                         ),
                     ),
-                    Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                 )
                 .distinct()
                 .order_by(StoredOperation.parent_job_id)
@@ -1949,11 +1965,11 @@ class AgentJobService:
             children_by_parent.setdefault(child.parent_job_id, []).append(child)
         for parent_id in parent_ids:
             parent = parents.get(parent_id)
-            if parent is None or parent.state not in {
-                "queued",
-                "running",
-                "waiting-for-operator",
-            }:
+            if parent is None or parent.state not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
                 continue
             children = tuple(children_by_parent.get(parent_id, ()))
             bound = parent.payload.get("workload_intent_ordinal")
@@ -2841,7 +2857,13 @@ class AgentJobService:
                         StoredOperation.state.in_(agent_operation_states.PARKED),
                         StoredOperation.kind.in_(_RESTART_REISSUE_OPERATIONS),
                         _retry_not_authorized_for_current_attempt(),
-                        Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
+                        ),
                         *(condition.expression for condition in predicate.common),
                         *(condition.expression for condition in predicate.diagnostics),
                     )
@@ -3598,7 +3620,7 @@ class AgentJobService:
             )
             return False
         if (
-            job.state == "waiting-for-operator"
+            job.state in job_states.words(LifecycleState.NEEDS_OPERATOR)
             and current_operation.state in agent_operation_states.PARKED
             and _retry_authorized_for_current_attempt(current_operation)
         ):
@@ -4644,7 +4666,7 @@ class AgentJobService:
             return
         if (
             job.kind == "agent-upgrade"
-            and job.state == "waiting-for-operator"
+            and job.state in job_states.words(LifecycleState.NEEDS_OPERATOR)
             and set(job.targets) - {operation.node_id for operation in operations}
         ):
             # Sequential agent upgrades intentionally materialize one target at

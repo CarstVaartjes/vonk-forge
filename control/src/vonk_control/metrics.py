@@ -12,9 +12,10 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import LifecycleState, OperationProgress
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 
+from . import job_states
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -40,7 +41,13 @@ _JOB_KINDS = frozenset(
     }
 )
 _JOB_STATES = frozenset(
-    {"queued", "running", "waiting-for-operator", "succeeded", "failed", "expired"}
+    job_states.words(
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.NEEDS_OPERATOR,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+    )
 )
 _ROUTE_STATES = frozenset({"published", "maintenance", "unavailable"})
 _AGENT_STATES = frozenset({"active", "retired"})

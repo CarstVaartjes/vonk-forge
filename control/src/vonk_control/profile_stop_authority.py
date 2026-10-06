@@ -12,10 +12,11 @@ from typing import Literal
 from pydantic import Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import SecurityRefusalError, canonical_message
+from vonk_agent_protocol import LifecycleState, SecurityRefusalError, canonical_message
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
+from . import job_states
 from .models import (
     AgentNode,
     AgentOperation,
@@ -231,7 +232,10 @@ def validate_profile_stop_owner(
 
     if require_current and (
         application.state != "running"
-        or profile_operation.state not in {"queued", "running", "waiting-for-operator"}
+        or profile_operation.state
+        not in job_states.words(
+            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+        )
         or run.state not in {"running", "starting", "stopping"}
     ):
         raise ProfileStopAuthorityError("current profile Stop identity is stale")

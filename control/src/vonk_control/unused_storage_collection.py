@@ -70,9 +70,9 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 
-from . import model_cache_states
+from . import job_states, model_cache_states
 from .artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -151,7 +151,9 @@ INVENTORY_MAX_AGE = timedelta(seconds=300)
 _DEAD_RUNS = ("stopped", "failed")
 # Installations that may hold files on their Sparks (a plan holds none).
 _HOLDING_STATES = ("installed", "installing", "partial", "failed")
-_FINISHED_JOBS = ("succeeded", "failed", "cancelled", "expired")
+_FINISHED_JOBS = job_states.words(
+    LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+)
 _RECEIPT_SUFFIX = ".receipt.json"
 _ASSIGNMENTS = TypeAdapter(list[FleetProfileAssignmentInput])
 

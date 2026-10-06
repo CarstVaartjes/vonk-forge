@@ -59,7 +59,9 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState
 
+from . import job_states
 from .fleet_projection import _installation_payload_expectations
 from .logging import log_event
 from .models import (
@@ -82,7 +84,12 @@ _LOGGER = logging.getLogger(__name__)
 #: removed (the retention grace: a retry or a person may still be using it).
 LEFTOVER_GRACE = timedelta(hours=24)
 _LEFTOVER_ACTOR = "system:residue-sweep"
-_ACTIVE_JOB_STATES = ("queued", "running", "waiting", "waiting-for-operator")
+_ACTIVE_JOB_STATES = job_states.words(
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.OBSERVING,
+    LifecycleState.NEEDS_OPERATOR,
+)
 # Operations that may own an installation plan or a distribution grant.
 _OWNER_JOB_KINDS = (
     "recipe.run-switch.v2",

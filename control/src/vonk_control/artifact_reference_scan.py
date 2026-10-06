@@ -15,9 +15,9 @@ from typing import Literal
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 
-from . import model_cache_states
+from . import job_states, model_cache_states
 from .artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -53,16 +53,23 @@ from .runtime_image_preparation import (
 )
 from .strict_json import read_stored_model
 
-_ACTIVE_PROFILE_APPLICATIONS = ("queued", "running", "waiting-for-operator")
-_ACTIVE_RUN_SWITCH_JOBS = ("queued", "running", "partial", "waiting-for-operator")
+_ACTIVE_PROFILE_APPLICATIONS = job_states.words(
+    LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+)
+_ACTIVE_RUN_SWITCH_JOBS = job_states.words(
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.NEEDS_OPERATOR,
+)
 _ACTIVE_INSTALLATIONS = ("planned", "installing", "installed", "partial")
 _ACTIVE_RUNS = ("starting", "running", "stopping")
-_ACTIVE_ARTIFACT_JOBS = (
-    "queued",
-    "running",
-    "partial",
-    "waiting-for-operator",
-    "cancelling",
+_ACTIVE_ARTIFACT_JOBS = job_states.words(
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.NEEDS_OPERATOR,
+    LifecycleState.OBSERVING,
 )
 _PROFILE_PAYLOAD_BUDGET = 16 * 1024 * 1024
 MAX_ARTIFACT_OWNER_SCAN_BYTES = 16 * 1024 * 1024

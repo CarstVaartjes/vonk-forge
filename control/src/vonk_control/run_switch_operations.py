@@ -27,11 +27,13 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
+    LifecycleState,
     OperationProgress,
     SecurityRefusalReason,
     canonical_message,
 )
 
+from . import job_states
 from .admission_locking import AdmissionLockBusy, busy_detail, patient_admission
 from .agent_jobs import AgentJobService
 from .artifact_lifecycle import (
@@ -540,7 +542,11 @@ class _ResourceFits:
         return self.requires_early_stop("run-switch.insufficient-disk")
 
 
-_TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
+_TERMINAL_STATES = frozenset(
+    job_states.words(
+        LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+    )
+)
 _OPERATION_KINDS = frozenset(
     {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
 )
@@ -3350,7 +3356,8 @@ class RunSwitchOperationService:
             if "start" in require_sequence(
                 progress.get("completed_phases", []), "completed phases"
             ) or (
-                job.state in {"running", "waiting"}
+                job.state
+                in job_states.words(LifecycleState.RUNNING, LifecycleState.OBSERVING)
                 and (phase is None or phase.kind in {"start", "final_verify"})
             ):
                 child_id = _string_or_none(progress.get("child_operation_id"))
@@ -3611,10 +3618,16 @@ class RunSwitchOperationService:
                 .where(
                     Job.kind.in_(_OPERATION_KINDS),
                     or_(
-                        Job.state.in_(("queued", "running", "waiting")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.OBSERVING,
+                            )
+                        ),
                         # Legacy: a wait with a clock is observed, one without is
                         # healed (re-evaluated) by the first advance, never left.
-                        Job.state == "waiting-for-operator",
+                        Job.state.in_(job_states.words(LifecycleState.NEEDS_OPERATOR)),
                     ),
                     or_(
                         due_at.is_(None),
@@ -3677,7 +3690,11 @@ class RunSwitchOperationService:
         try:
             with self._sessions.begin() as session:
                 job = session.get(Job, operation_id, with_for_update=True)
-                if job is None or job.state not in {"queued", "running", "waiting"}:
+                if job is None or job.state not in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.OBSERVING,
+                ):
                     return
                 progress = _read_progress(job.result)
                 code = error_code(error) or "run-switch.advance-failed"
@@ -6839,7 +6856,9 @@ class RunSwitchOperationService:
 
         with self._sessions.begin() as session:
             current = session.get(Job, operation_id, with_for_update=True)
-            if current is None or current.state not in {"queued", "running", "waiting"}:
+            if current is None or current.state not in job_states.words(
+                LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.OBSERVING
+            ):
                 return True
             current_plan = _load_plan(current.payload.get("plan"))
             if _progress_damaged(current.result):
@@ -6942,12 +6961,12 @@ class RunSwitchOperationService:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
                 return True
-            if job.state not in {
-                "queued",
-                "running",
-                "waiting",
-                "waiting-for-operator",
-            }:
+            if job.state not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.OBSERVING,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
                 return False
             payload = job.payload
             raw_plan = payload.get("plan")
@@ -6996,7 +7015,7 @@ class RunSwitchOperationService:
             if intent_status == "waiting":
                 pending_due = progress.get("observation_due_at")
                 if (
-                    job.state == "waiting"
+                    job.state in job_states.words(LifecycleState.OBSERVING)
                     and isinstance(pending_due, str)
                     and now < _aware(datetime.fromisoformat(pending_due))
                 ):
@@ -7034,9 +7053,9 @@ class RunSwitchOperationService:
                 session.commit()
                 return True
             if progress.get("observation_due_at") is None and (
-                job.state == "waiting-for-operator"
+                job.state in job_states.words(LifecycleState.NEEDS_OPERATOR)
                 or (
-                    job.state == "waiting"
+                    job.state in job_states.words(LifecycleState.OBSERVING)
                     and not progress.get("child_operation_id")
                     and progress.get("phase") != "final_verify"
                 )
@@ -7061,7 +7080,9 @@ class RunSwitchOperationService:
             raw_phase_index = progress.get("phase_index", 0)
             raw_item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
-            if job.state in {"waiting", "waiting-for-operator"}:
+            if job.state in job_states.words(
+                LifecycleState.OBSERVING, LifecycleState.NEEDS_OPERATOR
+            ):
                 if not child_id:
                     # Final verification observes an existing run and route;
                     # reopening this checkpoint cannot issue a new workload.
@@ -7072,7 +7093,8 @@ class RunSwitchOperationService:
                     # Newer intent was checked above, and the persisted start
                     # deadline remains immutable.
                     if progress.get("phase") != "final_verify" and not (
-                        job.state == "waiting" and isinstance(observation_due, str)
+                        job.state in job_states.words(LifecycleState.OBSERVING)
+                        and isinstance(observation_due, str)
                     ):
                         return False
                     _ADAPTER.project(
@@ -7287,7 +7309,10 @@ class RunSwitchOperationService:
                     ):
                         _complete_cancellation(job, current, now)
                         return True
-            if child.state == "waiting-for-operator" and checkpoint_cancellation:
+            if (
+                child.state in job_states.words(LifecycleState.NEEDS_OPERATOR)
+                and checkpoint_cancellation
+            ):
                 # A cancelled order needs no operator for an idempotent
                 # transfer: nothing is running, so close its parked operations
                 # (copied bytes stay on the Spark) and finish the cancellation
@@ -7324,7 +7349,7 @@ class RunSwitchOperationService:
                         phase_index=phase_index,
                         item_index=item_index,
                     )
-                elif child.state == "waiting-for-operator":
+                elif child.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
                     # The lifecycle child owns the uncertain effect. Keep its
                     # exact identity and capacity reservation instead of
                     # turning an agent restart into a terminal parent failure.
@@ -8397,7 +8422,7 @@ class RunSwitchOperationService:
             return True  # nothing is left to stop
         if child is None or child.state in _TERMINAL_STATES:
             return True
-        if child.state == "waiting-for-operator":
+        if child.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
             return self._abandon_idempotent_child(session, child_id, now)
         return False
 
@@ -8638,7 +8663,13 @@ class RunSwitchOperationService:
         blockers = (
             list(persisted_result.blockers)
             if persisted_result is not None
-            and job.state in {"queued", "running", "waiting", "waiting-for-operator"}
+            and job.state
+            in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.OBSERVING,
+                LifecycleState.NEEDS_OPERATOR,
+            )
             else []
         )
         return RunSwitchOperation(
@@ -8831,7 +8862,12 @@ class RunSwitchOperationProvider:
                 and operation.result
                 and operation.result.retryable
                 else ["cancel"]
-                if operation.state in {"queued", "running", "waiting"}
+                if operation.state
+                in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.OBSERVING,
+                )
                 and not (operation.result and operation.result.cancellation)
                 and (
                     operation.state == "queued"
@@ -9245,7 +9281,9 @@ def _wait_blockers(job: Job, progress: Mapping[str, object]) -> list[OperationBl
 
     reason = job.status_reason or ""
     nodes = job.targets if isinstance(job.targets, list) else []
-    if job.state in {"waiting", "waiting-for-operator"}:
+    if job.state in job_states.words(
+        LifecycleState.OBSERVING, LifecycleState.NEEDS_OPERATOR
+    ):
         return [
             make_blocker(
                 _wait_code(reason, "run-switch.waiting"),
@@ -9582,7 +9620,13 @@ def _lock_phase_owner(
             for job in session.scalars(
                 select(Job).where(
                     Job.kind == "recipe.run-switch.v2",
-                    Job.state.in_(("queued", "running", "waiting")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.OBSERVING,
+                        )
+                    ),
                 )
             )
             if current_key(job)
@@ -10595,7 +10639,10 @@ def _persist_run_switch_runtime_image_reference(
             or job.actor != actor
             # Background preparation publishes while its operation waits on
             # it; the exact checkpoint below still binds ownership.
-            or job.state not in {"queued", "running", "waiting"}
+            or job.state
+            not in job_states.words(
+                LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.OBSERVING
+            )
             or tuple(sorted(job.targets)) != target_nodes
             or job.payload.get("workload_intent_ordinal") != ordinal
             or job.payload.get("plan_digest") != plan.plan_digest
@@ -10624,7 +10671,10 @@ def _persist_run_switch_runtime_image_reference(
             or current.get("cancellation") is not None
             # The operation waits on this very background preparation, so the
             # same phase/item checkpoint also owns publication while waiting.
-            or job.state not in {"queued", "running", "waiting"}
+            or job.state
+            not in job_states.words(
+                LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.OBSERVING
+            )
             or current.get("phase_index", 0) != phase.index
             or current.get("item_index", 0) != item_index
             or current.get("child_operation_id") is not None

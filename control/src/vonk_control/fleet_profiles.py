@@ -20,10 +20,11 @@ from sqlalchemy import String, case, cast, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, object_session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_forge_contracts import RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology
 
+from . import job_states
 from .admission_locking import (
     AdmissionLockBusy,
     acquire_admission_keys,
@@ -220,8 +221,12 @@ _CHILD_PENDING_STATES = frozenset(
         "waiting-for-operator",
     }
 )
-_CHILD_FAILED_STATES = frozenset({"failed", "expired", "cancelled"})
-_PROFILE_ACTIVITY_ACTIVE_STATES = ("queued", "running", "waiting-for-operator")
+_CHILD_FAILED_STATES = frozenset(
+    job_states.words(LifecycleState.FAILED, LifecycleState.CANCELLED)
+)
+_PROFILE_ACTIVITY_ACTIVE_STATES = job_states.words(
+    LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+)
 # Decoded and database-sourced closed values are read back through the
 # contract's own alias, so a malformed state fails instead of reaching a typed
 # model as an unvalidated string.
@@ -588,7 +593,8 @@ def _owns_pending_admission(
 ) -> bool:
     """A late admission observer cannot replace a newer lifecycle decision."""
     return (
-        row.state in {"queued", "waiting-for-operator"}
+        row.state
+        in job_states.words(LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR)
         and progress.admission_pending
         and progress.cancellation is None
     )
@@ -1641,7 +1647,12 @@ class RunSwitchFleetProfileAdapter:
             # So is a legacy ``waiting-for-operator`` child (no Run/Switch action
             # exists; its own tick heals it): the profile mirrors it as running and
             # observes it again, never as a wait of its own.
-            if child.state in {"queued", "running", "waiting", "waiting-for-operator"}:
+            if child.state in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.OBSERVING,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
                 view = self._view_from_child(application_id, state, child)
                 new_progress = (
                     view.progress.model_dump(mode="json")
@@ -2630,7 +2641,8 @@ class RunSwitchFleetProfileAdapter:
         )
         child_state = _operation_state(
             "running"
-            if child.state in {"waiting", "waiting-for-operator"}
+            if child.state
+            in job_states.words(LifecycleState.OBSERVING, LifecycleState.NEEDS_OPERATOR)
             else child.state,
             default="running",
         )
@@ -4813,7 +4825,13 @@ class FleetProfileService:
             # before publishing its final no-workload receipt.
             for pending in session.scalars(
                 select(Job).where(
-                    Job.state.in_(("queued", "running", "waiting-for-operator"))
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    )
                 )
             ):
                 if type(pending.payload.get("workload_intent_ordinal")) is not int:
@@ -4835,7 +4853,11 @@ class FleetProfileService:
             for pending in session.scalars(
                 select(FleetProfileApplication).where(
                     FleetProfileApplication.state.in_(
-                        ("queued", "running", "waiting-for-operator")
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
                     ),
                 )
             ):
@@ -5048,7 +5070,13 @@ class FleetProfileService:
             return effects
         for pending in session.scalars(
             select(Job).where(
-                Job.state.in_(("queued", "running", "waiting-for-operator"))
+                Job.state.in_(
+                    job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.NEEDS_OPERATOR,
+                    )
+                )
             )
         ):
             if type(pending.payload.get("workload_intent_ordinal")) is not int:
@@ -5063,7 +5091,11 @@ class FleetProfileService:
         for pending in session.scalars(
             select(FleetProfileApplication).where(
                 FleetProfileApplication.state.in_(
-                    ("queued", "running", "waiting-for-operator")
+                    job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.NEEDS_OPERATOR,
+                    )
                 ),
             )
         ):
@@ -5445,7 +5477,11 @@ class FleetProfileService:
                     .where(
                         FleetProfileApplication.id != application_id,
                         FleetProfileApplication.state.in_(
-                            ("queued", "running", "waiting-for-operator")
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
                         ),
                     )
                     .order_by(FleetProfileApplication.id)
@@ -5649,7 +5685,7 @@ class FleetProfileService:
             # admission boundary; this read never refreshes the approved intent.
             replay = self._load_replay(profile_id, request_key=request_key, actor=actor)
             if replay is not None:
-                if replay.state == "waiting-for-operator":
+                if replay.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
                     self._discard_pending_application(replay.id)
                     raise
                 return replay
@@ -5898,7 +5934,11 @@ class FleetProfileService:
                     .where(
                         FleetProfileApplication.id != application_id,
                         FleetProfileApplication.state.in_(
-                            ("queued", "running", "waiting-for-operator")
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
                         ),
                     )
                     .limit(1)
@@ -5922,7 +5962,9 @@ class FleetProfileService:
                 if parent is None:
                     raise KeyError(retry_of_application_id)
                 prior = retry_parent_progress or _persisted_profile_progress(parent)
-                if parent.state not in {"failed", "waiting-for-operator"}:
+                if parent.state not in job_states.words(
+                    LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+                ):
                     raise FleetProfileConflict(
                         "Only failed or waiting applications can be retried"
                     )
@@ -6127,7 +6169,11 @@ class FleetProfileService:
                     select(FleetProfileApplication)
                     .where(
                         FleetProfileApplication.state.in_(
-                            ("queued", "running", "waiting-for-operator")
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
                         )
                     )
                     .order_by(FleetProfileApplication.id)
@@ -6415,7 +6461,10 @@ class FleetProfileService:
             )
             if (
                 row is None
-                or row.state not in {"failed", "waiting-for-operator"}
+                or row.state
+                not in job_states.words(
+                    LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+                )
                 or not row.current_operation_id
                 or self._switch_adapter is None
             ):
@@ -6446,7 +6495,9 @@ class FleetProfileService:
             return row is not None and self._retry_eligible(session, row)
 
     def _retry_eligible(self, session: Session, row: FleetProfileApplication) -> bool:
-        if row.state not in {"failed", "waiting-for-operator"}:
+        if row.state not in job_states.words(
+            LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+        ):
             return False
         try:
             progress = _canonical_progress(row.progress)
@@ -6554,7 +6605,11 @@ class FleetProfileService:
                         select(FleetProfileApplication).where(
                             FleetProfileApplication.id != application_id,
                             FleetProfileApplication.state.in_(
-                                ("queued", "running", "waiting-for-operator")
+                                job_states.words(
+                                    LifecycleState.QUEUED,
+                                    LifecycleState.RUNNING,
+                                    LifecycleState.NEEDS_OPERATOR,
+                                )
                             ),
                         )
                     )
@@ -6821,7 +6876,9 @@ class FleetProfileService:
             if parent is None:
                 raise KeyError(application_id)
             progress = _persisted_profile_progress(parent)
-            if parent.state not in {"failed", "waiting-for-operator"}:
+            if parent.state not in job_states.words(
+                LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+            ):
                 raise FleetProfileConflict(
                     "Only failed or waiting applications can be retried"
                 )
@@ -7111,7 +7168,9 @@ class FleetProfileService:
                 else None
             )
         failure = None
-        if state in {"failed", "waiting-for-operator"}:
+        if state in job_states.words(
+            LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+        ):
             # A failed row that recorded no reason still shows what is known of it.
             reason = (
                 row.status_reason
@@ -7166,7 +7225,13 @@ class FleetProfileService:
             ),
             "blockers": (
                 [item.model_dump(mode="json") for item in typed_progress.blockers]
-                if state in {"queued", "running", "failed", "waiting-for-operator"}
+                if state
+                in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.FAILED,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
                 else []
             ),
             "next_attempt_at": next_attempt.isoformat()
@@ -7354,7 +7419,12 @@ class FleetProfileService:
                     session, row, progress
                 )
                 if (
-                    row.state not in {"queued", "running", "waiting-for-operator"}
+                    row.state
+                    not in job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.NEEDS_OPERATOR,
+                    )
                     and not retrying_failure
                 ):
                     raise FleetProfileConflict("Profile application is not cancellable")
@@ -7474,7 +7544,11 @@ class FleetProfileService:
         observation_due = cancellation["observation_due_at"].as_string()
         eligible = (
             FleetProfileApplication.state.in_(
-                ("queued", "running", "waiting-for-operator")
+                job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
             )
             & (cancellation_state == "cancelling")
             & (func.coalesce(observation_due, "") <= now.isoformat())
@@ -8365,7 +8439,9 @@ class FleetProfileService:
                     select(FleetProfileApplication.id, FleetProfileApplication.actor)
                     .where(
                         FleetProfileApplication.state.in_(
-                            ("queued", "waiting-for-operator")
+                            job_states.words(
+                                LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
+                            )
                         ),
                         FleetProfileApplication.current_operation_id.is_(None),
                         FleetProfileApplication.current_step == 0,
@@ -8398,7 +8474,9 @@ class FleetProfileService:
                 select(FleetProfileApplication)
                 .where(
                     FleetProfileApplication.state.in_(
-                        ("queued", "waiting-for-operator")
+                        job_states.words(
+                            LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
+                        )
                     ),
                     admission_pending,
                     or_(retry_at.is_(None), retry_at <= retry_cutoff_text),
@@ -8541,7 +8619,9 @@ class FleetProfileService:
                 session.scalars(
                     select(FleetProfileApplication)
                     .where(
-                        FleetProfileApplication.state == "waiting-for-operator",
+                        FleetProfileApplication.state.in_(
+                            job_states.words(LifecycleState.NEEDS_OPERATOR)
+                        ),
                         func.coalesce(
                             FleetProfileApplication.progress["cancellation"][
                                 "state"
@@ -8696,9 +8776,8 @@ class FleetProfileService:
                     else None
                 ),
             )
-            if (
-                child.state in _CHILD_PENDING_STATES
-                or child.state == "waiting-for-operator"
+            if child.state in _CHILD_PENDING_STATES or child.state in job_states.words(
+                LifecycleState.NEEDS_OPERATOR
             ):
                 row.status_reason = (
                     child.status_reason
@@ -8925,7 +9004,9 @@ class FleetProfileService:
                 select(FleetProfileApplication)
                 .where(
                     FleetProfileApplication.state.in_(
-                        ("failed", "waiting-for-operator")
+                        job_states.words(
+                            LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+                        )
                     ),
                     or_(
                         retry_at.is_(None),
@@ -9905,7 +9986,13 @@ class FleetProfileService:
             result=_persisted_profile_result(row),
             blockers=(
                 list(progress.blockers)
-                if state in {"queued", "running", "failed", "waiting-for-operator"}
+                if state
+                in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.FAILED,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
                 else []
             ),
             next_attempt_at=next_attempt_at,

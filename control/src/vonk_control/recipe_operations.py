@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    LifecycleState,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeInstallPayload,
@@ -35,7 +36,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import read_model, read_recipe
 
-from . import agent_operation_states, artifact_job_states
+from . import agent_operation_states, artifact_job_states, job_states
 from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -427,7 +428,11 @@ class RecipeRunStatus:
 
 
 new_recipe_job = RecipeOperationAdapter.new_job
-_TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
+_TERMINAL_JOB_STATES = frozenset(
+    job_states.words(
+        LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+    )
+)
 _INITIAL_OBSERVATION_GRACE_SECONDS = 120
 # A Stop withdraws the run's route again if a competing publication listed it
 # between the withdrawal and the dispatch.
@@ -548,7 +553,11 @@ def _active_owned_workload_jobs(
         .where(
             Job.kind == kind,
             Job.state.in_(
-                ("queued", "running", "waiting-for-operator")
+                job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
                 if include_waiting_cancellation
                 else ("queued", "running")
             ),
@@ -562,7 +571,7 @@ def _active_owned_workload_jobs(
     return tuple(
         job
         for job in session.scalars(statement)
-        if job.state != "waiting-for-operator"
+        if job.state not in job_states.words(LifecycleState.NEEDS_OPERATOR)
         or (
             isinstance(job.result, Mapping)
             and job.result.get("cancel_requested") is True
@@ -859,7 +868,13 @@ class RecipeOperationService:
                 select(Job).where(
                     Job.kind == "recipe.build.v1",
                     Job.payload["owner_id"].as_string() == plan.build_id,
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
                 )
             )
@@ -913,7 +928,11 @@ class RecipeOperationService:
                     .where(
                         Job.kind == "recipe.build.v1",
                         Job.state.in_(
-                            ("failed", "waiting-for-operator", "expired", "cancelled")
+                            job_states.words(
+                                LifecycleState.FAILED,
+                                LifecycleState.NEEDS_OPERATOR,
+                                LifecycleState.CANCELLED,
+                            )
                         ),
                         Job.payload["owner_id"].as_string() == build.id,
                         Job.payload["plan_digest"].as_string()
@@ -1267,7 +1286,13 @@ class RecipeOperationService:
                 select(Job.id)
                 .where(
                     Job.kind == "recipe.reconcile",
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     Job.payload["owner_kind"].as_string() == "installation",
                     Job.payload["owner_id"].as_string() == installation_id,
                 )
@@ -1535,7 +1560,13 @@ class RecipeOperationService:
                     select(Job)
                     .where(
                         Job.kind.in_({"recipe.start", "recipe.stop"}),
-                        Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
+                        ),
                         Job.payload["owner_kind"].as_string() == "run",
                         Job.payload["owner_id"].as_string() == run.id,
                     )
@@ -1557,7 +1588,7 @@ class RecipeOperationService:
                     )
                 elif job.state == "running":
                     state = "running"
-                elif job.state == "waiting-for-operator":
+                elif job.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
                     state = "waiting-for-operator"
                 else:
                     continue
@@ -1780,7 +1811,13 @@ class RecipeOperationService:
                 select(Job.id)
                 .where(
                     Job.kind.in_(("recipe.uninstall", "recipe.reconcile")),
-                    Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     Job.payload["owner_kind"].as_string() == "installation",
                     Job.payload["owner_id"].as_string() == plan.installation_id,
                 )
@@ -2896,7 +2933,13 @@ class RecipeOperationService:
         active_jobs = tuple(
             session.scalars(
                 select(Job).where(
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     Job.payload["owner_kind"].as_string() == "installation",
                     Job.payload["owner_id"].as_string() == installation.id,
                     Job.kind.in_(
@@ -2909,7 +2952,13 @@ class RecipeOperationService:
             tuple(
                 session.scalars(
                     select(Job).where(
-                        Job.state.in_(("queued", "running", "waiting-for-operator")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
+                        ),
                         Job.payload["owner_kind"].as_string() == "run",
                         Job.payload["owner_id"].as_string().in_(run_ids),
                         Job.kind.in_(("recipe.start", "recipe.stop")),
@@ -3188,7 +3237,13 @@ class RecipeOperationService:
             )
 
         active_jobs_statement = select(Job).where(
-            Job.state.in_(("queued", "running", "waiting-for-operator")),
+            Job.state.in_(
+                job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.NEEDS_OPERATOR,
+                )
+            ),
             Job.payload["owner_kind"].as_string() == "installation",
             Job.payload["owner_id"].as_string() == installation.id,
             Job.kind.in_(("recipe.install", "recipe.uninstall", "recipe.reconcile")),
@@ -3201,7 +3256,13 @@ class RecipeOperationService:
             tuple(
                 session.scalars(
                     select(Job).where(
-                        Job.state.in_(("queued", "running", "waiting-for-operator")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
+                        ),
                         Job.payload["owner_kind"].as_string() == "run",
                         Job.payload["owner_id"].as_string().in_(run_ids),
                         Job.kind.in_(("recipe.start", "recipe.stop")),
@@ -3834,7 +3895,9 @@ class RecipeOperationService:
         now: datetime,
         intent: RecipeBuildIntent,
     ) -> Job:
-        if previous.state not in {"failed", "waiting-for-operator", "expired"}:
+        if previous.state not in job_states.words(
+            LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+        ):
             raise RecipeOperationConflict("recipe build is not retryable")
         if build_cancellation(previous) is not None:
             raise RecipeOperationConflict(
@@ -4907,7 +4970,7 @@ class RecipeOperationService:
             already_invalidated = superseded and (
                 job.state in {"cancelled", "failed"}
                 or (
-                    job.state == "waiting-for-operator"
+                    job.state in job_states.words(LifecycleState.NEEDS_OPERATOR)
                     and isinstance(job.result, Mapping)
                     and job.result.get("cancel_requested") is True
                 )
@@ -4958,7 +5021,11 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(
                     "cancellation request key was already used differently"
                 )
-            if job.state not in {"queued", "running", "waiting-for-operator"}:
+            if job.state not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
                 # A cancel always completes (rule 4): a parent that mirrors an
                 # order's wait (the Stop of a one-shot job in doubt, a legacy
                 # parked order) accepts it, and the orders end it.
@@ -4987,7 +5054,11 @@ class RecipeOperationService:
                         child, None, job, Outcome.CANCELLED, now
                     )
             if any(
-                child.state in {"running", "waiting-for-operator"} for child in children
+                child.state
+                in job_states.words(
+                    LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+                )
+                for child in children
             ):
                 job.result = _validated_result(
                     job.kind,
@@ -5038,7 +5109,13 @@ class RecipeOperationService:
                 select(Job)
                 .where(
                     Job.kind == "recipe.build.v1",
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     or_(
                         _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
                         Job.payload["build_intent"]["kind"].as_string() == "dependency",
@@ -5190,11 +5267,11 @@ class RecipeOperationService:
                 if completed:
                     reason = "exact cleanup confirmed; capacity released"
                 elif existing is not None:
-                    if existing.state in {
-                        "failed",
-                        "cancelled",
-                        "waiting-for-operator",
-                    }:
+                    if existing.state in job_states.words(
+                        LifecycleState.FAILED,
+                        LifecycleState.CANCELLED,
+                        LifecycleState.NEEDS_OPERATOR,
+                    ):
                         reason = (
                             f"exact cleanup {existing.id} is {existing.state}: "
                             f"{existing.status_reason or 'inspect its retained failure evidence'}; "
@@ -5310,7 +5387,11 @@ class RecipeOperationService:
             job = session.get(Job, job_id, with_for_update={"nowait": True})
             if job is None or job.state == "cancelled":
                 return False
-            if job.state not in {"queued", "running", "waiting-for-operator"}:
+            if job.state not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
                 raise RecipeOperationConflict("recipe build is not cancellable")
             build = session.get(
                 RecipeBuild,
@@ -5389,7 +5470,11 @@ class RecipeOperationService:
                 raise RecipeOperationConflict("recipe build authority changed")
             if job.state == "cancelled":
                 return False
-            if job.state not in {"queued", "running", "waiting-for-operator"}:
+            if job.state not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            ):
                 raise RecipeOperationConflict("recipe build is not cancellable")
             children = tuple(
                 session.scalars(
@@ -5491,7 +5576,13 @@ class RecipeOperationService:
             .where(
                 Job.kind == "recipe.build.v1",
                 Job.payload["owner_id"].as_string() == build_id,
-                Job.state.in_(("queued", "running", "waiting-for-operator")),
+                Job.state.in_(
+                    job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.NEEDS_OPERATOR,
+                    )
+                ),
             )
             .limit(1)
         )
@@ -6601,7 +6692,13 @@ class RecipeOperationService:
             select(Job)
             .where(
                 Job.kind.in_(("recipe.uninstall", "recipe.reconcile")),
-                Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                Job.state.in_(
+                    job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.NEEDS_OPERATOR,
+                    )
+                ),
                 Job.payload["owner_id"].as_string() == installation_id,
             )
             .order_by(Job.id)
@@ -6615,7 +6712,13 @@ class RecipeOperationService:
                 select(Job.id)
                 .where(
                     Job.kind == "recipe.reconcile",
-                    Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
                     Job.payload["owner_id"].as_string() == installation_id,
                 )
                 .limit(1)
@@ -7168,7 +7271,12 @@ class RecipeOperationService:
                 )
             )
             if session is not None
-            and job.state in {"queued", "running", "waiting-for-operator"}
+            and job.state
+            in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            )
             else ()
         )
         retry_due_at = min(

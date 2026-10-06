@@ -14,11 +14,11 @@ import httpx2
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_agent_protocol import AgentResult, LifecycleState, canonical_message
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.package_source import AgentPackageSource
 
-from . import agent_operation_states
+from . import agent_operation_states, job_states
 from .agent_jobs import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     AgentJobService,
@@ -42,7 +42,9 @@ _ONLINE_WINDOW = timedelta(seconds=150)
 # An ambiguous install result can leave durable apt/dpkg recovery in progress.
 # Every automatic retry waits through this controller safety window.
 _AGENT_UPGRADE_RECOVERY_FENCE = AGENT_UPGRADE_RECOVERY_FENCE
-_ACTIVE_ROLLOUT_STATES = ("queued", "running", "waiting-for-operator")
+_ACTIVE_ROLLOUT_STATES = job_states.words(
+    LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+)
 _ALREADY_CURRENT = "already runs the requested agent build"
 
 
@@ -468,7 +470,10 @@ class AgentUpgradeService:
             )
             stale_dispatch = parent.state == "running"
             if (
-                parent.state not in {"queued", "waiting-for-operator"}
+                parent.state
+                not in job_states.words(
+                    LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
+                )
                 and not failed_dispatch
                 and not stale_dispatch
             ):
@@ -497,7 +502,10 @@ class AgentUpgradeService:
                 ):
                     raise ValueError("failed agent upgrade dispatch audit is invalid")
                 if stale_dispatch and (
-                    worker_attempt is None or worker_attempt.state != "expired"
+                    worker_attempt is None
+                    or not job_states.attempt_means(
+                        worker_attempt.state, LifecycleState.OBSERVING
+                    )
                 ):
                     raise ValueError("agent upgrade worker dispatch is not stale")
             package = parent.payload.get("package")
@@ -737,7 +745,12 @@ class AgentUpgradeService:
                     .where(
                         Job.kind == "agent-upgrade",
                         or_(
-                            Job.state.in_(("waiting-for-operator", "running")),
+                            Job.state.in_(
+                                job_states.words(
+                                    LifecycleState.NEEDS_OPERATOR,
+                                    LifecycleState.RUNNING,
+                                )
+                            ),
                             and_(
                                 Job.state == "failed",
                                 Job.status_reason == UNSUPPORTED_DISPATCH,
@@ -951,7 +964,7 @@ class AgentUpgradeService:
             or agent_upgrade_in_flight(session, operation, now)
             for operation in operations
         ):
-            if parent.state == "waiting-for-operator":
+            if parent.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
                 # A legacy wait: no action exists for a rollout, and its orders
                 # are moving by themselves.
                 self._rollouts.project(parent, now)

@@ -31,13 +31,14 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
+    LifecycleState,
     OperationMemberProgress,
     OperationProgress,
     canonical_message,
 )
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
-from . import model_cache_states
+from . import job_states, model_cache_states
 from .admission_locking import is_admission_contention
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -928,7 +929,14 @@ class RecipeImageAvailabilityService:
         if (
             operation.kind != REMOVE_OPERATION_KIND
             or operation.state
-            not in {"queued", "running", "partial", "succeeded", "failed", "cancelled"}
+            not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.BACKOFF,
+                LifecycleState.SUCCEEDED,
+                LifecycleState.FAILED,
+                LifecycleState.CANCELLED,
+            )
             or operation.actor != intent.actor
             or operation.request_id != intent.request_key
             or operation.authority_revision != intent.recipe_revision_id
@@ -939,7 +947,9 @@ class RecipeImageAvailabilityService:
                 "recipe_image.operation_invalid",
                 "stored recipe removal plan does not match its Job owner",
             )
-        if operation.state in {"queued", "running", "partial"} and (
+        if operation.state in job_states.words(
+            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+        ) and (
             owner.checkpoint.failure is not None
             and not owner.checkpoint.failure.retryable
         ):
@@ -1969,7 +1979,13 @@ class RecipeImageAvailabilityService:
                     select(Job.id, Job.updated_at)
                     .where(
                         Job.kind == REMOVE_OPERATION_KIND,
-                        Job.state.in_(("queued", "running", "partial")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.BACKOFF,
+                            )
+                        ),
                     )
                     .order_by(Job.updated_at, Job.id)
                     .limit(64)
@@ -2009,7 +2025,12 @@ class RecipeImageAvailabilityService:
             if (
                 operation is None
                 or operation.kind != REMOVE_OPERATION_KIND
-                or operation.state not in {"queued", "running", "partial"}
+                or operation.state
+                not in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.BACKOFF,
+                )
             ):
                 return False
             owner = self._read_removal_owner(operation)
@@ -2125,11 +2146,9 @@ class RecipeImageAvailabilityService:
                 .execution_options(populate_existing=True)
                 .with_for_update(nowait=True)
             )
-            if operation is None or operation.state not in {
-                "queued",
-                "running",
-                "partial",
-            }:
+            if operation is None or operation.state not in job_states.words(
+                LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+            ):
                 return None
             owner = self._read_removal_owner(operation)
             checkpoint = owner.checkpoint
@@ -2185,11 +2204,9 @@ class RecipeImageAvailabilityService:
                 .execution_options(populate_existing=True)
                 .with_for_update(nowait=True)
             )
-            if operation is None or operation.state not in {
-                "queued",
-                "running",
-                "partial",
-            }:
+            if operation is None or operation.state not in job_states.words(
+                LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+            ):
                 return False
             owner = self._read_removal_owner(operation)
             checkpoint = owner.checkpoint
@@ -2339,11 +2356,9 @@ class RecipeImageAvailabilityService:
                 .execution_options(populate_existing=True)
                 .with_for_update(nowait=True)
             )
-            if operation is None or operation.state not in {
-                "queued",
-                "running",
-                "partial",
-            }:
+            if operation is None or operation.state not in job_states.words(
+                LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+            ):
                 return False
             owner = self._read_removal_owner(operation)
             checkpoint = owner.checkpoint
@@ -2386,11 +2401,11 @@ class RecipeImageAvailabilityService:
                     .execution_options(populate_existing=True)
                     .with_for_update(nowait=True)
                 )
-                if operation is None or operation.state not in {
-                    "queued",
-                    "running",
-                    "partial",
-                }:
+                if operation is None or operation.state not in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.BACKOFF,
+                ):
                     return False
                 owner = self._read_removal_owner(operation)
                 checkpoint = owner.checkpoint
@@ -2475,11 +2490,11 @@ class RecipeImageAvailabilityService:
                     .execution_options(populate_existing=True)
                     .with_for_update(nowait=True)
                 )
-                if operation is None or operation.state not in {
-                    "queued",
-                    "running",
-                    "partial",
-                }:
+                if operation is None or operation.state not in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.BACKOFF,
+                ):
                     return False
                 owner = self._read_removal_owner(operation)
                 checkpoint = owner.checkpoint
@@ -2678,7 +2693,9 @@ class RecipeImageAvailabilityService:
                 "recipe_image.cancel_request_key_reused",
                 "operation already has a different cancellation request",
             )
-        if job.state not in {"queued", "running", "partial"}:
+        if job.state not in job_states.words(
+            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+        ):
             raise RecipeImageAvailabilityError(
                 "recipe_image.not_cancellable",
                 "recipe operation is no longer active",
@@ -2762,7 +2779,11 @@ class RecipeImageAvailabilityService:
                 return None
             current = self._stored_cancellation(job)
             if current is None:
-                if job.state not in {"queued", "running", "partial"}:
+                if job.state not in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.BACKOFF,
+                ):
                     return self._view(job)
                 self._request_cancellation(
                     session,
@@ -2793,7 +2814,7 @@ class RecipeImageAvailabilityService:
                     select(Job.id)
                     .where(
                         Job.kind == OPERATION_KIND,
-                        Job.state == "cancelling",
+                        Job.state.in_(job_states.words(LifecycleState.OBSERVING)),
                     )
                     .order_by(Job.updated_at, Job.id)
                     .limit(limit)
@@ -2909,7 +2930,13 @@ class RecipeImageAvailabilityService:
                     .where(
                         Job.id != operation_id,
                         Job.kind == OPERATION_KIND,
-                        Job.state.in_(("queued", "running", "partial")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.BACKOFF,
+                            )
+                        ),
                         Job.payload["model_child"]["id"].as_string() == model_child.id,
                     )
                     .limit(1)
@@ -2984,11 +3011,11 @@ class RecipeImageAvailabilityService:
                 else:
                     child_query = child_query.where(Job.request_id == request_key)
                 child = session.scalar(child_query)
-                if child is None or child.state not in {
-                    "queued",
-                    "running",
-                    "waiting-for-operator",
-                }:
+                if child is None or child.state not in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.NEEDS_OPERATOR,
+                ):
                     return False
                 owner_id = (
                     child.payload.get("owner_id")
@@ -3029,7 +3056,13 @@ class RecipeImageAvailabilityService:
                     select(Job)
                     .where(
                         Job.id == child.id,
-                        Job.state.in_(("queued", "running", "waiting-for-operator")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.NEEDS_OPERATOR,
+                            )
+                        ),
                     )
                     .with_for_update(nowait=True)
                     .execution_options(populate_existing=True)
@@ -3066,7 +3099,7 @@ class RecipeImageAvailabilityService:
             if (
                 operation is None
                 or operation.kind != OPERATION_KIND
-                or operation.state != "cancelling"
+                or operation.state not in job_states.words(LifecycleState.OBSERVING)
                 or operation.current_attempt != claim.execution_attempt
                 or not isinstance(operation.payload, Mapping)
                 or operation.payload.get("claim_owner") != claim.claim_owner
@@ -3094,7 +3127,7 @@ class RecipeImageAvailabilityService:
                 )
                 if (
                     operation is None
-                    or operation.state != "cancelling"
+                    or operation.state not in job_states.words(LifecycleState.OBSERVING)
                     or operation.current_attempt != claim.execution_attempt
                     or not isinstance(operation.payload, Mapping)
                     or operation.payload.get("claim_owner") != claim.claim_owner
@@ -3149,7 +3182,9 @@ class RecipeImageAvailabilityService:
                     .with_for_update(nowait=True)
                     .execution_options(populate_existing=True)
                 )
-                if current is None or current.state != "cancelling":
+                if current is None or current.state not in job_states.words(
+                    LifecycleState.OBSERVING
+                ):
                     return False
                 row = self._lifecycle.lifecycle(current, now)
                 if row.observe_count < STOP_BUDGET:
@@ -3167,7 +3202,7 @@ class RecipeImageAvailabilityService:
             if (
                 operation is None
                 or operation.kind != OPERATION_KIND
-                or operation.state != "cancelling"
+                or operation.state not in job_states.words(LifecycleState.OBSERVING)
             ):
                 return False
             cancellation = self._stored_cancellation(operation)
@@ -3230,7 +3265,9 @@ class RecipeImageAvailabilityService:
                 .with_for_update(nowait=True)
                 .execution_options(populate_existing=True)
             )
-            if current is None or current.state != "cancelling":
+            if current is None or current.state not in job_states.words(
+                LifecycleState.OBSERVING
+            ):
                 return child_changed
             current_cancellation = self._stored_cancellation(current)
             if (
@@ -3327,7 +3364,11 @@ class RecipeImageAvailabilityService:
                 )
                 if job is None:
                     break
-                if job.state in {"queued", "running", "partial"}:
+                if job.state in job_states.words(
+                    LifecycleState.QUEUED,
+                    LifecycleState.RUNNING,
+                    LifecycleState.BACKOFF,
+                ):
                     self._request_cancellation(
                         session,
                         job,
@@ -4084,7 +4125,14 @@ class RecipeImageAvailabilityService:
                     .select_from(Job)
                     .where(
                         Job.kind.in_((OPERATION_KIND, REMOVE_OPERATION_KIND)),
-                        Job.state.in_(("queued", "running", "partial", "cancelling")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.BACKOFF,
+                                LifecycleState.OBSERVING,
+                            )
+                        ),
                     )
                 )
                 or 0
@@ -4135,7 +4183,13 @@ class RecipeImageAvailabilityService:
                     select(Job.id)
                     .where(
                         Job.kind == OPERATION_KIND,
-                        Job.state.in_(("queued", "running", "partial")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.BACKOFF,
+                            )
+                        ),
                     )
                     .order_by(Job.updated_at, Job.id)
                     .limit(max(limit * 8, _CLAIM_SCAN_WINDOW))
@@ -4147,7 +4201,13 @@ class RecipeImageAvailabilityService:
                     .where(
                         Job.id == operation_id,
                         Job.kind == OPERATION_KIND,
-                        Job.state.in_(("queued", "running", "partial")),
+                        Job.state.in_(
+                            job_states.words(
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.BACKOFF,
+                            )
+                        ),
                     )
                     .with_for_update(skip_locked=True)
                 )
@@ -4158,9 +4218,9 @@ class RecipeImageAvailabilityService:
                 )
                 if not self._retry_due(payload, now):
                     continue
-                if operation.state == "partial" and self._park_for_model(
-                    operation, payload, now
-                ):
+                if operation.state in job_states.words(
+                    LifecycleState.BACKOFF
+                ) and self._park_for_model(operation, payload, now):
                     # Only the model download is outstanding: no worker slot is
                     # spent polling it, so ready work is never queued behind it.
                     continue
@@ -4498,7 +4558,7 @@ class RecipeImageAvailabilityService:
         ):
             return None
         if (
-            operation.state == "cancelling"
+            operation.state in job_states.words(LifecycleState.OBSERVING)
             and self._stored_cancellation(operation) is None
         ):
             return None
@@ -4831,7 +4891,7 @@ class RecipeImageAvailabilityService:
                 or operation.payload.get("claim_owner") != claim.claim_owner
             ):
                 raise _AvailabilityClaimLost()
-            cancelling = operation.state == "cancelling"
+            cancelling = operation.state in job_states.words(LifecycleState.OBSERVING)
             if not cancelling and operation.state != "running":
                 raise _AvailabilityClaimLost()
             if (
@@ -4998,7 +5058,11 @@ class RecipeImageAvailabilityService:
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         with self._sessions.begin() as session:
             operation = self._claim_operation(
-                session, claim, allowed_states=("running", "cancelling")
+                session,
+                claim,
+                allowed_states=job_states.words(
+                    LifecycleState.RUNNING, LifecycleState.OBSERVING
+                ),
             )
             if operation is None:
                 return False
@@ -5065,7 +5129,11 @@ class RecipeImageAvailabilityService:
         )
         with self._sessions.begin() as session:
             operation = self._require_claim(
-                session, claim, allowed_states=("running", "cancelling")
+                session,
+                claim,
+                allowed_states=job_states.words(
+                    LifecycleState.RUNNING, LifecycleState.OBSERVING
+                ),
             )
             try:
                 require_reference_open(
@@ -5492,7 +5560,8 @@ class RecipeImageAvailabilityService:
         raw_retry_at = payload.get("retry_after_at")
         next_attempt_at = (
             raw_retry_at
-            if operation.state in {"queued", "partial"}
+            if operation.state
+            in job_states.words(LifecycleState.QUEUED, LifecycleState.BACKOFF)
             and isinstance(raw_retry_at, str)
             else None
         )
@@ -5530,7 +5599,10 @@ class RecipeImageAvailabilityService:
             cancellation=self._stored_cancellation(operation),
             blockers=tuple(
                 read_blockers(payload.get("blockers"))
-                if operation.state in {"queued", "partial", "failed"}
+                if operation.state
+                in job_states.words(
+                    LifecycleState.QUEUED, LifecycleState.BACKOFF, LifecycleState.FAILED
+                )
                 else ()
             ),
             next_attempt_at=next_attempt_at,
