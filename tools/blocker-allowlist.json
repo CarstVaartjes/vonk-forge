@@ -58,7 +58,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 74,
-    "unaudited": 308,
+    "unaudited": 267,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
   "categorized_raises": {
@@ -1855,10 +1855,11 @@
       ]
     },
     {
-      "family": "profile_stop_authority.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "family": "profile_stop_authority.security-edge",
+      "category": "security-edge",
+      "reason": "Exact destructive-effect consent and target fences: reject changed profile intent, generation, reviewed plan, child identity or ambiguous source authority before issuing Stop. Historical launch history is handled separately by durable run ownership; these checks remain fail closed.",
       "sites": [
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "profile-stop-target-is-not-authorized", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopAuthorization.identities_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-child-set-is-inconsistent", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-parent-identity-is-inconsistent", 1],
@@ -1882,14 +1883,6 @@
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-run-generation-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-run-membership-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-workload-intent-changed", 1]
-      ]
-    },
-    {
-      "family": "profile_stop_authority.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
-      "sites": [
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "profile-stop-target-is-not-authorized", 1]
       ]
     },
     {
@@ -2082,7 +2075,9 @@
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteNotReady", "RecipeRouteService.candidate_in_session", "recipe-endpoint-owner-is-awaiting-exact-readiness", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteNotReady", "RecipeRouteService.candidate_in_session", "recipe-rank-is-awaiting-current-exact-observation", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteSuperseded", "RecipeRouteService._execute", "route-publication-was-superseded", 2],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteSuperseded", "RecipeRouteService._record_completion", "route-publication-was-superseded", 1]
+        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteSuperseded", "RecipeRouteService._record_completion", "route-publication-was-superseded", 1],
+        ["control/src/vonk_control/recipe_routes.py", "RecipeRankStopped", "RecipeRouteService.candidate_in_session", "recipe-rank-reports-a-stopped-or-failed-workload", 1],
+        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteNotReady", "RecipeRouteService.candidate_in_session", "every-recipe-rank-must-be-running", 1]
       ]
     },
     {
@@ -2102,7 +2097,6 @@
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-rank-set-does-not-match-accepted-plan", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-rank-set-is-not-exact", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-run-must-have-exactly-one-mapped-endpoint-owner-entry", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "spark", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "stored-recipe-run-plan-is-invalid", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "_endpoint", "entrypoint-endpoint-evidence-is-missing", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "_endpoint", "entrypoint-endpoint-is-invalid", 2],
@@ -2119,7 +2113,6 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
       "sites": [
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "every-recipe-rank-must-be-running", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-route-clock-must-be-timezone-aware", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-run-alias-is-invalid-or-duplicated", 1]
       ]
@@ -2172,22 +2165,7 @@
       "sites": [
         ["control/src/vonk_control/recipe_stop_payloads.py", "BookkeepingUnknown", "stop_payload_from_job_run", "job-run-generation-is-missing", 1],
         ["control/src/vonk_control/recipe_stop_payloads.py", "BookkeepingUnknown", "stop_payload_from_start", "start-generation-is-missing", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-child-differs-from-retained-phase", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-children-differ-from-retained-phases", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-parent-is-inconsistent", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-phase-identities-overlap", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-run-identity-differs", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-start-target-identity-differs", 1],
         ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-stop-identity-is-stale", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-stop-mapping-membership-differs", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-stop-run-plan-identity-differs", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-start-payload-is-invalid", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-start-phase-materialization-is-incomplete", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-start-phases-are-invalid", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-start-phases-are-missing", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-stop-lacks-an-exact-start-target-for-every-node", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-stop-lacks-durable-start-authority", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "durable_run_stop_payloads", "recipe-stop-run-plan-is-invalid", 1],
         ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "stop_payload_from_job_run", "recipe-jobrun-payload-is-invalid", 1],
         ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadUnknown", "stop_payload_from_start", "recipe-start-payload-is-invalid", 1]
       ]
@@ -2197,9 +2175,8 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
       "sites": [
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadInvalid", "durable_run_stop_payloads", "recipe-start-target-has-ambiguous-durable-plans", 1],
         ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadInvalid", "durable_run_stop_payloads", "recipe-stop-generation-is-invalid", 1],
-        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadInvalid", "durable_run_stop_payloads", "recipe-stop-target-set-is-empty", 1]
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadInvalid", "durable_run_stop_payloads", "recipe-stop-target-set-is-empty-or-duplicated", 1]
       ]
     },
     {
@@ -2261,7 +2238,6 @@
         ["control/src/vonk_control/run_admission.py", "InvalidType", "run_port_demand", "recipe-interface-port-is-invalid", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidType", "run_port_demand", "recipe-interfaces-are-invalid", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "cluster-mapping-generation-changed-after-installation", 1],
-        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "exact-model-license-authority-is-unavailable", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "exact-recipe-dependencies-are-unavailable", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "recipe-installation-is-not-complete", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "recipe-revision-is-unavailable", 1],
@@ -2607,7 +2583,6 @@
       "category": "security-edge",
       "reason": "Fence authority guarding a destructive effect: a Stop is built only from the run's exact durable Start authority, a JobRun runtime is stopped only when its exact identity matches the accepted profile Stop, and a job joins only the workload intent it was admitted under. Without that proof the Controller must not invent a destructive payload or take a newer intent, so it fails closed.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._exact_stop_authority", "recipe-stop-lacks-its-exact-durable-start-authority", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._exact_stop_authority", "recipe-stop-target-lacks-its-exact-durable-start-authority", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "accepted-profile-does-not-authorize-this-exact-jobrun-stop", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "artifact-jobrun-escaped-its-immutable-run-membership", 2],
@@ -2616,7 +2591,9 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "artifact-jobrun-request-cannot-authorize-exact-stop", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "profile-jobrun-stop-parent-contract-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "_bound_workload_intent", "workload-operation-lacks-its-admitted-intent", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "_run_start_intent", "recipe-run-lacks-its-original-workload-authority", 1]
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "_run_start_intent", "recipe-run-lacks-its-original-workload-authority", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._exact_stop_authority", "recipe-stop-exact-target-ownership-differs", 1],
+        ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-stop-run-membership-differs", 1]
       ]
     },
     {
@@ -3354,7 +3331,6 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
-        ["control/src/vonk_control/install_admission.py", "BookkeepingUnknown", "InstallAdmissionService.plan_install", "exact-model-license-authority-is-unavailable", 1],
         ["control/src/vonk_control/install_admission.py", "BookkeepingUnknown", "InstallAdmissionService.plan_install", "exact-recipe-dependencies-are-unavailable", 1],
         ["control/src/vonk_control/install_admission.py", "InstallAdmissionBusy", "InstallAdmissionService._accept_install_in_session", "install-target-membership-changed-during-admission", 1],
         ["control/src/vonk_control/install_admission.py", "InstallAdmissionBusy", "InstallAdmissionService.accept_install_in_session", "install.capacity_busy", 2],

@@ -1102,3 +1102,58 @@ def test_installation_cleanup_does_not_require_original_install_job(tmp_path):
     authority = service.preview_reconciliation_authority(installed.owner_id)
     assert authority.installation_id == installed.owner_id
     assert {target.node_id for target in authority.targets} == set(nodes)
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
+    from datetime import timedelta
+
+    sessions, service, _queue, installation, started, nodes = _running_recipe(tmp_path)
+    with sessions() as session:
+        original = _required(session.get(Job, started.id))
+        ordinal = recipe_operations._bound_workload_intent(original)
+    request_id = str(uuid.uuid4())
+    reason, completed, advanced = service._retirement_cleanup(
+        original, request_id, "recipe.stop", "run", started.owner_id, ordinal
+    )
+    assert advanced and not completed, reason
+    with sessions.begin() as session:
+        first = _required(
+            session.scalar(select(Job).where(Job.request_id == request_id))
+        )
+        first_id = first.id
+        first.state = "failed"
+        for child in session.scalars(
+            select(AgentOperation).where(AgentOperation.parent_job_id == first_id)
+        ):
+            child.state = "failed"
+    service._clock = lambda: NOW + timedelta(seconds=10)
+    reason, completed, advanced = service._retirement_cleanup(
+        original, request_id, "recipe.stop", "run", started.owner_id, ordinal
+    )
+    assert advanced and not completed, reason
+    with sessions() as session:
+        stops = tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
+        assert len(stops) == 2
+        retry = next(job for job in stops if job.id != first_id)
+        assert retry.request_id != request_id
+        assert recipe_operations._bound_workload_intent(retry) == ordinal
+    _, _, advanced = service._retirement_cleanup(
+        original, request_id, "recipe.stop", "run", started.owner_id, ordinal
+    )
+    assert not advanced
+    for node in nodes:
+        service.record_node_result(retry.id, node, succeeded=True, evidence={})
+    _, completed, _ = service._retirement_cleanup(
+        original, request_id, "recipe.stop", "run", started.owner_id, ordinal
+    )
+    assert completed
+    fresh = service.preview_run(installation.owner_id, "after-cleanup")
+    assert fresh.allowed
+    accepted = service.start(
+        fresh,
+        plan_digest=fresh.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert accepted.owner_id != started.owner_id

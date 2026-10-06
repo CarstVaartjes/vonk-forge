@@ -190,7 +190,6 @@ from .recipe_start_payloads import (
 )
 from .recipe_stop_payloads import (
     RecipeStopAuthorityError,
-    StopPayloadUnknown,
     durable_run_stop_payloads,
     stop_payload_from_job_run,
 )
@@ -3427,10 +3426,6 @@ class RecipeOperationService:
                 cancel_pending_start=True,
                 allow_missing_nodes=False,
             )
-        except StopPayloadUnknown as error:
-            raise RecipeRetryLater(
-                "recipe Stop exact ownership is awaiting observation"
-            ) from error
         except RecipeStopAuthorityError as error:
             raise RecipeStopAuthorityRefused(
                 "recipe Stop exact target ownership differs"
