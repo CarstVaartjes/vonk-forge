@@ -30,6 +30,7 @@ from vonk_control.models import (
     ModelCacheSet,
     NodeInventorySnapshot,
     RecipeBuild,
+    ResourceReservation,
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
@@ -387,10 +388,25 @@ def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_libra
         )
         assert first is not None
         document = json.loads(json.dumps(first.document))
-        # An idle Spark is never refused for its memory estimate, so the first
-        # recipe must not fit by disk, which is a measured shortfall.
-        disk = document["topology"]["roles"][0]["resources"]["disk"]
-        disk.update(artifact_bytes=20_000)
+        memory = document["topology"]["roles"][0]["resources"]["memory"]
+        memory.update(peak_bytes=20_000)
+        # An idle Spark is never refused for its declared memory estimate, so a
+        # Vonk claim must hold memory for the oversized recipe to be refused.
+        node_id = session.scalar(select(NodeInventorySnapshot.node_id))
+        assert node_id is not None
+        session.add(
+            ResourceReservation(
+                node_id=node_id,
+                kind="unified-memory",
+                resource_key="other-capacity",
+                amount_bytes=1_000,
+                owner_kind="recipe-build",
+                owner_id=str(uuid.uuid4()),
+                state="active",
+                plan_digest="f" * 64,
+                created_at=NOW,
+            )
+        )
         canonical = RecipeDefinition.model_validate(document)
         successor = CatalogDocumentRevision(
             id=str(uuid.uuid4()),
