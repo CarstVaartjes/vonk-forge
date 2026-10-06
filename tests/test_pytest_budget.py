@@ -152,3 +152,26 @@ def test_the_rerun_keeps_the_session_calibration() -> None:
     config.stash[pytest_budget._CALIBRATION] = 1.77
     env = pytest_budget._rerun_environment(config)  # type: ignore[arg-type]
     assert float(env[pytest_budget.CALIBRATION_ENV]) == pytest.approx(1.77)
+
+
+def test_the_rerun_uses_the_calibration_the_worker_judged_by(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches an xdist controller (calibrated alone, ~1x) rerunning a suspect a
+    worker judged at ~1.8x against its own tighter budget (#1164 release)."""
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(pytest_budget, "_SUSPECT_CALIBRATIONS", {})
+    monkeypatch.setattr(pytest_budget, "_SUSPECTS", {})
+    report = SimpleNamespace(
+        user_properties=[
+            (pytest_budget._SUSPECT_PROPERTY, "t.py::test_x\t1.78\ttest took 19.4s")
+        ]
+    )
+    pytest_budget.pytest_runtest_logreport(report)  # type: ignore[arg-type]
+    assert pytest_budget._SUSPECTS == {"t.py::test_x": "test took 19.4s"}
+    config = SimpleNamespace(stash=pytest.Stash())
+    config.stash[pytest_budget._CALIBRATION] = 1.0
+    env = pytest_budget._rerun_environment(config)  # type: ignore[arg-type]
+    assert float(env[pytest_budget.CALIBRATION_ENV]) == pytest.approx(1.78)

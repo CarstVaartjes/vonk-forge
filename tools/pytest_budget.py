@@ -219,7 +219,10 @@ def pytest_runtest_makereport(
         return report
     # One overrun is not evidence. The session end runs the suspects again,
     # alone; running them here would sit inside pytest-timeout's hang guard.
-    report.user_properties.append((_SUSPECT_PROPERTY, f"{item.nodeid}\t{message}"))
+    calibration = item.config.stash.get(_CALIBRATION, 1.0)
+    report.user_properties.append(
+        (_SUSPECT_PROPERTY, f"{item.nodeid}\t{calibration!r}\t{message}")
+    )
     return report
 
 
@@ -243,15 +246,21 @@ def _plugin_arguments(arguments: tuple[str, ...] | list[str]) -> list[str]:
 
 
 def _rerun_environment(config: pytest.Config) -> dict[str, str]:
-    """The rerun judges against the same scaled budget the session used.
+    """The rerun judges against the same scaled budget the overrun was judged by.
 
     A fresh process would calibrate again on a host that just went quiet, and
-    so judge the rerun against a tighter budget than the overrun it checks."""
+    under xdist the controller's own calibration (measured alone) is tighter
+    than the workers' (measured side by side): both would judge the rerun
+    against a tighter budget than the overrun it checks. So the rerun uses the
+    largest calibration any suspect was judged with."""
 
     env = {**os.environ, _ISOLATED_ENV: "1"}
-    calibration = config.stash.get(_CALIBRATION, None)
-    if calibration is not None:
-        env[CALIBRATION_ENV] = repr(calibration)
+    judged = [*_SUSPECT_CALIBRATIONS.values()]
+    session = config.stash.get(_CALIBRATION, None)
+    if session is not None:
+        judged.append(session)
+    if judged:
+        env[CALIBRATION_ENV] = repr(max(judged))
     return env
 
 
@@ -298,6 +307,7 @@ def rerun_alone(config: pytest.Config, nodeids: list[str]) -> dict[str, str | No
 
 
 _SUSPECTS: dict[str, str] = {}
+_SUSPECT_CALIBRATIONS: dict[str, float] = {}
 _REPRODUCED_OVERRUNS: list[str] = []
 _NOISE: list[str] = []
 
@@ -306,8 +316,13 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     # Also runs in the xdist controller, which receives the worker's properties.
     for name, value in report.user_properties:
         if name == _SUSPECT_PROPERTY:
-            nodeid, _, message = str(value).partition("\t")
+            nodeid, _, rest = str(value).partition("\t")
+            calibration, _, message = rest.partition("\t")
             _SUSPECTS[nodeid] = message
+            try:
+                _SUSPECT_CALIBRATIONS[nodeid] = float(calibration)
+            except ValueError:
+                pass
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
