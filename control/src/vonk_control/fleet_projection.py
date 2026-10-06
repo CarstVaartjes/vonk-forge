@@ -14,6 +14,12 @@ from pydantic import (
 )
 from sqlalchemy import Row, case, func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import (
+    InstallDegradedReason,
+    NodeOfflineReason,
+    ProjectionCode,
+    RunDegradedReason,
+)
 from vonk_agent_protocol.inventory import NetworkInterface
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
@@ -129,19 +135,6 @@ AgentState = Literal["unregistered", "pending", "active", "retired", "revoked"]
 CertificateState = Literal[
     "valid", "missing", "not-yet-valid", "expired", "revoked", "inactive"
 ]
-OfflineReason = Literal[
-    "unregistered",
-    "agent-inactive",
-    "agent-revoked",
-    "never-seen",
-    "last-seen-in-future",
-    "stale",
-    "certificate-missing",
-    "certificate-not-yet-valid",
-    "certificate-expired",
-    "certificate-revoked",
-    "certificate-inactive",
-]
 InstallationState = Literal[
     "planned", "installing", "installed", "partial", "failed", "uninstalled"
 ]
@@ -149,54 +142,32 @@ RunState = Literal[
     "planned", "starting", "running", "stopping", "stopped", "failed", "lost"
 ]
 RouteState = Literal["withdrawn", "pending", "published", "failed"]
-InstallDegradedReason = Literal[
-    "external-member",
-    "mapping-incomplete",
-    "missing-ranks",
-    "unexpected-ranks",
-    "rank-membership-mismatch",
-    "installation-not-installed",
-    "rank-not-installed",
-    "rank-incomplete-bytes",
-]
-RunDegradedReason = Literal[
-    "external-member",
-    "mapping-incomplete",
-    "missing-ranks",
-    "unexpected-ranks",
-    "rank-membership-mismatch",
-    "run-not-running",
-    "rank-not-running",
-    "rank-stale",
-    "route-not-published",
-]
-
 # Database rows and decoded JSON carry these closed values as plain strings, so
 # they are read back through the declared alias instead of an unchecked
 # assignment into the typed projection model.
 _AGENT_STATE_ADAPTER = TypeAdapter(AgentState)
 _INSTALL_DEGRADED_REASON_ADAPTER = TypeAdapter(InstallDegradedReason)
 _RUN_DEGRADED_REASON_ADAPTER = TypeAdapter(RunDegradedReason)
-_CERTIFICATE_OFFLINE_REASONS: Mapping[CertificateState, OfflineReason | None] = {
+_CERTIFICATE_OFFLINE_REASONS: Mapping[CertificateState, NodeOfflineReason | None] = {
     "valid": None,
-    "missing": "certificate-missing",
-    "not-yet-valid": "certificate-not-yet-valid",
-    "expired": "certificate-expired",
-    "revoked": "certificate-revoked",
-    "inactive": "certificate-inactive",
+    "missing": NodeOfflineReason.CERTIFICATE_MISSING,
+    "not-yet-valid": NodeOfflineReason.CERTIFICATE_NOT_YET_VALID,
+    "expired": NodeOfflineReason.CERTIFICATE_EXPIRED,
+    "revoked": NodeOfflineReason.CERTIFICATE_REVOKED,
+    "inactive": NodeOfflineReason.CERTIFICATE_INACTIVE,
 }
 
 
 _INSTALL_PARTIAL_MAX_NAMED = 16
 _INSTALL_REASON_WORDS: dict[str, str] = {
-    "external-member": "a member is outside this fleet",
-    "mapping-incomplete": "the cluster mapping is incomplete",
-    "missing-ranks": "ranks are missing",
-    "unexpected-ranks": "ranks are unexpected",
-    "rank-membership-mismatch": "ranks are on the wrong Sparks",
-    "installation-not-installed": "the installation is not installed",
-    "rank-not-installed": "a rank is not installed",
-    "rank-incomplete-bytes": "a rank is short of its payload",
+    InstallDegradedReason.EXTERNAL_MEMBER: "a member is outside this fleet",
+    InstallDegradedReason.MAPPING_INCOMPLETE: "the cluster mapping is incomplete",
+    InstallDegradedReason.MISSING_RANKS: "ranks are missing",
+    InstallDegradedReason.UNEXPECTED_RANKS: "ranks are unexpected",
+    InstallDegradedReason.RANK_MEMBERSHIP_MISMATCH: "ranks are on the wrong Sparks",
+    InstallDegradedReason.INSTALLATION_NOT_INSTALLED: "the installation is not installed",
+    InstallDegradedReason.RANK_NOT_INSTALLED: "a rank is not installed",
+    InstallDegradedReason.RANK_INCOMPLETE_BYTES: "a rank is short of its payload",
 }
 
 
@@ -217,7 +188,7 @@ def _install_partial_warnings(
     for value in named:
         reason = value.degraded_reason
         if reason is None:
-            reason = "installation-not-installed"
+            reason = InstallDegradedReason.INSTALLATION_NOT_INSTALLED
         words = _INSTALL_REASON_WORDS[reason]
         ranks = (
             f" (rank {', '.join(str(rank) for rank in value.affected_ranks)})"
@@ -232,7 +203,7 @@ def _install_partial_warnings(
         )
         warnings.append(
             ProjectionReason(
-                code="install.partial",
+                code=ProjectionCode.INSTALL_PARTIAL,
                 detail=detail[:256],
                 severity="warning",
                 install_partial=InstallPartialEvidence(
@@ -255,7 +226,7 @@ def _install_partial_warnings(
     if len(incomplete) > len(named):
         warnings.append(
             ProjectionReason(
-                code="install.partial",
+                code=ProjectionCode.INSTALL_PARTIAL,
                 detail=(
                     f"{len(incomplete) - len(named)} more recipe installation "
                     "groups are incomplete."
@@ -273,7 +244,7 @@ def _install_degraded_reason(
 
     if value is None:
         return None
-    return _INSTALL_DEGRADED_REASON_ADAPTER.validate_python(value, strict=True)
+    return _INSTALL_DEGRADED_REASON_ADAPTER.validate_python(str(value), strict=True)
 
 
 def _run_degraded_reason(value: str | None) -> RunDegradedReason | None:
@@ -281,7 +252,7 @@ def _run_degraded_reason(value: str | None) -> RunDegradedReason | None:
 
     if value is None:
         return None
-    return _RUN_DEGRADED_REASON_ADAPTER.validate_python(value, strict=True)
+    return _RUN_DEGRADED_REASON_ADAPTER.validate_python(str(value), strict=True)
 
 
 class _StrictModel(StrictJSONModel):
@@ -329,22 +300,7 @@ class InstallPartialEvidence(_StrictModel):
 
 
 class ProjectionReason(_StrictModel):
-    code: Literal[
-        "node.offline",
-        "inventory.missing",
-        "inventory.stale",
-        "telemetry.missing",
-        "telemetry.delayed",
-        "telemetry.stale",
-        "install.partial",
-        "profile.retrying",
-        "run.degraded",
-        "recipe.update_available",
-        "cpu.low-clock",
-        "network.nas-route-wifi-no-wired-port",
-        "network.nas-route-wifi-wired-port-down",
-        "network.nas-route-wifi-wired-port-unused",
-    ]
+    code: ProjectionCode
     detail: Text256
     severity: Literal["info", "warning", "error"]
     #: Typed evidence for ``install.partial``: which installation, which rank
@@ -357,7 +313,7 @@ class NodeConnection(_StrictModel):
     agent_state: AgentState
     certificate_state: CertificateState
     online_state: Literal["online", "offline", "unregistered"]
-    offline_reason: OfflineReason | None
+    offline_reason: NodeOfflineReason | None
     last_seen_at: datetime | None
     last_seen_age_seconds: float | None = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
 
@@ -876,25 +832,25 @@ class FleetProjection:
         fleet_node_ids: frozenset[str],
     ) -> str | None:
         if any(value.node_id not in fleet_node_ids for value in (*expected, *actual)):
-            return "external-member"
+            return InstallDegradedReason.EXTERNAL_MEMBER
         expected_ranks = [value.rank for value in expected]
         actual_ranks = [value.rank for value in actual]
         if len(expected) != expected_count or expected_ranks != list(
             range(expected_count)
         ):
-            return "mapping-incomplete"
+            return InstallDegradedReason.MAPPING_INCOMPLETE
         missing = set(expected_ranks) - set(actual_ranks)
         if missing:
-            return "missing-ranks"
+            return InstallDegradedReason.MISSING_RANKS
         unexpected = set(actual_ranks) - set(expected_ranks)
         if unexpected or len(actual_ranks) != expected_count:
-            return "unexpected-ranks"
+            return InstallDegradedReason.UNEXPECTED_RANKS
         expected_members = {
             (value.rank, value.node_id, value.role) for value in expected
         }
         actual_members = {(value.rank, value.node_id, value.role) for value in actual}
         if actual_members != expected_members:
-            return "rank-membership-mismatch"
+            return InstallDegradedReason.RANK_MEMBERSHIP_MISMATCH
         return None
 
     def _installed_presence(
@@ -935,11 +891,11 @@ class FleetProjection:
             affected: list[int] = []
             expectations = _installation_payload_expectations(installation.plan)
             if reason is None and installation.state != "installed":
-                reason = "installation-not-installed"
+                reason = InstallDegradedReason.INSTALLATION_NOT_INSTALLED
             if reason is None:
                 affected = [node.rank for node in nodes if node.state != "installed"]
                 if affected:
-                    reason = "rank-not-installed"
+                    reason = InstallDegradedReason.RANK_NOT_INSTALLED
             if reason is None:
                 affected = [
                     node.rank
@@ -948,7 +904,7 @@ class FleetProjection:
                     and node.installed_bytes < expectations[node.node_id]
                 ]
                 if affected:
-                    reason = "rank-incomplete-bytes"
+                    reason = InstallDegradedReason.RANK_INCOMPLETE_BYTES
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
             for node in visible_nodes:
@@ -1027,13 +983,13 @@ class FleetProjection:
                     < timedelta(seconds=self._run_rank_fresh_seconds),
                 )
             if reason is None and run.state != "running":
-                reason = "run-not-running"
+                reason = RunDegradedReason.RUN_NOT_RUNNING
             if reason is None and any(node.state != "running" for node in nodes):
-                reason = "rank-not-running"
+                reason = RunDegradedReason.RANK_NOT_RUNNING
             if reason is None and any(not freshness[node.id][1] for node in nodes):
-                reason = "rank-stale"
+                reason = RunDegradedReason.RANK_STALE
             if reason is None and run.route_state != "published":
-                reason = "route-not-published"
+                reason = RunDegradedReason.ROUTE_NOT_PUBLISHED
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
             update = recipe_update_notice(
@@ -1209,7 +1165,7 @@ class FleetProjection:
         if connection.online_state != "online":
             warnings.append(
                 ProjectionReason(
-                    code="node.offline",
+                    code=ProjectionCode.NODE_OFFLINE,
                     detail="The authenticated agent is not currently online.",
                     severity="warning",
                 )
@@ -1217,7 +1173,7 @@ class FleetProjection:
         if inventory_state is None:
             warnings.append(
                 ProjectionReason(
-                    code="inventory.missing",
+                    code=ProjectionCode.INVENTORY_MISSING,
                     detail="No admission inventory snapshot is available.",
                     severity="warning",
                 )
@@ -1225,7 +1181,7 @@ class FleetProjection:
         elif inventory_state.freshness == "stale":
             warnings.append(
                 ProjectionReason(
-                    code="inventory.stale",
+                    code=ProjectionCode.INVENTORY_STALE,
                     detail="Admission inventory is stale.",
                     severity="warning",
                 )
@@ -1249,7 +1205,7 @@ class FleetProjection:
         if telemetry_state is None:
             warnings.append(
                 ProjectionReason(
-                    code="telemetry.missing",
+                    code=ProjectionCode.TELEMETRY_MISSING,
                     detail="No telemetry sample is available.",
                     severity="warning",
                 )
@@ -1257,7 +1213,7 @@ class FleetProjection:
         elif telemetry_state.freshness == "delayed":
             warnings.append(
                 ProjectionReason(
-                    code="telemetry.delayed",
+                    code=ProjectionCode.TELEMETRY_DELAYED,
                     detail="Telemetry delivery is delayed.",
                     severity="warning",
                 )
@@ -1265,7 +1221,7 @@ class FleetProjection:
         elif telemetry_state.freshness == "stale":
             warnings.append(
                 ProjectionReason(
-                    code="telemetry.stale",
+                    code=ProjectionCode.TELEMETRY_STALE,
                     detail="Telemetry is stale.",
                     severity="warning",
                 )
@@ -1275,7 +1231,7 @@ class FleetProjection:
             if low_clock is not None:
                 warnings.append(
                     ProjectionReason(
-                        code="cpu.low-clock",
+                        code=ProjectionCode.CPU_LOW_CLOCK,
                         detail=_low_clock_detail(low_clock),
                         severity="warning",
                     )
@@ -1284,7 +1240,7 @@ class FleetProjection:
         for detail in stalls:
             warnings.append(
                 ProjectionReason(
-                    code="profile.retrying",
+                    code=ProjectionCode.PROFILE_RETRYING,
                     detail=f"A profile load keeps retrying: {detail}"[:256],
                     severity="warning",
                 )
@@ -1292,7 +1248,7 @@ class FleetProjection:
         if any(not value.healthy for value in loaded):
             warnings.append(
                 ProjectionReason(
-                    code="run.degraded",
+                    code=ProjectionCode.RUN_DEGRADED,
                     detail="A loaded recipe group is degraded.",
                     severity="warning",
                 )
@@ -1343,7 +1299,7 @@ class FleetProjection:
                 agent_state="unregistered",
                 certificate_state=certificate_state,
                 online_state="unregistered",
-                offline_reason="unregistered",
+                offline_reason=NodeOfflineReason.UNREGISTERED,
                 last_seen_at=None,
                 last_seen_age_seconds=None,
             )
@@ -1354,17 +1310,17 @@ class FleetProjection:
             else max(0.0, (current - last_seen).total_seconds())
         )
         if value.state == "revoked" or value.revoked_at is not None:
-            offline_reason: OfflineReason | None = "agent-revoked"
+            offline_reason: NodeOfflineReason | None = NodeOfflineReason.AGENT_REVOKED
         elif value.state != "active":
-            offline_reason = "agent-inactive"
+            offline_reason = NodeOfflineReason.AGENT_INACTIVE
         elif certificate_state != "valid":
             offline_reason = _CERTIFICATE_OFFLINE_REASONS[certificate_state]
         elif last_seen is None:
-            offline_reason = "never-seen"
+            offline_reason = NodeOfflineReason.NEVER_SEEN
         elif current - last_seen < timedelta(0):
-            offline_reason = "last-seen-in-future"
+            offline_reason = NodeOfflineReason.LAST_SEEN_IN_FUTURE
         elif current - last_seen > timedelta(seconds=self._agent_online_seconds):
-            offline_reason = "stale"
+            offline_reason = NodeOfflineReason.STALE
         else:
             offline_reason = None
         return NodeConnection(

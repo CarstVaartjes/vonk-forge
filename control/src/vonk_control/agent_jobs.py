@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
     FailureCode,
+    InstallAdmissionCode,
     LifecycleState,
     OutcomeDone,
     OutcomeFailed,
@@ -1672,7 +1673,9 @@ class AgentJobService:
             )
         except AdmissionLockBusy as error:
             if protocol_operation.value == AgentOperation.RECIPE_INSTALL.value:
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise InstallAdmissionBusy(
+                    InstallAdmissionCode.CAPACITY_BUSY
+                ) from error
             if uses_workload_admission:
                 raise RunAdmissionBusy("run capacity writer is busy") from error
             raise

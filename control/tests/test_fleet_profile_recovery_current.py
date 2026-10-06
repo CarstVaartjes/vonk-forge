@@ -1463,8 +1463,6 @@ def test_every_conflict_type_declares_what_a_retry_does_with_it() -> None:
     types listed here may park; any other new type fails this test until it is
     classified (and, if it supersedes, carries a contract reason code)."""
 
-    from typing import get_args
-
     from vonk_control.fleet_profile_contract import FleetProfileSupersedeCode
     from vonk_control.fleet_profiles import RETRY_SUPERSEDE, RETRY_WAIT
 
@@ -1486,7 +1484,7 @@ def test_every_conflict_type_declares_what_a_retry_does_with_it() -> None:
         if cls.retry_disposition == RETRY_WAIT:
             actual_waits.add(cls.__name__)
         else:
-            assert cls.supersede_code in get_args(FleetProfileSupersedeCode)
+            assert cls.supersede_code in set(FleetProfileSupersedeCode)
     assert actual_waits == waits
 
 

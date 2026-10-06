@@ -16,12 +16,14 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from pydantic import BaseModel
 from vonk_agent_protocol import (
     AgentResult,
     ErrorCatalog,
     LifecycleVocabulary,
     OutcomeCatalog,
     OutcomeEvidence,
+    ReasonCodeVocabulary,
     canonical_message,
 )
 
@@ -155,9 +157,11 @@ def test_rust_round_trips_every_error_category(error: dict[str, Any]) -> None:
     assert _round_trip("error", sent) == sent
 
 
-def _vocabulary_documents() -> list[dict[str, str]]:
+def _vocabulary_documents(
+    carrier: type[BaseModel] = LifecycleVocabulary,
+) -> list[dict[str, str]]:
     members: dict[str, list[str]] = {}
-    for name, field in LifecycleVocabulary.model_fields.items():
+    for name, field in carrier.model_fields.items():
         enum = field.annotation
         assert isinstance(enum, type) and issubclass(enum, Enum)
         members[name] = [member.value for member in enum]
@@ -178,10 +182,21 @@ def test_rust_knows_every_word_of_the_vocabulary() -> None:
         assert _round_trip("vocabulary", sent) == sent
 
 
+def test_rust_knows_every_reason_code() -> None:
+    documents = _vocabulary_documents(ReasonCodeVocabulary)
+    assert documents
+    for document in documents:
+        sent = json.loads(
+            canonical_message(ReasonCodeVocabulary.model_validate(document))
+        )
+        assert _round_trip("reason-codes", sent) == sent
+
+
 @pytest.mark.parametrize(
     ("kind", "document"),
     [
         ("vocabulary", {"state": "waiting-for-operator"}),
+        ("reason-codes", {"model_cache_code": "model_cache.made_up"}),
         ("agent-result", {"fence": FENCE, "state": "failed", "result": UNKNOWN}),
         (
             "agent-result",
@@ -220,4 +235,5 @@ def test_rust_refuses_what_the_contract_refuses(kind: str, document: Any) -> Non
             "agent-result": AgentResult.parse,
             "error": ErrorCatalog.model_validate,
             "vocabulary": LifecycleVocabulary.model_validate,
+            "reason-codes": ReasonCodeVocabulary.model_validate,
         }[kind](document)

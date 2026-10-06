@@ -343,7 +343,7 @@ def require_admissible(plan: RunPlan) -> None:
             blockers=blockers,
         )
     raise RunPlanConflict(
-        "run.plan_invalid: run plan is blocked by current admission evidence"
+        f"{RunAdmissionCode.PLAN_INVALID}: run plan is blocked by current admission evidence"
         + (f" ({_blocker_text(blockers)})" if blockers else "")
     )
 

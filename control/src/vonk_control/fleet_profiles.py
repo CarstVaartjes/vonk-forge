@@ -20,7 +20,17 @@ from sqlalchemy import String, case, cast, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, object_session, sessionmaker
-from vonk_agent_protocol import LifecycleState, canonical_message, input_state
+from vonk_agent_protocol import (
+    LifecycleState,
+    ModelCacheBlockerCode,
+    OperationFailureCode,
+    ProfileReasonCode,
+    RunSwitchCode,
+    RuntimeImageCode,
+    SupersedeCode,
+    canonical_message,
+    input_state,
+)
 from vonk_forge_contracts import RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology
 
@@ -246,11 +256,11 @@ _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
 # profile recovery; receipts that do not validate would repeat child effects.
 _PROFILE_RECOVERY_REFUSED_CODES = frozenset(
     {
-        "run-switch.receipt_invalid",
-        "runtime_image.archive_unavailable",
-        "runtime_image.receipt_identity_conflict",
-        "runtime_image.receipt_identity_invalid",
-        "runtime_image.receipt_invalid",
+        RunSwitchCode.RECEIPT_INVALID,
+        RuntimeImageCode.ARCHIVE_UNAVAILABLE,
+        RuntimeImageCode.RECEIPT_IDENTITY_CONFLICT,
+        RuntimeImageCode.RECEIPT_IDENTITY_INVALID,
+        RuntimeImageCode.RECEIPT_INVALID,
     }
 )
 # A profile request may race a short heartbeat, telemetry write, or worker
@@ -778,7 +788,7 @@ class FleetProfileConflict(RuntimeError):
 
     retry_disposition: ClassVar[str] = RETRY_SUPERSEDE
     supersede_code: ClassVar[FleetProfileSupersedeCode] = (
-        "effects-changed-during-admission"
+        SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
     )
 
 
@@ -795,7 +805,7 @@ class FleetProfileAdmissionBusy(FleetProfileConflict):
     that is known, so the wait says what it is waiting for.
     """
 
-    code = "profile.admission_busy"
+    code = ProfileReasonCode.ADMISSION_BUSY
     retry_disposition = RETRY_WAIT
 
     def __init__(self, message: str, *, holder: str | None = None) -> None:
@@ -812,38 +822,38 @@ class FleetProfileAdmissionStorageError(FleetProfileConflict):
 class FleetProfileAdmissionEffectBusy(FleetProfileConflict):
     """A live effect owner must finish before a superseding plan can bind."""
 
-    code = "profile.admission_effect_busy"
+    code = ProfileReasonCode.ADMISSION_EFFECT_BUSY
     retry_disposition = RETRY_WAIT
 
 
 class FleetProfileResourceRecheckUnavailable(FleetProfileAdmissionEffectBusy):
     """The resource recheck under the admission fence failed for a named cause."""
 
-    code = "profile.resource_recheck_unavailable"
+    code = ProfileReasonCode.RESOURCE_RECHECK_UNAVAILABLE
     retry_disposition = RETRY_WAIT
 
 
 class FleetProfileStalePlanConflict(FleetProfileConflict):
     """Admission refused because the caller's reviewed plan is no longer current."""
 
-    code = "profile.stale_plan"
+    code = ProfileReasonCode.STALE_PLAN
     retry_disposition = RETRY_SUPERSEDE
-    supersede_code = "effects-changed-during-admission"
+    supersede_code = SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
 
 
 class FleetProfileReviewStale(FleetProfileStalePlanConflict):
     """The reviewed effects differ from the current plan; nothing was accepted."""
 
-    code = "profile.review_stale"
+    code = ProfileReasonCode.REVIEW_STALE
     retry_disposition = RETRY_SUPERSEDE
-    supersede_code = "effects-changed-during-admission"
+    supersede_code = SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
 
 
 class _FleetProfileSupersededIntentConflict(FleetProfileStalePlanConflict):
     """A later accepted intent owns an overlapping workload effect scope."""
 
     retry_disposition = RETRY_SUPERSEDE
-    supersede_code = "superseded-by-intent"
+    supersede_code = SupersedeCode.SUPERSEDED_BY_INTENT
 
 
 class FleetProfileSelectionLost(FleetProfileStalePlanConflict):
@@ -853,15 +863,15 @@ class FleetProfileSelectionLost(FleetProfileStalePlanConflict):
     selected profile, so adopting it would undo a newer load.
     """
 
-    code = "profile.selection_lost"
+    code = ProfileReasonCode.SELECTION_LOST
     retry_disposition = RETRY_SUPERSEDE
-    supersede_code = "effects-changed-during-admission"
+    supersede_code = SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
 
 
 class FleetProfileAssetReservationConflict(FleetProfileConflict):
     """A profile asset could not be reserved right now; a later attempt may."""
 
-    code = "profile.asset_reservation_unavailable"
+    code = ProfileReasonCode.ASSET_RESERVATION_UNAVAILABLE
     retry_disposition = RETRY_WAIT
 
 
@@ -907,7 +917,7 @@ def _require_recovery_preparation(
             else ""
         )
         raise _FleetProfileRecoveryBindingConflict(
-            "profile.recovery_cache_pending: Prepare cache on the Controller for "
+            f"{ProfileReasonCode.RECOVERY_CACHE_PENDING}: Prepare cache on the Controller for "
             f"assignment {assignment_id}{exact}"
             + ("; recovery retains these exact identities." if exact else ".")
         )
@@ -930,7 +940,7 @@ def _require_recovery_preparation(
         observed
     ):
         raise _FleetProfileRecoveryBindingConflict(
-            "profile.recovery_artifact_changed: Prepared assets for assignment "
+            f"{ProfileReasonCode.RECOVERY_ARTIFACT_CHANGED}: Prepared assets for assignment "
             f"{assignment_id} differ from its accepted model/image identity; "
             "restore the exact accepted assets or use an explicit new load "
             "to bind the replacement."
@@ -969,7 +979,7 @@ def _preview_blockers(preview: FleetProfilePreview) -> list[OperationBlocker]:
 #: Blockers only the Controller's own preparation (model download, runtime image
 #: build) resolves; a load that has just these waits instead of being refused.
 _PREPARATION_RESOLVABLE_CODES = frozenset(
-    {"profile.preparation_unavailable", "run-switch.recipe-build-unavailable"}
+    {ProfileReasonCode.PREPARATION_UNAVAILABLE, RunSwitchCode.RECIPE_BUILD_UNAVAILABLE}
 )
 
 
@@ -1040,7 +1050,7 @@ def _deferral_code(error: BaseException) -> str:
 
     if isinstance(error, FleetProfileResourceRecheckUnavailable):
         return error.code
-    return "profile.admission_busy"
+    return ProfileReasonCode.ADMISSION_BUSY
 
 
 def _error_summary(error: BaseException) -> str:
@@ -1270,7 +1280,7 @@ class RunSwitchFleetProfileAdapter:
             and child.result.phase == "prepare"
             and child.result.subphase == "runtime-image"
             and child.result.child_operation_id is None
-            and child.result.failure_code == "runtime_image.cache_missing"
+            and child.result.failure_code == RuntimeImageCode.CACHE_MISSING
             for child in found[1]
         )
 
@@ -1776,7 +1786,7 @@ class RunSwitchFleetProfileAdapter:
                     and isinstance(current_item.get("profile_stop_scope"), Mapping)
                     and child.result is not None
                     and child.result.failure_code
-                    == "run-switch.profile.incomplete_multi_spark_model"
+                    == RunSwitchCode.PROFILE_INCOMPLETE_MULTI_SPARK_MODEL
                 )
                 if not expected_partial_failure:
                     reason = child.status_reason or (
@@ -1896,7 +1906,7 @@ class RunSwitchFleetProfileAdapter:
                     (
                         reason
                         for reason in reviewed.reasons
-                        if reason.code == "profile.incomplete_multi_spark_model"
+                        if reason.code == ProfileReasonCode.INCOMPLETE_MULTI_SPARK_MODEL
                     ),
                     None,
                 )
@@ -4197,7 +4207,7 @@ class FleetProfileService:
                 application_state=application_state,
                 assignments=None,
                 projection_issue=FleetProfileEndpointProjectionIssue(
-                    code="profile.application_intent.invalid",
+                    code=ProfileReasonCode.APPLICATION_INTENT_INVALID,
                     detail=detail
                     or "Stored application intent is invalid or inconsistent.",
                 ),
@@ -4360,7 +4370,7 @@ class FleetProfileService:
                     # was left out (and the effects that follow from it).
                     reasons.append(
                         FleetProfileReason(
-                            code="profile.choices_unreadable",
+                            code=ProfileReasonCode.CHOICES_UNREADABLE,
                             detail=(
                                 f"{unreadable} saved choice(s) cannot be read and "
                                 "are left out of this plan; save the profile again."
@@ -4374,7 +4384,7 @@ class FleetProfileService:
                         continue
                     reasons.append(
                         FleetProfileReason(
-                            code="profile.recipe_unavailable",
+                            code=ProfileReasonCode.RECIPE_UNAVAILABLE,
                             detail=(
                                 f"Recipe {choice.recipe_selector} has no active "
                                 "catalog revision; the plan waits for the catalog "
@@ -4442,7 +4452,7 @@ class FleetProfileService:
                 if unknown_nodes:
                     item_reasons.append(
                         FleetProfileReason(
-                            code="profile.spark_unavailable",
+                            code=ProfileReasonCode.SPARK_UNAVAILABLE,
                             detail=(
                                 "Assignment references Spark IDs that are not enrolled: "
                                 + ", ".join(unknown_nodes)
@@ -4454,9 +4464,9 @@ class FleetProfileService:
                     item_reasons.append(
                         FleetProfileReason(
                             code=(
-                                "profile.incomplete_multi_spark_model"
+                                ProfileReasonCode.INCOMPLETE_MULTI_SPARK_MODEL
                                 if required_count is not None and required_count > 1
-                                else "profile.spark_removed"
+                                else ProfileReasonCode.SPARK_REMOVED
                             ),
                             detail=(
                                 (
@@ -4474,7 +4484,7 @@ class FleetProfileService:
                 if required_count is None or len(assignment.nodes) != required_count:
                     item_reasons.append(
                         FleetProfileReason(
-                            code="profile.topology_incomplete",
+                            code=ProfileReasonCode.TOPOLOGY_INCOMPLETE,
                             detail=(
                                 f"Recipe requires {required_count or 'a valid'} Sparks; "
                                 f"the draft assigns {len(assignment.nodes)}."
@@ -4494,7 +4504,7 @@ class FleetProfileService:
                     if not preparation_unavailable_reported:
                         reasons.append(
                             FleetProfileReason(
-                                code="profile.preparation_unavailable",
+                                code=ProfileReasonCode.PREPARATION_UNAVAILABLE,
                                 detail=(
                                     "Exact model and OCI preparation evidence is "
                                     f"unavailable for {assignment.recipe_title}; "
@@ -4560,7 +4570,7 @@ class FleetProfileService:
                         ):
                             reasons.append(
                                 FleetProfileReason(
-                                    code="profile.runtime_image_rebuild_pending",
+                                    code=ProfileReasonCode.RUNTIME_IMAGE_REBUILD_PENDING,
                                     detail="The accepted runtime image needs cache repair before distribution.",
                                     severity="warning",
                                 )
@@ -4568,7 +4578,7 @@ class FleetProfileService:
                         elif preparation is None and requires_preparation:
                             reasons.append(
                                 FleetProfileReason(
-                                    code="profile.preparation_unavailable",
+                                    code=ProfileReasonCode.PREPARATION_UNAVAILABLE,
                                     detail="Prepare the exact model and runtime image in the Controller cache before loading this assignment.",
                                     severity="error",
                                 )
@@ -4576,7 +4586,7 @@ class FleetProfileService:
                     except (KeyError, RuntimeError, TypeError, ValueError) as error:
                         reasons.append(
                             FleetProfileReason(
-                                code="profile.preparation_unavailable",
+                                code=ProfileReasonCode.PREPARATION_UNAVAILABLE,
                                 detail=str(error)[:512]
                                 or "The preparation provider returned no exact evidence.",
                                 severity=(
@@ -4589,7 +4599,7 @@ class FleetProfileService:
                     ):
                         reasons.append(
                             FleetProfileReason(
-                                code="profile.preparation_unavailable",
+                                code=ProfileReasonCode.PREPARATION_UNAVAILABLE,
                                 detail="The preparation provider returned an invalid contract.",
                                 severity=(
                                     "error" if requires_preparation else "warning"
@@ -4617,7 +4627,7 @@ class FleetProfileService:
                         ):
                             reasons.append(
                                 FleetProfileReason(
-                                    code="profile.preparation_scope_mismatch",
+                                    code=ProfileReasonCode.PREPARATION_SCOPE_MISMATCH,
                                     detail=(
                                         "Preparation evidence does not cover exactly "
                                         f"the assignment target scope ({', '.join(expected_nodes)})."
@@ -4663,7 +4673,7 @@ class FleetProfileService:
                         # admissible yet, and it is planned again.
                         reasons.append(
                             FleetProfileReason(
-                                code="profile.switch_scope_unresolved",
+                                code=ProfileReasonCode.SWITCH_SCOPE_UNRESOLVED,
                                 detail=(
                                     "The Spark scope of the profile switch changed "
                                     "while it was planned; it is planned again."
@@ -4682,7 +4692,7 @@ class FleetProfileService:
                 if self._switch_adapter is None:
                     reasons.append(
                         FleetProfileReason(
-                            code="profile.switch_authority_unavailable",
+                            code=ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE,
                             detail="Run/Switch authority is required to apply this profile.",
                             severity="error",
                         )
@@ -4913,7 +4923,7 @@ class FleetProfileService:
                 if not members <= target_nodes:
                     reasons.append(
                         FleetProfileReason(
-                            code="profile.pending_cross_scope",
+                            code=ProfileReasonCode.PENDING_CROSS_SCOPE,
                             detail="A pending workload crosses the selected idle scope.",
                             severity="error",
                         )
@@ -4962,7 +4972,7 @@ class FleetProfileService:
                 if not members <= target_nodes:
                     reasons.append(
                         FleetProfileReason(
-                            code="profile.pending_cross_scope",
+                            code=ProfileReasonCode.PENDING_CROSS_SCOPE,
                             detail="A pending profile change crosses the selected idle scope.",
                             severity="error",
                         )
@@ -5004,7 +5014,7 @@ class FleetProfileService:
                 ):
                     reasons.append(
                         FleetProfileReason(
-                            code="profile.distributed_cross_scope",
+                            code=ProfileReasonCode.DISTRIBUTED_CROSS_SCOPE,
                             detail=(
                                 f"Running workload {run.alias} uses Sparks outside "
                                 "the profile scope; review the complete distributed group."
@@ -5067,7 +5077,7 @@ class FleetProfileService:
                 if not node_ids <= target_nodes:
                     reasons.append(
                         FleetProfileReason(
-                            code="profile.shared_installation_scope",
+                            code=ProfileReasonCode.SHARED_INSTALLATION_SCOPE,
                             detail="Exact installation policy would affect a multi-Spark installation outside the profile scope.",
                             severity="error",
                         )
@@ -5087,7 +5097,7 @@ class FleetProfileService:
                 )
                 reasons.append(
                     FleetProfileReason(
-                        code="profile.cleanup_delegated",
+                        code=ProfileReasonCode.CLEANUP_DELEGATED,
                         detail=(
                             "Run/Switch removes installation "
                             f"{installation.id} under this profile's "
@@ -5100,7 +5110,7 @@ class FleetProfileService:
         if adapter_switch_needed and active_runs:
             reasons.append(
                 FleetProfileReason(
-                    code="profile.interruption_expected",
+                    code=ProfileReasonCode.INTERRUPTION_EXPECTED,
                     detail=(
                         "The reviewed plan includes required runtime stops; "
                         "affected workloads may be unavailable until final starts complete."
@@ -5385,7 +5395,7 @@ class FleetProfileService:
         *,
         retry_delay: timedelta | None = None,
         blockers: Sequence[OperationBlocker] | None = None,
-        code: str = "profile.admission_busy",
+        code: str = ProfileReasonCode.ADMISSION_BUSY,
     ) -> FleetProfileApplicationView:
         """Record bounded retry state after a nonblocking admission refusal."""
 
@@ -5600,7 +5610,7 @@ class FleetProfileService:
                             "Profile order was replaced before admission by a later "
                             "scoped intent",
                             now,
-                            code="superseded-by-intent",
+                            code=SupersedeCode.SUPERSEDED_BY_INTENT,
                             by=application_id,
                             session=session,
                         )
@@ -5613,7 +5623,7 @@ class FleetProfileService:
                         "Profile order was replaced before admission by a later "
                         "scoped intent",
                         now,
-                        code="superseded-by-intent",
+                        code=SupersedeCode.SUPERSEDED_BY_INTENT,
                         by=application_id,
                         session=session,
                     )
@@ -5745,7 +5755,7 @@ class FleetProfileService:
                         pending.id,
                         state=LifecycleState.SUPERSEDED,
                         reason=str(error),
-                        code="superseded-by-intent",
+                        code=SupersedeCode.SUPERSEDED_BY_INTENT,
                     )
                 else:
                     self._discard_pending_application(pending.id)
@@ -6074,7 +6084,7 @@ class FleetProfileService:
                 if prior.intended_profile is None:
                     return self._decline_retry(
                         parent,
-                        "profile.retry_intent_unavailable",
+                        ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
                         "the receipt carries no accepted intent to recover",
                     )
                 if self._superseding_intent(session, parent, prior):
@@ -6084,7 +6094,9 @@ class FleetProfileService:
                 parent_intent = self._intended_profile(parent, session=session)
                 if isinstance(parent_intent, Residue):
                     return self._decline_retry(
-                        parent, "profile.retry_intent_unavailable", parent_intent.note
+                        parent,
+                        ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
+                        parent_intent.note,
                     )
                 intended = parent_intent
                 reviewed_application = session.get(
@@ -6098,7 +6110,7 @@ class FleetProfileService:
                 if isinstance(reviewed_plan, Residue):
                     return self._decline_retry(
                         parent,
-                        "profile.retry_review_unavailable",
+                        ProfileReasonCode.RETRY_REVIEW_UNAVAILABLE,
                         "the reviewed plan of the receipt cannot be read",
                     )
                 _validate_remaining_effects(reviewed_plan.effects, preview.effects)
@@ -6294,7 +6306,7 @@ class FleetProfileService:
                             "Profile order was replaced before admission by a later "
                             "scoped intent",
                             now,
-                            code="superseded-by-intent",
+                            code=SupersedeCode.SUPERSEDED_BY_INTENT,
                             by=application_id,
                             session=session,
                         )
@@ -6320,7 +6332,7 @@ class FleetProfileService:
                         "Profile order was replaced by a later scoped intent; "
                         "issued effects retain their own cancellation receipts",
                         now,
-                        code="superseded-by-intent",
+                        code=SupersedeCode.SUPERSEDED_BY_INTENT,
                         by=application_id,
                         effect=_LifecycleEffect.UNKNOWN,
                         session=session,
@@ -6394,7 +6406,7 @@ class FleetProfileService:
                         retry_parent,
                         superseded_by,
                         now,
-                        code="superseded-by-retry",
+                        code=SupersedeCode.SUPERSEDED_BY_RETRY,
                         by=row.id,
                         session=session,
                     )
@@ -6748,7 +6760,7 @@ class FleetProfileService:
             except Exception as error:  # noqa: BLE001 - a load never fails on this
                 blockers.append(
                     make_blocker(
-                        "profile.preparation_not_started",
+                        ProfileReasonCode.PREPARATION_NOT_STARTED,
                         f"Preparing {assignment.recipe_title} could not be "
                         f"started yet: {error}",
                         severity="warning",
@@ -6775,7 +6787,10 @@ class FleetProfileService:
                 node_id
                 for reason in (*assessment.blockers, *assessment.warnings)
                 if reason.code
-                in {"run-switch.insufficient-disk", "run-switch.disk-eviction-planned"}
+                in {
+                    RunSwitchCode.INSUFFICIENT_DISK,
+                    RunSwitchCode.DISK_EVICTION_PLANNED,
+                }
                 for node_id in reason.node_ids
             }
             fit = assessment.fit_after_stop or assessment.fit_current
@@ -6793,7 +6808,7 @@ class FleetProfileService:
                         node.disk_free_bytes - node.disk_free_after_bytes,
                         source="profile-load",
                         subject=preview.profile_id,
-                        reason="run-switch.insufficient-disk",
+                        reason=RunSwitchCode.INSUFFICIENT_DISK,
                     )
                 except Exception:  # a load never fails on this
                     _LOGGER.warning("storage relief failed", exc_info=True)
@@ -6970,14 +6985,14 @@ class FleetProfileService:
                 )
             if progress.intended_profile is None:
                 decline = (
-                    "profile.retry_intent_unavailable",
+                    ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
                     "the receipt carries no accepted intent to recover",
                 )
             adapter = self._switch_adapter
             if decline is None and parent.current_operation_id is not None:
                 if adapter is None:
                     decline = (
-                        "profile.retry_executor_unavailable",
+                        ProfileReasonCode.RETRY_EXECUTOR_UNAVAILABLE,
                         "the Run/Switch executor is not bound yet",
                     )
                 else:
@@ -7003,7 +7018,10 @@ class FleetProfileService:
                 else self._reviewed_profile_plan(parent, session=session)
             )
             if isinstance(persisted_plan, Residue):
-                decline = ("profile.retry_review_unavailable", persisted_plan.note)
+                decline = (
+                    ProfileReasonCode.RETRY_REVIEW_UNAVAILABLE,
+                    persisted_plan.note,
+                )
             intended = progress.intended_profile
             cache_loss_recovery = (
                 adapter is not None
@@ -7017,7 +7035,7 @@ class FleetProfileService:
             or intended is None
         ):
             code, detail = decline or (
-                "profile.retry_intent_unavailable",
+                ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
                 "the receipt carries no accepted intent to recover",
             )
             return self._decline_retry_application(application_id, code, detail)
@@ -7042,14 +7060,14 @@ class FleetProfileService:
             )
             return self._decline_retry_application(
                 application_id,
-                "profile.recovery_waiting",
+                ProfileReasonCode.RECOVERY_WAITING,
                 "current Fleet conditions do not admit the accepted plan yet",
                 blockers,
             )
         if tuple(preview.scope.node_ids) != tuple(intended.scope.node_ids):
             return self._decline_retry_application(
                 application_id,
-                "profile.recovery_scope_changed",
+                ProfileReasonCode.RECOVERY_SCOPE_CHANGED,
                 "the fleet scope changed since the application was accepted",
             )
         expected_assignments = {
@@ -7071,7 +7089,7 @@ class FleetProfileService:
         if observed_assignments != expected_assignments:
             return self._decline_retry_application(
                 application_id,
-                "profile.recovery_assignments_changed",
+                ProfileReasonCode.RECOVERY_ASSIGNMENTS_CHANGED,
                 "the assignments changed since the application was accepted",
             )
         _require_recovery_preparations(persisted_plan, preview)
@@ -7265,7 +7283,7 @@ class FleetProfileService:
                 else f"The profile application ended {state} without a recorded reason"
             )
             failure = OperationFailureEvidence(
-                error_code="fleet_profile_application_failed",
+                error_code=OperationFailureCode.FLEET_PROFILE_APPLICATION_FAILED,
                 summary=(
                     "Profile application needs attention"
                     if state in fleet_profile_states.NEEDS_OPERATOR
@@ -7812,7 +7830,7 @@ class FleetProfileService:
                 pending.id,
                 state=LifecycleState.SUPERSEDED,
                 reason=str(error),
-                code="superseded-by-intent",
+                code=SupersedeCode.SUPERSEDED_BY_INTENT,
             )
         except FleetProfileConflict as error:
             if pending is None:
@@ -7863,7 +7881,7 @@ class FleetProfileService:
                             _persisted_profile_progress(row),
                             [
                                 make_blocker(
-                                    "profile.recovery_cache_pending", str(error)
+                                    ProfileReasonCode.RECOVERY_CACHE_PENDING, str(error)
                                 )
                             ],
                             because=error,
@@ -7892,7 +7910,7 @@ class FleetProfileService:
                             _aware(self._clock()),
                             code=error.supersede_code
                             if isinstance(error, FleetProfileConflict)
-                            else "effects-changed-during-admission",
+                            else SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION,
                             session=session,
                         )
                         recovery_deferred = True
@@ -7907,7 +7925,8 @@ class FleetProfileService:
                             _persisted_profile_progress(row),
                             [
                                 make_blocker(
-                                    error_code(error) or "profile.retry_conflict",
+                                    error_code(error)
+                                    or ProfileReasonCode.RETRY_CONFLICT,
                                     str(error) or "The profile could not be retried",
                                 )
                             ],
@@ -7977,7 +7996,7 @@ class FleetProfileService:
                     "Profile order was replaced by a newer fleet profile load; "
                     "issued effects retain their cancellation receipts",
                     now,
-                    code="superseded-by-intent",
+                    code=SupersedeCode.SUPERSEDED_BY_INTENT,
                     effect=_LifecycleEffect.UNKNOWN,
                     session=session,
                 )
@@ -7988,7 +8007,7 @@ class FleetProfileService:
                     "Profile order was replaced by a changed profile or later "
                     "scoped intent; issued effects retain their own cancellation receipts",
                     now,
-                    code="superseded-by-intent",
+                    code=SupersedeCode.SUPERSEDED_BY_INTENT,
                     effect=_LifecycleEffect.UNKNOWN,
                     session=session,
                 )
@@ -8200,7 +8219,7 @@ class FleetProfileService:
                             failed,
                             str(error),
                             _aware(self._clock()),
-                            code="effects-changed-during-admission",
+                            code=SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION,
                             session=session,
                         )
                     else:
@@ -8651,7 +8670,7 @@ class FleetProfileService:
                 application_id,
                 state=LifecycleState.SUPERSEDED,
                 reason=f"Pending profile intent was superseded: {error}",
-                code="effects-changed-during-admission",
+                code=SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION,
             )
             return True
         except (FleetProfileConflict, FleetProfilePermissionDenied, KeyError) as error:
@@ -9468,7 +9487,8 @@ class FleetProfileService:
             )
             cache_blockers = cache.get("blockers") if cache is not None else None
             if isinstance(cache_blockers, Sequence) and any(
-                blocker == "recipe-not-cached" for blocker in cache_blockers
+                blocker == ModelCacheBlockerCode.RECIPE_NOT_CACHED
+                for blocker in cache_blockers
             ):
                 # The selected exact revision is bound into the profile, so the
                 # operator has to prepare this cache entry rather than accept a

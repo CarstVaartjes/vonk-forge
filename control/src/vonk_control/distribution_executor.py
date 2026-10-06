@@ -17,6 +17,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
     DistributionObject,
     OperationMemberProgress,
     OperationProgress,
@@ -1538,7 +1539,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                     return
                 except RuntimeImagePreparationError as error:
                     if (
-                        error.code != "artifact.reference_busy"
+                        error.code != ArtifactLifecycleCode.REFERENCE_BUSY
                         or attempt + 1 >= attempts
                     ):
                         raise

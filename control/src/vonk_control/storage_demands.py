@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from vonk_agent_protocol import StorageDemandCode
+
 from .worker_memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,8 +52,8 @@ class StorageRelief:
     detail: str
 
 
-STORAGE_EVICTING = "storage.evicting"
-STORAGE_INSUFFICIENT = "storage.insufficient_after_eviction"
+STORAGE_EVICTING = StorageDemandCode.EVICTING
+STORAGE_INSUFFICIENT = StorageDemandCode.INSUFFICIENT_AFTER_EVICTION
 
 
 class StorageDemands:

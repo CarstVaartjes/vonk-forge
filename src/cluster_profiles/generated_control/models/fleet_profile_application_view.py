@@ -8,10 +8,10 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.fleet_profile_application_view_reason_code_type_0 import check_fleet_profile_application_view_reason_code_type_0
-from ..models.fleet_profile_application_view_reason_code_type_0 import FleetProfileApplicationViewReasonCodeType0
 from ..models.fleet_profile_application_view_state import check_fleet_profile_application_view_state
 from ..models.fleet_profile_application_view_state import FleetProfileApplicationViewState
+from ..models.supersede_code import check_supersede_code
+from ..models.supersede_code import SupersedeCode
 from ..types import UNSET, Unset
 from typing import cast
 import datetime
@@ -52,7 +52,7 @@ class FleetProfileApplicationView:
             blockers (list[OperationBlocker] | Unset):
             cancellation (FleetProfileApplicationCancellationView | None | Unset):
             next_attempt_at (datetime.datetime | None | Unset):
-            reason_code (FleetProfileApplicationViewReasonCodeType0 | None | Unset):
+            reason_code (None | SupersedeCode | Unset):
             retry_of_application_id (None | str | Unset):
             superseded_by (None | str | Unset):
      """
@@ -75,7 +75,7 @@ class FleetProfileApplicationView:
     blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: FleetProfileApplicationCancellationView | None | Unset = UNSET
     next_attempt_at: datetime.datetime | None | Unset = UNSET
-    reason_code: FleetProfileApplicationViewReasonCodeType0 | None | Unset = UNSET
+    reason_code: None | SupersedeCode | Unset = UNSET
     retry_of_application_id: None | str | Unset = UNSET
     superseded_by: None | str | Unset = UNSET
 
@@ -336,7 +336,7 @@ class FleetProfileApplicationView:
         next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
 
 
-        def _parse_reason_code(data: object) -> FleetProfileApplicationViewReasonCodeType0 | None | Unset:
+        def _parse_reason_code(data: object) -> None | SupersedeCode | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -344,14 +344,14 @@ class FleetProfileApplicationView:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                reason_code_type_0 = check_fleet_profile_application_view_reason_code_type_0(data)
+                reason_code_type_0 = check_supersede_code(data)
 
 
 
                 return reason_code_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(FleetProfileApplicationViewReasonCodeType0 | None | Unset, data)
+            return cast(None | SupersedeCode | Unset, data)
 
         reason_code = _parse_reason_code(d.pop("reason_code", UNSET))
 

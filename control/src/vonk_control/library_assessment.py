@@ -11,6 +11,7 @@ from itertools import combinations
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LibraryAssessmentCode
 
 from .library_contract import (
     LibraryRecipeProjection,
@@ -31,7 +32,8 @@ def _reason(code: str, detail: str) -> RunSwitchReason:
 
 def unavailable(detail: str) -> RecipeReadinessCheck:
     return RecipeReadinessCheck(
-        state="unavailable", reasons=[_reason("library.assessment_unavailable", detail)]
+        state="unavailable",
+        reasons=[_reason(LibraryAssessmentCode.ASSESSMENT_UNAVAILABLE, detail)],
     )
 
 
@@ -196,7 +198,7 @@ class LibraryAssessment:
                 state="blocked",
                 reasons=[
                     _reason(
-                        "library.cache_missing",
+                        LibraryAssessmentCode.CACHE_MISSING,
                         f"{reason} for {recipe.selector}; prepare the exact assets with vonkctl recipe download {recipe.selector}.",
                     )
                     for reason in blockers
@@ -232,7 +234,7 @@ class LibraryAssessment:
                 reasons=fit.blockers
                 or [
                     _reason(
-                        "library.capacity_unavailable",
+                        LibraryAssessmentCode.CAPACITY_UNAVAILABLE,
                         "Fresh capacity and resource-demand evidence is unavailable.",
                     )
                 ],
@@ -276,7 +278,7 @@ class LibraryAssessment:
                 state="blocked",
                 reasons=[
                     _reason(
-                        "library.insufficient_nodes",
+                        LibraryAssessmentCode.INSUFFICIENT_NODES,
                         f"This topology requires {recipe.node_count} Sparks; {len(nodes)} active enrolled Sparks are available.",
                     )
                 ],

@@ -12,6 +12,10 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import (
+    InstallAdmissionCode,
+    RuntimePreflightCode,
+)
 
 from .admission_locking import (
     AdmissionLockBusy,
@@ -127,22 +131,22 @@ class InstallPlan:
 
 
 class InstallPlanConflict(RuntimeError):
-    code = "install.plan_invalid"
+    code = InstallAdmissionCode.PLAN_INVALID
 
 
 class InstallAdmissionBusy(InstallPlanConflict):
     """A capacity writer owns the row; retry only after releasing this transaction."""
 
-    code = "install.capacity_busy"
+    code = InstallAdmissionCode.CAPACITY_BUSY
 
 
 class InstallPreflightExpired(InstallAdmissionBusy):
     """The exact plan is admissible except that its runtime evidence expired."""
 
-    code = "runtime_preflight.stale"
+    code = RuntimePreflightCode.STALE
 
     def __init__(
-        self, code: str = "runtime_preflight.stale", detail: str | None = None
+        self, code: str = RuntimePreflightCode.STALE, detail: str | None = None
     ):
         self.code = code
         self.detail = detail
@@ -150,20 +154,20 @@ class InstallPreflightExpired(InstallAdmissionBusy):
 
 
 _RETRYABLE_INSTALL_BLOCKERS = {
-    "install.inventory_missing",
-    "install.stale_inventory",
-    "install.insufficient_disk",
-    "install.artifact_store_read_only",
-    "install.image_distribution_pending",
-    "runtime_preflight.host_changed",
-    "runtime_preflight.requirements_changed",
-    "runtime_preflight.stale",
+    InstallAdmissionCode.INVENTORY_MISSING,
+    InstallAdmissionCode.STALE_INVENTORY,
+    InstallAdmissionCode.INSUFFICIENT_DISK,
+    InstallAdmissionCode.ARTIFACT_STORE_READ_ONLY,
+    InstallAdmissionCode.IMAGE_DISTRIBUTION_PENDING,
+    RuntimePreflightCode.HOST_CHANGED,
+    RuntimePreflightCode.REQUIREMENTS_CHANGED,
+    RuntimePreflightCode.STALE,
 }
 
 _REFRESHABLE_PREFLIGHT_BLOCKERS = {
-    "runtime_preflight.host_changed",
-    "runtime_preflight.requirements_changed",
-    "runtime_preflight.stale",
+    RuntimePreflightCode.HOST_CHANGED,
+    RuntimePreflightCode.REQUIREMENTS_CHANGED,
+    RuntimePreflightCode.STALE,
 }
 
 
@@ -189,7 +193,7 @@ def require_admissible(plan: InstallPlan) -> None:
             f"install is waiting for inventory or capacity ({causes})"
         )
     raise InstallPlanConflict(
-        "install.plan_invalid: install plan is blocked by current admission evidence"
+        f"{InstallAdmissionCode.PLAN_INVALID}: install plan is blocked by current admission evidence"
     )
 
 
@@ -440,7 +444,8 @@ class InstallAdmissionService:
             ):
                 blockers.append(
                     AdmissionReason(
-                        "install.agent_upgrade_required", AGENT_UPGRADE_REQUIRED_DETAIL
+                        InstallAdmissionCode.AGENT_UPGRADE_REQUIRED,
+                        AGENT_UPGRADE_REQUIRED_DETAIL,
                     )
                 )
             if legal_admission.warning is not None:
@@ -453,7 +458,9 @@ class InstallAdmissionService:
                 if compiled_plan_error:
                     detail = f"{detail} {compiled_plan_error}"
                 blockers.append(
-                    AdmissionReason("install.compiled_plan_unavailable", detail)
+                    AdmissionReason(
+                        InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE, detail
+                    )
                 )
             role = role_by_name.get(mapping_node.role)
             if role is None:
@@ -470,7 +477,7 @@ class InstallAdmissionService:
             ):
                 blockers.append(
                     AdmissionReason(
-                        "install.compiled_plan_unavailable",
+                        InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
                         "Controller-issued compiled model receipts are unavailable.",
                     )
                 )
@@ -490,7 +497,7 @@ class InstallAdmissionService:
                     if previous != size:
                         blockers.append(
                             AdmissionReason(
-                                "install.compiled_plan_unavailable",
+                                InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
                                 "Compiled model receipts disagree about an object size.",
                             )
                         )
@@ -498,21 +505,21 @@ class InstallAdmissionService:
             if image_bytes is None:
                 blockers.append(
                     AdmissionReason(
-                        "install.compiled_plan_unavailable",
+                        InstallAdmissionCode.COMPILED_PLAN_UNAVAILABLE,
                         "Controller-issued runtime image receipt is unavailable.",
                     )
                 )
             elif image_bytes > disk.image_bytes:
                 warnings.append(
                     AdmissionReason(
-                        "install.image_size_underdeclared",
+                        InstallAdmissionCode.IMAGE_SIZE_UNDERDECLARED,
                         "Image exceeds the recipe's estimate; disk admission uses its verified size.",
                     )
                 )
             if actual_artifact_bytes > disk.artifact_bytes:
                 warnings.append(
                     AdmissionReason(
-                        "install.artifact_size_underdeclared",
+                        InstallAdmissionCode.ARTIFACT_SIZE_UNDERDECLARED,
                         "Model files exceed the recipe's estimate; disk admission uses their verified sizes.",
                     )
                 )
@@ -520,21 +527,21 @@ class InstallAdmissionService:
             if snapshot is None:
                 blockers.append(
                     AdmissionReason(
-                        "install.inventory_missing",
+                        InstallAdmissionCode.INVENTORY_MISSING,
                         "No authenticated inventory is available for this GPU node.",
                     )
                 )
             if snapshot is not None and snapshot.stale:
                 blockers.append(
                     AdmissionReason(
-                        "install.stale_inventory",
+                        InstallAdmissionCode.STALE_INVENTORY,
                         "GPU node disk inventory is stale; refresh it before installing.",
                     )
                 )
             if snapshot is not None and snapshot.artifact_store_read_only:
                 blockers.append(
                     AdmissionReason(
-                        "install.artifact_store_read_only",
+                        InstallAdmissionCode.ARTIFACT_STORE_READ_ONLY,
                         "The GPU node artifact store is read-only.",
                     )
                 )
@@ -580,7 +587,7 @@ class InstallAdmissionService:
                 # a valid cold install before the Controller can distribute it.
                 warnings.append(
                     AdmissionReason(
-                        "install.image_distribution_pending",
+                        InstallAdmissionCode.IMAGE_DISTRIBUTION_PENDING,
                         "The exact built image will be imported by the ordered Run/Switch target-copy phase.",
                     )
                 )
@@ -618,7 +625,7 @@ class InstallAdmissionService:
             if free_after is not None and free_after < floor:
                 blockers.append(
                     AdmissionReason(
-                        "install.insufficient_disk",
+                        InstallAdmissionCode.INSUFFICIENT_DISK,
                         (
                             f"Installation would leave {free_after} bytes, below the required {floor}-byte floor."
                             + (f" Disk is {holders}." if holders else "")
@@ -731,10 +738,12 @@ class InstallAdmissionService:
                 workload_intent_ordinal=workload_intent_ordinal,
             )
         except AdmissionLockBusy as error:
-            raise InstallAdmissionBusy("install.capacity_busy") from error
+            raise InstallAdmissionBusy(InstallAdmissionCode.CAPACITY_BUSY) from error
         except OperationalError as error:
             if is_admission_contention(error):
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise InstallAdmissionBusy(
+                    InstallAdmissionCode.CAPACITY_BUSY
+                ) from error
             raise
 
     def _accept_install_in_session(
@@ -862,13 +871,17 @@ class InstallAdmissionService:
             or tuple((node.node_id, node.rank, node.role) for node in mapping_nodes)
             != tuple((node.node_id, node.rank, node.role) for node in plan.nodes)
         ):
-            raise InstallPlanConflict("install.plan_stale")
+            raise InstallPlanConflict(InstallAdmissionCode.PLAN_STALE)
         try:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
-            raise InstallPlanConflict("install.dependencies_stale") from error
+            raise InstallPlanConflict(
+                InstallAdmissionCode.DEPENDENCIES_STALE
+            ) from error
         except (TypeError, ValueError) as error:
-            raise InstallPlanConflict("install.dependencies_stale") from error
+            raise InstallPlanConflict(
+                InstallAdmissionCode.DEPENDENCIES_STALE
+            ) from error
         try:
             persisted_plan = installation_plan_document(
                 {
@@ -886,7 +899,7 @@ class InstallAdmissionService:
                 }
             )
         except RecipeExecutionContractError as error:
-            raise InstallPlanConflict("install.plan_invalid") from error
+            raise InstallPlanConflict(InstallAdmissionCode.PLAN_INVALID) from error
         installation = RecipeInstallation(
             recipe_revision_id=plan.recipe_revision_id,
             model_content_sha256=_primary_model_sha256(revision.document),
@@ -980,7 +993,7 @@ def _primary_model_sha256(document: Mapping[str, object]) -> str:
         or len(digest) != 64
         or any(character not in "0123456789abcdef" for character in digest)
     ):
-        raise InstallPlanConflict("install.model_identity_unavailable")
+        raise InstallPlanConflict(InstallAdmissionCode.MODEL_IDENTITY_UNAVAILABLE)
     return digest
 
 

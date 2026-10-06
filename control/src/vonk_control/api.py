@@ -39,7 +39,12 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
-from vonk_agent_protocol import SecurityRefusalReason, canonical_message
+from vonk_agent_protocol import (
+    CatalogCode,
+    ControllerErrorCode,
+    SecurityRefusalReason,
+    canonical_message,
+)
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -173,13 +178,13 @@ _ARTIFACT_OUTPUT_UPLOAD = re.compile(
 
 
 _CATALOG_HTTP_ERROR_CODES = {
-    400: "catalog.invalid_request",
+    400: CatalogCode.INVALID_REQUEST,
     401: SecurityRefusalReason.CATALOG_AUTHENTICATION_REQUIRED.value,
-    403: "catalog.insufficient_role",
-    404: "catalog.not_found",
-    409: "catalog.conflict",
-    422: "catalog.invalid_request",
-    503: "catalog.unavailable",
+    403: CatalogCode.INSUFFICIENT_ROLE,
+    404: CatalogCode.NOT_FOUND,
+    409: CatalogCode.CONFLICT,
+    422: CatalogCode.INVALID_REQUEST,
+    503: CatalogCode.UNAVAILABLE,
 }
 
 
@@ -250,7 +255,9 @@ def _catalog_error_content(request: Request, error: StarletteHTTPException) -> b
 
     detail = error.detail if isinstance(error.detail, str) else "catalog request failed"
     response = CatalogProblem(
-        code=_CATALOG_HTTP_ERROR_CODES.get(error.status_code, "catalog.request_failed"),
+        code=_CATALOG_HTTP_ERROR_CODES.get(
+            error.status_code, CatalogCode.REQUEST_FAILED
+        ),
         detail=detail[:256],
         request_id=request.state.request_id,
     )
@@ -268,13 +275,13 @@ def _http_error_code(status_code: int) -> str:
         # supplies a canonical code directly.
         return SecurityRefusalReason.CONTROLLER_REQUEST_REJECTED.value
     return {
-        400: "controller.invalid_request",
-        404: "controller.not_found",
-        409: "controller.conflict",
-        413: "controller.request_too_large",
-        422: "controller.invalid_request",
-        503: "controller.unavailable",
-    }.get(status_code, f"controller.http_{status_code}")
+        400: ControllerErrorCode.INVALID_REQUEST,
+        404: ControllerErrorCode.NOT_FOUND,
+        409: ControllerErrorCode.CONFLICT,
+        413: ControllerErrorCode.REQUEST_TOO_LARGE,
+        422: ControllerErrorCode.INVALID_REQUEST,
+        503: ControllerErrorCode.UNAVAILABLE,
+    }.get(status_code, f"{ControllerErrorCode.HTTP}{status_code}")
 
 
 class _FleetEventStreamResponse(StreamingResponse):
@@ -617,7 +624,7 @@ def create_app(
             )
         if request.url.path.startswith("/api/catalog/"):
             response = CatalogProblem(
-                code="catalog.invalid_request",
+                code=CatalogCode.INVALID_REQUEST,
                 detail="catalog request is invalid",
                 request_id=request.state.request_id,
             )
@@ -775,7 +782,7 @@ def create_app(
                         operation=f"{request.method} {request.url.path}",
                         endpoint=request.url.path,
                         http_status=500,
-                        code="controller.internal_error",
+                        code=ControllerErrorCode.INTERNAL_ERROR,
                         request_id=request_id,
                         source="unknown",
                         decision="exit",
@@ -784,7 +791,7 @@ def create_app(
                 status_code=500,
                 media_type="application/json",
             )
-            response.headers["x-vonk-error-code"] = "controller.internal_error"
+            response.headers["x-vonk-error-code"] = ControllerErrorCode.INTERNAL_ERROR
         response.headers["x-request-id"] = request_id
         response.headers["x-content-type-options"] = "nosniff"
         if response.status_code >= 400 and "x-vonk-error-code" not in response.headers:

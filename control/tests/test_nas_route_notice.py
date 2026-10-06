@@ -2,6 +2,7 @@
 
 from typing import get_args
 
+from vonk_agent_protocol import ProjectionCode
 from vonk_agent_protocol.inventory import NetworkInterface
 from vonk_control.fleet_projection import ProjectionReason
 from vonk_control.nas_route_notice import NasRouteWarningCode, nas_route_notice
@@ -10,7 +11,8 @@ from vonk_control.nas_route_notice import NasRouteWarningCode, nas_route_notice
 def test_every_nas_route_code_is_a_projection_reason_code() -> None:
     # The guard for the class: a new notice code that the projection contract
     # does not name would fail validation at runtime, so fail here instead.
-    reason_codes = set(get_args(ProjectionReason.model_fields["code"].annotation))
+    assert ProjectionReason.model_fields["code"].annotation is ProjectionCode
+    reason_codes = set(ProjectionCode)
     assert set(get_args(NasRouteWarningCode)) <= reason_codes
     assert {code for code in reason_codes if code.startswith("network.")} == set(
         get_args(NasRouteWarningCode)

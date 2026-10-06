@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import Select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol import AdmissionCode, UnknownOutcomeError
 
 from .settings import DATABASE_WAIT_BUDGETS
 
@@ -43,7 +43,7 @@ class AdmissionLockBusy(UnknownOutcomeError, RuntimeError):
     transactions seen at that moment, so "busy" always says why and by whom.
     """
 
-    code = "admission.capacity_busy"
+    code = AdmissionCode.CAPACITY_BUSY
 
     def __init__(
         self,

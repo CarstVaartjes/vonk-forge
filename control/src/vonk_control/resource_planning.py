@@ -15,7 +15,13 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Literal, Protocol, TypeGuard, get_args, runtime_checkable
 
-from vonk_agent_protocol import ResourceBlockerCode
+from vonk_agent_protocol import (
+    ResourceBlockerCode,
+    ResourcePlanningCode,
+    ResourceTerm,
+    ResourceTermProblem,
+    resource_term_code,
+)
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_forge_contracts.recipe import RecipeDiskResources, RecipeMemoryResources
 
@@ -453,7 +459,7 @@ def resolve_effective_settings(
             None,
             (
                 _reason(
-                    "resource.settings_unknown",
+                    ResourcePlanningCode.SETTINGS_UNKNOWN,
                     "Canonical effective settings are unavailable.",
                 ),
             ),
@@ -472,7 +478,7 @@ def resolve_effective_settings(
     if kind not in {"generation", "embedding", "job"}:
         reasons.append(
             _reason(
-                "resource.settings_kind_unknown",
+                ResourcePlanningCode.SETTINGS_KIND_UNKNOWN,
                 "Canonical settings kind is missing or unsupported.",
             )
         )
@@ -485,7 +491,7 @@ def resolve_effective_settings(
         if type(value) is not int or value < 1:
             reasons.append(
                 _reason(
-                    "resource.settings_type",
+                    ResourcePlanningCode.SETTINGS_TYPE,
                     f"Canonical {name} must be a positive integer.",
                 )
             )
@@ -500,7 +506,10 @@ def resolve_effective_settings(
     raw_knobs = settings.get("knobs", {})
     if not isinstance(raw_knobs, Mapping):
         reasons.append(
-            _reason("resource.knobs_invalid", "Canonical settings knobs are invalid.")
+            _reason(
+                ResourcePlanningCode.KNOBS_INVALID,
+                "Canonical settings knobs are invalid.",
+            )
         )
         raw_knobs = {}
     for name, raw_value in raw_knobs.items():
@@ -529,7 +538,7 @@ def resolve_effective_settings(
     if not isinstance(parallel, Mapping):
         reasons.append(
             _reason(
-                "resource.parallelism_unknown",
+                ResourcePlanningCode.PARALLELISM_UNKNOWN,
                 "Canonical topology parallelism is unavailable.",
             )
         )
@@ -537,7 +546,7 @@ def resolve_effective_settings(
     if "parallelism" in settings:
         reasons.append(
             _reason(
-                "resource.parallelism_duplicate",
+                ResourcePlanningCode.PARALLELISM_DUPLICATE,
                 "Parallelism is owned by topology and cannot be repeated in settings.",
             )
         )
@@ -547,7 +556,7 @@ def resolve_effective_settings(
         if type(value) is not int or value < 1:
             reasons.append(
                 _reason(
-                    "resource.parallelism_type",
+                    ResourcePlanningCode.PARALLELISM_TYPE,
                     f"Canonical topology parallelism {name} is invalid.",
                 )
             )
@@ -558,7 +567,8 @@ def resolve_effective_settings(
     if type(node_count) is not int or node_count < 1:
         reasons.append(
             _reason(
-                "resource.parallelism_type", "Canonical topology node_count is invalid."
+                ResourcePlanningCode.PARALLELISM_TYPE,
+                "Canonical topology node_count is invalid.",
             )
         )
         node_count = None
@@ -574,7 +584,7 @@ def resolve_effective_settings(
         if world_size is not None and product != world_size:
             reasons.append(
                 _reason(
-                    "resource.parallelism_inconsistent",
+                    ResourcePlanningCode.PARALLELISM_INCONSISTENT,
                     "Topology parallelism product does not equal node_count.",
                 )
             )
@@ -582,7 +592,7 @@ def resolve_effective_settings(
     if not isinstance(backend, str) or not backend:
         reasons.append(
             _reason(
-                "resource.parallelism_type",
+                ResourcePlanningCode.PARALLELISM_TYPE,
                 "Canonical topology parallelism backend is invalid.",
             )
         )
@@ -737,7 +747,7 @@ def resource_demand(
     if evidence.declared_total_bytes is not None and declared_bound is None:
         reasons.append(
             _reason(
-                "resource.evidence_invalid",
+                ResourcePlanningCode.EVIDENCE_INVALID,
                 "Declared recipe-role memory envelope is invalid.",
                 node_id=node_id,
             )
@@ -746,7 +756,7 @@ def resource_demand(
         if declared_bound is None:
             reasons.append(
                 _reason(
-                    "resource.evidence_unknown",
+                    ResourcePlanningCode.EVIDENCE_UNKNOWN,
                     "Memory evidence is missing or stale and no declared role bound is available.",
                     node_id=node_id,
                 )
@@ -758,7 +768,7 @@ def resource_demand(
     ):
         reasons.append(
             _reason(
-                "resource.evidence_invalid",
+                ResourcePlanningCode.EVIDENCE_INVALID,
                 "Memory evidence digest is invalid.",
                 node_id=node_id,
             )
@@ -771,7 +781,7 @@ def resource_demand(
             if declared_bound is None:
                 reasons.append(
                     _reason(
-                        "resource.evidence_unknown",
+                        ResourcePlanningCode.EVIDENCE_UNKNOWN,
                         f"{name} is missing and no declared role bound is available.",
                         node_id=node_id,
                     )
@@ -781,13 +791,13 @@ def resource_demand(
         elif type(item) is not int or item < 0:
             reasons.append(
                 _reason(
-                    "resource.evidence_invalid",
+                    ResourcePlanningCode.EVIDENCE_INVALID,
                     f"{name} is invalid; resource evidence cannot be trusted.",
                     node_id=node_id,
                 )
             )
     context = _term(
-        "context",
+        ResourceTerm.CONTEXT,
         selected.context_tokens,
         evidence.baseline_context_tokens,
         evidence.context_bytes_per_token,
@@ -796,7 +806,7 @@ def resource_demand(
         required=selected.context_tokens is not None,
     )
     concurrency = _term(
-        "concurrency",
+        ResourceTerm.CONCURRENCY,
         selected.concurrency,
         evidence.baseline_concurrency,
         evidence.concurrency_bytes_per_request,
@@ -805,7 +815,7 @@ def resource_demand(
         required=selected.concurrency is not None,
     )
     batch = _term(
-        "batch",
+        ResourceTerm.BATCH,
         selected.batch_tokens,
         evidence.baseline_batch_tokens,
         evidence.batch_bytes_per_token,
@@ -850,7 +860,7 @@ def resource_demand(
     if uncertain and declared_bound is not None and total is not None:
         reasons.append(
             _reason(
-                "resource.estimate_uncertain",
+                ResourcePlanningCode.ESTIMATE_UNCERTAIN,
                 f"Forecast {total} bytes from the declared recipe-role memory envelope ({declared_bound} bytes); {', '.join(dict.fromkeys(uncertain))} is unavailable, so actual demand may exceed this bound.",
                 severity="warning",
                 node_id=node_id,
@@ -920,7 +930,7 @@ def plan_capacity(
         if type(stop.release_bytes) is not int or stop.release_bytes < 0:
             reasons.append(
                 _reason(
-                    "resource.stop_release_unknown",
+                    ResourcePlanningCode.STOP_RELEASE_UNKNOWN,
                     "A planned stop has no valid capacity release evidence.",
                     node_id=stop.node_id,
                 )
@@ -1248,7 +1258,7 @@ def classify_preparation_effects(
 
 
 def _term(
-    name: str,
+    name: ResourceTerm,
     value: int | None,
     baseline: int | None,
     coefficient: int | None,
@@ -1265,8 +1275,8 @@ def _term(
                 None,
                 (
                     _reason(
-                        f"resource.{name}_unknown",
-                        f"Effective {name} setting is unavailable; capacity cannot be predicted.",
+                        resource_term_code(name, ResourceTermProblem.UNKNOWN),
+                        f"Effective {name.value} setting is unavailable; capacity cannot be predicted.",
                         node_id=node_id,
                     ),
                 ),
@@ -1275,8 +1285,8 @@ def _term(
     if baseline is not None and (type(baseline) is not int or baseline < 0):
         return None, (
             _reason(
-                f"resource.{name}_evidence_invalid",
-                f"Measured baseline evidence for {name} is invalid.",
+                resource_term_code(name, ResourceTermProblem.EVIDENCE_INVALID),
+                f"Measured baseline evidence for {name.value} is invalid.",
                 node_id=node_id,
             ),
         )
@@ -1287,24 +1297,24 @@ def _term(
     ):
         return None, (
             _reason(
-                f"resource.{name}_evidence_invalid",
-                f"Declared supported range for {name} is invalid.",
+                resource_term_code(name, ResourceTermProblem.EVIDENCE_INVALID),
+                f"Declared supported range for {name.value} is invalid.",
                 node_id=node_id,
             ),
         )
     if supported is not None and (value < supported[0] or value > supported[1]):
         return None, (
             _reason(
-                f"resource.{name}_unsupported",
-                f"Effective {name} setting is outside the declared supported range.",
+                resource_term_code(name, ResourceTermProblem.UNSUPPORTED),
+                f"Effective {name.value} setting is outside the declared supported range.",
                 node_id=node_id,
             ),
         )
     if baseline is None:
         return None, (
             _reason(
-                f"resource.{name}_evidence_unknown",
-                f"No baseline evidence is declared for effective {name}.",
+                resource_term_code(name, ResourceTermProblem.EVIDENCE_UNKNOWN),
+                f"No baseline evidence is declared for effective {name.value}.",
                 node_id=node_id,
             ),
         )
@@ -1313,16 +1323,16 @@ def _term(
     if coefficient is None:
         return None, (
             _reason(
-                f"resource.{name}_evidence_unknown",
-                f"No evidence supports changing effective {name} from its measured baseline.",
+                resource_term_code(name, ResourceTermProblem.EVIDENCE_UNKNOWN),
+                f"No evidence supports changing effective {name.value} from its measured baseline.",
                 node_id=node_id,
             ),
         )
     if type(coefficient) is not int or coefficient < 0:
         return None, (
             _reason(
-                f"resource.{name}_evidence_invalid",
-                f"Measured coefficient for {name} is invalid.",
+                resource_term_code(name, ResourceTermProblem.EVIDENCE_INVALID),
+                f"Measured coefficient for {name.value} is invalid.",
                 node_id=node_id,
             ),
         )

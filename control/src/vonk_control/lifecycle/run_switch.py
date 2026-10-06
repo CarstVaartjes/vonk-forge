@@ -55,7 +55,10 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import (
+    LifecycleState,
+    RunSwitchCode,
+)
 
 from .. import job_states
 from ..agent_operation_facts import aware
@@ -102,7 +105,7 @@ _STORED = {
 KEEP: Any = object()
 _KEEP = KEEP
 _CANCEL_EFFECT_UNKNOWN = (
-    "run-switch.cancel-effect-unknown: the child operation was still running when "
+    f"{RunSwitchCode.CANCEL_EFFECT_UNKNOWN}: the child operation was still running when "
     "the stop budget ended; its own lifecycle owns it"
 )
 

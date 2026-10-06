@@ -21,10 +21,12 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Literal
 
+from vonk_agent_protocol import RuntimeImageCode
+
 #: Stored images are keyed by their address (manifest digest) and stored size.
 ImageKey = tuple[str, int]
 
-_UNREADABLE_CODE = "runtime_image.archive_unavailable"
+_UNREADABLE_CODE = RuntimeImageCode.ARCHIVE_UNAVAILABLE
 _MAX_REMEMBERED = 8192
 
 

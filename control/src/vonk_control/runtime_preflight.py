@@ -7,6 +7,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from vonk_agent_protocol import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
@@ -73,21 +74,21 @@ def admission_blockers(
     if result is None:
         return (
             RuntimePreflightBlocker(
-                "runtime_preflight.required",
+                RuntimePreflightCode.REQUIRED,
                 "Spark runtime preflight has not completed.",
             ),
         )
     if current_fingerprint is None or result.fingerprint != current_fingerprint:
         return (
             RuntimePreflightBlocker(
-                "runtime_preflight.host_changed",
+                RuntimePreflightCode.HOST_CHANGED,
                 "Spark host policy changed or its current fingerprint is unavailable; rerun preflight.",
             ),
         )
     if result.observed_at > now or now - result.observed_at > maximum_age:
         return (
             RuntimePreflightBlocker(
-                "runtime_preflight.stale",
+                RuntimePreflightCode.STALE,
                 "Spark runtime preflight evidence has expired; rerun preflight.",
             ),
         )
@@ -98,14 +99,14 @@ def admission_blockers(
         if finding is None or finding.status == "unknown":
             blockers.append(
                 RuntimePreflightBlocker(
-                    "runtime_preflight.requirement_unknown",
+                    RuntimePreflightCode.REQUIREMENT_UNKNOWN,
                     f"Mandatory runtime capability {capability} is unknown.",
                 )
             )
         elif finding.status == "failed":
             blockers.append(
                 RuntimePreflightBlocker(
-                    f"runtime_preflight.{finding.code}",
+                    RuntimePreflightCode.CAPABILITY_FAILED,
                     f"Runtime capability {capability} failed: {finding.code}.",
                 )
             )

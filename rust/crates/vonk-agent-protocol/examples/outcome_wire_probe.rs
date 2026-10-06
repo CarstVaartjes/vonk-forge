@@ -8,7 +8,7 @@
 use serde::{Serialize, de::DeserializeOwned};
 use std::io::{self, Read};
 use vonk_agent_protocol::generated::{
-    ErrorCatalog, LifecycleVocabulary, OutcomeCatalog, OutcomeEvidence,
+    ErrorCatalog, LifecycleVocabulary, OutcomeCatalog, OutcomeEvidence, ReasonCodeVocabulary,
 };
 use vonk_agent_protocol::{AgentResult, canonical_json, parse_strict};
 
@@ -34,6 +34,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("error") => roundtrip::<ErrorCatalog>(&raw),
         Some("evidence") => roundtrip::<OutcomeEvidence>(&raw),
         Some("vocabulary") => roundtrip::<LifecycleVocabulary>(&raw),
-        _ => Err("usage: outcome_wire_probe agent-result|outcome|error|evidence|vocabulary".into()),
+        Some("reason-codes") => roundtrip::<ReasonCodeVocabulary>(&raw),
+        _ => Err(
+            "usage: outcome_wire_probe agent-result|outcome|error|evidence|vocabulary|reason-codes"
+                .into(),
+        ),
     }
 }

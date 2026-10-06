@@ -13,6 +13,7 @@ from datetime import datetime
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import ClusterMappingCode
 from vonk_forge_contracts import RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology
 
@@ -51,7 +52,8 @@ def validate_mapping_parameters(value: object) -> dict[str, object]:
         parsed = _MAPPING_PARAMETERS.validate_json(encoded, strict=True)
     except (TypeError, ValueError, ValidationError) as error:
         raise ClusterMappingError(
-            "mapping.parameters_invalid", "persisted mapping parameters are invalid"
+            ClusterMappingCode.PARAMETERS_INVALID,
+            "persisted mapping parameters are invalid",
         ) from error
     return copy.deepcopy(parsed)
 
@@ -101,7 +103,7 @@ def candidate_placements(
     """Use the mapping authority's deterministic rank and role assignment."""
     if topology.node_count != len(node_ids) or len(set(node_ids)) != len(node_ids):
         raise ClusterMappingError(
-            "mapping.node_count",
+            ClusterMappingCode.NODE_COUNT,
             "selected GPU node count does not match the exact topology",
         )
     expanded = [
@@ -135,7 +137,8 @@ class ClusterMappingService:
                 raise KeyError(recipe_revision_id)
             if revision.state != "active" or revision.content_digest is None:
                 raise ClusterMappingError(
-                    "mapping.recipe_unresolved", "only a resolved recipe can be mapped"
+                    ClusterMappingCode.RECIPE_UNRESOLVED,
+                    "only a resolved recipe can be mapped",
                 )
             document = copy.deepcopy(revision.document)
             nodes = _active_nodes(session, node_ids)
@@ -143,7 +146,9 @@ class ClusterMappingService:
         try:
             topology = recipe_topology(document)
         except RecipeRuntimeSpecError as error:
-            raise ClusterMappingError("mapping.topology_invalid", str(error)) from error
+            raise ClusterMappingError(
+                ClusterMappingCode.TOPOLOGY_INVALID, str(error)
+            ) from error
         effective = _effective_parameters(document, parameters)
         placements = candidate_placements(
             topology, tuple(node.node_id for node in nodes)
@@ -196,7 +201,8 @@ class ClusterMappingService:
                 or revision.content_digest != plan.recipe_content_sha256
             ):
                 raise ClusterMappingError(
-                    "mapping.stale_plan", "recipe changed after mapping preview"
+                    ClusterMappingCode.STALE_PLAN,
+                    "recipe changed after mapping preview",
                 )
             nodes = _active_nodes(
                 session, tuple(item.node_id for item in plan.nodes), lock=True
@@ -231,7 +237,7 @@ class ClusterMappingService:
                 )
             ):
                 raise ClusterMappingError(
-                    "mapping.stale_plan", "mapping plan identity is invalid"
+                    ClusterMappingCode.STALE_PLAN, "mapping plan identity is invalid"
                 )
             existing = session.scalar(
                 select(ClusterMapping).where(
@@ -243,7 +249,8 @@ class ClusterMappingService:
             endpoint = [item.node_id for item in plan.nodes if item.endpoint_owner]
             if len(endpoint) != 1:
                 raise ClusterMappingError(
-                    "mapping.endpoint_owner", "mapping must have one endpoint owner"
+                    ClusterMappingCode.ENDPOINT_OWNER,
+                    "mapping must have one endpoint owner",
                 )
             mapping = ClusterMapping(
                 recipe_revision_id=plan.recipe_revision_id,
@@ -280,7 +287,8 @@ def _active_nodes(
 ) -> tuple[AgentNode, ...]:
     if not node_ids or len(node_ids) != len(set(node_ids)):
         raise ClusterMappingError(
-            "mapping.nodes_invalid", "mapping nodes must be unique and non-empty"
+            ClusterMappingCode.NODES_INVALID,
+            "mapping nodes must be unique and non-empty",
         )
     statement = select(AgentNode).where(AgentNode.node_id.in_(node_ids))
     if lock:
@@ -288,7 +296,7 @@ def _active_nodes(
     rows = tuple(session.scalars(statement))
     if len(rows) != len(node_ids):
         raise ClusterMappingError(
-            "mapping.node_unknown", "a selected GPU node is unknown"
+            ClusterMappingCode.NODE_UNKNOWN, "a selected GPU node is unknown"
         )
     if any(
         row.state != "active"
@@ -297,7 +305,7 @@ def _active_nodes(
         for row in rows
     ):
         raise ClusterMappingError(
-            "mapping.node_incompatible",
+            ClusterMappingCode.NODE_INCOMPATIBLE,
             "a selected GPU node is inactive or incompatible",
         )
     return rows
@@ -345,10 +353,10 @@ def _topology_capabilities(
 
 def _mapping_actor(actor: str) -> str:
     if not isinstance(actor, str):
-        raise ClusterMappingError("mapping.actor", "mapping actor is invalid")
+        raise ClusterMappingError(ClusterMappingCode.ACTOR, "mapping actor is invalid")
     actor = actor.strip()
     if not actor or len(actor) > 200:
-        raise ClusterMappingError("mapping.actor", "mapping actor is invalid")
+        raise ClusterMappingError(ClusterMappingCode.ACTOR, "mapping actor is invalid")
     return actor
 
 
@@ -392,7 +400,9 @@ def effective_option_choices(
     try:
         return read_recipe(document).resolve_options(supplied)
     except (RecipeOptionError, ValidationError) as error:
-        raise ClusterMappingError("mapping.option_invalid", str(error)) from error
+        raise ClusterMappingError(
+            ClusterMappingCode.OPTION_INVALID, str(error)
+        ) from error
 
 
 def mapping_option_choices(parameters: Mapping[str, object]) -> dict[str, str]:
@@ -412,7 +422,9 @@ def _effective_parameters(
     try:
         choices, settings = split_option_choices(supplied)
     except RecipeRuntimeSpecError as error:
-        raise ClusterMappingError("mapping.option_invalid", str(error)) from error
+        raise ClusterMappingError(
+            ClusterMappingCode.OPTION_INVALID, str(error)
+        ) from error
     resolved = effective_option_choices(document, choices)
     effective = _effective_settings(document, settings)
     if resolved:
@@ -433,7 +445,7 @@ def _effective_settings(
         raw_settings = document.get("settings")
         if not isinstance(raw_settings, Mapping):
             raise ClusterMappingError(
-                "mapping.parameters_invalid", "recipe settings are invalid"
+                ClusterMappingCode.PARAMETERS_INVALID, "recipe settings are invalid"
             )
         effective: dict[str, object] = {}
         for name in ("context_tokens", "concurrency", "max_batch_tokens"):
@@ -448,20 +460,22 @@ def _effective_settings(
         unknown = set(supplied) - set(effective)
         if unknown:
             raise ClusterMappingError(
-                "mapping.parameter_unknown", "mapping contains an unknown setting"
+                ClusterMappingCode.PARAMETER_UNKNOWN,
+                "mapping contains an unknown setting",
             )
         effective.update(copy.deepcopy(dict(supplied)))
         return effective
     if not isinstance(raw_parameters, list):
         raise ClusterMappingError(
-            "mapping.parameters_invalid", "recipe parameters are invalid"
+            ClusterMappingCode.PARAMETERS_INVALID, "recipe parameters are invalid"
         )
     definitions = {
         str(item["name"]): item for item in raw_parameters if isinstance(item, Mapping)
     }
     if set(supplied) - set(definitions):
         raise ClusterMappingError(
-            "mapping.parameter_unknown", "mapping contains an unknown parameter"
+            ClusterMappingCode.PARAMETER_UNKNOWN,
+            "mapping contains an unknown parameter",
         )
     effective = {
         name: copy.deepcopy(definition["default"])
@@ -482,7 +496,8 @@ def _effective_settings(
         )
         if not valid_type:
             raise ClusterMappingError(
-                "mapping.parameter_type", f"parameter {name} has the wrong type"
+                ClusterMappingCode.PARAMETER_TYPE,
+                f"parameter {name} has the wrong type",
             )
         minimum = definition.get("minimum")
         maximum = definition.get("maximum")
@@ -502,7 +517,8 @@ def _effective_settings(
             and re.fullmatch(pattern, value) is None
         ):
             raise ClusterMappingError(
-                "mapping.parameter_value", f"parameter {name} is outside its bounds"
+                ClusterMappingCode.PARAMETER_VALUE,
+                f"parameter {name} is outside its bounds",
             )
     return dict(sorted(effective.items()))
 

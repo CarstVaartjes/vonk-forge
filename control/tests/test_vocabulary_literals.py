@@ -267,3 +267,158 @@ def test_the_enum_members_are_not_literals(tmp_path: Path) -> None:
     )
 
     assert counts == Counter()
+
+
+def test_the_reason_codes_come_from_the_contract() -> None:
+    from vonk_agent_protocol import REASON_CODE_ENUMS, RunSwitchCode
+
+    assert RunSwitchCode.PLAN_BLOCKED.value in scan.REASON_CODE_WORDS
+    assert "recipe-installation" not in scan.REASON_CODE_WORDS
+    assert {enum.__name__ for enum in REASON_CODE_ENUMS} >= {
+        "ModelCacheCode",
+        "ProfileReasonCode",
+        "ProjectionCode",
+        "RecipeImageCode",
+    }
+    # Plain prose is never a code, even when an enum also carries the word.
+    assert "stale" not in scan.REASON_CODE_WORDS
+    assert "context" not in scan.REASON_CODE_WORDS
+
+
+def test_a_hand_spelled_reason_code_is_found_even_as_a_message_prefix(
+    tmp_path: Path,
+) -> None:
+    counts = _python(
+        tmp_path,
+        """
+CODE = "reconcile.membership_changed"
+MESSAGE = "run-switch.plan_blocked: the plan changed"
+F_MESSAGE = f"run-switch.plan_blocked: {CODE}"
+PROSE = "stop everything"
+OTHER = "recipe-installation"
+""",
+    )
+
+    assert counts[("reason_code", REL)] == 3
+
+
+def test_a_free_string_code_position_is_found(tmp_path: Path) -> None:
+    source = """
+class WidgetError(Exception):
+    code = "widget.invalid"
+
+    def __init__(self, code: str, detail: str) -> None:
+        self.code = code
+
+
+class BrokenWidget(WidgetError):
+    pass
+
+
+def _reason(code: str, detail: str):
+    return detail
+
+
+def use(error, blockers):
+    raise BrokenWidget("anything.new", "detail")
+    raise WidgetError(code="another.new", detail="d")
+    blockers.append(make_blocker("a.new.blocker", "d"))
+    _reason("fresh.code", "d")
+    Reason(reason_code=f"x.{error}")
+    return status(status_code=404, exit_code="1")
+
+
+def defaulted(code: str = "default.code"):
+    return code
+"""
+    path = _module(tmp_path, source)
+
+    found = scan.scan_code_positions([path], root=tmp_path)
+
+    kinds = [line.split(": ", 1)[1].split(":", 1)[0] for line in found]
+    assert sorted(kinds) == sorted(
+        [
+            "attribute code",
+            "code argument of BrokenWidget",
+            "WidgetError(code=)",
+            "code argument of make_blocker",
+            "code argument of _reason",
+            "Reason(reason_code=)",
+            "default of code",
+        ]
+    )
+
+
+def test_a_contract_member_in_a_code_position_is_not_a_literal(
+    tmp_path: Path,
+) -> None:
+    source = """
+from vonk_agent_protocol import RunSwitchCode
+
+
+class WidgetError(Exception):
+    code = RunSwitchCode.PLAN_BLOCKED
+
+    def __init__(self, code, detail=""):
+        self.code = code
+
+
+def use():
+    raise WidgetError(RunSwitchCode.STALE_PLAN, "d")
+    raise WidgetError(code=RunSwitchCode.STALE_PLAN)
+"""
+    path = _module(tmp_path, source)
+
+    assert scan.scan_code_positions([path], root=tmp_path) == []
+    assert not scan.scan_python([path], root=tmp_path)
+
+
+def test_the_flat_tiers_fail_on_any_occurrence(tmp_path: Path) -> None:
+    counts = _python(tmp_path, 'CODE = "profile.review_stale"\n')
+
+    found = scan.flat_problems(
+        counts, ["control/src/x.py:3: attribute code: 'new.code'"]
+    )
+
+    assert len(found) == 2
+    assert "reason-code literal" in found[0]
+    assert "add the code to its domain enum first" in found[1]
+
+
+# Parses every Controller module twice more.
+@pytest.mark.slow(30)
+def test_the_repository_has_no_free_string_reason_code() -> None:
+    assert scan.flat_problems(scan.scan_python(), scan.scan_code_positions()) == []
+
+
+def test_the_cli_spells_only_contract_codes() -> None:
+    import ast
+    import re
+
+    from vonk_agent_protocol import REASON_CODE_ENUMS
+
+    from cluster_profiles import cli, cli_render, controller_cli
+
+    members = {
+        member.value
+        for enum in (*REASON_CODE_ENUMS, SecurityRefusalReason, WaitReason)
+        for member in enum
+        if any(mark in member.value for mark in scan._SEPARATORS)
+    }
+    domains = {word.split(".")[0] for word in members if "." in word}
+    shaped = re.compile(r"^[a-z][a-z0-9_-]*\.[a-z0-9_.-]+$")
+    unknown: set[str] = set()
+    for module in (cli, cli_render, controller_cli):
+        assert module.__file__ is not None
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and shaped.match(node.value)
+                and node.value.split(".")[0] in domains
+                and not re.search(r"\.v[0-9]+$", node.value)
+                and node.value not in members
+            ):
+                unknown.add(node.value)
+    assert not unknown, f"the CLI spells codes the contract does not own: {unknown}"

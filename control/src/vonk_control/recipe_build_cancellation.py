@@ -10,7 +10,11 @@ from pydantic import ConfigDict
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    LifecycleState,
+    RecipeBuildCode,
+    canonical_message,
+)
 from vonk_forge_contracts import read_recipe
 
 from . import job_states
@@ -55,7 +59,8 @@ def read_build_intent(job: Job) -> RecipeBuildIntent:
         )
     except (KeyError, TypeError, ValueError) as error:
         raise BuildConsumerError(
-            "build.producer_invalid", "accepted build producer intent is invalid"
+            RecipeBuildCode.PRODUCER_INVALID,
+            "accepted build producer intent is invalid",
         ) from error
 
 
@@ -100,7 +105,7 @@ def lock_availability_build_dependency(
     runtime = payload.get("runtime")
     if not isinstance(runtime, Mapping):
         raise BuildConsumerError(
-            "build.consumer_invalid", "availability runtime identity is invalid"
+            RecipeBuildCode.CONSUMER_INVALID, "availability runtime identity is invalid"
         )
     builder = runtime.get("builder_node_id")
     digest = payload.get("build_input_sha256")
@@ -113,7 +118,7 @@ def lock_availability_build_dependency(
         or not isinstance(revision, str)
     ):
         raise BuildConsumerError(
-            "build.consumer_invalid", "availability build identity is invalid"
+            RecipeBuildCode.CONSUMER_INVALID, "availability build identity is invalid"
         )
     lock_build_dependency(
         session,
@@ -160,7 +165,8 @@ def lock_profile_build_dependencies(
                 raise ValueError("reviewed profile build disappeared")
     except (KeyError, TypeError, ValueError) as error:
         raise BuildConsumerError(
-            "build.consumer_invalid", "reviewed profile build identity is invalid"
+            RecipeBuildCode.CONSUMER_INVALID,
+            "reviewed profile build identity is invalid",
         ) from error
 
 
@@ -200,7 +206,7 @@ def lock_build_dependency(
         if getattr(error.orig, "sqlstate", None) != "55P03":
             raise
         raise BuildConsumerError(
-            "build.consumer_busy",
+            RecipeBuildCode.CONSUMER_BUSY,
             "build ownership is changing; retry the request",
             retryable=True,
         ) from error
@@ -211,7 +217,7 @@ def lock_build_dependency(
         or build.build_input_sha256 != build_input_sha256
     ):
         raise BuildConsumerError(
-            "build.consumer_invalid", "accepted build consumer identity changed"
+            RecipeBuildCode.CONSUMER_INVALID, "accepted build consumer identity changed"
         )
     # Detachment removes demand; pending cleanup must not prevent it. New
     # consumers retain the default refusal and cannot join a cancelling child.
@@ -236,10 +242,11 @@ def lock_build_dependency(
             build_cancellation(cancelling)
         except (TypeError, ValueError) as error:
             raise BuildConsumerError(
-                "build.consumer_invalid", "build cancellation evidence is invalid"
+                RecipeBuildCode.CONSUMER_INVALID,
+                "build cancellation evidence is invalid",
             ) from error
         raise BuildConsumerError(
-            "build.cancellation_pending",
+            RecipeBuildCode.CANCELLATION_PENDING,
             "build cleanup must settle before joining this execution",
             retryable=True,
         )
@@ -294,7 +301,8 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
             )
         except (KeyError, TypeError, ValueError) as error:
             raise BuildConsumerError(
-                "build.consumer_invalid", "accepted build consumer evidence is invalid"
+                RecipeBuildCode.CONSUMER_INVALID,
+                "accepted build consumer evidence is invalid",
             ) from error
         if current:
             consumers.append(parent.id)
@@ -323,7 +331,8 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
                 consumers.append(application.id)
         except (KeyError, TypeError, ValueError) as error:
             raise BuildConsumerError(
-                "build.consumer_invalid", "accepted profile build evidence is invalid"
+                RecipeBuildCode.CONSUMER_INVALID,
+                "accepted profile build evidence is invalid",
             ) from error
     return tuple(sorted(consumers))
 

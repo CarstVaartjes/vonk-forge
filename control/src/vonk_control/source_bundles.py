@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import SourceBundleCode, canonical_message
 from vonk_agent_protocol.source_bundles import (
     SourceBundleDigestManifest,
     SourceBundleFile,
@@ -61,7 +61,7 @@ def generate_source_bundle(files: Mapping[str, bytes]) -> GeneratedSourceBundle:
     """Create a deterministic canonical tar from regular source files."""
 
     if not files:
-        raise SourceBundleError("bundle.empty", "source bundle has no files")
+        raise SourceBundleError(SourceBundleCode.EMPTY, "source bundle has no files")
     stream = io.BytesIO()
     normalized: dict[str, bytes] = {}
     with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as bundle:
@@ -70,7 +70,7 @@ def generate_source_bundle(files: Mapping[str, bytes]) -> GeneratedSourceBundle:
             content = files[raw_path]
             if not isinstance(content, bytes):
                 raise SourceBundleError(
-                    "bundle.file_invalid", "source bundle file is not binary"
+                    SourceBundleCode.FILE_INVALID, "source bundle file is not binary"
                 )
             normalized[path] = content
             member = tarfile.TarInfo(path)
@@ -116,13 +116,13 @@ class SourceBundleStore:
             or any(character not in "0123456789abcdef" for character in expected_sha256)
         ):
             raise SourceBundleError(
-                "bundle.digest_invalid", "expected digest is invalid"
+                SourceBundleCode.DIGEST_INVALID, "expected digest is invalid"
             )
         archive = _read_archive(payload, self._limits)
         manifest = _inspect_archive(archive, self._limits)
         if manifest.sha256 != expected_sha256:
             raise SourceBundleError(
-                "bundle.digest_mismatch", "source bundle digest does not match"
+                SourceBundleCode.DIGEST_MISMATCH, "source bundle digest does not match"
             )
         directory = self._root / expected_sha256[:2]
         destination = directory / f"{expected_sha256}.tar"
@@ -131,7 +131,8 @@ class SourceBundleStore:
             existing = destination.read_bytes()
             if _inspect_archive(existing, self._limits).sha256 != expected_sha256:
                 raise SourceBundleError(
-                    "bundle.storage_collision", "stored source bundle is inconsistent"
+                    SourceBundleCode.STORAGE_COLLISION,
+                    "stored source bundle is inconsistent",
                 )
             return StoredBundle(destination, manifest, len(existing))
 
@@ -160,19 +161,20 @@ class SourceBundleStore:
             character not in "0123456789abcdef" for character in sha256
         ):
             raise SourceBundleError(
-                "bundle.digest_invalid", "source bundle digest is invalid"
+                SourceBundleCode.DIGEST_INVALID, "source bundle digest is invalid"
             )
         path = self._root / sha256[:2] / f"{sha256}.tar"
         try:
             archive = path.read_bytes()
         except OSError as error:
             raise SourceBundleError(
-                "bundle.not_found", "source bundle is unavailable"
+                SourceBundleCode.NOT_FOUND, "source bundle is unavailable"
             ) from error
         manifest = _inspect_archive(archive, self._limits)
         if manifest.sha256 != sha256:
             raise SourceBundleError(
-                "bundle.storage_collision", "stored source bundle is inconsistent"
+                SourceBundleCode.STORAGE_COLLISION,
+                "stored source bundle is inconsistent",
             )
         return _generated_bundle(archive, manifest, self._limits)
 
@@ -206,12 +208,12 @@ class DatabaseSourceBundleStore:
         self._limits = limits or BundleLimits()
 
     def put(self, expected_sha256: str, payload: IO[bytes]) -> StoredBundle:
-        _validate_digest(expected_sha256, "bundle.digest_invalid")
+        _validate_digest(expected_sha256, SourceBundleCode.DIGEST_INVALID)
         archive = _read_archive(payload, self._limits)
         manifest = _inspect_archive(archive, self._limits)
         if manifest.sha256 != expected_sha256:
             raise SourceBundleError(
-                "bundle.digest_mismatch", "source bundle digest does not match"
+                SourceBundleCode.DIGEST_MISMATCH, "source bundle digest does not match"
             )
         from .models import RecipeSourceBundle, SourceBundleArchive
 
@@ -223,11 +225,13 @@ class DatabaseSourceBundleStore:
                 and parse_source_bundle_manifest(metadata.manifest) != manifest
             ):
                 raise SourceBundleError(
-                    "bundle.storage_collision", "stored source manifest is inconsistent"
+                    SourceBundleCode.STORAGE_COLLISION,
+                    "stored source manifest is inconsistent",
                 )
             if stored is not None and stored.archive != archive:
                 raise SourceBundleError(
-                    "bundle.storage_collision", "stored source bundle is inconsistent"
+                    SourceBundleCode.STORAGE_COLLISION,
+                    "stored source bundle is inconsistent",
                 )
             if stored is not None and metadata is not None:
                 # Verified again just now: a bundle a new revision is about to
@@ -256,30 +260,33 @@ class DatabaseSourceBundleStore:
         )
 
     def get(self, sha256: str) -> GeneratedSourceBundle:
-        _validate_digest(sha256, "bundle.digest_invalid")
+        _validate_digest(sha256, SourceBundleCode.DIGEST_INVALID)
         from .models import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions() as session:
             stored = session.get(SourceBundleArchive, sha256)
             if stored is None:
                 raise SourceBundleError(
-                    "bundle.not_found", "source bundle is unavailable"
+                    SourceBundleCode.NOT_FOUND, "source bundle is unavailable"
                 )
             metadata = session.get(RecipeSourceBundle, sha256)
             if metadata is None:
                 raise SourceBundleError(
-                    "bundle.manifest_invalid", "stored source manifest is unavailable"
+                    SourceBundleCode.MANIFEST_INVALID,
+                    "stored source manifest is unavailable",
                 )
             persisted = parse_source_bundle_manifest(metadata.manifest)
             archive = stored.archive
         manifest = _inspect_archive(archive, self._limits)
         if manifest != persisted:
             raise SourceBundleError(
-                "bundle.storage_collision", "stored source manifest is inconsistent"
+                SourceBundleCode.STORAGE_COLLISION,
+                "stored source manifest is inconsistent",
             )
         if manifest.sha256 != sha256:
             raise SourceBundleError(
-                "bundle.storage_collision", "stored source bundle is inconsistent"
+                SourceBundleCode.STORAGE_COLLISION,
+                "stored source bundle is inconsistent",
             )
         return _generated_bundle(archive, manifest, self._limits)
 
@@ -289,7 +296,7 @@ def parse_source_bundle_manifest(value: object) -> SourceBundleManifest:
         return SourceBundleManifest.model_validate_json(canonical_message(value))
     except (TypeError, ValueError) as error:
         raise SourceBundleError(
-            "bundle.manifest_invalid", "stored source manifest is invalid"
+            SourceBundleCode.MANIFEST_INVALID, "stored source manifest is invalid"
         ) from error
 
 
@@ -315,7 +322,7 @@ def _generated_bundle(
             stream = bundle.extractfile(member)
             if stream is None:
                 raise SourceBundleError(
-                    "bundle.read_failed", "source bundle file cannot be read"
+                    SourceBundleCode.READ_FAILED, "source bundle file cannot be read"
                 )
             files[_safe_path(member.name)] = stream.read(limits.max_file_bytes + 1)
     return GeneratedSourceBundle(MappingProxyType(files), archive, manifest)
@@ -324,12 +331,14 @@ def _generated_bundle(
 def _read_archive(payload: IO[bytes], limits: BundleLimits) -> bytes:
     archive = payload.read(limits.max_archive_bytes + 1)
     if not isinstance(archive, bytes):
-        raise SourceBundleError("bundle.read_failed", "source bundle is not binary")
+        raise SourceBundleError(
+            SourceBundleCode.READ_FAILED, "source bundle is not binary"
+        )
     if not archive:
-        raise SourceBundleError("bundle.empty", "source bundle is empty")
+        raise SourceBundleError(SourceBundleCode.EMPTY, "source bundle is empty")
     if len(archive) > limits.max_archive_bytes:
         raise SourceBundleError(
-            "bundle.archive_too_large", "source bundle is too large"
+            SourceBundleCode.ARCHIVE_TOO_LARGE, "source bundle is too large"
         )
     return archive
 
@@ -342,45 +351,49 @@ def _inspect_archive(archive: bytes, limits: BundleLimits) -> SourceBundleManife
         bundle = tarfile.open(fileobj=io.BytesIO(archive), mode="r:*")  # noqa: SIM115
     except (tarfile.TarError, OSError) as error:
         raise SourceBundleError(
-            "bundle.invalid_archive", "source bundle is invalid"
+            SourceBundleCode.INVALID_ARCHIVE, "source bundle is invalid"
         ) from error
     with bundle:
         for member in bundle:
             path = _safe_path(member.name)
             if path in seen:
                 raise SourceBundleError(
-                    "bundle.duplicate_path", "source bundle contains a duplicate path"
+                    SourceBundleCode.DUPLICATE_PATH,
+                    "source bundle contains a duplicate path",
                 )
             seen.add(path)
             if member.isdir():
                 continue
             if not member.isfile():
                 raise SourceBundleError(
-                    "bundle.entry_forbidden",
+                    SourceBundleCode.ENTRY_FORBIDDEN,
                     "source bundle may contain only directories and regular files",
                 )
             if len(files) >= limits.max_files:
                 raise SourceBundleError(
-                    "bundle.too_many_files", "source bundle contains too many files"
+                    SourceBundleCode.TOO_MANY_FILES,
+                    "source bundle contains too many files",
                 )
             if member.size < 0 or member.size > limits.max_file_bytes:
                 raise SourceBundleError(
-                    "bundle.file_too_large", "source bundle file is too large"
+                    SourceBundleCode.FILE_TOO_LARGE, "source bundle file is too large"
                 )
             total += member.size
             if total > limits.max_total_bytes:
                 raise SourceBundleError(
-                    "bundle.expanded_too_large", "expanded source bundle is too large"
+                    SourceBundleCode.EXPANDED_TOO_LARGE,
+                    "expanded source bundle is too large",
                 )
             extracted = bundle.extractfile(member)
             if extracted is None:
                 raise SourceBundleError(
-                    "bundle.read_failed", "source bundle file cannot be read"
+                    SourceBundleCode.READ_FAILED, "source bundle file cannot be read"
                 )
             content = extracted.read(limits.max_file_bytes + 1)
             if len(content) != member.size:
                 raise SourceBundleError(
-                    "bundle.size_mismatch", "source bundle file size is inconsistent"
+                    SourceBundleCode.SIZE_MISMATCH,
+                    "source bundle file size is inconsistent",
                 )
             files.append(
                 SourceBundleFile(
@@ -406,16 +419,16 @@ def _inspect_archive(archive: bytes, limits: BundleLimits) -> SourceBundleManife
 def _safe_path(value: str) -> str:
     if not value or "\x00" in value or value.startswith("/"):
         raise SourceBundleError(
-            "bundle.path_forbidden", "source bundle path is forbidden"
+            SourceBundleCode.PATH_FORBIDDEN, "source bundle path is forbidden"
         )
     path = PurePosixPath(value)
     if any(part in {"", ".", ".."} for part in path.parts):
         raise SourceBundleError(
-            "bundle.path_forbidden", "source bundle path is forbidden"
+            SourceBundleCode.PATH_FORBIDDEN, "source bundle path is forbidden"
         )
     normalized = path.as_posix()
     if len(normalized.encode("utf-8")) > 512:
         raise SourceBundleError(
-            "bundle.path_too_long", "source bundle path is too long"
+            SourceBundleCode.PATH_TOO_LONG, "source bundle path is too long"
         )
     return normalized

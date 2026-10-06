@@ -20,6 +20,8 @@ from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
     OperationProgress,
+    RecipeUpdateCode,
+    RuntimeImageCode,
     SecurityRefusalReason,
 )
 
@@ -114,11 +116,11 @@ class RecipeUpdateBatches:
             document = read_update_document(job.payload)
         except (ValueError, TypeError) as error:
             raise _error(
-                "recipe_update.operation_invalid", "stored update document is invalid"
+                RecipeUpdateCode.OPERATION_INVALID, "stored update document is invalid"
             ) from error
         if job.kind != UPDATE_KIND or _binding_digest(document) != job.payload_digest:
             raise _error(
-                "recipe_update.operation_invalid",
+                RecipeUpdateCode.OPERATION_INVALID,
                 "stored update scope does not match its accepted identity",
             )
         if any(
@@ -126,7 +128,7 @@ class RecipeUpdateBatches:
             for child in document.children
         ):
             raise _error(
-                "recipe_update.operation_invalid",
+                RecipeUpdateCode.OPERATION_INVALID,
                 "update dependency graph contains a cycle",
             )
         return document
@@ -150,13 +152,13 @@ class RecipeUpdateBatches:
     ) -> RecipeUpdateResponse:
         if job.kind != UPDATE_KIND or job.actor != actor:
             raise _error(
-                "recipe_update.request_key_reused",
+                RecipeUpdateCode.REQUEST_KEY_REUSED,
                 "request key was already used for another operation",
             )
         document = self._document(job)
         if document.request != scope:
             raise _error(
-                "recipe_update.request_key_reused",
+                RecipeUpdateCode.REQUEST_KEY_REUSED,
                 "request key was already used for another scope",
             )
         return self._view(job, document)
@@ -193,7 +195,7 @@ class RecipeUpdateBatches:
                         receipt.oci_archive_sha256, receipt.image_bytes
                     )
                 except RuntimeImagePreparationError as error:
-                    if error.code == "runtime_image.cache_missing" or isinstance(
+                    if error.code == RuntimeImageCode.CACHE_MISSING or isinstance(
                         error.__cause__, FileNotFoundError
                     ):
                         continue
@@ -232,7 +234,7 @@ class RecipeUpdateBatches:
                     or revision.execution_key is None
                 ):
                     raise _error(
-                        "recipe_update.scope_invalid",
+                        RecipeUpdateCode.SCOPE_INVALID,
                         "selected recipe revision is no longer available",
                     )
                 children.append(
@@ -315,7 +317,7 @@ class RecipeUpdateBatches:
         size = max(len(_encoded(worst)), len(_encoded(response)))
         if size > MAX_CONTROL_DOCUMENT_BYTES:
             raise _error(
-                "recipe_update.scope_invalid",
+                RecipeUpdateCode.SCOPE_INVALID,
                 f"complete update scope requires up to {size} bytes; document limit is {MAX_CONTROL_DOCUMENT_BYTES} bytes",
             )
 
@@ -770,7 +772,7 @@ class RecipeUpdateBatches:
         )
         if job is None:
             raise _error(
-                "recipe_update.claim_lost", "recipe update no longer owns its claim"
+                RecipeUpdateCode.CLAIM_LOST, "recipe update no longer owns its claim"
             )
         document = self._document(job)
         if (
@@ -780,7 +782,7 @@ class RecipeUpdateBatches:
             or document.claim_until <= _now(self.owner._clock())
         ):
             raise _error(
-                "recipe_update.claim_lost", "recipe update no longer owns its claim"
+                RecipeUpdateCode.CLAIM_LOST, "recipe update no longer owns its claim"
             )
         return job, document
 
@@ -801,7 +803,7 @@ class RecipeUpdateBatches:
         )
         if job.actor != actor or child is None or intent != self._intent(child):
             raise _error(
-                "recipe_update.operation_invalid",
+                RecipeUpdateCode.OPERATION_INVALID,
                 "child admission does not match the accepted update scope",
             )
         revision = session.get(CatalogDocumentRevision, child.recipe_revision_id)
@@ -811,7 +813,7 @@ class RecipeUpdateBatches:
             or revision.execution_key != child.effective_execution_key
         ):
             raise _error(
-                "recipe_update.operation_invalid",
+                RecipeUpdateCode.OPERATION_INVALID,
                 "child recipe no longer matches the accepted update identity",
             )
 
@@ -867,7 +869,7 @@ class RecipeUpdateBatches:
                     )
                 ):
                     raise _error(
-                        "recipe_update.operation_invalid",
+                        RecipeUpdateCode.OPERATION_INVALID,
                         "child receipt does not match its frozen recipe identity",
                     )
                 child.operation_id = observed.id
@@ -883,7 +885,7 @@ class RecipeUpdateBatches:
                 )
                 child.retry_at = None
             except RecipeImageAvailabilityError as error:
-                if error.code == "recipe_update.claim_lost":
+                if error.code == RecipeUpdateCode.CLAIM_LOST:
                     return
                 retryable = _retryable(error)
                 child.failure = RecipeUpdateFailure(
@@ -900,7 +902,7 @@ class RecipeUpdateBatches:
             except (ValueError, TypeError):
                 child.state = LifecycleState.FAILED
                 child.failure = RecipeUpdateFailure(
-                    code="recipe_update.observation_invalid",
+                    code=RecipeUpdateCode.OBSERVATION_INVALID,
                     detail="child operation returned invalid persisted evidence",
                     retryable=False,
                 )

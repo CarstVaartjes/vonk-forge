@@ -8,7 +8,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    StopPlanCode,
+    UninstallPlanCode,
+    canonical_message,
+)
 
 SharedCachePolicy = Literal["retain-shared-download-cache"]
 
@@ -154,28 +158,28 @@ def stop_plan(
     if run_state not in {"starting", "running", "stopping", "failed", "lost"}:
         blockers.append(
             ActionReason(
-                "stop.run_not_stoppable",
+                StopPlanCode.RUN_NOT_STOPPABLE,
                 f"Run state {run_state} cannot accept a stop operation.",
             )
         )
     if not immutable_membership_exact or not ordered_nodes:
         blockers.append(
             ActionReason(
-                "stop.rank_membership_changed",
+                StopPlanCode.RANK_MEMBERSHIP_CHANGED,
                 "Persisted ranks no longer match the immutable accepted run plan.",
             )
         )
     if not stop_scope_exact:
         blockers.append(
             ActionReason(
-                "stop.target_scope_changed",
+                StopPlanCode.TARGET_SCOPE_CHANGED,
                 "Stop targets and missing ranks do not partition the accepted group.",
             )
         )
     if not reservation_membership_exact:
         blockers.append(
             ActionReason(
-                "stop.reservation_membership_changed",
+                StopPlanCode.RESERVATION_MEMBERSHIP_CHANGED,
                 "Active run reservations include a node outside the accepted rank group.",
             )
         )
@@ -236,7 +240,7 @@ def stop_plan(
         blockers=tuple(blockers),
         warnings=(
             ActionReason(
-                "stop.capacity_release_deferred",
+                StopPlanCode.CAPACITY_RELEASE_DEFERRED,
                 "Capacity remains reserved until every selected rank stops successfully.",
             ),
         ),
@@ -342,7 +346,7 @@ def uninstall_plan(
     }:
         blockers.append(
             ActionReason(
-                "uninstall.installation_not_uninstallable",
+                UninstallPlanCode.INSTALLATION_NOT_UNINSTALLABLE,
                 f"Installation state {installation_state} cannot be uninstalled.",
             )
         )
@@ -351,28 +355,28 @@ def uninstall_plan(
     ):
         blockers.append(
             ActionReason(
-                "uninstall.rank_membership_changed",
+                UninstallPlanCode.RANK_MEMBERSHIP_CHANGED,
                 "Persisted nodes no longer match the immutable installation plan.",
             )
         )
     if active_run_count:
         blockers.append(
             ActionReason(
-                "uninstall.active_run",
+                UninstallPlanCode.ACTIVE_RUN,
                 f"{active_run_count} active run(s) must be stopped explicitly first.",
             )
         )
     if active_runs_truncated:
         blockers.append(
             ActionReason(
-                "uninstall.active_runs_truncated",
+                UninstallPlanCode.ACTIVE_RUNS_TRUNCATED,
                 "The bounded active-run list is incomplete; uninstall remains blocked.",
             )
         )
     if active_operation:
         blockers.append(
             ActionReason(
-                "uninstall.operation_active",
+                UninstallPlanCode.OPERATION_ACTIVE,
                 "This installation already has an active uninstall operation.",
             )
         )
@@ -427,7 +431,7 @@ def uninstall_plan(
     if disposition == "abandon":
         warnings.append(
             ActionReason(
-                "uninstall.abandon-never-installed",
+                UninstallPlanCode.ABANDON_NEVER_INSTALLED,
                 "The persisted plan never reached a node; it is abandoned "
                 "rather than uninstalled.",
             )
@@ -435,7 +439,7 @@ def uninstall_plan(
     elif not bytes_known:
         warnings.append(
             ActionReason(
-                "uninstall.bytes_unknown",
+                UninstallPlanCode.BYTES_UNKNOWN,
                 "Reclaimable bytes are unknown; cleanup remains scoped to this installation.",
             )
         )

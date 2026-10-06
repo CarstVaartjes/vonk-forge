@@ -38,6 +38,7 @@ from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
     DistributionAssignment,
+    DistributionCode,
     InventoryRequest,
     RecipeRunObservationsWire,
     SignedHostHelperGrant,
@@ -1737,12 +1738,12 @@ def install_agent_routes(
             else {}
         )
         if error.code in {
-            "distribution.unassigned",
-            "distribution.wrong_node",
-            "distribution.expired",
+            DistributionCode.UNASSIGNED,
+            DistributionCode.WRONG_NODE,
+            DistributionCode.EXPIRED,
         }:
             return HTTPException(status_code=403, detail=error.detail, headers=headers)
-        if error.code == "distribution.object_invalid":
+        if error.code == DistributionCode.OBJECT_INVALID:
             return HTTPException(status_code=404, detail=error.detail, headers=headers)
         return HTTPException(status_code=503, detail=error.detail, headers=headers)
 
