@@ -23,9 +23,10 @@ import tarfile
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple, Protocol, Self
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -1089,6 +1090,18 @@ class LocalBrowserController:
         )
 
 
+class LostStartProof(NamedTuple):
+    operation_id: str
+    payload_digest: str
+    run_id: str
+    attempt: int
+    fence: str
+    endpoint: str
+    container: str
+    managed_containers: tuple[str, ...]
+    response_sha256: str
+
+
 class SparkLifecycle:
     def __init__(self, arguments: argparse.Namespace, graph: dict[str, object]) -> None:
         self.arguments = arguments
@@ -1104,6 +1117,7 @@ class SparkLifecycle:
         self.synthetic_fabric_octet = os.getpid() % 200 + 20
         self.firewall_environment: dict[str, str] = {}
         self.agent_installed = False
+        self.lost_start_proof: LostStartProof | None = None
         self.synthetic_fixture_sha256: str | None = None
         # The release whose Controller this lane runs. The upgrade-carry lane
         # starts on the previous release and moves to the candidate.
@@ -1533,6 +1547,289 @@ class SparkLifecycle:
             lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS,
             agent_source_address=f"172.31.{self.synthetic_fabric_octet}.1",
             caddyfile=self._acceptance_caddyfile(),
+        )
+        self._configure_receipt_fault_relay()
+
+    def _configure_receipt_fault_relay(self) -> None:
+        assert self.bundle is not None
+        root = self.bundle / "acceptance-receipts"
+        root.mkdir(mode=0o770, exist_ok=True)
+        self._run_command(
+            ["sudo", "/usr/bin/chown", f"{os.getuid()}:10001", os.fspath(root)],
+            cwd=self.bundle,
+            timeout=30,
+        )
+        os.chmod(root, 0o770)
+        relay = self.bundle / "acceptance-receipt-fault.py"
+        shutil.copyfile(Path(__file__).with_name("receipt_fault.py"), relay)
+        os.chmod(relay, 0o644)
+        path = self.bundle / "docker-compose.yaml"
+        compose = yaml.safe_load(path.read_text(encoding="utf-8"))
+        service = compose["services"]["control-api"]
+        for mount in (
+            "./acceptance-receipt-fault.py:/acceptance/receipt_fault.py:ro",
+            "./acceptance-receipts:/acceptance-state",
+        ):
+            if mount not in service["volumes"]:
+                service["volumes"].append(mount)
+        service["command"] = ["python", "/acceptance/receipt_fault.py"]
+        path.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
+
+    def _arm_start_receipt_loss(self) -> None:
+        assert self.bundle is not None
+        if self.lost_start_proof is not None:
+            return
+        root = self.bundle / "acceptance-receipts"
+        for name in ("blocked.json", "replayed.json"):
+            if (root / name).exists():
+                raise LifecycleError("lost Start receipt acceptance state is not fresh")
+        (root / "armed.json").write_text(
+            json.dumps({"id": str(uuid.uuid4())}),
+            encoding="utf-8",
+        )
+        os.chmod(root / "armed.json", 0o644)
+
+    def _container_for_replay(self, run_id: str) -> str:
+        assert self.temporary_root is not None
+        result = self._run_command(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.Id}} {{.State.Running}}",
+                f"vonk-{run_id}",
+            ],
+            cwd=self.temporary_root,
+            timeout=30,
+        ).stdout.strip()
+        if re.fullmatch(r"[0-9a-f]{64} true", result) is None:
+            raise LifecycleError("lost Start receipt canary is not serving")
+        return result
+
+    def _managed_for_replay(self) -> tuple[str, ...]:
+        assert self.temporary_root is not None
+        lines = self._run_command(
+            ["docker", "ps", "--no-trunc", "--format", "{{.ID}} {{.Names}}"],
+            cwd=self.temporary_root,
+            timeout=30,
+        ).stdout.splitlines()
+        return tuple(
+            sorted(
+                line
+                for line in lines
+                if re.fullmatch(
+                    r"[0-9a-f]{64} vonk-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}",
+                    line,
+                )
+            )
+        )
+
+    def _direct_canary_inference(self, endpoint: str) -> str:
+        """Probe from the authorized NAS namespace before route publication."""
+        assert self.bundle is not None
+        bundle = self.bundle
+        parsed = urlsplit(endpoint)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname != f"172.31.{self.synthetic_fabric_octet}.1"
+            or parsed.port is None
+            or not 1 <= parsed.port <= 65535
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise LifecycleError(
+                "lost Start receipt endpoint is outside the disposable Spark"
+            )
+
+        def transport(
+            method: str,
+            path: str,
+            body: bytes | None,
+            _headers: Mapping[str, str],
+            _timeout: float,
+        ) -> tuple[int, bytes]:
+            probe = self._run_command(
+                self._compose(
+                    "exec",
+                    "-T",
+                    "litellm",
+                    "python",
+                    "-c",
+                    "import base64,json,sys,urllib.request; "
+                    "req=urllib.request.Request(sys.argv[1]+sys.argv[3], data=sys.stdin.buffer.read(), method=sys.argv[2], headers={'Content-Type':'application/json'}); "
+                    "response=urllib.request.urlopen(req,timeout=30); "
+                    "print(json.dumps({'status':response.status,'body':base64.b64encode(response.read(1048577)).decode()}))",
+                    endpoint.rstrip("/"),
+                    method,
+                    path,
+                ),
+                cwd=bundle,
+                timeout=40,
+                input_text="" if body is None else body.decode("utf-8"),
+            )
+            observed = require_object(json.loads(probe.stdout), "direct canary probe")
+            status, encoded = observed.get("status"), observed.get("body")
+            if type(status) is not int or not isinstance(encoded, str):
+                raise LifecycleError("direct canary probe is invalid")
+            return status, base64.b64decode(encoded, validate=True)
+
+        inference = Client(
+            endpoint.rstrip("/"),
+            None,
+            timeout=30,
+            headers={"X-Vonk-Acceptance-Probe": "lost-start-receipt"},
+            transport=transport,
+        )
+        fixture = self.synthetic_canary_fixture
+        return self._run_canonical_inference(
+            inference, fixture.serving_check, fixture.slug
+        )
+
+    def _recover_lost_start_receipt(self, node_id: str) -> None:
+        if getattr(self, "lost_start_proof", None) is not None:
+            return
+        bundle = getattr(self, "bundle", None)
+        if bundle is None:
+            return
+        assert self.temporary_root is not None
+        path = bundle / "acceptance-receipts/blocked.json"
+        if not path.is_file():
+            return
+        if path.stat().st_size > 64 * 1024:
+            raise LifecycleError("lost Start receipt exceeds its evidence bound")
+        receipt = require_object(
+            json.loads(path.read_text(encoding="utf-8")), "lost Start receipt"
+        )
+        fence, endpoint = receipt.get("fence"), receipt.get("endpoint")
+        if (
+            not isinstance(fence, str)
+            or UUID.fullmatch(fence) is None
+            or not isinstance(endpoint, str)
+        ):
+            raise LifecycleError("lost Start receipt identity is invalid")
+        rows = self._psql(
+            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state "
+            "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
+            f"WHERE a.fence='{fence}'"
+        )
+        if len(rows) != 1 or len(rows[0]) != 7:
+            raise LifecycleError("lost Start receipt has no accepted Controller claim")
+        operation_id, payload_digest, run_id, attempt, kind, owner, state = rows[0]
+        if (
+            UUID.fullmatch(operation_id) is None
+            or SHA256.fullmatch(payload_digest) is None
+            or UUID.fullmatch(run_id) is None
+            or not attempt.isdigit()
+            or kind != "recipe.start"
+            or owner != node_id
+            or state != "running"
+        ):
+            raise LifecycleError(
+                "lost Start receipt is not the live exact canary Start"
+            )
+        before_container = self._container_for_replay(run_id)
+        before_managed = self._managed_for_replay()
+        before_response = self._direct_canary_inference(endpoint)
+        self._run_command(
+            ["sudo", "/usr/bin/systemctl", "stop", "vonk-forge-agent.service"],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        self._run_command(
+            [
+                "sudo",
+                "/usr/bin/python3",
+                "-c",
+                "from pathlib import Path; import sys; Path(sys.argv[1]).write_bytes(b'acceptance-lost-start-journal')",
+                os.fspath(AGENT_DATA / "state.sqlite"),
+            ],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        self._run_command(
+            ["sudo", "/usr/bin/systemctl", "start", "vonk-forge-agent.service"],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        self.lost_start_proof = LostStartProof(
+            operation_id,
+            payload_digest,
+            run_id,
+            int(attempt),
+            fence,
+            endpoint,
+            before_container,
+            before_managed,
+            before_response,
+        )
+        if self._direct_canary_inference(endpoint) != before_response:
+            raise LifecycleError(
+                "canary inference changed after the unacknowledged Start journal was lost"
+            )
+
+    def _verify_lost_start_replay(self, run_id: str) -> None:
+        assert self.bundle is not None
+        proof = self.lost_start_proof
+        if proof is None or proof.run_id != run_id:
+            raise LifecycleError("canary never exercised an unacknowledged exact Start")
+        path = self.bundle / "acceptance-receipts/replayed.json"
+        if not path.is_file():
+            raise LifecycleError(
+                "Controller did not accept a fresh Start receipt after journal loss"
+            )
+        receipt = require_object(
+            json.loads(path.read_text(encoding="utf-8")), "replayed Start receipt"
+        )
+        fence = receipt.get("fence")
+        if (
+            not isinstance(fence, str)
+            or UUID.fullmatch(fence) is None
+            or fence == proof.fence
+            or receipt.get("endpoint") != proof.endpoint
+        ):
+            raise LifecycleError(
+                "Start replay did not report the same serving effect under a fresh fence"
+            )
+        rows = self._psql(
+            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,a.state "
+            "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
+            f"WHERE a.fence='{fence}'"
+        )
+        if (
+            len(rows) != 1
+            or len(rows[0]) != 5
+            or rows[0][:3] != [proof.operation_id, proof.payload_digest, proof.run_id]
+            or not rows[0][3].isdigit()
+            or int(rows[0][3]) <= proof.attempt
+            or rows[0][4] != "succeeded"
+        ):
+            raise LifecycleError(
+                "Start replay changed the accepted operation or exact payload"
+            )
+        if (
+            self._container_for_replay(run_id) != proof.container
+            or self._managed_for_replay() != proof.managed_containers
+            or self._direct_canary_inference(proof.endpoint) != proof.response_sha256
+        ):
+            raise LifecycleError(
+                "Start replay replaced, duplicated or changed the serving effect"
+            )
+        print(
+            json.dumps(
+                {
+                    "event": "exact-start-replayed-after-journal-loss",
+                    "operation_id": proof.operation_id,
+                    "run_id": proof.run_id,
+                    "payload_digest": proof.payload_digest,
+                    "original_attempt": proof.attempt,
+                    "replay_attempt": int(rows[0][3]),
+                    "container": proof.container.split()[0],
+                }
+            ),
+            flush=True,
         )
 
     def _acceptance_caddyfile(self) -> str | None:
@@ -2485,6 +2782,7 @@ class SparkLifecycle:
                     "synthetic canary preparation receipts are incomplete"
                 )
 
+            self._arm_start_receipt_loss()
             application_payload = self._load_canary_profile(
                 preview,
                 request_key=self._canary_request_key(fixture, node_id, "profile-load"),
@@ -2568,6 +2866,7 @@ class SparkLifecycle:
                 inference, fixture.serving_check, fixture.slug
             )
             completed.append("inference-ok")
+            self._verify_lost_start_replay(run_id)
             if carry is not None:
                 # A carry that replaced the workload reports the installation
                 # and run that now serve, which the cleanup must remove.
@@ -3024,6 +3323,7 @@ class SparkLifecycle:
         # retry schedule and the same application identity must be observed
         # until it reaches a terminal outcome.
         while typed.state in _LIVE_APPLICATION_STATES:
+            self._recover_lost_start_receipt(node_id)
             if time.monotonic() >= deadline:
                 # Say where it stalled: a queued application with no step
                 # means nothing claimed it, while a running one names the step
