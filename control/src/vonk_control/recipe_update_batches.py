@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
     OperationProgress,
+    ProgressPhase,
     RecipeUpdateCode,
     RuntimeImageCode,
     SecurityRefusalReason,
@@ -356,7 +357,7 @@ class RecipeUpdateBatches:
             children=document.children,
             cancellation=document.cancellation,
             progress=OperationProgress(
-                phase="update" if waiting else "complete",
+                phase=ProgressPhase.UPDATING if waiting else ProgressPhase.COMPLETED,
                 completed_bytes=0,
                 total_bytes_known=False,
                 completed_items=complete,

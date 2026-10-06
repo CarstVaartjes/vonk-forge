@@ -8,7 +8,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
-use vonk_agent_protocol::generated::{AgentOperation, WaitReason};
+use vonk_agent_protocol::generated::{AgentOperation, FailureStage, WaitReason};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
 };
@@ -570,7 +570,7 @@ impl StateStore {
             let finished = ExecutionResult::unknown(
                 WaitReason::AgentRestartInterrupted,
                 "agent restarted with an operation in progress",
-                UnknownEvidence::at("agent-restart")
+                UnknownEvidence::at(FailureStage::AgentRestart)
                     .because("the agent restarted before the operation's result was recorded"),
             )
             .finish_for(&operation);

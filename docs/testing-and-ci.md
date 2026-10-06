@@ -470,7 +470,14 @@ including `RuntimePreflightFindingCode` and `HelperErrorCode`) in a string liter
 the agent, helper or protocol crates, no `json!` result body outside tests, and one
 struct literal of the runtime preflight finding (the constructor that takes a
 `RuntimePreflightFindingCode` member), so a new free-string finding code fails.
-Its two residues (`VOCABULARY_RESIDUE`, `TOOL_OUTPUT_WORDS`) only fall.
+`ProgressPhase` and `HostHelperResponseStatus` are guarded in every spelling, plain
+words included; `FailureStage` is guarded by its type (every stage parameter takes the
+enum). A `#[cfg(test)]` item is skipped wherever it stands, so code after an early test
+module is scanned too. `VOCABULARY_RESIDUE` is empty; a word that is a tool's output or
+a file's content goes to `FOREIGN_MEANINGS` with its reason. The Python ratchet has a
+flat `progress_phase` tier: a phase spelled by hand in the `phase=` of
+`OperationProgress`/`OperationMemberProgress`, in a progress-shaped dict or in a
+comparison with a progress phase fails.
 
 The lifecycle also has a hardware canary that nothing in CI runs:
 `scripts/lifecycle-canary` drives one load, one cancel during start and one

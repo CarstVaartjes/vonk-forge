@@ -4,10 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 use serde_yaml::{Mapping, Value};
+use vonk_agent_protocol::generated::SourcePolicyCode;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SourceFinding {
-    pub code: &'static str,
+    pub code: SourcePolicyCode,
     pub path: String,
     pub line: Option<usize>,
     pub detail: &'static str,
@@ -28,7 +29,7 @@ pub fn inspect_build_source(
     match files.get(dockerfile) {
         Some(payload) => inspect_dockerfile(dockerfile, payload, &mut findings),
         None => findings.push(finding(
-            "dockerfile.missing",
+            SourcePolicyCode::DockerfileMissing,
             dockerfile,
             None,
             "recipe Dockerfile is missing from the source bundle",
@@ -87,7 +88,7 @@ pub fn dockerfile_base_images(
 fn inspect_dockerfile(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>) {
     let Ok(text) = std::str::from_utf8(payload) else {
         findings.push(finding(
-            "dockerfile.invalid_utf8",
+            SourcePolicyCode::DockerfileInvalidUtf8,
             path,
             None,
             "Dockerfile must be UTF-8",
@@ -100,7 +101,7 @@ fn inspect_dockerfile(path: &str, payload: &[u8], findings: &mut Vec<SourceFindi
     for (line, instruction, argument) in dockerfile_instructions(text) {
         if argument.contains("<<") {
             findings.push(finding(
-                "dockerfile.heredoc_forbidden",
+                SourcePolicyCode::DockerfileHeredocForbidden,
                 path,
                 Some(line),
                 "Dockerfile heredocs are not accepted",
@@ -117,14 +118,14 @@ fn inspect_dockerfile(path: &str, payload: &[u8], findings: &mut Vec<SourceFindi
                 let base = tokens.first().copied().unwrap_or_default();
                 if placeholder_image(base) {
                     findings.push(finding(
-                        "dockerfile.base_placeholder",
+                        SourcePolicyCode::DockerfileBasePlaceholder,
                         path,
                         Some(line),
                         "replace the all-zero base-image placeholder with a verified linux/arm64 digest",
                     ));
                 } else if base != "scratch" && !pinned_image(base) {
                     findings.push(finding(
-                        "dockerfile.base_unpinned",
+                        SourcePolicyCode::DockerfileBaseUnpinned,
                         path,
                         Some(line),
                         "every base image must be pinned by sha256 digest",
@@ -136,13 +137,13 @@ fn inspect_dockerfile(path: &str, payload: &[u8], findings: &mut Vec<SourceFindi
             }
             "USER" => final_user = Some((argument.trim().to_owned(), line)),
             "ADD" => findings.push(finding(
-                "dockerfile.add_forbidden",
+                SourcePolicyCode::DockerfileAddForbidden,
                 path,
                 Some(line),
                 "ADD is forbidden; use bounded local COPY",
             )),
             "ONBUILD" => findings.push(finding(
-                "dockerfile.onbuild_forbidden",
+                SourcePolicyCode::DockerfileOnbuildForbidden,
                 path,
                 Some(line),
                 "ONBUILD may hide deferred build instructions",
@@ -151,7 +152,7 @@ fn inspect_dockerfile(path: &str, payload: &[u8], findings: &mut Vec<SourceFindi
                 let compact = argument.to_ascii_lowercase().replace(' ', "");
                 if compact.contains("--mount=type=secret") || compact.contains("--mount=type=ssh") {
                     findings.push(finding(
-                        "dockerfile.secret_mount",
+                        SourcePolicyCode::DockerfileSecretMount,
                         path,
                         Some(line),
                         "secret and SSH build mounts are forbidden",
@@ -159,7 +160,7 @@ fn inspect_dockerfile(path: &str, payload: &[u8], findings: &mut Vec<SourceFindi
                 }
                 if compact.contains("--network=host") || compact.contains("--security=insecure") {
                     findings.push(finding(
-                        "dockerfile.build_privilege",
+                        SourcePolicyCode::DockerfileBuildPrivilege,
                         path,
                         Some(line),
                         "host networking and insecure build execution are forbidden",
@@ -172,7 +173,7 @@ fn inspect_dockerfile(path: &str, payload: &[u8], findings: &mut Vec<SourceFindi
     }
     if !saw_from {
         findings.push(finding(
-            "dockerfile.from_missing",
+            SourcePolicyCode::DockerfileFromMissing,
             path,
             None,
             "Dockerfile must declare a base stage",
@@ -183,7 +184,7 @@ fn inspect_dockerfile(path: &str, payload: &[u8], findings: &mut Vec<SourceFindi
         .is_none_or(|(user, _)| !non_root_user(user))
     {
         findings.push(finding(
-            "dockerfile.root_user",
+            SourcePolicyCode::DockerfileRootUser,
             path,
             final_user.map(|(_, line)| line),
             "the final image stage must select an explicit numeric non-root user",
@@ -207,7 +208,7 @@ fn inspect_copy(
         && placeholder_image(from)
     {
         findings.push(finding(
-            "dockerfile.copy_stage_placeholder",
+            SourcePolicyCode::DockerfileCopyBasePlaceholder,
             path,
             Some(line),
             "replace the all-zero external COPY placeholder with a verified digest",
@@ -219,7 +220,7 @@ fn inspect_copy(
         && !pinned_image(from)
     {
         findings.push(finding(
-            "dockerfile.copy_stage_unpinned",
+            SourcePolicyCode::DockerfileCopyBaseUnpinned,
             path,
             Some(line),
             "COPY --from must reference a declared stage or pinned image",
@@ -227,13 +228,17 @@ fn inspect_copy(
     }
     tokens.retain(|value| !value.starts_with("--"));
     let sources = if argument.trim_start().starts_with('[') {
-        serde_json::from_str::<Vec<String>>(argument)
-            .ok()
-            .map(|items| {
-                let count = items.len().saturating_sub(1);
-                items.into_iter().take(count).collect()
-            })
-            .unwrap_or_default()
+        let Ok(items) = serde_json::from_str::<Vec<String>>(argument) else {
+            findings.push(finding(
+                SourcePolicyCode::DockerfileCopyInvalid,
+                path,
+                Some(line),
+                "COPY syntax cannot be reviewed safely",
+            ));
+            return;
+        };
+        let count = items.len().saturating_sub(1);
+        items.into_iter().take(count).collect()
     } else {
         let count = tokens.len().saturating_sub(1);
         tokens
@@ -245,11 +250,13 @@ fn inspect_copy(
     if sources.is_empty()
         || sources.iter().any(|value| {
             (value.starts_with('/') && !copies_from_stage)
+                || value.starts_with('~')
+                || value.contains('$')
                 || value.split('/').any(|part| part == "..")
         })
     {
         findings.push(finding(
-            "dockerfile.copy_escape",
+            SourcePolicyCode::DockerfileCopyPath,
             path,
             Some(line),
             "COPY sources must stay inside the canonical build context",
@@ -260,7 +267,7 @@ fn inspect_copy(
 fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>) {
     let Ok(document) = serde_yaml::from_slice::<Value>(payload) else {
         findings.push(finding(
-            "compose.invalid",
+            SourcePolicyCode::ComposeInvalid,
             path,
             None,
             "Compose document is invalid",
@@ -270,7 +277,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
     let Some(services) = mapping_get(document.as_mapping(), "services").and_then(Value::as_mapping)
     else {
         findings.push(finding(
-            "compose.invalid",
+            SourcePolicyCode::ComposeInvalid,
             path,
             None,
             "Compose document must contain a services mapping",
@@ -280,7 +287,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
     for service in services.values() {
         let Some(service) = service.as_mapping() else {
             findings.push(finding(
-                "compose.service_invalid",
+                SourcePolicyCode::ComposeServiceInvalid,
                 path,
                 None,
                 "Compose service must be a mapping",
@@ -289,7 +296,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
         };
         if mapping_get(Some(service), "privileged").and_then(Value::as_bool) == Some(true) {
             findings.push(finding(
-                "compose.privileged",
+                SourcePolicyCode::ComposePrivileged,
                 path,
                 None,
                 "privileged Compose services are forbidden",
@@ -298,7 +305,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
         for key in ["network_mode", "pid", "ipc", "uts", "userns_mode"] {
             if mapping_get(Some(service), key).and_then(Value::as_str) == Some("host") {
                 findings.push(finding(
-                    "compose.host_namespace",
+                    SourcePolicyCode::ComposeHostNamespace,
                     path,
                     None,
                     "host namespaces are forbidden",
@@ -307,7 +314,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
         }
         if nonempty_sequence(mapping_get(Some(service), "cap_add")) {
             findings.push(finding(
-                "compose.capabilities",
+                SourcePolicyCode::ComposeCapabilities,
                 path,
                 None,
                 "added Linux capabilities are forbidden",
@@ -315,7 +322,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
         }
         if nonempty_sequence(mapping_get(Some(service), "devices")) {
             findings.push(finding(
-                "compose.devices",
+                SourcePolicyCode::ComposeDevices,
                 path,
                 None,
                 "Compose build metadata may not request host devices",
@@ -326,7 +333,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
             .any(|value| value.to_ascii_lowercase().contains("unconfined"))
         {
             findings.push(finding(
-                "compose.unconfined",
+                SourcePolicyCode::ComposeUnconfined,
                 path,
                 None,
                 "unconfined security profiles are forbidden",
@@ -335,22 +342,15 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
         let volumes = mapping_get(Some(service), "volumes");
         if volumes.is_some_and(|value| !value.is_sequence()) {
             findings.push(finding(
-                "compose.volumes_invalid",
+                SourcePolicyCode::ComposeVolumesInvalid,
                 path,
                 None,
                 "Compose volumes must be a sequence",
             ));
         }
-        for (source, explicit_bind) in volume_sources(volumes) {
-            if source.contains("docker.sock") || source.contains("podman.sock") {
-                findings.push(finding(
-                    "compose.container_socket",
-                    path,
-                    None,
-                    "container runtime sockets are forbidden",
-                ));
-            }
-            if explicit_bind
+        for (source, explicit_bind, container_socket) in volume_sources(volumes) {
+            if container_socket
+                || explicit_bind
                 || source.starts_with('/')
                 || source.starts_with("./")
                 || source.starts_with("../")
@@ -359,10 +359,10 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
                 || source.starts_with('~')
             {
                 findings.push(finding(
-                    "compose.host_bind",
+                    SourcePolicyCode::ComposeHostBind,
                     path,
                     None,
-                    "host bind mounts are forbidden",
+                    "host bind mounts and container-engine sockets are forbidden",
                 ));
             }
         }
@@ -386,7 +386,9 @@ fn sequence_strings(value: Option<&Value>) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-fn volume_sources(value: Option<&Value>) -> Vec<(String, bool)> {
+/// Each volume's source, whether it is an explicit bind, and whether it names a
+/// container-engine socket (anywhere in a short-form entry, as the Controller reads it).
+fn volume_sources(value: Option<&Value>) -> Vec<(String, bool, bool)> {
     value
         .and_then(Value::as_sequence)
         .map(|items| {
@@ -396,20 +398,28 @@ fn volume_sources(value: Option<&Value>) -> Vec<(String, bool)> {
                     Value::String(short) => short
                         .split(':')
                         .next()
-                        .map(|source| (source.to_owned(), false)),
+                        .map(|source| (source.to_owned(), false, names_container_socket(short))),
                     Value::Mapping(long) => mapping_get(Some(long), "source")
                         .and_then(Value::as_str)
                         .map(|source| {
                             let explicit_bind = mapping_get(Some(long), "type")
                                 .and_then(Value::as_str)
                                 == Some("bind");
-                            (source.to_owned(), explicit_bind)
+                            (
+                                source.to_owned(),
+                                explicit_bind,
+                                names_container_socket(source),
+                            )
                         }),
                     _ => None,
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn names_container_socket(value: &str) -> bool {
+    value.contains("docker.sock") || value.contains("podman.sock")
 }
 
 fn dockerfile_instructions(text: &str) -> Vec<(usize, String, String)> {
@@ -474,7 +484,7 @@ fn non_root_user(value: &str) -> bool {
 }
 
 fn finding(
-    code: &'static str,
+    code: SourcePolicyCode,
     path: &str,
     line: Option<usize>,
     detail: &'static str,

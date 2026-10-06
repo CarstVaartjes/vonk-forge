@@ -15,8 +15,8 @@ use url::Url;
 use vonk_agent_protocol::generated::{
     ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, ControllerErrorCode,
     HostHelperGrantResponse, HostRuntimeGrantRequest, HostRuntimeGrantRequestAction,
-    IssuedCertificateResponse, PackageActivationGrantRequest, RenewRequest, SecurityRefusalReason,
-    TelemetryRequest,
+    IssuedCertificateResponse, PackageActivationGrantRequest, ProgressPhase, RenewRequest,
+    SecurityRefusalReason, TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
@@ -437,7 +437,7 @@ pub struct DistributionDownloadEvidence {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DistributionProgress {
-    pub phase: &'static str,
+    pub phase: ProgressPhase,
     pub completed_items: u64,
     pub total_items: u64,
     pub object_sha256: String,
@@ -472,7 +472,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
         self.object_bytes[index] = self.object_bytes[index].max(bytes);
         self.completed_items += u64::from(completed);
         (self.callback)(DistributionProgress {
-            phase: "copying",
+            phase: ProgressPhase::Copying,
             completed_items: self.completed_items,
             total_items: self.object_bytes.len() as u64,
             object_sha256: object.sha256.clone(),
@@ -485,7 +485,7 @@ impl<F: FnMut(DistributionProgress)> DistributionProgressTracker<F> {
 
 struct ProgressSnapshot {
     fence: uuid::Uuid,
-    phase: String,
+    phase: ProgressPhase,
     counters: Option<(u64, u64)>,
 }
 
@@ -661,13 +661,13 @@ impl AgentHttpClient {
         }
     }
 
-    pub(crate) fn set_progress_phase(&self, fence: uuid::Uuid, phase: &str) {
+    pub(crate) fn set_progress_phase(&self, fence: uuid::Uuid, phase: ProgressPhase) {
         *self
             .progress_phase
             .lock()
             .expect("progress phase lock poisoned") = Some(ProgressSnapshot {
             fence,
-            phase: phase.to_owned(),
+            phase,
             counters: None,
         });
     }
@@ -692,7 +692,7 @@ impl AgentHttpClient {
     pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         let mut progress = progress.clone();
         if let Some(measured) = progress.progress.as_mut()
-            && measured.phase == "executing"
+            && crate::vocabulary::is(&measured.phase, ProgressPhase::Executing)
             && let Some(snapshot) = self
                 .progress_phase
                 .lock()
@@ -700,7 +700,7 @@ impl AgentHttpClient {
                 .as_ref()
             && snapshot.fence == progress.fence
         {
-            measured.phase.clone_from(&snapshot.phase);
+            measured.phase = snapshot.phase.to_string();
             if let Some((bytes, total)) = snapshot.counters {
                 measured.completed_bytes = bytes;
                 measured.total_bytes = Some(total);
@@ -1268,7 +1268,7 @@ impl AgentHttpClient {
         mut progress: F,
     ) -> Result<(), ClientError>
     where
-        F: FnMut(u64, &'static str),
+        F: FnMut(u64, ProgressPhase),
     {
         let ObjectPlacement {
             destination,
@@ -1314,7 +1314,7 @@ impl AgentHttpClient {
         preallocate(&output, offset, expected_bytes);
         let mut output = BufWriter::with_capacity(1024 * 1024, output);
         let mut write_behind = WriteBehind::new(offset);
-        progress(offset, "copying");
+        progress(offset, ProgressPhase::Copying);
         let mut last_progress = tokio::time::Instant::now();
         let mut retries = 0_u32;
         while offset < expected_bytes {
@@ -1363,7 +1363,7 @@ impl AgentHttpClient {
                     governor.record_bytes(chunk.len() as u64);
                     write_behind.written(&mut output, offset).await?;
                     if last_progress.elapsed() >= Duration::from_millis(200) {
-                        progress(offset, "copying");
+                        progress(offset, ProgressPhase::Copying);
                         last_progress = tokio::time::Instant::now();
                     }
                 }
@@ -1377,14 +1377,14 @@ impl AgentHttpClient {
                 Ok(()) => retries = 0,
                 Err(error) if error.retryable() && retries < 4 => {
                     governor.throttled();
-                    progress(offset, "copying");
+                    progress(offset, ProgressPhase::Copying);
                     tokio::time::sleep(Duration::from_millis(500 * (1 << retries))).await;
                     retries += 1;
                 }
                 Err(error) => return Err(error),
             }
         }
-        progress(offset, "copying");
+        progress(offset, ProgressPhase::Copying);
         write_behind.finish().await?;
         output.flush().await?;
         output.get_ref().sync_all().await?;
@@ -1402,7 +1402,7 @@ impl AgentHttpClient {
         // not re-hashed. The digest names the object; ingress hashing happens
         // once, where the Controller's cache first receives the bytes. The
         // object is flushed and about to be renamed into place.
-        progress(expected_bytes, "finalizing");
+        progress(expected_bytes, ProgressPhase::Finalizing);
         let before_rename = tokio::fs::symlink_metadata(&partial).await?;
         if !same_file_metadata(&synced_metadata, &before_rename) {
             return Err(ClientError::Protocol);
@@ -2418,6 +2418,7 @@ mod tests {
     use uuid::Uuid;
     use vonk_agent_protocol::generated::{
         AgentClaimPayload, AgentOperation, ArtifactDistributionPayload, OperationProgress,
+        ProgressPhase,
     };
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, HostRuntimeRequest,
@@ -3242,7 +3243,11 @@ mod tests {
             .unwrap();
         // One operation-wide phase for the whole transfer: a per-object step
         // must not make it flip while other objects are still moving.
-        assert!(snapshots.iter().all(|item| item.phase == "copying"));
+        assert!(
+            snapshots
+                .iter()
+                .all(|item| item.phase == ProgressPhase::Copying)
+        );
         assert!(
             snapshots
                 .windows(2)
@@ -3587,7 +3592,7 @@ mod tests {
                     governor: &StreamGovernor::default(),
                 },
                 |_, phase| {
-                    if phase == "finalizing" && !swapped {
+                    if phase == ProgressPhase::Finalizing && !swapped {
                         std::fs::write(&replacement, &corrupt).unwrap();
                         std::fs::set_permissions(
                             &replacement,
@@ -3720,7 +3725,10 @@ mod tests {
                 .contains("range: bytes=5-")
         );
         assert!(updates.windows(2).all(|pair| pair[0].0 <= pair[1].0));
-        assert_eq!(updates.last(), Some(&(model.len() as u64, "finalizing")));
+        assert_eq!(
+            updates.last(),
+            Some(&(model.len() as u64, ProgressPhase::Finalizing))
+        );
     }
 
     #[tokio::test]
@@ -3987,7 +3995,7 @@ mod tests {
             fence: progress.fence,
         };
         let (client, server) = heartbeat_client(directive);
-        client.set_progress_phase(progress.fence, "uploading");
+        client.set_progress_phase(progress.fence, ProgressPhase::Uploading);
         client.set_progress_bytes(progress.fence, 512, 1024);
         client.heartbeat(&progress).await.unwrap();
         let request = server.join().unwrap();

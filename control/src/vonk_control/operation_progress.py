@@ -11,38 +11,42 @@ from datetime import UTC, datetime
 from math import exp
 
 from vonk_agent_protocol import (
+    TRANSFER_PHASES,
+    WAITING_PHASES,
     LifecycleState,
     OperationMemberProgress,
     OperationProgress,
-    StateAlias,
+    ProgressPhase,
+    adopt_progress_phase,
 )
 
 from . import job_states
 from .bounded_json import BoundedJSONError, integer
 from .strict_json import read_stored_model
 
-TRANSFER_PHASES = frozenset(
+#: Lifecycle words a stored phase can also be while the work waits for something
+#: other than bytes; the progress words that wait are ``WAITING_PHASES``.
+_LIFECYCLE_WAITING_WORDS = frozenset(
     {
-        "download",
-        "downloading",
-        "transfer",
-        "transferring",
-        "copying",
-        "upload",
-        "uploading",
-        "distribution",
-    }
-)
-WAITING_PHASES = frozenset(
-    {
-        "queued",
-        "pending",
-        StateAlias.WAITING.value,
         LifecycleState.OBSERVING.value,
         LifecycleState.BACKOFF.value,
         *job_states.words(LifecycleState.NEEDS_OPERATOR),
     }
 )
+
+
+def is_transfer_phase(word: str) -> bool:
+    """Whether a phase word (an agent's, current or retired) is one where bytes move."""
+    return adopt_progress_phase(word) in TRANSFER_PHASES
+
+
+def is_waiting_phase(word: str) -> bool:
+    """Whether a phase word means the work is not running yet."""
+    return (
+        adopt_progress_phase(word) in WAITING_PHASES or word in _LIFECYCLE_WAITING_WORDS
+    )
+
+
 STALE_AFTER_SECONDS = 45.0
 STALL_AFTER_SECONDS = 120.0
 PROGRESS_INTERVAL_SECONDS = 1.0
@@ -118,7 +122,7 @@ def observe_progress(
         result.pop(key, None)
     if (
         delta_time > 0
-        and result["phase"] in TRANSFER_PHASES
+        and is_transfer_phase(str(result["phase"]))
         and result["phase"] == old.get("phase")
     ):
         delta = max(
@@ -169,7 +173,7 @@ def project_progress(
     stopped = (
         advanced is not None and (now - advanced).total_seconds() >= STALL_AFTER_SECONDS
     )
-    activity = "waiting" if stale or value.phase in WAITING_PHASES else "active"
+    activity = "waiting" if stale or is_waiting_phase(value.phase) else "active"
     # A transfer phase is stall-able whenever bytes remain (or are unknown).  A
     # non-transfer phase is stall-able only when the operation itself declared a
     # measurable total that is still incomplete, so a phase with no declared
@@ -186,15 +190,15 @@ def project_progress(
     )
     if (
         stopped
-        and value.phase not in WAITING_PHASES
+        and not is_waiting_phase(value.phase)
         and (
-            (value.phase in TRANSFER_PHASES and bytes_remaining)
-            or (value.phase not in TRANSFER_PHASES and declared_remaining)
+            (is_transfer_phase(value.phase) and bytes_remaining)
+            or (not is_transfer_phase(value.phase) and declared_remaining)
         )
     ):
         activity = "possibly_stalled"
     changes: dict[str, object] = {"activity": activity}
-    if stale or value.phase not in TRANSFER_PHASES:
+    if stale or not is_transfer_phase(value.phase):
         changes.update(
             bytes_per_second=None, smoothed_bytes_per_second=None, eta_seconds=None
         )
@@ -224,9 +228,9 @@ def aggregate_progress(members: Sequence[OperationMemberProgress]) -> OperationP
     phase = (
         next(iter(phases))
         if len(phases) == 1
-        else "transfer"
-        if phases and phases <= TRANSFER_PHASES
-        else "prepare"
+        else ProgressPhase.TRANSFER.value
+        if phases and all(is_transfer_phase(word) for word in phases)
+        else ProgressPhase.PREPARING.value
     )
     timestamps = [
         member.last_progress_at for member in members if member.last_progress_at
@@ -267,7 +271,7 @@ def aggregate_progress(members: Sequence[OperationMemberProgress]) -> OperationP
         if any(member.activity == "possibly_stalled" for member in active)
         else "waiting"
         if any(
-            member.activity == "waiting" or member.phase in WAITING_PHASES
+            member.activity == "waiting" or is_waiting_phase(member.phase)
             for member in active
         )
         else "active",

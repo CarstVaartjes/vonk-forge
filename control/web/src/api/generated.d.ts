@@ -2266,6 +2266,12 @@ export interface components {
             /** Value */
             value: string;
         };
+        /**
+         * FailureStage
+         * @description The step an operation stopped at: a short, stable, secret-free word.
+         * @enum {string}
+         */
+        FailureStage: "agent-restart" | "agent-upgrade-installed" | "artifact-distribution" | "base-image-import" | "bounded-build-process" | "egress-address" | "egress-image-import" | "egress-network-create" | "egress-readiness" | "egress-service-start" | "helper-runtime-reconciliation" | "helper-runtime-reconciliation-lock" | "image-build" | "image-upload" | "image-verification" | "installation-checkpoint-storage" | "installation-directory" | "installation-metadata" | "installation-path" | "installation-receipt" | "installation-reconciliation-lock" | "installation-removal" | "installation-validation" | "job-cancel-stop" | "job-inputs" | "job-state" | "job-stop" | "lifecycle-metadata" | "model-custody" | "model-materialization" | "observation-identity" | "output-storage" | "retained-container" | "run-storage" | "runtime-adapter" | "runtime-cache" | "runtime-cache-cleanup" | "runtime-metadata" | "runtime-projection" | "source-bundle-fetch" | "stop" | "stop-cleanup" | "stop-metadata" | "stop-plan" | "unknown";
         /** FleetActionResponse */
         FleetActionResponse: {
             /**
@@ -3642,6 +3648,12 @@ export interface components {
          */
         HelperErrorCode: "call_join_failed" | "concurrency_limit" | "grant_invalid" | "grant_node_mismatch" | "grant_unauthorized" | "inspection_outcome_invalid" | "installation_reconciliation_busy" | "installation_reconciliation_storage_unavailable" | "message_framing_invalid" | "operation_command_failed" | "operation_failed" | "operation_invalid" | "operation_invalid_artifact" | "operation_io" | "operation_stop_uncertain" | "operation_unsafe_path" | "outcome_malformed" | "package_custody_failed" | "package_install_failed" | "package_metadata_failed" | "package_preflight_failed" | "package_verification_failed" | "peer_identity_invalid" | "rejection_malformed" | "request_arguments_presence_invalid" | "request_argument_nul_byte" | "request_attempt_invalid" | "request_bytes_invalid" | "request_document_invalid" | "request_encoding_invalid" | "request_installation_identity_invalid" | "request_invalid" | "request_ledger_failed" | "request_plan_binding_invalid" | "request_plan_bytes_invalid" | "request_replayed" | "request_schema_version_invalid" | "request_storage_invalid" | "response_unbound" | "runtime_authority_unavailable" | "runtime_endpoint_firewall_rejected" | "runtime_fabric_firewall_rejected" | "runtime_fabric_unavailable" | "runtime_helper_call_join_failed" | "runtime_helper_inspection_outcome_invalid" | "runtime_helper_message_framing_invalid" | "runtime_helper_outcome_malformed" | "runtime_helper_protocol_invalid" | "runtime_helper_rejection_malformed" | "runtime_helper_request_arguments_presence_invalid" | "runtime_helper_request_argument_nul_byte" | "runtime_helper_request_attempt_invalid" | "runtime_helper_request_bytes_invalid" | "runtime_helper_request_document_invalid" | "runtime_helper_request_encoding_invalid" | "runtime_helper_request_installation_identity_invalid" | "runtime_helper_request_plan_binding_invalid" | "runtime_helper_request_plan_bytes_invalid" | "runtime_helper_request_schema_version_invalid" | "runtime_helper_request_storage_invalid" | "runtime_helper_response_unbound" | "runtime_helper_stop_uncertain" | "runtime_helper_system_clock_invalid" | "runtime_helper_unavailable" | "runtime_image_identity_invalid" | "runtime_image_inspect_failed" | "runtime_image_load_failed" | "runtime_image_receipt_failed" | "runtime_process_exited" | "runtime_run_missing" | "system_clock_invalid";
         /**
+         * HostHelperResponseStatus
+         * @description The verdict a privileged-helper reply carries.
+         * @enum {string}
+         */
+        HostHelperResponseStatus: "rejected" | "package-installed" | "package-activation-confirmed" | "container-runtime-request-executed" | "container-runtime-stop-uncertain";
+        /**
          * ImageStoreCode
          * @description Refusals and damage found by the Controller OCI image store.
          * @enum {string}
@@ -4311,7 +4323,9 @@ export interface components {
             error_category: components["schemas"]["ErrorCategory"];
             event_kind: components["schemas"]["LifecycleEventKind"];
             failure_code: components["schemas"]["FailureCode"];
+            failure_stage: components["schemas"]["FailureStage"];
             gateway_route_state: components["schemas"]["GatewayRouteState"];
+            host_helper_response_status: components["schemas"]["HostHelperResponseStatus"];
             installation_node_state: components["schemas"]["InstallationNodeState"];
             installation_state: components["schemas"]["InstallationState"];
             invalid_request_reason: components["schemas"]["InvalidRequestReason"];
@@ -4326,6 +4340,7 @@ export interface components {
             outcome_kind: components["schemas"]["OutcomeKind"];
             placement_install_state: components["schemas"]["PlacementInstallState"];
             placement_load_state: components["schemas"]["PlacementLoadState"];
+            progress_phase: components["schemas"]["ProgressPhase"];
             reservation_state: components["schemas"]["ReservationState"];
             resource_blocker_code: components["schemas"]["ResourceBlockerCode"];
             route_publication_state: components["schemas"]["RoutePublicationState"];
@@ -5343,6 +5358,12 @@ export interface components {
          * @enum {string}
          */
         ProfileReasonCode: "profile.admission_busy" | "profile.admission_effect_busy" | "profile.application_intent.invalid" | "profile.choices_unreadable" | "profile.cleanup_delegated" | "profile.distributed_cross_scope" | "profile.failure_repeated" | "profile.incomplete_multi_spark_model" | "profile.interruption_expected" | "profile.pending_cross_scope" | "profile.preparation_not_started" | "profile.preparation_scope_mismatch" | "profile.preparation_unavailable" | "profile.recipe_unavailable" | "profile.recovery_assignments_changed" | "profile.recovery_cache_pending" | "profile.recovery_scope_changed" | "profile.recovery_waiting" | "profile.resource_recheck_unavailable" | "profile.retry_conflict" | "profile.retry_executor_unavailable" | "profile.retry_intent_unavailable" | "profile.retry_review_unavailable" | "profile.review_stale" | "profile.runtime_image_rebuild_pending" | "profile.shared_installation_scope" | "profile.spark_removed" | "profile.spark_unavailable" | "profile.stale_plan" | "profile.switch_authority_unavailable" | "profile.switch_scope_unresolved" | "profile.topology_incomplete" | "profile.recovery_artifact_changed" | "profile.runtime-image-changed" | "profile.selection_lost" | "profile.asset_reservation_unavailable";
+        /**
+         * ProgressPhase
+         * @description What an operation is doing, as the measured progress names it.
+         * @enum {string}
+         */
+        ProgressPhase: "queued" | "pending" | "waiting" | "preparing" | "downloading" | "model-download" | "verifying" | "finalizing" | "building" | "pulling" | "transfer" | "copying" | "uploading" | "installing" | "reconciling-installation" | "starting" | "stopping" | "uninstalling" | "reclaiming" | "updating" | "executing" | "completed" | "failed";
         /**
          * ProjectionCode
          * @description Warnings and attention items of the fleet and library projections.

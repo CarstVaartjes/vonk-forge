@@ -11,6 +11,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use vonk_agent_protocol::generated::FailureStage;
 use vonk_agent_protocol::{
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES, RecipeReconciliationIdentity,
     canonical_json as canonical_protocol_json,
@@ -51,23 +52,23 @@ pub enum OciError {
     ReconciliationBusy,
     #[error("install {stage} failed: {source}")]
     Install {
-        stage: &'static str,
+        stage: FailureStage,
         #[source]
         source: Box<OciError>,
     },
     #[error("start {stage} failed: {source}")]
     Start {
-        stage: &'static str,
+        stage: FailureStage,
         #[source]
         source: Box<OciError>,
     },
 }
 
 impl OciError {
-    pub fn safe_start_context(&self) -> (&'static str, &'static str) {
+    pub fn safe_start_context(&self) -> (FailureStage, &'static str) {
         let (stage, source) = match self {
             Self::Start { stage, source } => (*stage, source.as_ref()),
-            error => ("unknown", error),
+            error => (FailureStage::Unknown, error),
         };
         let category = match source {
             Self::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -79,10 +80,10 @@ impl OciError {
         (stage, category)
     }
 
-    pub fn safe_install_context(&self) -> (&'static str, &'static str) {
+    pub fn safe_install_context(&self) -> (FailureStage, &'static str) {
         match self {
             Self::Install { stage, source } => (*stage, source.safe_category()),
-            error => ("unknown", error.safe_category()),
+            error => (FailureStage::Unknown, error.safe_category()),
         }
     }
 
@@ -179,7 +180,7 @@ const TRUSTED_RUNTIME_UID: u32 = 10_001;
 type PhysicalArtifactIdentity = (String, String, u64, String, String, String);
 type PhysicalMaterialization = (PathBuf, PhysicalArtifactIdentity);
 
-fn install_error(stage: &'static str, source: OciError) -> OciError {
+fn install_error(stage: FailureStage, source: OciError) -> OciError {
     OciError::Install {
         stage,
         source: Box::new(source),
@@ -187,7 +188,7 @@ fn install_error(stage: &'static str, source: OciError) -> OciError {
 }
 
 fn start_stage<T>(
-    stage: &'static str,
+    stage: FailureStage,
     work: impl FnOnce() -> Result<T, OciError>,
 ) -> Result<T, OciError> {
     work().map_err(|source| OciError::Start {
@@ -460,39 +461,44 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         self.verify_image(spec)
-            .map_err(|error| install_error("image-verification", error))?;
-        let installation = managed_path(self.data_root, "installations", installation_id)
-            .map_err(|error| install_error("installation-path", OciError::Workload(error)))?;
+            .map_err(|error| install_error(FailureStage::ImageVerification, error))?;
+        let installation =
+            managed_path(self.data_root, "installations", installation_id).map_err(|error| {
+                install_error(FailureStage::InstallationPath, OciError::Workload(error))
+            })?;
         fs::create_dir_all(&installation)
             .map_err(OciError::Io)
-            .map_err(|error| install_error("installation-directory", error))?;
+            .map_err(|error| install_error(FailureStage::InstallationDirectory, error))?;
         fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))
             .map_err(OciError::Io)
-            .map_err(|error| install_error("installation-directory", error))?;
+            .map_err(|error| install_error(FailureStage::InstallationDirectory, error))?;
         self.ensure_runtime_cache(installation_id)
-            .map_err(|error| install_error("runtime-cache", error))?;
+            .map_err(|error| install_error(FailureStage::RuntimeCache, error))?;
         materialize_compiled_models_observed(self.data_root, spec, installation_id, progress)
-            .map_err(|error| install_error("model-materialization", error))?;
+            .map_err(|error| install_error(FailureStage::ModelMaterialization, error))?;
         let encoded_spec = serde_json::to_vec(spec)
             .map_err(OciError::Json)
-            .map_err(|error| install_error("installation-metadata", error))?;
+            .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
         if encoded_spec.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
-            return Err(install_error("installation-metadata", OciError::Artifact));
+            return Err(install_error(
+                FailureStage::InstallationMetadata,
+                OciError::Artifact,
+            ));
         }
         write_installation_metadata(self.data_root, &installation, spec)
-            .map_err(|error| install_error("installation-metadata", error))?;
+            .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
         atomic_write(&installation, "spec.json", &encoded_spec)
-            .map_err(|error| install_error("installation-metadata", error))?;
+            .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
         atomic_write(
             &installation,
             "recipe-content.sha256",
             recipe_content_sha256.as_bytes(),
         )
-        .map_err(|error| install_error("installation-metadata", error))?;
+        .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
         File::open(&installation)
             .map_err(OciError::Io)
             .and_then(|file| file.sync_all().map_err(OciError::Io))
-            .map_err(|error| install_error("installation-metadata", error))?;
+            .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
         Ok(())
     }
 
@@ -953,23 +959,23 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         placement: &CompiledRuntimePlacement,
         identity: Option<&RecipeRunStartIdentity>,
     ) -> Result<RuntimeStartPlan, OciError> {
-        start_stage("image-verification", || self.verify_image(spec))?;
-        let state = start_stage("run-storage", || {
+        start_stage(FailureStage::ImageVerification, || self.verify_image(spec))?;
+        let state = start_stage(FailureStage::RunStorage, || {
             let state = managed_path(self.data_root, "runs", run_id)?;
             fs::create_dir_all(&state)?;
             fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
             Ok(state)
         })?;
-        start_stage("output-storage", || {
+        start_stage(FailureStage::OutputStorage, || {
             let outputs = state.join("outputs");
             fs::create_dir_all(&outputs)?;
             fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
             ensure_runtime_tmp(&outputs)
         })?;
-        start_stage("runtime-cache", || {
+        start_stage(FailureStage::RuntimeCache, || {
             self.ensure_runtime_cache(installation_id)
         })?;
-        start_stage("job-inputs", || {
+        start_stage(FailureStage::JobInputs, || {
             if spec.job.is_some() {
                 let inputs = state.join("inputs");
                 let metadata = fs::symlink_metadata(&inputs)?;
@@ -979,7 +985,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             Ok(())
         })?;
-        let metadata = start_stage("runtime-metadata", || {
+        let metadata = start_stage(FailureStage::RuntimeMetadata, || {
             let metadata = self.ensure_run_metadata(run_id)?;
             self.write_runtime_contract(spec, run_id)?;
             // The first authorized helper invocation resets private runtime
@@ -988,7 +994,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             File::open(&metadata)?.sync_all()?;
             Ok(metadata)
         })?;
-        let main = start_stage("runtime-projection", || {
+        let main = start_stage(FailureStage::RuntimeProjection, || {
             self.start_arguments(spec, installation_id, run_id, placement)
         })?;
         let runtime_image_digest = spec.runtime_image.image_digest.clone();
@@ -1001,10 +1007,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             })
             .transpose()
             .map_err(|source| OciError::Start {
-                stage: "observation-identity",
+                stage: FailureStage::ObservationIdentity,
                 source: Box::new(source),
             })?;
-        start_stage("lifecycle-metadata", || {
+        start_stage(FailureStage::LifecycleMetadata, || {
             atomic_write(
                 &metadata,
                 "lifecycle.json",

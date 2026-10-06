@@ -433,29 +433,7 @@ fn probe_diagnostic(output: &crate::process::ProcessOutput) -> Code {
             return finding;
         }
     }
-    podman_finding_code(podman_build_diagnostic(output))
-}
-
-/// The finding code of a classified podman failure.
-fn podman_finding_code(diagnostic: PodmanBuildDiagnostic) -> Code {
-    match diagnostic {
-        PodmanBuildDiagnostic::TemporaryStorageExhausted => {
-            Code::PreflightFindingTemporaryStorageExhausted
-        }
-        PodmanBuildDiagnostic::SubordinateIdMappingUnavailable => {
-            Code::PreflightFindingSubordinateIdMappingUnavailable
-        }
-        PodmanBuildDiagnostic::UserNamespaceDenied => Code::PreflightFindingUserNamespaceDenied,
-        PodmanBuildDiagnostic::ProcMountDenied => Code::PreflightFindingProcMountDenied,
-        PodmanBuildDiagnostic::PermissionDenied => Code::PreflightFindingPermissionDenied,
-        PodmanBuildDiagnostic::MemoryLimitExceeded => Code::PreflightFindingMemoryLimitExceeded,
-        PodmanBuildDiagnostic::StorageDriverFailure => Code::PreflightFindingStorageDriverFailure,
-        PodmanBuildDiagnostic::SystemdScopeFailure => Code::PreflightFindingSystemdScopeFailure,
-        PodmanBuildDiagnostic::PatchRejected => Code::PreflightFindingPatchRejected,
-        PodmanBuildDiagnostic::BuildStepFailed => Code::PreflightFindingBuildStepFailed,
-        PodmanBuildDiagnostic::NonzeroWithoutOutput => Code::PreflightFindingNonzeroWithoutOutput,
-        PodmanBuildDiagnostic::Unknown => Code::PreflightFindingUnclassifiedPodmanBuildFailure,
-    }
+    podman_build_diagnostic(output).finding_code()
 }
 
 fn user_service_arguments(xdg: &Path, tmp: &Path) -> Vec<String> {

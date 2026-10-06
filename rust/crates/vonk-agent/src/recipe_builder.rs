@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use tempfile::{Builder, TempDir};
 use thiserror::Error;
 use uuid::Uuid;
+use vonk_agent_protocol::generated::{FailureStage, RuntimePreflightFindingCode};
 use vonk_agent_protocol::{
     RecipeBuildAdapter, RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence,
     RecipeBuildRequest, canonical_json, hex_sha256,
@@ -173,7 +174,7 @@ pub enum RecipeBuildError {
     NetworkPolicy,
     #[error("build egress boundary failed during {stage} ({diagnostic})")]
     NetworkBoundary {
-        stage: &'static str,
+        stage: FailureStage,
         diagnostic: PodmanBuildDiagnostic,
         logs: Box<crate::failure_evidence::FailureProcessLogs>,
     },
@@ -216,22 +217,53 @@ pub enum PodmanBuildDiagnostic {
     Unknown,
 }
 
+impl PodmanBuildDiagnostic {
+    /// The contract's finding code for this classification: the one spelling of
+    /// the fact. The runtime preflight reports it as the finding's code and the
+    /// failure evidence derives its kebab-case diagnostic from it ([`fmt::Display`]).
+    pub fn finding_code(self) -> RuntimePreflightFindingCode {
+        match self {
+            Self::TemporaryStorageExhausted => {
+                RuntimePreflightFindingCode::PreflightFindingTemporaryStorageExhausted
+            }
+            Self::SubordinateIdMappingUnavailable => {
+                RuntimePreflightFindingCode::PreflightFindingSubordinateIdMappingUnavailable
+            }
+            Self::UserNamespaceDenied => {
+                RuntimePreflightFindingCode::PreflightFindingUserNamespaceDenied
+            }
+            Self::ProcMountDenied => RuntimePreflightFindingCode::PreflightFindingProcMountDenied,
+            Self::PermissionDenied => RuntimePreflightFindingCode::PreflightFindingPermissionDenied,
+            Self::MemoryLimitExceeded => {
+                RuntimePreflightFindingCode::PreflightFindingMemoryLimitExceeded
+            }
+            Self::StorageDriverFailure => {
+                RuntimePreflightFindingCode::PreflightFindingStorageDriverFailure
+            }
+            Self::SystemdScopeFailure => {
+                RuntimePreflightFindingCode::PreflightFindingSystemdScopeFailure
+            }
+            Self::PatchRejected => RuntimePreflightFindingCode::PreflightFindingPatchRejected,
+            Self::BuildStepFailed => RuntimePreflightFindingCode::PreflightFindingBuildStepFailed,
+            Self::NonzeroWithoutOutput => {
+                RuntimePreflightFindingCode::PreflightFindingNonzeroWithoutOutput
+            }
+            Self::Unknown => {
+                RuntimePreflightFindingCode::PreflightFindingUnclassifiedPodmanBuildFailure
+            }
+        }
+    }
+}
+
+/// The diagnostic text agents have always reported (`temporary-storage-exhausted`):
+/// the finding code's own word without its domain prefix, in kebab case.
 impl fmt::Display for PodmanBuildDiagnostic {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::TemporaryStorageExhausted => "temporary-storage-exhausted",
-            Self::SubordinateIdMappingUnavailable => "subordinate-id-mapping-unavailable",
-            Self::UserNamespaceDenied => "user-namespace-denied",
-            Self::ProcMountDenied => "proc-mount-denied",
-            Self::PermissionDenied => "permission-denied",
-            Self::MemoryLimitExceeded => "memory-limit-exceeded",
-            Self::StorageDriverFailure => "storage-driver-failure",
-            Self::SystemdScopeFailure => "systemd-scope-failure",
-            Self::PatchRejected => "patch-rejected",
-            Self::BuildStepFailed => "build-step-failed",
-            Self::NonzeroWithoutOutput => "nonzero-without-output",
-            Self::Unknown => "unclassified-podman-build-failure",
-        })
+        let code = self.finding_code().to_string();
+        let word = code
+            .rsplit_once('.')
+            .map_or(code.as_str(), |(_, word)| word);
+        formatter.write_str(&word.replace('_', "-"))
     }
 }
 
@@ -259,18 +291,18 @@ impl RecipeBuildError {
         let failure = Failure::new(self.to_string());
         match self {
             Self::Process(error) => failure
-                .stage("bounded-build-process")
+                .stage(FailureStage::BoundedBuildProcess)
                 .diagnostic(process_error_diagnostic(error)),
             Self::BaseImageImport { diagnostic, logs } => failure
-                .stage("base-image-import")
+                .stage(FailureStage::BaseImageImport)
                 .diagnostic(diagnostic.to_string())
                 .process_logs(logs.as_deref().cloned()),
             Self::ImageBuild { diagnostic, logs } => failure
-                .stage("image-build")
+                .stage(FailureStage::ImageBuild)
                 .diagnostic(diagnostic.to_string())
                 .process_logs(logs.as_deref().cloned()),
             Self::AdapterBuild { diagnostic, logs } => failure
-                .stage("runtime-adapter")
+                .stage(FailureStage::RuntimeAdapter)
                 .diagnostic(diagnostic.to_string())
                 .process_logs(logs.as_deref().cloned()),
             Self::NetworkBoundary {
@@ -1138,7 +1170,10 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             context.cancelled,
         )?;
         if !imported.success {
-            return Err(network_boundary_error("egress-image-import", &imported));
+            return Err(network_boundary_error(
+                FailureStage::EgressImageImport,
+                &imported,
+            ));
         }
         // Neither network needs container-name discovery. Keeping Aardvark
         // out of these private bridges also avoids competing DNS lifecycles
@@ -1165,7 +1200,10 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
                 context.cancelled,
             )?;
             if !output.success {
-                return Err(network_boundary_error("egress-network-create", &output));
+                return Err(network_boundary_error(
+                    FailureStage::EgressNetworkCreate,
+                    &output,
+                ));
             }
         }
         let mut arguments = vec![
@@ -1215,7 +1253,10 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             context.cancelled,
         )?;
         if !started.success {
-            return Err(network_boundary_error("egress-service-start", &started));
+            return Err(network_boundary_error(
+                FailureStage::EgressServiceStart,
+                &started,
+            ));
         }
         // systemd confirms exec, not container readiness. Probe the actual
         // deny boundary while Podman creates its network and starts the helper.
@@ -1261,7 +1302,7 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             cancelled,
         )?;
         if !output.success {
-            return Err(network_boundary_error("egress-address", &output));
+            return Err(network_boundary_error(FailureStage::EgressAddress, &output));
         }
         std::str::from_utf8(&output.stdout)
             .ok()
@@ -1283,7 +1324,7 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
                 probe.stderr.extend(tail);
             }
         }
-        network_boundary_error("egress-readiness", &probe)
+        network_boundary_error(FailureStage::EgressReadiness, &probe)
     }
 
     fn service_arguments(&self, unit: &str, timeout: Duration, wait: bool) -> Vec<String> {
@@ -1404,7 +1445,7 @@ impl<R: ProcessRunner> Drop for BuildEgress<'_, R> {
 }
 
 fn network_boundary_error(
-    stage: &'static str,
+    stage: FailureStage,
     output: &crate::process::ProcessOutput,
 ) -> RecipeBuildError {
     RecipeBuildError::NetworkBoundary {
@@ -1706,6 +1747,7 @@ mod tests {
     };
     use crate::process::{ProcessError, ProcessOutput};
     use vonk_agent_protocol::RecipeBuildAdapterDefinition;
+    use vonk_agent_protocol::generated::FailureStage;
 
     #[test]
     fn podman_failure_retains_sanitized_final_ring_output() {
@@ -1723,7 +1765,7 @@ mod tests {
                 diagnostic: podman_build_diagnostic(&output),
                 logs: Some(Box::new(super::sanitized_process_logs(&output))),
             },
-            super::network_boundary_error("egress-network-create", &output),
+            super::network_boundary_error(FailureStage::EgressNetworkCreate, &output),
         ];
         for error in errors {
             let body = error.failure_evidence();

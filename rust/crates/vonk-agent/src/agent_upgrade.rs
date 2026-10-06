@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::HelperErrorCode;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
+use vonk_agent_protocol::generated::{HelperErrorCode, HostHelperResponseStatus};
 use vonk_agent_protocol::{AgentClaim, AgentUpgradeRequest, canonical_json, parse_strict};
 
 use crate::client::{AgentHttpClient, ClientError};
@@ -112,7 +113,7 @@ impl AgentUpgradeExecutor<'_> {
             .await
             .map_err(|_| AgentUpgradeError::HelperResponseInvalid)??;
         validate_helper_response(&response, &request_id)?;
-        if response.status != "package-installed" {
+        if response.status != HostHelperResponseStatus::PackageInstalled {
             return Err(AgentUpgradeError::HelperResponseInvalid);
         }
         // A real upgrade restarts this service from dpkg postinst before the helper
@@ -282,7 +283,7 @@ pub(crate) fn validate_helper_response(
     if response.schema_version != 1 || response.process_running.is_some() {
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
-    if response.status == "rejected" {
+    if response.status == HostHelperResponseStatus::Rejected {
         let reported = response.error_code.as_deref();
         let code = reported.and_then(crate::helper_codes::upgrade_rejection);
         if response
@@ -312,8 +313,9 @@ pub(crate) fn validate_helper_response(
     }
     if response.request_id.map(|id| id.to_string()).as_deref() != Some(expected_request_id)
         || !matches!(
-            response.status.as_str(),
-            "package-installed" | "package-activation-confirmed"
+            response.status,
+            HostHelperResponseStatus::PackageInstalled
+                | HostHelperResponseStatus::PackageActivationConfirmed
         )
         || response.exit_code.is_some()
         || response.error_code.is_some()
@@ -325,16 +327,19 @@ pub(crate) fn validate_helper_response(
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentUpgradeError, HelperErrorCode, HelperResponse, validate_helper_response};
+    use super::{
+        AgentUpgradeError, HelperErrorCode, HelperResponse, HostHelperResponseStatus,
+        validate_helper_response,
+    };
     use vonk_agent_protocol::{canonical_generated_json, parse_strict};
 
-    fn response(status: &str) -> HelperResponse {
+    fn response(status: HostHelperResponseStatus) -> HelperResponse {
         HelperResponse {
             diagnostic: None,
             process_logs: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
-            status: status.parse().unwrap(),
+            status,
             error_code: None,
             exit_code: None,
             process_running: None,
@@ -343,7 +348,7 @@ mod tests {
 
     #[test]
     fn package_failure_detail_survives_wire_roundtrip_and_redacts_secrets() {
-        let mut response = response("rejected");
+        let mut response = response(HostHelperResponseStatus::Rejected);
         response.error_code = Some("package_install_failed".into());
         response.exit_code = Some(1);
         response.diagnostic = Some("permission denied\npassword=do-not-expose".into());
@@ -356,7 +361,7 @@ mod tests {
 
     #[test]
     fn package_context_rejects_the_shared_inspection_outcome_field() {
-        let mut response = response("package-installed");
+        let mut response = response(HostHelperResponseStatus::PackageInstalled);
         response.process_running = Some(true);
         let mut response: HelperResponse =
             parse_strict(&canonical_generated_json(&response).unwrap()).unwrap();
@@ -364,7 +369,7 @@ mod tests {
             validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
             Err(AgentUpgradeError::HelperResponseInvalid)
         ));
-        response.status = "rejected".parse().unwrap();
+        response.status = HostHelperResponseStatus::Rejected;
         assert!(matches!(
             validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
             Err(AgentUpgradeError::HelperResponseInvalid)
@@ -384,7 +389,7 @@ mod tests {
 
     #[test]
     fn accepts_stable_helper_rejection_diagnostics() {
-        let mut response = response("rejected");
+        let mut response = response(HostHelperResponseStatus::Rejected);
         response.error_code = Some("operation_failed".to_owned());
         let error = validate_helper_response(&response, "10000000-0000-4000-8000-000000000001")
             .unwrap_err();
@@ -400,7 +405,7 @@ mod tests {
 
     #[test]
     fn accepts_bounded_package_install_diagnostics() {
-        let mut response = response("rejected");
+        let mut response = response(HostHelperResponseStatus::Rejected);
         response.error_code = Some("package_install_failed".to_owned());
         response.exit_code = Some(75);
         let error = validate_helper_response(&response, "10000000-0000-4000-8000-000000000001")
@@ -417,7 +422,7 @@ mod tests {
 
     #[test]
     fn rejects_unbounded_or_misbound_package_exit_diagnostics() {
-        let mut response = response("rejected");
+        let mut response = response(HostHelperResponseStatus::Rejected);
         response.error_code = Some("package_install_failed".to_owned());
         response.exit_code = Some(256);
         assert!(matches!(
@@ -435,7 +440,7 @@ mod tests {
 
     #[test]
     fn rejects_untrusted_helper_diagnostics() {
-        let mut response = response("rejected");
+        let mut response = response(HostHelperResponseStatus::Rejected);
         response.error_code = Some("dpkg stderr: secret".to_owned());
         assert!(matches!(
             validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
@@ -445,7 +450,7 @@ mod tests {
 
     #[test]
     fn distinguishes_invalid_response_from_restart_not_observed() {
-        let mut response = response("package-installed");
+        let mut response = response(HostHelperResponseStatus::PackageInstalled);
         assert!(
             validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_ok()
         );
