@@ -25,6 +25,7 @@ from .artifact_job_response_interface import ArtifactJobResponseInterface
 from .artifact_job_response_preparation_type_0 import ArtifactJobResponsePreparationType0
 from .artifact_job_response_state_type_0 import ArtifactJobResponseStateType0
 from .artifact_job_result_evidence import ArtifactJobResultEvidence
+from .artifact_job_result_evidence_failure_kind_type_0 import ArtifactJobResultEvidenceFailureKindType0
 from .artifact_job_storage_capabilities import ArtifactJobStorageCapabilities
 from .artifact_job_transport_capabilities import ArtifactJobTransportCapabilities
 from .artifact_lifecycle_code import ArtifactLifecycleCode
@@ -385,6 +386,7 @@ from .node_distribution_assignment import NodeDistributionAssignment
 from .node_offline_reason import NodeOfflineReason
 from .node_profile_change import NodeProfileChange
 from .node_profile_payload import NodeProfilePayload
+from .node_telemetry_payload import NodeTelemetryPayload
 from .observation_cause import ObservationCause
 from .observed_assignment_state import ObservedAssignmentState
 from .operation_blocker import OperationBlocker
@@ -470,6 +472,8 @@ from .recipe_installation_payload import RecipeInstallationPayload
 from .recipe_integer_setting import RecipeIntegerSetting
 from .recipe_integer_setting_change_effect import RecipeIntegerSettingChangeEffect
 from .recipe_job_input import RecipeJobInput
+from .recipe_job_input_file import RecipeJobInputFile
+from .recipe_job_input_manifest import RecipeJobInputManifest
 from .recipe_job_interface import RecipeJobInterface
 from .recipe_job_interface_adapter import RecipeJobInterfaceAdapter
 from .recipe_job_output import RecipeJobOutput
@@ -726,6 +730,7 @@ __all__ = (
     "ArtifactJobResponsePreparationType0",
     "ArtifactJobResponseStateType0",
     "ArtifactJobResultEvidence",
+    "ArtifactJobResultEvidenceFailureKindType0",
     "ArtifactJobStorageCapabilities",
     "ArtifactJobTransportCapabilities",
     "ArtifactLifecycleCode",
@@ -1086,6 +1091,7 @@ __all__ = (
     "NodeOfflineReason",
     "NodeProfileChange",
     "NodeProfilePayload",
+    "NodeTelemetryPayload",
     "ObservationCause",
     "ObservedAssignmentState",
     "OperationBlocker",
@@ -1171,6 +1177,8 @@ __all__ = (
     "RecipeIntegerSetting",
     "RecipeIntegerSettingChangeEffect",
     "RecipeJobInput",
+    "RecipeJobInputFile",
+    "RecipeJobInputManifest",
     "RecipeJobInterface",
     "RecipeJobInterfaceAdapter",
     "RecipeJobOutput",

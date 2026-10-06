@@ -25,6 +25,7 @@ from pydantic import (
 )
 from vonk_agent_protocol import canonical_message
 
+from .mapping_parameters import EngineArgumentValue
 from .strict_json import StrictJSONModel
 
 MAX_INPUT_FILES = 32
@@ -337,7 +338,7 @@ class CompiledArtifactContract(ArtifactContractModel):
     output: ArtifactOutputContract
     output_limits: ArtifactOutputLimits
     max_timeout_seconds: int = Field(ge=1, le=3_600)
-    engine: dict[str, object] | None = None
+    engine: dict[str, EngineArgumentValue] | None = None
 
     @field_validator("parameters", mode="before")
     @classmethod

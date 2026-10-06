@@ -165,6 +165,7 @@ def test_typescript_sources_may_not_spell_the_words(tmp_path: Path) -> None:
 
 # Parses and walks every Python module of the repository three times over.
 @pytest.mark.slow(30)
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_the_repository_holds_the_python_ratchet() -> None:
     assert scan.problems(scan.scan_python(), scan.load_baseline()) == []
 

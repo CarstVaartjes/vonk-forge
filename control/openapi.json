@@ -975,9 +975,56 @@
         "type": "object"
       },
       "ArtifactJobResultEvidence": {
-        "additionalProperties": true,
-        "description": "Known evidence fields with room for engine-specific evidence keys.",
+        "additionalProperties": false,
+        "description": "Every fact the Controller records beside an artifact job's result.\n\nThe run's measurements (``elapsed_milliseconds``, ``peak_memory_bytes``),\nthe cancellation that was asked for, and, for a job whose active scope may\nstill exist, what is known about that residue.",
         "properties": {
+          "active_scope_may_remain": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Scope May Remain"
+          },
+          "cancel_actor": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Actor"
+          },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason"
+          },
+          "cancel_request_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Request Id"
+          },
           "elapsed_milliseconds": {
             "anyOf": [
               {
@@ -990,6 +1037,32 @@
             ],
             "title": "Elapsed Milliseconds"
           },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "cancellation-stop-uncertain",
+                  "agent-lease-expired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
+          "late_results_accepted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Late Results Accepted"
+          },
           "peak_memory_bytes": {
             "anyOf": [
               {
@@ -1001,6 +1074,29 @@
               }
             ],
             "title": "Peak Memory Bytes"
+          },
+          "recoverable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recoverable"
+          },
+          "residue_resolved_by": {
+            "anyOf": [
+              {
+                "const": "exact-stop",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residue Resolved By"
           }
         },
         "title": "ArtifactJobResultEvidence",
@@ -2997,7 +3093,10 @@
           "engine": {
             "anyOf": [
               {
-                "additionalProperties": true,
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue",
+                  "x-vonk-passthrough": "A structured engine argument value is the upstream recipe's own JSON (RuntimeArgumentValue in vonk_forge_contracts); the engine, not the Controller, defines its structure, and the mapping must keep it exact."
+                },
                 "type": "object"
               },
               {
@@ -10413,6 +10512,7 @@
         "title": "JobResumeResponse",
         "type": "object"
       },
+      "JsonValue": {},
       "LibraryAssessmentCode": {
         "description": "Why a library entry is not assessed runnable on the current fleet.",
         "enum": [
@@ -14740,6 +14840,29 @@
         "title": "NodeProfilePayload",
         "type": "object"
       },
+      "NodeTelemetryPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "sample_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Sample Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "sample_id"
+        ],
+        "title": "NodeTelemetryPayload",
+        "type": "object"
+      },
       "ObservationCause": {
         "description": "Why an attempt is being observed rather than settled.\n\nAn attempt that ended without a definite answer is ``observing``; this says\nwhat left it unanswered.  ``reported-unknown``: the executor said it could not\nconfirm the effect.  ``lease-lapsed``: the executor stopped reporting.  The old\nspellings carried this in the state word itself (``waiting-for-operator`` and\n``expired``), which is why an adopted attempt also yields its cause.",
         "enum": [
@@ -18253,6 +18376,78 @@
           "max_bytes"
         ],
         "title": "RecipeJobInput",
+        "type": "object"
+      },
+      "RecipeJobInputFile": {
+        "additionalProperties": false,
+        "properties": {
+          "media_type": {
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "maximum": 536870912,
+            "minimum": 0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "slot": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+            "title": "Slot",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot",
+          "name",
+          "media_type",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "RecipeJobInputFile",
+        "type": "object"
+      },
+      "RecipeJobInputManifest": {
+        "additionalProperties": false,
+        "description": "Declared user files; manifest.json itself is platform metadata.",
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeJobInputFile"
+            },
+            "maxItems": 32,
+            "title": "Files",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "total_bytes": {
+            "maximum": 1073741824,
+            "minimum": 0,
+            "title": "Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "total_bytes",
+          "files"
+        ],
+        "title": "RecipeJobInputManifest",
         "type": "object"
       },
       "RecipeJobInterface": {
@@ -34412,6 +34607,21 @@
     }
   },
   "x-vonk-json-columns": {
+    "artifact_distribution_assignments.objects": [
+      "DistributionObject"
+    ],
+    "artifact_jobs.compiled_contract": [
+      "CompiledArtifactContract"
+    ],
+    "artifact_jobs.input_manifest": [
+      "RecipeJobInputManifest"
+    ],
+    "artifact_jobs.output_limits": [
+      "ArtifactOutputLimits"
+    ],
+    "artifact_jobs.result_evidence": [
+      "ArtifactJobResultEvidence"
+    ],
     "catalog_document_revisions.projected": [
       "ModelRevisionProjection",
       "RecipeRevisionProjection",
@@ -34428,6 +34638,16 @@
     ],
     "fleet_profiles.assignments": [
       "FleetProfileAssignmentInput"
+    ],
+    "fleet_stream_events.payload": [
+      "AgentOperationPayload",
+      "InstallationNodePayload",
+      "JobPayload",
+      "NodeProfilePayload",
+      "NodeTelemetryPayload",
+      "RecipeInstallationPayload",
+      "RecipeRunPayload",
+      "RunNodePayload"
     ],
     "model_cache_operations.payload": [
       "ModelCacheDownloadPayload",

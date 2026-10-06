@@ -36,6 +36,7 @@ from typing import (
     Any,
     ClassVar,
     Literal,
+    TypeAliasType,
     Union,
     get_args,
     get_origin,
@@ -445,6 +446,9 @@ def _walk(tp: Any, path: str, seen: set[Any], out: list[_Violation]) -> None:
         return
     if tp is JsonValue:
         out.append((path, "JsonValue"))
+        return
+    if isinstance(tp, TypeAliasType):
+        _walk(tp.__value__, path, seen, out)
         return
     origin = get_origin(tp)
     if origin is Annotated:

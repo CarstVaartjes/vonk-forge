@@ -1338,15 +1338,33 @@ export interface components {
         };
         /**
          * ArtifactJobResultEvidence
-         * @description Known evidence fields with room for engine-specific evidence keys.
+         * @description Every fact the Controller records beside an artifact job's result.
+         *
+         *     The run's measurements (``elapsed_milliseconds``, ``peak_memory_bytes``),
+         *     the cancellation that was asked for, and, for a job whose active scope may
+         *     still exist, what is known about that residue.
          */
         ArtifactJobResultEvidence: {
+            /** Active Scope May Remain */
+            active_scope_may_remain?: boolean | null;
+            /** Cancel Actor */
+            cancel_actor?: string | null;
+            /** Cancel Reason */
+            cancel_reason?: string | null;
+            /** Cancel Request Id */
+            cancel_request_id?: string | null;
             /** Elapsed Milliseconds */
             elapsed_milliseconds?: number | null;
+            /** Failure Kind */
+            failure_kind?: ("cancellation-stop-uncertain" | "agent-lease-expired") | null;
+            /** Late Results Accepted */
+            late_results_accepted?: boolean | null;
             /** Peak Memory Bytes */
             peak_memory_bytes?: number | null;
-        } & {
-            [key: string]: unknown;
+            /** Recoverable */
+            recoverable?: boolean | null;
+            /** Residue Resolved By */
+            residue_resolved_by?: "exact-stop" | null;
         };
         /** ArtifactJobStorageCapabilities */
         ArtifactJobStorageCapabilities: {
@@ -2012,7 +2030,7 @@ export interface components {
         CompiledArtifactContract: {
             /** Engine */
             engine?: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["pydantic__types__JsonValue"];
             } | null;
             input: components["schemas"]["ArtifactInputContract"];
             /**
@@ -4364,6 +4382,7 @@ export interface components {
             /** State */
             state: string;
         };
+        JsonValue: unknown;
         /**
          * LibraryAssessmentCode
          * @description Why a library entry is not assessed runnable on the current fleet.
@@ -5759,6 +5778,13 @@ export interface components {
             /** Profile Changed */
             profile_changed?: boolean | null;
         };
+        /** NodeTelemetryPayload */
+        NodeTelemetryPayload: {
+            /** Node Id */
+            node_id: string;
+            /** Sample Id */
+            sample_id: string;
+        };
         /**
          * ObservationCause
          * @description Why an attempt is being observed rather than settled.
@@ -6816,6 +6842,34 @@ export interface components {
             required: boolean;
             /** Slots */
             slots?: components["schemas"]["RecipeInputSlot"][] | null;
+        };
+        /** RecipeJobInputFile */
+        RecipeJobInputFile: {
+            /** Media Type */
+            media_type: string;
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Slot */
+            slot: string;
+        };
+        /**
+         * RecipeJobInputManifest
+         * @description Declared user files; manifest.json itself is platform metadata.
+         */
+        RecipeJobInputManifest: {
+            /** Files */
+            files: components["schemas"]["RecipeJobInputFile"][];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Total Bytes */
+            total_bytes: number;
         };
         /** RecipeJobInterface */
         RecipeJobInterface: {

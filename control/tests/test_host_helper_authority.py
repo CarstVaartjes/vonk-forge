@@ -860,6 +860,7 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
     assert inspect_operation.action == "run-inspect"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_job_run_stop_grant_preserves_logical_and_runtime_target_identity() -> None:
     service = runtime_service(operation_kind="recipe.job.run.v1", cancel_requested=True)
     binding = runtime_plan_binding(service, ContainerRuntimeAction.STOP)
@@ -916,6 +917,7 @@ def test_service_stop_grant_signs_exact_durable_prior_start() -> None:
     )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_job_run_stop_rejects_wrong_runtime_target() -> None:
     service = runtime_service(operation_kind="recipe.job.run.v1", cancel_requested=True)
     binding = runtime_plan_binding(service, ContainerRuntimeAction.STOP)
@@ -955,6 +957,7 @@ def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
 
 @pytest.mark.parametrize("operation_kind", ["recipe.start", "recipe.job.run.v1"])
 @pytest.mark.parametrize("node_intent", [1, 2])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_cancellation_permits_only_stop_under_the_original_live_fence(
     operation_kind: str,
     node_intent: int,

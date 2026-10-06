@@ -4,13 +4,6 @@
     "agent_operation_attempts.progress",
     "agent_operation_attempts.result",
     "agent_operations.payload",
-    "artifact_distribution_assignments.objects",
-    "artifact_jobs.compiled_contract",
-    "artifact_jobs.input_manifest",
-    "artifact_jobs.output_limits",
-    "artifact_jobs.parameters",
-    "artifact_jobs.result_evidence",
-    "fleet_stream_events.payload",
     "jobs.payload",
     "jobs.result"
   ],

@@ -1850,6 +1850,7 @@ def test_claim_rejects_unknown_structural_fields(
 
 
 @pytest.mark.parametrize("field", ("protocol_version", "wait_seconds"))
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_claim_rejects_string_encoded_numeric_fields(
     agent_system,
     field: str,
@@ -3222,6 +3223,7 @@ def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
     (b"[1]", b"[]", b'"scalar"', b"0", b"true", b"false", b"null"),
     ids=("array", "empty-array", "string", "number", "true", "false", "null"),
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_enrollment_rejects_non_object_json_without_server_error(
     agent_system, raw: bytes
 ) -> None:

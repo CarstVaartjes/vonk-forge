@@ -15,8 +15,6 @@ from vonk_control.jobs import JobService
 # document. Their surrounding request, response, and receipt remain typed.
 EXTENSION_OBJECTS = {
     "ArtifactJobCreate.properties.parameters": "Engine-defined parameter values",
-    "ArtifactJobResultEvidence": "Engine-specific output measurements",
-    "CompiledArtifactContract.properties.engine.anyOf.0": "Engine keyword arguments",
     "FleetProfileAssignmentView.properties.model": "Current model projection",
     "FleetProfileAssignmentView.properties.recipe": "Current recipe projection",
     "FleetProfileAssignmentView.properties.resources": "Current resource projection",

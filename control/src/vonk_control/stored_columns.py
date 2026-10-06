@@ -13,17 +13,35 @@ from typing import Annotated
 
 from pydantic import Field
 from vonk_agent_protocol import CacheReferenceReason, RecipeBuildRequest
+from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.inventory import Capability, NetworkInterface
+from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
+from .artifact_jobs import ArtifactJobResultEvidence
 from .catalog_revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     UnprojectedRevision,
 )
 from .catalog_sync_contract import ManagedCatalogSyncResult
+from .compiled_artifact_contract import (
+    ArtifactOutputLimits,
+    CompiledArtifactContract,
+    ParameterScalar,
+)
+from .fleet_event_contract import (
+    AgentOperationPayload,
+    InstallationNodePayload,
+    JobPayload,
+    NodeProfilePayload,
+    NodeTelemetryPayload,
+    RecipeInstallationPayload,
+    RecipeRunPayload,
+    RunNodePayload,
+)
 from .fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -119,3 +137,26 @@ bind("recipe_builds", "plan", RecipeBuildRequest)
 bind("cluster_mappings", "parameters", MappingParameters)
 bind("recipe_installations", "plan", StoredInstallationPlan)
 bind("recipe_runs", "plan", StoredRunPlan)
+
+bind("artifact_jobs", "parameters", dict[str, ParameterScalar])
+bind("artifact_jobs", "output_limits", ArtifactOutputLimits)
+bind("artifact_jobs", "compiled_contract", CompiledArtifactContract)
+bind("artifact_jobs", "input_manifest", RecipeJobInputManifest)
+bind("artifact_jobs", "result_evidence", ArtifactJobResultEvidence, nullable=True)
+
+bind("artifact_distribution_assignments", "objects", list[DistributionObject])
+bind(
+    "fleet_stream_events",
+    "payload",
+    {
+        "node-profile": NodeProfilePayload,
+        "node-telemetry-latest": NodeTelemetryPayload,
+        "recipe-installation": RecipeInstallationPayload,
+        "installation-node": InstallationNodePayload,
+        "recipe-run": RecipeRunPayload,
+        "run-node": RunNodePayload,
+        "job": JobPayload,
+        "agent-operation": AgentOperationPayload,
+    },
+    discriminator="entity_kind",
+)
