@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
+    LifecycleSubject,
     OperationMemberProgress,
     OperationProgress,
     RecipeJobRunResult,
@@ -33,6 +34,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 
+from . import agent_operation_states
 from .agent_jobs import (
     AgentJobService,
     authorize_operator_resume_in_session,
@@ -81,6 +83,7 @@ from .operation_contract import (
 )
 from .operation_progress import aggregate_progress, project_progress
 from .route_runtime import verify_active_route_bundle
+from .state_filters import state_filter
 from .strict_json import StrictJSONModel, read_stored_model, warn_unreadable_once
 
 COMMIT_PATTERN = r"^[0-9a-f]{40}$"
@@ -696,7 +699,7 @@ class _StandaloneJobActivityProjection:
             .exists()
         )
         if query.state is not None:
-            filters.append(Job.state == query.state)
+            filters.append(state_filter(Job.state, LifecycleSubject.JOB, query.state))
         if query.request_id is not None:
             filters.append(Job.request_id == query.request_id)
         if query.node_id is not None:
@@ -1025,7 +1028,7 @@ def _progress_projection(
         "compensated",
         "failed",
         "cancelled",
-        "waiting-for-operator",
+        *agent_operation_states.PARKED,
     }:
         return projected.model_copy(
             update={
@@ -1085,7 +1088,7 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
     state = _required_text(item["state"], "operation state is invalid")
     if kind in {operation.value for operation in ProtocolAgentOperation}:
         if (
-            state not in {"failed", "waiting-for-operator"}
+            state not in {"failed", *agent_operation_states.PARKED}
             or item.get("result") is None
         ):
             return None
@@ -1366,7 +1369,7 @@ def _agent_upgrade_diagnostics(
                 not target["target_proven"]
                 and target["attempts"]
                 and (
-                    target["state"] == "waiting-for-operator"
+                    target["state"] in agent_operation_states.PARKED
                     or target["raw_reason"] in RECOVERABLE_AGENT_UPGRADE_REASONS
                 )
                 for target in targets
@@ -1884,7 +1887,11 @@ class _DurableOperationProjection:
         with self._sessions() as session:
             filters = []
             if state is not None:
-                filters.append(AgentOperation.state == state)
+                filters.append(
+                    state_filter(
+                        AgentOperation.state, LifecycleSubject.AGENT_OPERATION, state
+                    )
+                )
             if node_id is not None:
                 filters.append(AgentOperation.node_id == node_id)
             if request_id is not None:
@@ -1909,7 +1916,11 @@ class _DurableOperationProjection:
             rows = rows[:limit]
             total_filters = []
             if state is not None:
-                total_filters.append(AgentOperation.state == state)
+                total_filters.append(
+                    state_filter(
+                        AgentOperation.state, LifecycleSubject.AGENT_OPERATION, state
+                    )
+                )
             if node_id is not None:
                 total_filters.append(AgentOperation.node_id == node_id)
             if request_id is not None:
@@ -1985,7 +1996,11 @@ class _DurableOperationProjection:
             raise ValueError("operation provider page limit is invalid")
         filters = []
         if query.state is not None:
-            filters.append(AgentOperation.state == query.state)
+            filters.append(
+                state_filter(
+                    AgentOperation.state, LifecycleSubject.AGENT_OPERATION, query.state
+                )
+            )
         if query.node_id is not None:
             filters.append(AgentOperation.node_id == query.node_id)
         if query.request_id is not None:
@@ -2009,7 +2024,13 @@ class _DurableOperationProjection:
             )
             total_filters = []
             if query.state is not None:
-                total_filters.append(AgentOperation.state == query.state)
+                total_filters.append(
+                    state_filter(
+                        AgentOperation.state,
+                        LifecycleSubject.AGENT_OPERATION,
+                        query.state,
+                    )
+                )
             if query.node_id is not None:
                 total_filters.append(AgentOperation.node_id == query.node_id)
             if query.request_id is not None:

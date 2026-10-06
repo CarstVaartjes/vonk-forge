@@ -112,6 +112,9 @@ ALLOWED_FILES = frozenset(
         "agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py",
         "agent_protocol/src/vonk_agent_protocol/outcome.py",
         "control/src/vonk_control/agent_outcome.py",
+        # The CLI ships without the contract package; this is its one copy of the
+        # words, and test_vocabulary_literals keeps it equal to the contract.
+        "src/cluster_profiles/cli_states.py",
     }
 )
 

@@ -37,6 +37,7 @@ from .cli_outcome import (
 )
 from .cli_render import render_payload, terminal_text
 from .cli_select import SelectorError
+from .cli_states import OPERATOR_WAIT_STATES
 from .control_client import (
     ControlClientError,
     ControlConflict,
@@ -2593,7 +2594,7 @@ def _fleet(
         actions = recovery.get("actions") if isinstance(recovery, Mapping) else None
         if (
             current.get("id") != job_id
-            or current.get("state") != "waiting-for-operator"
+            or current.get("state") not in OPERATOR_WAIT_STATES
             or not isinstance(actions, list)
             or "resume" not in actions
         ):
@@ -2754,7 +2755,7 @@ def _fleet(
                 observed.get("action") != "upgrade"
                 and (
                     _state(observed) in _TERMINAL_STATES
-                    or _state(observed) == "waiting-for-operator"
+                    or _state(observed) in OPERATOR_WAIT_STATES
                 )
             ),
             validate=same_job,

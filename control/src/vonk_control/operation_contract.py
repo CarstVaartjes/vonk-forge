@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import AgentFailureResult
 
+from . import agent_operation_states
 from .bounded_json import integer, require_integer, sequence
 from .logging import redact_text
 
@@ -338,11 +339,11 @@ def recovery_for_operation(
         raise TypeError("available actions must be a collection of recovery actions")
     actions.extend(action for action in advertised if action in permitted)
     return OperationRecovery(
-        uncertain=uncertain or state in {"waiting-for-operator", "uncertain"},
+        uncertain=uncertain or state in {*agent_operation_states.PARKED, "uncertain"},
         actions=actions,
         explanation=(
             "Inspect the durable outcome before taking recovery action."
-            if uncertain or state in {"waiting-for-operator", "uncertain"}
+            if uncertain or state in {*agent_operation_states.PARKED, "uncertain"}
             else None
         ),
     )

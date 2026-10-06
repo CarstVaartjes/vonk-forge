@@ -795,6 +795,8 @@ class AgentOperationAttempt(Base):
         ForeignKey("agent_certificates.serial"), nullable=False, index=True
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Why an ``observing`` attempt has no definite answer (``ObservationCause``).
+    observation_cause: Mapped[str | None] = mapped_column(String(24))
     progress: Mapped[dict[str, object] | None] = mapped_column(JSON)
     result: Mapped[dict[str, object] | None] = mapped_column(JSON)
 

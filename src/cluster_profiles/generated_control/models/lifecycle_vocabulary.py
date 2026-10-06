@@ -28,6 +28,8 @@ from ..models.lifecycle_subject import check_lifecycle_subject
 from ..models.lifecycle_subject import LifecycleSubject
 from ..models.migration_step import check_migration_step
 from ..models.migration_step import MigrationStep
+from ..models.observation_cause import check_observation_cause
+from ..models.observation_cause import ObservationCause
 from ..models.operator_action_name import check_operator_action_name
 from ..models.operator_action_name import OperatorActionName
 from ..models.operator_surface import check_operator_surface
@@ -88,6 +90,13 @@ class LifecycleVocabulary:
                 validation).
             lifecycle_subject (LifecycleSubject): The persisted models whose ``state`` the lifecycle core owns.
             migration_step (MigrationStep): The migration steps of the blocker audit (section 5.6) that retire a writer.
+            observation_cause (ObservationCause): Why an attempt is being observed rather than settled.
+
+                An attempt that ended without a definite answer is ``observing``; this says
+                what left it unanswered.  ``reported-unknown``: the executor said it could not
+                confirm the effect.  ``lease-lapsed``: the executor stopped reporting.  The old
+                spellings carried this in the state word itself (``waiting-for-operator`` and
+                ``expired``), which is why an adopted attempt also yields its cause.
             operator_action (OperatorActionName): The operator actions a row can advertise and the core accepts.
             operator_surface (OperatorSurface): The real surfaces behind an advertised action in the blocker allowlist.
             outcome_kind (OutcomeKind): What an executor reported, as the lifecycle core sees it.
@@ -137,6 +146,7 @@ class LifecycleVocabulary:
     invalid_request_reason: InvalidRequestReason
     lifecycle_subject: LifecycleSubject
     migration_step: MigrationStep
+    observation_cause: ObservationCause
     operator_action: OperatorActionName
     operator_surface: OperatorSurface
     outcome_kind: OutcomeKind
@@ -171,6 +181,8 @@ class LifecycleVocabulary:
 
         migration_step: str = self.migration_step
 
+        observation_cause: str = self.observation_cause
+
         operator_action: str = self.operator_action
 
         operator_surface: str = self.operator_surface
@@ -204,6 +216,7 @@ class LifecycleVocabulary:
             "invalid_request_reason": invalid_request_reason,
             "lifecycle_subject": lifecycle_subject,
             "migration_step": migration_step,
+            "observation_cause": observation_cause,
             "operator_action": operator_action,
             "operator_surface": operator_surface,
             "outcome_kind": outcome_kind,
@@ -268,6 +281,11 @@ class LifecycleVocabulary:
 
 
 
+        observation_cause = check_observation_cause(d.pop("observation_cause"))
+
+
+
+
         operator_action = check_operator_action_name(d.pop("operator_action"))
 
 
@@ -328,6 +346,7 @@ class LifecycleVocabulary:
             invalid_request_reason=invalid_request_reason,
             lifecycle_subject=lifecycle_subject,
             migration_step=migration_step,
+            observation_cause=observation_cause,
             operator_action=operator_action,
             operator_surface=operator_surface,
             outcome_kind=outcome_kind,

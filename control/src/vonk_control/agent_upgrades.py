@@ -18,6 +18,7 @@ from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.package_source import AgentPackageSource
 
+from . import agent_operation_states
 from .agent_jobs import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     AgentJobService,
@@ -573,7 +574,7 @@ class AgentUpgradeService:
             waiting = [
                 operation
                 for operation in stored_operations
-                if operation.state == "waiting-for-operator"
+                if operation.state in agent_operation_states.PARKED
             ]
             active = [
                 operation
@@ -643,9 +644,8 @@ class AgentUpgradeService:
                         .with_for_update(of=AgentOperationAttempt)
                     )
                     if attempt is None or attempt.state not in {
-                        "expired",
                         "failed",
-                        "waiting-for-operator",
+                        *agent_operation_states.ATTEMPT_OBSERVING,
                     }:
                         raise ValueError("stored agent upgrade attempt is invalid")
                     # Operator resume is a new dispatch decision. For an
@@ -688,7 +688,11 @@ class AgentUpgradeService:
         ):
             self._advance(session, parent)
             return
-        if message.state not in {"succeeded", "failed", "waiting-for-operator"}:
+        if message.state not in {
+            "succeeded",
+            "failed",
+            agent_operation_states.WIRE_UNKNOWN,
+        }:
             return
         # A helper acknowledgement without exact fresh identity, and every
         # failure, is retried automatically behind the dpkg safety fence.  A
@@ -833,7 +837,7 @@ class AgentUpgradeService:
             .where(
                 AgentOperation.parent_job_id == parent.id,
                 AgentOperation.node_id == node_id,
-                AgentOperation.state == "waiting-for-operator",
+                AgentOperation.state.in_(agent_operation_states.PARKED),
                 AgentOperation.current_attempt >= 1,
             )
             .with_for_update(of=AgentOperation)
@@ -856,7 +860,7 @@ class AgentUpgradeService:
             select(AgentOperation)
             .where(
                 AgentOperation.parent_job_id == parent.id,
-                AgentOperation.state == "waiting-for-operator",
+                AgentOperation.state.in_(agent_operation_states.PARKED),
                 AgentOperation.next_action_at.is_(None),
             )
             .with_for_update(of=AgentOperation)
@@ -909,7 +913,7 @@ class AgentUpgradeService:
                 select(AgentOperation)
                 .where(
                     AgentOperation.parent_job_id == older.id,
-                    AgentOperation.state.in_({"queued", "waiting-for-operator"}),
+                    AgentOperation.state.in_(agent_operation_states.QUEUED_OR_PARKED),
                 )
                 .with_for_update(of=AgentOperation)
             ):
@@ -1010,7 +1014,7 @@ class AgentUpgradeService:
             for operation in operations
             # A dispatched order whose Spark went dark past its fence no
             # longer holds the fleet, but it is not settled either.
-            if operation.state in {"waiting-for-operator", "running"}
+            if operation.state in agent_operation_states.RUNNING_OR_PARKED
         ]
         if deferred or retrying:
             self._rollouts.project(

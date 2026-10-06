@@ -39,6 +39,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallPayload,
 )
 
+from . import agent_operation_states
 from .agent_jobs import (
     _WORKLOAD_INTENT_OPERATIONS,
     superseded_cancellation_deadline,
@@ -423,7 +424,9 @@ class HostRuntimeAuthorityService:
                 select(StoredAgentOperation).where(
                     StoredAgentOperation.node_id == node_id,
                     StoredAgentOperation.kind == "agent.upgrade.v1",
-                    StoredAgentOperation.state.in_({"running", "waiting-for-operator"}),
+                    StoredAgentOperation.state.in_(
+                        agent_operation_states.RUNNING_OR_PARKED
+                    ),
                 )
             )
             matching = []

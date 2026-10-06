@@ -39,6 +39,7 @@ from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
+from . import agent_operation_states
 from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -204,7 +205,7 @@ _TERMINAL_PARENT_STATES = frozenset(
 #: resume, and a refusal that explains why it is not progressing is genuine
 #: evidence that must stay.
 _AGGREGATE_FINAL_STATES = AGGREGATE_FINAL_STATES
-_CONCLUDED_OUTCOMES = _AGGREGATE_FINAL_STATES - {"waiting-for-operator"}
+_CONCLUDED_OUTCOMES = _AGGREGATE_FINAL_STATES - set(agent_operation_states.PARKED)
 #: Idempotent, content-addressed transfers and read-only checks. When their job
 #: has already ended, a sibling's parked retry can never be claimed; abandoning
 #: it loses nothing (finished objects and partial files stay in the cache).
@@ -250,7 +251,7 @@ def _safe_retry_failure(kind: str, state: str, result: Mapping[str, object]) -> 
     """
     if kind not in _RESTART_REISSUE_OPERATIONS:
         return False
-    if state == "waiting-for-operator":
+    if state == agent_operation_states.WIRE_UNKNOWN:
         # The agent's own words for "I could not confirm the effect".  Its body
         # is often only ``{"reason": ...}`` with no ``failure_kind``, which
         # ``kind_for_agent_error`` reads as an invalid contract, so the kind is
@@ -296,7 +297,7 @@ def _parked_retry_evidence(
 ) -> bool:
     """Prove that a parked current-schema attempt still owns safe recovery."""
     if (
-        operation.state != "waiting-for-operator"
+        operation.state not in agent_operation_states.PARKED
         or _retry_authorized_for_current_attempt(operation)
         or operation.current_attempt < 1
         or operation.current_attempt != attempt.attempt
@@ -309,7 +310,7 @@ def _parked_retry_evidence(
         return False
     if hashlib.sha256(payload).hexdigest() != operation.payload_digest:
         return False
-    if attempt.state == "expired":
+    if agent_operation_states.attempt_lapsed(attempt):
         # Expiry never proves the old executor stopped. Only exact-resume
         # operations qualify, whose agent reconciles the old effect first.
         # A late result retained under the expired fence stays diagnostic
@@ -318,15 +319,19 @@ def _parked_retry_evidence(
         # its absence parked a start whose result arrived after its lease
         # behind an operator forever.
         return _aware(attempt.lease_deadline) <= _aware(now)
-    if attempt.state not in {"failed", "waiting-for-operator"}:
+    if not agent_operation_states.attempt_failed_or_unknown(attempt):
         return False
     try:
         result = validate_result_for_operation(
-            operation.kind, attempt.result, state=attempt.state
+            operation.kind,
+            attempt.result,
+            state=agent_operation_states.attempt_wire_state(attempt),
         ).model_dump(mode="json")
     except (TypeError, ValueError):
         return False
-    return _safe_retry_failure(operation.kind, attempt.state, result)
+    return _safe_retry_failure(
+        operation.kind, agent_operation_states.attempt_wire_state(attempt), result
+    )
 
 
 def _abandon_operation(
@@ -385,7 +390,7 @@ def abandon_idempotent_job_in_session(
         return False
     adapter = AgentOperationAdapter(session)
     for operation in operations:
-        if operation.state in {"queued", "waiting-for-operator"}:
+        if operation.state in agent_operation_states.QUEUED_OR_PARKED:
             adapter.settle(operation, None, job, CancelRequested(reason=reason), now)
     if job.state not in _ENDED_PARENT_STATES:
         set_parent_state(job, "cancelled", reason, now)
@@ -473,7 +478,7 @@ def agent_upgrade_in_flight(
 
     if operation.kind != AgentOperation.AGENT_UPGRADE.value:
         return False
-    if operation.state not in {"running", "waiting-for-operator"}:
+    if operation.state not in agent_operation_states.RUNNING_OR_PARKED:
         return False
     if operation.current_attempt < 1:
         return False
@@ -492,7 +497,7 @@ def agent_upgrade_in_flight(
     if deadline <= current:
         return False
     reason = attempt.result.get("reason") if isinstance(attempt.result, dict) else None
-    return attempt.state in {"waiting-for-operator", "expired"} or (
+    return agent_operation_states.attempt_is_observing(attempt) or (
         reason in AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
     )
 
@@ -508,7 +513,7 @@ def other_agent_upgrade_in_flight(
             select(StoredOperation).where(
                 StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
                 StoredOperation.id != operation.id,
-                StoredOperation.state.in_({"running", "waiting-for-operator"}),
+                StoredOperation.state.in_(agent_operation_states.RUNNING_OR_PARKED),
             )
         )
     )
@@ -587,7 +592,7 @@ def operator_resume_candidates_in_session(
             select(StoredOperation)
             .where(
                 StoredOperation.parent_job_id == job_id,
-                StoredOperation.state == "waiting-for-operator",
+                StoredOperation.state.in_(agent_operation_states.PARKED),
             )
             .order_by(StoredOperation.id)
         )
@@ -755,7 +760,7 @@ def retire_exhausted_operations_in_session(
             select(StoredOperation)
             .where(
                 StoredOperation.parent_job_id == job_id,
-                StoredOperation.state == "waiting-for-operator",
+                StoredOperation.state.in_(agent_operation_states.PARKED),
             )
             .order_by(StoredOperation.id)
             .with_for_update(of=StoredOperation)
@@ -1229,13 +1234,13 @@ class _ClaimCondition:
 class _ClaimBranch:
     """The claimability conditions that apply to one non-terminal state."""
 
-    state: str
+    states: tuple[str, ...]
     conditions: tuple[_ClaimCondition, ...]
 
     @property
     def expression(self) -> ColumnElement[bool]:
         return and_(
-            StoredOperation.state == self.state,
+            StoredOperation.state.in_(self.states),
             *(condition.expression for condition in self.conditions),
         )
 
@@ -1265,7 +1270,7 @@ class _ClaimPredicate:
 
     def branch_for(self, state: str) -> _ClaimBranch | None:
         for branch in self.branches:
-            if branch.state == state:
+            if state in branch.states:
                 return branch
         return None
 
@@ -1314,9 +1319,11 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
             AgentOperationAttempt.operation_id == StoredOperation.id,
             AgentOperationAttempt.attempt == StoredOperation.current_attempt,
             or_(
-                AgentOperationAttempt.state.in_({"failed", "waiting-for-operator"}),
+                agent_operation_states.sql_attempt_failed_or_unknown(
+                    AgentOperationAttempt
+                ),
                 and_(
-                    AgentOperationAttempt.state == "expired",
+                    agent_operation_states.sql_attempt_lapsed(AgentOperationAttempt),
                     AgentOperationAttempt.lease_deadline <= now,
                 ),
             ),
@@ -1355,7 +1362,7 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
         ),
         branches=(
             _ClaimBranch(
-                "queued",
+                (agent_operation_states.QUEUED,),
                 (
                     _ClaimCondition(
                         "queued-attempt-not-zero",
@@ -1364,7 +1371,7 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
                 ),
             ),
             _ClaimBranch(
-                "running",
+                (agent_operation_states.RUNNING,),
                 (
                     _ClaimCondition("running-attempt-missing", attempt_present),
                     _ClaimCondition("running-attempt-not-running", attempt_running),
@@ -1372,7 +1379,7 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
                 ),
             ),
             _ClaimBranch(
-                "waiting-for-operator",
+                agent_operation_states.PARKED,
                 (
                     _ClaimCondition(
                         "operator-retry-not-authorized",
@@ -1847,7 +1854,7 @@ class AgentJobService:
                 if any(
                     child.state not in {"succeeded", "failed", "cancelled"}
                     and not (
-                        child.state == "waiting-for-operator"
+                        child.state in agent_operation_states.PARKED
                         and child.current_attempt > 0
                         and (child.status_reason or "").startswith("claim refused:")
                     )
@@ -1856,7 +1863,7 @@ class AgentJobService:
                     continue
                 for child in children:
                     adapter.withdraw_retry(child)
-                    if child.state == "waiting-for-operator":
+                    if child.state in agent_operation_states.PARKED:
                         adapter.settle(
                             child,
                             None,
@@ -1896,7 +1903,8 @@ class AgentJobService:
                         now,
                     )
             if any(
-                child.state in {"running", "waiting-for-operator"} for child in children
+                child.state in agent_operation_states.RUNNING_OR_PARKED
+                for child in children
             ):
                 previous = (
                     dict(parent.result) if isinstance(parent.result, Mapping) else {}
@@ -1925,7 +1933,7 @@ class AgentJobService:
                 state = "running"
             elif all(
                 child.state
-                in {"succeeded", "failed", "cancelled", "waiting-for-operator"}
+                in {"succeeded", "failed", "cancelled", *agent_operation_states.PARKED}
                 for child in children
             ):
                 # A superseded parent may have one rank finish just before the
@@ -1974,7 +1982,7 @@ class AgentJobService:
                     StoredOperation.workload_intent_ordinal.is_not(None),
                     StoredOperation.workload_intent_ordinal < ordinal,
                     StoredOperation.current_attempt > 0,
-                    StoredOperation.state == "waiting-for-operator",
+                    StoredOperation.state.in_(agent_operation_states.PARKED),
                 )
                 .order_by(StoredOperation.id)
                 .with_for_update(of=StoredOperation)
@@ -2012,7 +2020,7 @@ class AgentJobService:
                     StoredOperation.workload_intent_ordinal.is_not(None),
                     StoredOperation.workload_intent_ordinal < current_ordinal,
                     StoredOperation.current_attempt > 0,
-                    StoredOperation.state.in_({"running", "waiting-for-operator"}),
+                    StoredOperation.state.in_(agent_operation_states.RUNNING_OR_PARKED),
                 )
                 .order_by(StoredOperation.parent_job_id, StoredOperation.id)
             )
@@ -2021,7 +2029,7 @@ class AgentJobService:
         for operation in candidates:
             if (
                 operation.kind in _ABANDONABLE_OPERATIONS
-                and operation.state == "waiting-for-operator"
+                and operation.state in agent_operation_states.PARKED
             ):
                 # A parked idempotent transfer runs nothing a cancellation
                 # receipt could stop, and an ended job never stamped the
@@ -2373,9 +2381,7 @@ class AgentJobService:
             select(StoredOperation)
             .where(
                 StoredOperation.node_id == node.node_id,
-                StoredOperation.state.in_(
-                    {"queued", "running", "waiting-for-operator"}
-                ),
+                StoredOperation.state.in_(agent_operation_states.LIVE),
             )
             .order_by(StoredOperation.created_at, StoredOperation.id)
             .limit(1)
@@ -2625,7 +2631,7 @@ class AgentJobService:
             .where(
                 StoredOperation.node_id == node_id,
                 StoredOperation.kind == AgentOperation.RECIPE_START.value,
-                StoredOperation.state.in_({"running", "waiting-for-operator"}),
+                StoredOperation.state.in_(agent_operation_states.RUNNING_OR_PARKED),
                 StoredOperation.current_attempt > 0,
             )
             .order_by(StoredOperation.id)
@@ -2712,7 +2718,7 @@ class AgentJobService:
                     )
                     .where(
                         StoredOperation.node_id == node_id,
-                        StoredOperation.state == "waiting-for-operator",
+                        StoredOperation.state.in_(agent_operation_states.PARKED),
                         StoredOperation.kind.in_(_RESTART_REISSUE_OPERATIONS),
                         _retry_not_authorized_for_current_attempt(),
                         Job.state.in_({"queued", "running", "waiting-for-operator"}),
@@ -2734,9 +2740,7 @@ class AgentJobService:
                         StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
                         StoredOperation.payload["rollback"]["attempt_nonce"].as_string()
                         == receipt.attempt_nonce,
-                        StoredOperation.state.in_(
-                            {"queued", "running", "waiting-for-operator"}
-                        ),
+                        StoredOperation.state.in_(agent_operation_states.LIVE),
                     )
                     .order_by(StoredOperation.created_at, StoredOperation.id)
                     .limit(1)
@@ -2917,7 +2921,7 @@ class AgentJobService:
                             StoredOperation.id != operation.id,
                             StoredOperation.kind.in_(_MUTATING_OPERATIONS),
                             StoredOperation.state.in_(
-                                {"running", "waiting-for-operator"}
+                                agent_operation_states.RUNNING_OR_PARKED
                             ),
                         )
                         .order_by(StoredOperation.id)
@@ -3087,10 +3091,10 @@ class AgentJobService:
                         if previous.progress is None
                         else validate_progress_update(None, previous.progress)
                     )
-                if previous is not None and previous.state in {
-                    "running",
-                    "waiting-for-operator",
-                }:
+                if previous is not None and (
+                    previous.state == "running"
+                    or agent_operation_states.attempt_reported_unknown(previous)
+                ):
                     if operation.state == "running" and (
                         _attempt_holds_open_launch_budget(operation, previous, now)
                     ):
@@ -3228,9 +3232,7 @@ class AgentJobService:
                 StoredOperation.parent_job_id == parent_job_id,
                 StoredOperation.node_id == node_id,
                 StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
-                StoredOperation.state.in_(
-                    {"queued", "running", "waiting-for-operator"}
-                ),
+                StoredOperation.state.in_(agent_operation_states.LIVE),
             )
             .order_by(StoredOperation.created_at, StoredOperation.id)
             .with_for_update(of=StoredOperation)
@@ -3315,9 +3317,8 @@ class AgentJobService:
         )
         if attempt is None or attempt.state not in {
             "running",
-            "waiting-for-operator",
-            "expired",
             "failed",
+            *agent_operation_states.ATTEMPT_OBSERVING,
         }:
             return
         message = AgentResult.model_validate(
@@ -3473,7 +3474,7 @@ class AgentJobService:
             return False
         if (
             job.state == "waiting-for-operator"
-            and current_operation.state == "waiting-for-operator"
+            and current_operation.state in agent_operation_states.PARKED
             and _retry_authorized_for_current_attempt(current_operation)
         ):
             set_parent_state(job, "queued", None, now)
@@ -3875,9 +3876,12 @@ class AgentJobService:
                 operation.kind, message.result, state=message.state
             )
             evidence = _document(message.result)
-            if message.state in {"failed", "waiting-for-operator"}:
+            if message.state in {"failed", agent_operation_states.WIRE_UNKNOWN}:
                 evidence = sanitize_failure_evidence(evidence)
-            if attempt.state == message.state and attempt.result == evidence:
+            if (
+                agent_operation_states.attempt_wire_state(attempt) == message.state
+                and attempt.result == evidence
+            ):
                 return False
             superseded_intent = (
                 operation.workload_intent_ordinal is not None
@@ -3892,8 +3896,11 @@ class AgentJobService:
                 and isinstance(parent.result, Mapping)
                 and superseded_cancellation_deadline(parent.result) is not None
                 and operation.current_attempt == attempt.attempt
-                and operation.state in {"running", "waiting-for-operator"}
-                and attempt.state in {"running", "expired"}
+                and operation.state in agent_operation_states.RUNNING_OR_PARKED
+                and (
+                    attempt.state == "running"
+                    or agent_operation_states.attempt_lapsed(attempt)
+                )
                 and attempt.result is None
                 and (
                     (
@@ -3967,7 +3974,7 @@ class AgentJobService:
                         )
                     if parent.state in {"queued", "running"}:
                         self._aggregate_parent(session, operation.parent_job_id)
-            if attempt.state != "expired":
+            if not agent_operation_states.attempt_lapsed(attempt):
                 raise StaleAgentAttempt("agent operation attempt is not expired")
             if attempt.result is not None:
                 if attempt.result != evidence:
@@ -4049,7 +4056,7 @@ class AgentJobService:
                 message.result,
                 state=message.state,
             )
-            if state in {"failed", "waiting-for-operator"}:
+            if state in {"failed", agent_operation_states.WIRE_UNKNOWN}:
                 try:
                     raw_result = _document(message.result)
                     diagnostics = raw_result.pop("diagnostics", None)
@@ -4524,7 +4531,7 @@ class AgentJobService:
             # for retry would wait forever behind a retry that cannot run.
             for operation in operations:
                 if (
-                    operation.state == "waiting-for-operator"
+                    operation.state in agent_operation_states.PARKED
                     and operation.kind in _ABANDONABLE_OPERATIONS
                 ):
                     _abandon_operation(operation, job.id, job.updated_at)

@@ -34,6 +34,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from .cli_states import OPERATOR_WAIT_STATES
 from .control_client import ControlClient, ControlClientError
 from .fleet_qualification import (
     ArtifactJobSmokeAdapter,
@@ -49,7 +50,7 @@ PROFILE_LABEL = "qualification-authority"
 # the group running, a host restart takes every selected Spark down.
 FAILURE_MODES = ("single-host-restart", "dual-rank-loss-recovery", "dual-host-restart")
 _TERMINAL_APPLICATIONS = frozenset(
-    {"succeeded", "failed", "cancelled", "waiting-for-operator"}
+    {"succeeded", "failed", "cancelled", *OPERATOR_WAIT_STATES}
 )
 _PASSED = frozenset({"passed", "covered"})
 

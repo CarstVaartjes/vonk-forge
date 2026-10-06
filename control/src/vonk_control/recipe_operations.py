@@ -35,6 +35,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import read_model, read_recipe
 
+from . import agent_operation_states
 from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -4000,7 +4001,7 @@ class RecipeOperationService:
                 run.route_state = "withdrawn"
                 run.updated_at = now
             return
-        if state == "waiting-for-operator" and isinstance(result, Mapping):
+        if state == agent_operation_states.WIRE_UNKNOWN and isinstance(result, Mapping):
             parsed = validate_result_for_operation(operation.kind, result, state=state)
             if (
                 isinstance(parsed, AgentFailureResult)
@@ -4015,7 +4016,7 @@ class RecipeOperationService:
                 return
         if (
             state == "failed"
-            and operation.state == "waiting-for-operator"
+            and operation.state in agent_operation_states.PARKED
             and retry_scheduled(operation) is not None
             and isinstance(result, Mapping)
         ):
@@ -7167,7 +7168,7 @@ class RecipeOperationService:
                     select(AgentOperation)
                     .where(
                         AgentOperation.parent_job_id == job.id,
-                        AgentOperation.state == "waiting-for-operator",
+                        AgentOperation.state.in_(agent_operation_states.PARKED),
                     )
                     .order_by(AgentOperation.node_id, AgentOperation.id)
                 )

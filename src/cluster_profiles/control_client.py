@@ -26,6 +26,7 @@ import httpx2
 from jsonschema import Draft202012Validator, FormatChecker, validators
 from jsonschema.exceptions import SchemaError, ValidationError, best_match
 
+from .cli_states import OPERATOR_WAIT_STATES
 from .control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from .control_transport import open_https
 from .error_reporting import (
@@ -1572,7 +1573,7 @@ class ControlClient:
                 return result
             if result.state in {"expired", "failed"}:
                 raise JobFailed(result, sensitive_values=(self._token,))
-            if result.state == "waiting-for-operator":
+            if result.state in OPERATOR_WAIT_STATES:
                 raise JobWaitingForOperator(result, sensitive_values=(self._token,))
             remaining = deadline - time.monotonic()
             if remaining <= 0:

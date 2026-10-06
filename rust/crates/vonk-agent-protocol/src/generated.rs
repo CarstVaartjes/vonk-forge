@@ -2675,6 +2675,7 @@ pub struct LifecycleVocabulary {
     pub invalid_request_reason: InvalidRequestReason,
     pub lifecycle_subject: LifecycleSubject,
     pub migration_step: MigrationStep,
+    pub observation_cause: ObservationCause,
     pub operator_action: OperatorActionName,
     pub operator_surface: OperatorSurface,
     pub outcome_kind: OutcomeKind,
@@ -2798,6 +2799,45 @@ impl ::std::convert::TryFrom<&str> for NetworkInterfaceKind {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for NetworkInterfaceKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ObservationCause {
+    #[serde(rename = "reported-unknown")]
+    ReportedUnknown,
+    #[serde(rename = "lease-lapsed")]
+    LeaseLapsed,
+}
+impl ::std::fmt::Display for ObservationCause {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ReportedUnknown => f.write_str("reported-unknown"),
+            Self::LeaseLapsed => f.write_str("lease-lapsed"),
+        }
+    }
+}
+impl ::std::str::FromStr for ObservationCause {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "reported-unknown" => Ok(Self::ReportedUnknown),
+            "lease-lapsed" => Ok(Self::LeaseLapsed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ObservationCause {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ObservationCause {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -8340,6 +8380,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub invalid_request_reason: InvalidRequestReason,
             pub lifecycle_subject: LifecycleSubject,
             pub migration_step: MigrationStep,
+            pub observation_cause: ObservationCause,
             pub operator_action: OperatorActionName,
             pub operator_surface: OperatorSurface,
             pub outcome_kind: OutcomeKind,
@@ -8363,6 +8404,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             invalid_request_reason: raw.invalid_request_reason,
             lifecycle_subject: raw.lifecycle_subject,
             migration_step: raw.migration_step,
+            observation_cause: raw.observation_cause,
             operator_action: raw.operator_action,
             operator_surface: raw.operator_surface,
             outcome_kind: raw.outcome_kind,
@@ -8495,6 +8537,61 @@ impl ::std::cmp::PartialEq<str> for NetworkInterfaceKind {
 impl ::std::cmp::PartialEq<&str> for NetworkInterfaceKind {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl ObservationCause {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ReportedUnknown => "reported-unknown",
+            Self::LeaseLapsed => "lease-lapsed",
+        }
+    }
+}
+impl ::std::ops::Deref for ObservationCause {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ObservationCause {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ObservationCause {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ObservationCause {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ObservationCause", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "reported-unknown")]
+            ReportedUnknown,
+            #[serde(rename = "lease-lapsed")]
+            LeaseLapsed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ReportedUnknown => Self::ReportedUnknown,
+            Raw::LeaseLapsed => Self::LeaseLapsed,
+        })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for OperationCheckpoint {

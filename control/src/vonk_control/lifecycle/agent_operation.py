@@ -8,24 +8,31 @@ retry fence, the operator actions, a stop), and the **only** projection of a cor
 decision back onto the stored rows (:meth:`AgentOperationAdapter.apply`).  No
 other code writes an order's ``state`` for a recovery decision.
 
-Stored encoding.  The stored ``state`` vocabulary is the contract of the whole
-Controller (claim predicate, operator projection, API, owners), so it does not
-change; the core's eight states are projected onto it:
+Stored encoding.  An order's stored ``state`` is a word of the core vocabulary
+(``vonk_agent_protocol.LifecycleState``), so each core state is stored as itself:
 
 ========================  ==========================================
 core state                stored order
 ========================  ==========================================
-``queued``                ``queued`` (attempt 0), or a claimable retry
+``queued``                ``queued`` (attempt 0)
 ``running``               ``running``
-``backoff``               ``waiting-for-operator`` + ``next_action_at``
-``observing``             ``waiting-for-operator``, ``next_action_at`` NULL
-``needs-operator``        ``waiting-for-operator``, ``next_action_at`` NULL
+``backoff``               ``backoff`` + ``next_action_at`` (the retry clock)
+``observing``             ``observing`` + ``next_action_at``, ``observe_count`` > 0
+``needs-operator``        ``needs-operator``, ``next_action_at`` NULL
 ``succeeded``/``failed``  ``succeeded``/``failed``
 ``cancelled``             ``cancelled``
 ========================  ==========================================
 
-A waiting order with ``next_action_at`` set is an automatic retry (the label is
-legacy: an operator is not involved); without it the order waits, and the
+A row written before the rename says ``waiting-for-operator`` for all three waits;
+the contract adopts it (``agent_operation_states.PARKED`` selects both spellings)
+and the schedule columns still say which wait it was, so the reconciler classifies it
+on its first pass.  An attempt ends ``succeeded``, ``failed``, ``cancelled`` or
+``observing`` with a typed ``observation_cause`` (``reported-unknown`` or
+``lease-lapsed``); the agent wire keeps its own four result words and is mapped at
+ingress (``agent_operation_states.record_wire_state``).
+
+A parked order with ``next_action_at`` set is an automatic retry (an operator is not
+involved); without it the order waits, and the
 reconciler re-evaluates it on every pass (rules 1 to 3), so a wait never outlives
 its cause and an observation needs no persisted counter.
 
@@ -52,6 +59,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LEGACY_WAIT_STATE, AgentOperation
 
+from .. import agent_operation_states as aos
 from ..agent_operation_facts import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     RESTART_REISSUE_OPERATIONS,
@@ -94,6 +102,7 @@ IRREVERSIBLE_OPERATIONS = frozenset(
         AgentOperation.RECIPE_BUILD_CLEANUP.value,
     }
 )
+#: The word of a parent *job* that waits (the job table converts with its own kind).
 WAITING = LEGACY_WAIT_STATE
 JOB_RUN_OPERATION = AgentOperation.RECIPE_JOB_RUN.value
 #: The owner kind a one-shot job's order carries in its parent job's payload.
@@ -106,7 +115,7 @@ ENDED_PARENT_STATES = frozenset({"succeeded", "failed", "cancelled", "expired"})
 #: States in which a parent's aggregate considers an order finished (a waiting
 #: order is final for the aggregate: the parent then waits with it).
 AGGREGATE_FINAL_STATES = frozenset(
-    {"cancelled", "compensated", "failed", "succeeded", WAITING}
+    {"cancelled", "compensated", "failed", "succeeded", *aos.PARKED}
 )
 #: The operator actions of a parked order (the same pair the Job endpoints take).
 OPERATOR_ACTIONS = (ActionName.RESUME.value, ActionName.RETIRE.value)
@@ -146,7 +155,7 @@ def _legacy_retry_due(operation: StoredOperation) -> datetime | None:
 def retry_scheduled(operation: StoredOperation) -> datetime | None:
     """When a waiting order's automatic retry becomes claimable, if it has one."""
 
-    if operation.state != WAITING:
+    if not aos.order_is_parked(operation.state):
         return None
     if operation.next_action_at is not None:
         # Above zero the order is being observed, which is not a retry.
@@ -263,7 +272,7 @@ class AgentOperationAdapter:
                     assert deadline is not None
                     lease = max(lease, aware(deadline))
             next_action = lease
-        elif stored == WAITING:
+        elif stored in aos.PARKED:
             scheduled = retry_scheduled(operation)
             if scheduled is not None:
                 state, next_action = State.BACKOFF, scheduled
@@ -434,7 +443,7 @@ class AgentOperationAdapter:
             and attempt is not None
             and attempt.state == "running"
         ):
-            attempt.state = "expired"
+            aos.lapse(attempt)
             changed = True
         stored_next = (
             None
@@ -471,17 +480,17 @@ class AgentOperationAdapter:
                 if operation.current_attempt == 0:
                     return "queued", None
                 # A queued retry is claimable now; only a waiting order is.
-                return WAITING, after.next_action_at or now
+                return aos.BACKOFF, after.next_action_at or now
             case State.BACKOFF:
                 if operation.current_attempt == 0:
                     # Never issued: it is simply queued, and a queued order
                     # (attempt 0) is what the claim predicate offers.
                     return "queued", None
-                return WAITING, after.next_action_at or now
+                return aos.BACKOFF, after.next_action_at or now
             case State.OBSERVING:
-                return WAITING, after.next_action_at or now
+                return aos.OBSERVING, after.next_action_at or now
             case State.NEEDS_OPERATOR:
-                return WAITING, None
+                return aos.NEEDS_OPERATOR, None
             case State.RUNNING:
                 return "running", None
             case State.SUCCEEDED:
@@ -533,10 +542,10 @@ class AgentOperationAdapter:
             return False
         changed = False
         if attempt.state == "running":
-            attempt.state = "expired"
+            aos.lapse(attempt)
             changed = True
-        elif attempt.state not in {"expired", "failed", WAITING}:
-            attempt.state = WAITING
+        elif not (attempt.state == "failed" or aos.attempt_is_observing(attempt)):
+            aos.record_wire_state(attempt, aos.WIRE_UNKNOWN)
             changed = True
         if aware(attempt.lease_deadline) < not_before:
             attempt.lease_deadline = not_before
@@ -724,7 +733,7 @@ class AgentOperationAdapter:
         that the target runs); the core then decides what happens to it.
         """
 
-        operation.state = WAITING
+        operation.state = aos.NEEDS_OPERATOR
         operation.next_action_at = None
         operation.observe_count = 0
         operation.retry_disposition = None
@@ -747,8 +756,8 @@ class AgentOperationAdapter:
     def expire_attempt(attempt: AgentOperationAttempt) -> None:
         """An attempt that can no longer report is ``expired``; its fence stays."""
 
-        if attempt.state in {"running", WAITING}:
-            attempt.state = "expired"
+        if attempt.state == "running" or aos.attempt_reported_unknown(attempt):
+            aos.lapse(attempt)
 
     @staticmethod
     def record_report(
@@ -759,7 +768,7 @@ class AgentOperationAdapter:
         """Keep the executor's own report on its attempt (a fact, not a decision)."""
 
         attempt.result = result
-        attempt.state = state
+        aos.record_wire_state(attempt, state)
 
 
 def aggregate_parent_state(
@@ -778,7 +787,7 @@ def aggregate_parent_state(
     retrying = [
         i
         for i, (state, scheduled) in enumerate(children)
-        if state == WAITING and scheduled
+        if state in aos.PARKED and scheduled
     ]
     if (
         retrying
@@ -794,7 +803,7 @@ def aggregate_parent_state(
     states = {state for state, _ in children}
     if "failed" in states:
         return "failed"
-    if WAITING in states:
+    if states & set(aos.PARKED):
         return WAITING
     if "cancelled" in states:
         return "cancelled"
@@ -854,7 +863,7 @@ def adopt_legacy_orders(connection: Connection) -> int:
     result = connection.execute(
         update(StoredOperation)
         .where(
-            StoredOperation.state == WAITING,
+            StoredOperation.state.in_(aos.PARKED),
             StoredOperation.next_action_at.is_(None),
             StoredOperation.retry_disposition == _LEGACY_RETRY,
             StoredOperation.retry_disposition_attempt
@@ -903,7 +912,7 @@ def parked_orders(now: datetime):
     """
 
     return and_(
-        StoredOperation.state == WAITING,
+        StoredOperation.state.in_(aos.PARKED),
         or_(
             StoredOperation.next_action_at.is_(None),
             and_(

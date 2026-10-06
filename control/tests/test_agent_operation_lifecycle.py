@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import (
     AgentJobService,
     operator_resume_candidates_in_session,
@@ -278,7 +279,7 @@ def test_a_restart_safe_order_parked_for_an_operator_is_retried(agent_service) -
     assert jobs.reconcile_orders() is True
 
     after = _stored(sessions, operation.id)
-    assert after.state == "waiting-for-operator" and after.next_action_at is not None
+    assert after.state == aos.BACKOFF and after.next_action_at is not None
     assert "retry scheduled at" in (after.status_reason or "")
     assert job_state(sessions, operation.parent_job_id).state == "queued"
     clock.now = after.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
@@ -417,7 +418,7 @@ def test_a_lapsed_running_order_is_decided_without_the_node_polling(
     assert jobs.reconcile_orders() is True
 
     stored = _stored(sessions, operation.id)
-    assert stored.state == "waiting-for-operator" and stored.next_action_at is not None
+    assert stored.state == aos.BACKOFF and stored.next_action_at is not None
     assert "the effect is unobserved" in (stored.status_reason or "")
 
 
@@ -555,4 +556,106 @@ def test_nodes_never_polled_are_still_reconciled(agent_service) -> None:
         node.revoked_at = clock.now
     clock.advance(seconds=45)
     assert jobs.reconcile_orders() is True
-    assert _stored(sessions, operation.id).state == "waiting-for-operator"
+    assert _stored(sessions, operation.id).state == aos.BACKOFF
+
+
+# ------------------------------------ the stored vocabulary is the core's
+
+
+def test_a_lapsed_attempt_is_observed_with_its_cause_and_an_old_one_reads_the_same(
+    agent_service,
+) -> None:
+    jobs, sessions, clock = agent_service
+    order = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
+    )
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    clock.advance(seconds=45)
+    assert jobs.reconcile_orders() is True
+
+    stored = _stored(sessions, order.id)
+    assert stored.state == aos.BACKOFF
+    with sessions() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == order.id
+            )
+        )
+        assert attempt.state == aos.OBSERVING
+        assert attempt.observation_cause == "lease-lapsed"
+        assert aos.attempt_lapsed(attempt) and not aos.attempt_reported_unknown(attempt)
+        found = session.scalars(
+            select(AgentOperationAttempt.id).where(
+                aos.sql_attempt_lapsed(AgentOperationAttempt)
+            )
+        ).all()
+        assert attempt.id in found
+
+        # The row a Controller wrote before the rename carries the cause in the word.
+        attempt.state = "expired"
+        attempt.observation_cause = None
+        session.flush()
+        assert aos.attempt_lapsed(attempt) and aos.attempt_is_observing(attempt)
+        assert (
+            attempt.id
+            in session.scalars(
+                select(AgentOperationAttempt.id).where(
+                    aos.sql_attempt_lapsed(AgentOperationAttempt)
+                )
+            ).all()
+        )
+        attempt.state = "waiting-for-operator"
+        session.flush()
+        assert aos.attempt_reported_unknown(attempt) and not aos.attempt_lapsed(attempt)
+        assert (
+            attempt.id
+            in session.scalars(
+                select(AgentOperationAttempt.id).where(
+                    aos.sql_attempt_failed_or_unknown(AgentOperationAttempt)
+                )
+            ).all()
+        )
+        session.rollback()
+
+
+def test_a_legacy_parked_order_is_found_by_every_selection_and_a_new_one_too(
+    agent_service,
+) -> None:
+    jobs, sessions, clock = agent_service
+    order = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
+    )
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    for word in (
+        "waiting-for-operator",
+        aos.NEEDS_OPERATOR,
+        aos.BACKOFF,
+        aos.OBSERVING,
+    ):
+        with sessions.begin() as session:
+            session.get(AgentOperation, order.id).state = word
+        with sessions() as session:
+            for words in (aos.PARKED, aos.LIVE, aos.RUNNING_OR_PARKED):
+                assert (
+                    order.id
+                    in session.scalars(
+                        select(AgentOperation.id).where(AgentOperation.state.in_(words))
+                    ).all()
+                ), (word, words)
+        assert aos.order_is_parked(word)
+    assert not aos.order_is_parked("running") and not aos.order_is_parked("queued")
+
+
+def test_the_agent_word_for_unknown_is_mapped_at_ingress_to_an_observed_attempt(
+    agent_service,
+) -> None:
+    attempt = AgentOperationAttempt()
+    aos.record_wire_state(attempt, aos.WIRE_UNKNOWN)
+    assert attempt.state == aos.OBSERVING
+    assert aos.attempt_reported_unknown(attempt)
+    assert aos.attempt_wire_state(attempt) == aos.WIRE_UNKNOWN
+    aos.record_wire_state(attempt, "failed")
+    assert attempt.state == "failed" and attempt.observation_cause is None
+    assert aos.attempt_wire_state(attempt) == "failed"
+    aos.lapse(attempt)
+    assert aos.attempt_lapsed(attempt)

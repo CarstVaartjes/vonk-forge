@@ -4128,6 +4128,7 @@ export interface components {
             invalid_request_reason: components["schemas"]["InvalidRequestReason"];
             lifecycle_subject: components["schemas"]["LifecycleSubject"];
             migration_step: components["schemas"]["MigrationStep"];
+            observation_cause: components["schemas"]["ObservationCause"];
             operator_action: components["schemas"]["OperatorActionName"];
             operator_surface: components["schemas"]["OperatorSurface"];
             outcome_kind: components["schemas"]["OutcomeKind"];
@@ -4759,6 +4760,18 @@ export interface components {
             /** Profile Changed */
             profile_changed?: boolean | null;
         };
+        /**
+         * ObservationCause
+         * @description Why an attempt is being observed rather than settled.
+         *
+         *     An attempt that ended without a definite answer is ``observing``; this says
+         *     what left it unanswered.  ``reported-unknown``: the executor said it could not
+         *     confirm the effect.  ``lease-lapsed``: the executor stopped reporting.  The old
+         *     spellings carried this in the state word itself (``waiting-for-operator`` and
+         *     ``expired``), which is why an adopted attempt also yields its cause.
+         * @enum {string}
+         */
+        ObservationCause: "reported-unknown" | "lease-lapsed";
         /**
          * OperationBlocker
          * @description One reason an operation is waiting or blocked, with the Sparks it concerns.

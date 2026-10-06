@@ -42,6 +42,7 @@ from vonk_agent_protocol.host_helper import (
     RecipeReconciliationIdentity,
     host_helper_grant_signing_bytes,
 )
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_api import (
     AgentApiServices,
     EnrollmentRateLimiter,
@@ -2165,7 +2166,7 @@ def test_expired_exact_result_is_retained_as_diagnostic_without_completing_job(
                 AgentOperationAttempt.fence == claim["fence"]
             )
         )
-        assert attempt.state == "expired"
+        assert aos.attempt_lapsed(attempt)
         assert attempt.result == {}
         assert session.get(Job, job.id).state != "succeeded"
 

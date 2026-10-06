@@ -87,7 +87,12 @@ test("uses honest status labels for active and operator-blocked operations", () 
   expect(activityStatus({...base, action: "operation.reconcile.waiting"})).toBe("in_progress");
   expect(activityStateLabel("waiting")).toBe("Waiting to recheck");
   expect(activityStateLabel("waiting-for-operator")).toBe("Waiting for operator");
+  expect(activityStateLabel("needs-operator")).toBe("Waiting for operator");
+  expect(activityStateLabel("backoff")).toBe("Retrying automatically");
+  expect(activityStateLabel("observing")).toBe("Checking the outcome");
   expect(activityStatus({...base, action: "operation.reconcile.waiting-for-operator"})).toBe("attention");
+  expect(activityStatus({...base, action: "operation.reconcile.needs-operator"})).toBe("attention");
+  expect(activityStatus({...base, action: "operation.reconcile.backoff"})).toBe("in_progress");
   expect(activityStatus({...base, action: "operation.reconcile.failed"})).toBe("unsuccessful");
   expect(activityStatus({...base, action: "operation.reconcile.expired"})).toBe("unsuccessful");
   expect(activityStatus({...base, action: "operation.reconcile.succeeded"})).toBe("recorded");

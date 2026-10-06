@@ -178,6 +178,20 @@ class StateAlias(WireEnum):
     EXPIRED = "expired"
 
 
+class ObservationCause(WireEnum):
+    """Why an attempt is being observed rather than settled.
+
+    An attempt that ended without a definite answer is ``observing``; this says
+    what left it unanswered.  ``reported-unknown``: the executor said it could not
+    confirm the effect.  ``lease-lapsed``: the executor stopped reporting.  The old
+    spellings carried this in the state word itself (``waiting-for-operator`` and
+    ``expired``), which is why an adopted attempt also yields its cause.
+    """
+
+    REPORTED_UNKNOWN = "reported-unknown"
+    LEASE_LAPSED = "lease-lapsed"
+
+
 class AdoptedState(NamedTuple):
     """What a stored word means in the core vocabulary.
 
@@ -198,8 +212,12 @@ _PARTIAL = AdoptedState(LifecycleState.BACKOFF)
 #: A job that lapsed without an answer is over: nothing will report for it.
 _JOB_EXPIRED = AdoptedState(LifecycleState.FAILED)
 #: An attempt whose lease lapsed was interrupted, not refused: what it did is
-#: unknown, so it is observed, and the operation decides what happens next.
+#: unknown, so it is observed, and the operation decides what happens next.  The
+#: same holds for an attempt the agent reported as ``waiting-for-operator`` (its
+#: old word for "I could not confirm the effect"): an attempt is a record of one
+#: try, never a wait for a person, so it too is observed.
 _ATTEMPT_EXPIRED = AdoptedState(LifecycleState.OBSERVING)
+_ATTEMPT_UNKNOWN = AdoptedState(LifecycleState.OBSERVING)
 
 #: What each retired spelling means, per subject whose stored ``state`` the core
 #: owns, and only for the words that subject has ever stored (its CHECK
@@ -219,14 +237,14 @@ STATE_ALIASES: Mapping[LifecycleSubject, Mapping[StateAlias, AdoptedState]] = {
         StateAlias.EXPIRED: _JOB_EXPIRED,
     },
     LifecycleSubject.JOB_ATTEMPT: {
-        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        StateAlias.WAITING_FOR_OPERATOR: _ATTEMPT_UNKNOWN,
         StateAlias.EXPIRED: _ATTEMPT_EXPIRED,
     },
     LifecycleSubject.AGENT_OPERATION: {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
     },
     LifecycleSubject.AGENT_OPERATION_ATTEMPT: {
-        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
+        StateAlias.WAITING_FOR_OPERATOR: _ATTEMPT_UNKNOWN,
         StateAlias.EXPIRED: _ATTEMPT_EXPIRED,
     },
     LifecycleSubject.MODEL_CACHE_OPERATION: {
@@ -240,6 +258,22 @@ STATE_ALIASES: Mapping[LifecycleSubject, Mapping[StateAlias, AdoptedState]] = {
         StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
     },
 }
+
+#: The cause an old attempt spelling carried (see :class:`ObservationCause`).
+ATTEMPT_ALIAS_CAUSE: Mapping[StateAlias, ObservationCause] = {
+    StateAlias.WAITING_FOR_OPERATOR: ObservationCause.REPORTED_UNKNOWN,
+    StateAlias.EXPIRED: ObservationCause.LEASE_LAPSED,
+}
+
+
+def legacy_observation_cause(stored: str) -> ObservationCause | None:
+    """The cause an attempt's old state word meant, or ``None`` for any other word."""
+
+    try:
+        return ATTEMPT_ALIAS_CAUSE.get(StateAlias(stored))
+    except ValueError:
+        return None
+
 
 #: What an alias means when the subject is not known (an API filter, a CLI
 #: argument).  Activity lists jobs, so ``expired`` means what it means for a job.
@@ -591,6 +625,7 @@ class LifecycleVocabulary(WireModel):
     wait_verdict: WaitVerdict
     lifecycle_subject: LifecycleSubject
     state_alias: StateAlias
+    observation_cause: ObservationCause
     state_write_kind: StateWriteKind
     migration_step: MigrationStep
     error_category: ErrorCategory
@@ -601,6 +636,7 @@ class LifecycleVocabulary(WireModel):
 
 
 __all__ = [
+    "ATTEMPT_ALIAS_CAUSE",
     "INPUT_ALIASES",
     "LEGACY_WAIT_STATE",
     "LIVE_LIFECYCLE_STATES",
@@ -619,6 +655,7 @@ __all__ = [
     "LifecycleSubject",
     "LifecycleVocabulary",
     "MigrationStep",
+    "ObservationCause",
     "OperatorActionName",
     "OperatorSurface",
     "OutcomeKind",
@@ -634,6 +671,7 @@ __all__ = [
     "input_state",
     "is_live",
     "is_state",
+    "legacy_observation_cause",
     "live_words",
     "state_adopter",
     "stored_words",

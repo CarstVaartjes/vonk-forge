@@ -111,6 +111,12 @@ export const StateAlias = {
 } as const;
 export type StateAlias = (typeof StateAlias)[keyof typeof StateAlias];
 
+export const ObservationCause = {
+  REPORTED_UNKNOWN: "reported-unknown",
+  LEASE_LAPSED: "lease-lapsed",
+} as const;
+export type ObservationCause = (typeof ObservationCause)[keyof typeof ObservationCause];
+
 export const StateWriteKind = {
   ATTRIBUTE: "attribute",
   DICT_ITEM: "dict-item",

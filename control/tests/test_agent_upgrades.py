@@ -8,6 +8,7 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrade_status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
@@ -372,7 +373,7 @@ def test_failed_install_retries_behind_fence_without_budget_while_rollout_contin
             )
             parent = session.get(Job, job.id)
             assert operation is not None and attempt is not None
-            assert operation.state == "waiting-for-operator"
+            assert operation.state in aos.PARKED
             assert operation.next_action_at is not None
             assert attempt.state == "failed"
             deadline = attempt.lease_deadline
@@ -609,7 +610,7 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
             dict(operation.payload),
             operation.current_attempt,
         ) == immutable
-        assert operation.state == "waiting-for-operator"
+        assert operation.state in aos.PARKED
         assert operation.next_action_at is not None
         resumed_attempt = session.scalar(
             select(AgentOperationAttempt).where(
@@ -825,12 +826,12 @@ def test_resume_quiesces_stale_old_identity_without_duplicate_mutation(
         # No duplicate mutation: the expired install is fenced and retried
         # automatically only after the dpkg safety window.
         assert parent is not None and parent.state == "queued"
-        assert operation is not None and operation.state == "waiting-for-operator"
+        assert operation is not None and operation.state in aos.PARKED
         assert operation.next_action_at is not None
         assert operation.current_attempt == 1
         assert len(attempts) == 1
         assert attempts[0].fence == child.fence
-        assert attempts[0].state == "expired"
+        assert aos.attempt_lapsed(attempts[0])
 
 
 def test_resume_rejects_legacy_running_worker_dispatch_before_lease_deadline(
@@ -914,7 +915,7 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
         )
         assert parent is not None and parent.state == "queued"
         assert operation is not None and operation.current_attempt == 1
-        assert operation.state == "waiting-for-operator"
+        assert operation.state in aos.PARKED
         assert operation.next_action_at is not None
 
 
@@ -1052,7 +1053,7 @@ def test_success_result_cannot_advance_without_exact_fresh_agent_identity(
         stored = session.get(Job, job.id)
         # The unproven handoff keeps this Spark in flight; it is retried
         # behind the safety fence unless exact identity arrives first.
-        assert operation is not None and operation.state == "waiting-for-operator"
+        assert operation is not None and operation.state in aos.PARKED
         assert operation.next_action_at is not None
         assert stored is not None and stored.state == "queued"
 
@@ -1856,7 +1857,7 @@ def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
     with sessions() as session:
         operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
         assert operation is not None
-        assert operation.state == "waiting-for-operator"
+        assert operation.state in aos.PARKED
         # The handoff is retried only behind the safety fence, and only while
         # the Spark still runs the exact rollback source; proven identity
         # completes it first.

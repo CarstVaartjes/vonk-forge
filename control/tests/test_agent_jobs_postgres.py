@@ -12,6 +12,7 @@ from sqlalchemy import event, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
 from vonk_control.enrollment import EnrollmentService
@@ -286,7 +287,7 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
         stored = session.get(AgentOperation, operation.id)
         parent_row = session.get(Job, parent_job.id)
         assert stored is not None and parent_row is not None
-        assert stored.state == "waiting-for-operator"
+        assert stored.state in aos.PARKED
         due = stored.next_action_at
         if not auto_retry:
             assert due is None
@@ -511,7 +512,7 @@ def test_postgres_expired_mutating_operation_schedules_bounded_exact_retry(
     with sessions() as session:
         gated = session.get(AgentOperation, operation.id)
         assert gated is not None
-        assert gated.state == "waiting-for-operator"
+        assert gated.state in aos.PARKED
         assert gated.next_action_at is not None
         assert gated.next_action_at is not None
         due = gated.next_action_at
@@ -521,7 +522,7 @@ def test_postgres_expired_mutating_operation_schedules_bounded_exact_retry(
                 AgentOperationAttempt.attempt == 1,
             )
         )
-        assert attempt is not None and attempt.state == "expired"
+        assert attempt is not None and aos.attempt_lapsed(attempt)
         assert session.get(Job, parent_job.id).state == "queued"  # type: ignore[union-attr]
 
     clock.now = due.replace(tzinfo=UTC)
@@ -918,7 +919,7 @@ def test_postgres_complete_serializes_expiry_gate_with_identity_lock(
     with sessions() as session:
         assert (
             session.get(AgentOperation, fenced_operation(sessions, first).id).state
-            == "waiting-for-operator"
+            in aos.PARKED
         )
 
 
@@ -1067,7 +1068,7 @@ def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(ser
                 AgentOperationAttempt.fence == original.fence
             )
         )
-        assert previous is not None and previous.state == "expired"
+        assert previous is not None and aos.attempt_lapsed(previous)
         previous.attempt = 5
         job = session.get(Job, parked.parent_job_id)
         assert job is not None
