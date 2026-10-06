@@ -387,8 +387,10 @@ def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_libra
         )
         assert first is not None
         document = json.loads(json.dumps(first.document))
-        memory = document["topology"]["roles"][0]["resources"]["memory"]
-        memory.update(peak_bytes=20_000)
+        # An idle Spark is never refused for its memory estimate, so the first
+        # recipe must not fit by disk, which is a measured shortfall.
+        disk = document["topology"]["roles"][0]["resources"]["disk"]
+        disk.update(artifact_bytes=20_000)
         canonical = RecipeDefinition.model_validate(document)
         successor = CatalogDocumentRevision(
             id=str(uuid.uuid4()),
