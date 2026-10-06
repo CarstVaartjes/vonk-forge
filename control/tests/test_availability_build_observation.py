@@ -10,6 +10,7 @@ from vonk_agent_protocol import canonical_message
 from vonk_control import availability_production
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
+from vonk_control.job_documents import AvailabilityJobPayload, read_row_column
 from vonk_control.models import Job, NodeInventorySnapshot, RecipeBuild
 from vonk_control.recipe_image_availability import (
     BuildUnsettled,
@@ -48,7 +49,10 @@ def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
         with sessions() as session:
             row = session.get(Job, parent.id)
             assert row is not None
-            runtime = dict(require_mapping(row.payload["runtime"], "runtime"))
+            payload = read_row_column(row, "payload")
+            assert isinstance(payload, AvailabilityJobPayload)
+            runtime = payload.runtime
+            assert runtime is not None
             assert owner._authority is not None
             recipe, _ = owner._authority(revision.id)
         assert composition.service._builder is not None
@@ -183,7 +187,9 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
                     row.payload["build_dependency"], "dependency"
                 )
                 assert dependency["operation_id"] == child_id
-                assert row.payload["claim_owner"] is None
+                payload = read_row_column(row, "payload")
+                assert isinstance(payload, AvailabilityJobPayload)
+                assert payload.claim_owner is None
                 retry = require_mapping(row.payload["retry"], "retry")
                 assert retry["automatic_attempts"] == 0
         receipt = _write_controller_build_receipt(
