@@ -209,7 +209,7 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     pending = recipe_service.get_operator_request(request_id, actor="operator")
     assert isinstance(pending, dict)
     assert pending["operation_id"] == parent_id
-    assert pending["state"] == "partial"
+    assert pending["state"] == "backoff"
     with sessions() as session:
         pending_parent = session.get(Job, parent_id)
         assert pending_parent is not None and pending_parent.result is None
@@ -252,7 +252,7 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     assert isinstance(replay, dict)
     assert replay["operation_id"] == parent_id
     assert replay["model_removals"] == [child_id]
-    assert replay["state"] == "partial"
+    assert replay["state"] == "backoff"
     with sessions() as session:
         replayed_parent = session.get(Job, parent_id)
         assert replayed_parent is not None

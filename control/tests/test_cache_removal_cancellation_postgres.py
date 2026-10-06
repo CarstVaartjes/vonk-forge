@@ -274,7 +274,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
     )
     assert availability.run_pending() == 1
     parent = availability.get(parent.id)
-    assert parent.state == "partial"
+    assert parent.state == LifecycleState.BACKOFF
     assert parent.model_child is not None
     child_id = str(parent.model_child["id"])
     child = cache.get_operation(child_id)

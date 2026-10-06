@@ -104,7 +104,7 @@ def test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait(
         "phase_count": 1,
         "phase_index": 0,
         "members": [{"node_id": node_id, "state": "pending"}],
-        "state": "waiting",
+        "state": "observing",
         "total_bytes_known": False,
     }
     payload = {
@@ -116,21 +116,21 @@ def test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait(
         "plan_digest": "a" * 64,
         "progress": progress,
         "request_key": "22222222-2222-4222-8222-222222222222",
-        "state": "waiting",
+        "state": "observing",
     }
 
     operation = RunSwitchOperation.from_dict(payload)
-    assert operation.state == "waiting"
-    assert operation.progress.state == "waiting"
+    assert operation.state == "observing"
+    assert operation.progress.state == "observing"
 
     manual_wait = {
         **payload,
-        "state": "waiting-for-operator",
-        "progress": {**progress, "state": "waiting-for-operator"},
+        "state": "needs-operator",
+        "progress": {**progress, "state": "needs-operator"},
     }
     projected = RunSwitchOperation.from_dict(manual_wait)
-    assert projected.state == "waiting-for-operator"
-    assert projected.progress.state == "waiting-for-operator"
+    assert projected.state == "needs-operator"
+    assert projected.progress.state == "needs-operator"
 
 
 def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None:

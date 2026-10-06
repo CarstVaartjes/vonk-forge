@@ -221,6 +221,15 @@ def _openssl_compatible_ed25519_private_key(raw: bytes) -> bytes:
     return b"-----BEGIN PRIVATE KEY-----\n" + body + b"\n-----END PRIVATE KEY-----\n"
 
 
+#: A cache operation that has not ended (an older Controller sent ``partial`` for
+#: one that retries).
+_LIVE_CACHE_STATES = frozenset({"queued", "running", "backoff", "observing", "partial"})
+#: A profile application that has not reached a terminal outcome.
+_LIVE_APPLICATION_STATES = frozenset(
+    {"queued", "running", "needs-operator", "waiting-for-operator"}
+)
+
+
 class LifecycleError(RuntimeError):
     """A bounded acceptance failure that contains no credential material."""
 
@@ -2779,7 +2788,7 @@ class SparkLifecycle:
         ):
             raise LifecycleError("synthetic canary recipe download identity differs")
         deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
-        while typed.state in {"queued", "running", "partial"}:
+        while typed.state in _LIVE_CACHE_STATES:
             if time.monotonic() >= deadline:
                 evidence = {
                     "state": typed.state,
@@ -2852,7 +2861,7 @@ class SparkLifecycle:
         # finishes.  This is a recoverable state: the Controller owns the
         # retry schedule and the same application identity must be observed
         # until it reaches a terminal outcome.
-        while typed.state in {"queued", "running", "waiting-for-operator"}:
+        while typed.state in _LIVE_APPLICATION_STATES:
             if time.monotonic() >= deadline:
                 # Say where it stalled: a queued application with no step
                 # means nothing claimed it, while a running one names the step

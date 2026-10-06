@@ -128,7 +128,7 @@ if mode == "accept-cancellation":
         # A separate SQLAlchemy session must see the durable child intent before
         # the process-local wakeup is sent.
         child = cache.get_operation(operation_id)
-        assert child.state == LifecycleState.OBSERVING
+        assert child.state == "observing"
         assert child.cancellation["actor"] == "operator"
         assert child.cancellation["reason"] == config["reason"]
         original_signal(operation_id)
@@ -137,10 +137,10 @@ if mode == "accept-cancellation":
         config["parent_id"], actor="operator",
         request_id=config["cancel_request_id"], reason=config["reason"],
     )
-    assert receipt.state == LifecycleState.OBSERVING
+    assert receipt.state == "observing"
     availability.reconcile_cancellations()
-    assert availability.get(config["parent_id"]).state == LifecycleState.OBSERVING
-    assert cache.get_operation(config["child_id"]).state == LifecycleState.OBSERVING
+    assert availability.get(config["parent_id"]).state == "observing"
+    assert cache.get_operation(config["child_id"]).state == "observing"
     os._exit(23)
 
 if mode == "new-consumer":
@@ -338,7 +338,7 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
     )
     assert service.run_pending() == 1
     parent = service.get(parent.id)
-    assert parent.state == "partial"
+    assert parent.state == LifecycleState.BACKOFF
     assert parent.model_child is not None
     child_id = str(parent.model_child["id"])
     child = cache.get_operation(child_id)
@@ -395,8 +395,8 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
 
         joined = _controller(config_path, "new-consumer")
         assert joined is not None
-        assert joined.get("parent_state") == "cancelling"
-        assert joined.get("child_state") == "cancelling"
+        assert joined.get("parent_state") == "observing"
+        assert joined.get("child_state") == "observing"
         assert joined.get("second_child_id") != child_id
         expected_child_cancel_key = str(
             uuid.uuid5(
