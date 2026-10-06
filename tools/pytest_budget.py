@@ -242,6 +242,19 @@ def _plugin_arguments(arguments: tuple[str, ...] | list[str]) -> list[str]:
     return found
 
 
+def _rerun_environment(config: pytest.Config) -> dict[str, str]:
+    """The rerun judges against the same scaled budget the session used.
+
+    A fresh process would calibrate again on a host that just went quiet, and
+    so judge the rerun against a tighter budget than the overrun it checks."""
+
+    env = {**os.environ, _ISOLATED_ENV: "1"}
+    calibration = config.stash.get(_CALIBRATION, None)
+    if calibration is not None:
+        env[CALIBRATION_ENV] = repr(calibration)
+    return env
+
+
 def rerun_alone(config: pytest.Config, nodeids: list[str]) -> dict[str, str | None]:
     """Run ``nodeids`` again in one fresh process, without the other tests.
 
@@ -269,7 +282,7 @@ def rerun_alone(config: pytest.Config, nodeids: list[str]) -> dict[str, str | No
         finished = subprocess.run(
             command,
             cwd=config.rootpath,
-            env={**os.environ, _ISOLATED_ENV: "1"},
+            env=_rerun_environment(config),
             capture_output=True,
             text=True,
             check=False,
