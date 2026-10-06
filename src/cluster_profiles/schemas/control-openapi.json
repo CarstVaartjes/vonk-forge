@@ -9,6 +9,21 @@
         "title": "AdmissionCode",
         "type": "string"
       },
+      "AgentEvidenceCode": {
+        "description": "Optional agent evidence that was dropped so the mandatory report is kept.\n\nAn agent report carries a mandatory core (identity, lease, capacity, outcome)\nand optional evidence (NICs, the NAS route, fabric details, readings,\nprogress, diagnostics). Invalid optional evidence is never a reason to refuse\nthe core: the evidence is dropped and one of these words names what was lost,\non the agent that dropped it and on the Controller that received it.",
+        "enum": [
+          "agent_evidence.claim_hint_dropped",
+          "agent_evidence.failure_diagnostics_dropped",
+          "agent_evidence.inventory_fabric_dropped",
+          "agent_evidence.inventory_nas_route_dropped",
+          "agent_evidence.inventory_network_dropped",
+          "agent_evidence.inventory_network_interface_dropped",
+          "agent_evidence.progress_dropped",
+          "agent_evidence.telemetry_reading_dropped"
+        ],
+        "title": "AgentEvidenceCode",
+        "type": "string"
+      },
       "AgentFailureKind": {
         "enum": [
           "temporary-dependency",
@@ -12211,6 +12226,7 @@
               "wired",
               "wifi",
               "fabric",
+              "tunnel",
               "other"
             ],
             "title": "Kind",
@@ -13791,6 +13807,9 @@
           "admission_code": {
             "$ref": "#/components/schemas/AdmissionCode"
           },
+          "agent_evidence_code": {
+            "$ref": "#/components/schemas/AgentEvidenceCode"
+          },
           "artifact_lifecycle_code": {
             "$ref": "#/components/schemas/ArtifactLifecycleCode"
           },
@@ -13917,6 +13936,7 @@
         },
         "required": [
           "admission_code",
+          "agent_evidence_code",
           "artifact_lifecycle_code",
           "cache_reference_reason",
           "catalog_code",

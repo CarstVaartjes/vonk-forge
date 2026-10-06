@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_core import ValidationError
@@ -14,6 +14,12 @@ from .contracts import (
     AgentProtocolError,
     canonical_message,
 )
+from .optional_evidence import (
+    EvidenceGroup,
+    OptionalEvidenceModel,
+    fail_open_on_optional_evidence,
+)
+from .reason_codes import AgentEvidenceCode
 from .wire_model import WireModel
 
 # Authenticated transport memory safeguard.
@@ -43,7 +49,24 @@ class TelemetryWireModel(WireModel):
     pass
 
 
-class TelemetrySample(TelemetryWireModel):
+class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
+    """One host sample. The capacity scalars are the core; the 4.1 readings
+    (temperature, CPU clocks) are optional evidence dropped when invalid."""
+
+    EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
+        EvidenceGroup(
+            AgentEvidenceCode.TELEMETRY_READING_DROPPED, (("gpu_temperature_c",),)
+        ),
+        EvidenceGroup(
+            AgentEvidenceCode.TELEMETRY_READING_DROPPED,
+            (
+                ("cpu_frequency_avg_mhz",),
+                ("cpu_frequency_min_mhz",),
+                ("cpu_frequency_max_mhz",),
+            ),
+        ),
+    )
+
     boot_id: str = Field(
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     )
@@ -98,6 +121,8 @@ class TelemetrySample(TelemetryWireModel):
         ):
             raise ValueError("telemetry CPU frequencies are inconsistent")
         return self
+
+    drop_invalid_optional_evidence = fail_open_on_optional_evidence()
 
 
 class TelemetryRequest(TelemetryWireModel):

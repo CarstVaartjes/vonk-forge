@@ -13,7 +13,7 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
-    ActivateRequest, AgentUpgradeGrantRequest, BoundedErrorResponse, ClaimRequest,
+    ActivateRequest, AgentEvidenceCode, AgentUpgradeGrantRequest, BoundedErrorResponse, ClaimRequest,
     ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse, HostRuntimeGrantRequest,
     HostRuntimeGrantRequestAction, IssuedCertificateResponse, PackageActivationGrantRequest,
     ProgressPhase, RenewRequest, RequestValidationIssueLocItem, RequestValidationProblem,
@@ -1540,6 +1540,9 @@ impl AgentHttpClient {
     pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
         let mut request = inventory.to_request(chrono::Utc::now().into());
         clamp_inventory_request(&mut request);
+        for warning in clamp_inventory_request(&mut request) {
+            eprintln!("vonk-agent: inventory evidence dropped: {warning}");
+        }
         request.validate().map_err(|_| ClientError::Protocol)?;
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -2068,7 +2071,14 @@ fn controller_error(
 /// value never exceeds its total, invalid or duplicate capabilities and an
 /// incomplete fabric pair are omitted.  Nothing is invented: a missing driver
 /// or runtime version still fails validation and the report is retried.
-fn clamp_inventory_request(request: &mut InventoryRequest) {
+///
+/// The network interfaces, the NAS route and the fabric pair are optional
+/// evidence: an inconsistent part is dropped (an interface with an invalid or
+/// repeated name, a route naming no reported interface, an invalid fabric
+/// address) and named in the returned typed warnings, never allowed to fail
+/// the mandatory capacity report.
+fn clamp_inventory_request(request: &mut InventoryRequest) -> Vec<AgentEvidenceCode> {
+    let mut warnings = Vec::new();
     const MAX_BYTES: u64 = 16 * 1024_u64.pow(4);
     for value in [
         &mut request.disk_total_bytes,
@@ -2107,13 +2117,64 @@ fn clamp_inventory_request(request: &mut InventoryRequest) {
         version.retain(|character| character.is_ascii());
         version.truncate(256);
     }
-    if request.fabric_address.is_none()
-        || !request
-            .fabric_bandwidth_mbps
-            .is_some_and(|value| (1..=1_000_000).contains(&value))
-    {
+    let fabric_valid = request.fabric_address.as_deref().is_some_and(|value| {
+        value.len() <= 45
+            && value
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.to_string() == value)
+    }) && request
+        .fabric_bandwidth_mbps
+        .is_some_and(|value| (1..=1_000_000).contains(&value));
+    if !fabric_valid {
+        if request.fabric_address.is_some() || request.fabric_bandwidth_mbps.is_some() {
+            warnings.push(AgentEvidenceCode::AgentEvidenceInventoryFabricDropped);
+        }
         request.fabric_address = None;
         request.fabric_bandwidth_mbps = None;
+    }
+    clamp_network_evidence(request, &mut warnings);
+    warnings
+}
+
+/// Keep the consistent part of the NIC evidence; see `clamp_inventory_request`.
+fn clamp_network_evidence(request: &mut InventoryRequest, warnings: &mut Vec<AgentEvidenceCode>) {
+    const MAX_INTERFACES: usize = 16;
+    if let Some(interfaces) = request.network_interfaces.as_mut() {
+        let reported = interfaces.len();
+        let mut seen = std::collections::BTreeSet::new();
+        interfaces.retain_mut(|interface| {
+            if !vonk_agent_protocol::valid_interface_name(&interface.name)
+                || !seen.insert(interface.name.clone())
+            {
+                return false;
+            }
+            if interface
+                .link_speed_mbps
+                .is_some_and(|speed| !(1..=1_000_000).contains(&speed))
+            {
+                interface.link_speed_mbps = None;
+            }
+            true
+        });
+        if interfaces.len() > MAX_INTERFACES {
+            // Keep the interface the NAS route uses when the list must be bounded.
+            let route = request.nas_route_interface.clone();
+            interfaces.sort_by_key(|interface| Some(&interface.name) != route.as_ref());
+            interfaces.truncate(MAX_INTERFACES);
+        }
+        if interfaces.len() != reported {
+            warnings.push(AgentEvidenceCode::AgentEvidenceInventoryNetworkInterfaceDropped);
+        }
+    }
+    let route_reported = request.nas_route_interface.as_deref().is_none_or(|route| {
+        request
+            .network_interfaces
+            .as_deref()
+            .is_some_and(|interfaces| interfaces.iter().any(|value| value.name == route))
+    });
+    if !route_reported {
+        request.nas_route_interface = None;
+        warnings.push(AgentEvidenceCode::AgentEvidenceInventoryNasRouteDropped);
     }
 }
 
@@ -2459,6 +2520,121 @@ mod tests {
         request.container_runtime_version.clear();
         clamp_inventory_request(&mut request);
         assert!(request.validate().is_err());
+    }
+
+    fn valid_inventory() -> vonk_agent_protocol::InventoryRequest {
+        vonk_agent_protocol::InventoryRequest {
+            schema_version: 1,
+            observed_at: Utc::now().into(),
+            disk_total_bytes: 100,
+            disk_free_bytes: 50,
+            host_memory_total_bytes: 100,
+            host_memory_free_bytes: 50,
+            gpu_memory_total_bytes: 100,
+            gpu_memory_free_bytes: 50,
+            gpu_count: 1,
+            memory_pool: vonk_agent_protocol::generated::InventoryRequestMemoryPool::Separate,
+            artifact_store_read_only: false,
+            capabilities: vec!["runtime.oci".to_owned()],
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+            network_interfaces: None,
+            nas_route_interface: None,
+            nvidia_driver_version: "580.1".to_owned(),
+            container_runtime_version: "podman 5".to_owned(),
+        }
+    }
+
+    fn interface(
+        name: &str,
+        speed: Option<u32>,
+    ) -> vonk_agent_protocol::generated::NetworkInterface {
+        vonk_agent_protocol::generated::NetworkInterface {
+            name: name.to_owned(),
+            kind: vonk_agent_protocol::generated::NetworkInterfaceKind::Wired,
+            link_speed_mbps: speed,
+            carrier: true,
+        }
+    }
+
+    #[test]
+    fn inconsistent_network_evidence_never_fails_the_mandatory_report() {
+        use vonk_agent_protocol::generated::AgentEvidenceCode;
+        // Wrong implementation: the report went out with a repeated NIC name, an
+        // invalid name, an impossible link speed and a route naming no NIC, so
+        // the Controller refused the whole capacity report.
+        let mut request = valid_inventory();
+        request.network_interfaces = Some(vec![
+            interface("enP7s7", Some(10_000)),
+            interface("enP7s7", None),
+            interface("bad name", None),
+            interface("wlP9s9", Some(0)),
+        ]);
+        request.nas_route_interface = Some("tailscale0".to_owned());
+        assert!(request.validate().is_err());
+
+        let warnings = clamp_inventory_request(&mut request);
+
+        request.validate().unwrap();
+        assert!(
+            warnings.contains(&AgentEvidenceCode::AgentEvidenceInventoryNetworkInterfaceDropped)
+        );
+        assert!(warnings.contains(&AgentEvidenceCode::AgentEvidenceInventoryNasRouteDropped));
+        let names: Vec<_> = request
+            .network_interfaces
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|value| (value.name.as_str(), value.link_speed_mbps))
+            .collect();
+        assert_eq!(names, vec![("enP7s7", Some(10_000)), ("wlP9s9", None)]);
+        assert_eq!(request.nas_route_interface, None);
+        // The mandatory capacity evidence is untouched.
+        assert_eq!(request.disk_free_bytes, 50);
+        assert_eq!(request.container_runtime_version, "podman 5");
+    }
+
+    #[test]
+    fn an_oversized_interface_list_keeps_the_nas_route() {
+        let mut request = valid_inventory();
+        request.network_interfaces = Some(
+            (0..20)
+                .map(|index| interface(&format!("en{index:02}"), None))
+                .collect(),
+        );
+        request.nas_route_interface = Some("en19".to_owned());
+        clamp_inventory_request(&mut request);
+        request.validate().unwrap();
+        assert_eq!(request.network_interfaces.as_ref().unwrap().len(), 16);
+        assert_eq!(request.nas_route_interface.as_deref(), Some("en19"));
+    }
+
+    #[test]
+    fn a_fabric_address_that_is_not_canonical_is_dropped_with_its_bandwidth() {
+        use vonk_agent_protocol::generated::AgentEvidenceCode;
+        let mut request = valid_inventory();
+        request.fabric_address = Some("192.168.100.002".to_owned());
+        request.fabric_bandwidth_mbps = Some(200_000);
+        let warnings = clamp_inventory_request(&mut request);
+        request.validate().unwrap();
+        assert_eq!(
+            warnings,
+            vec![AgentEvidenceCode::AgentEvidenceInventoryFabricDropped]
+        );
+        assert_eq!(request.fabric_address, None);
+        assert_eq!(request.fabric_bandwidth_mbps, None);
+    }
+
+    #[test]
+    fn a_consistent_report_is_forwarded_whole_without_warnings() {
+        let mut request = valid_inventory();
+        request.network_interfaces = Some(vec![interface("enP7s7", Some(1000))]);
+        request.nas_route_interface = Some("enP7s7".to_owned());
+        request.fabric_address = Some("192.168.100.2".to_owned());
+        request.fabric_bandwidth_mbps = Some(200_000);
+        let before = request.clone();
+        assert!(clamp_inventory_request(&mut request).is_empty());
+        assert_eq!(request, before);
     }
 
     #[test]

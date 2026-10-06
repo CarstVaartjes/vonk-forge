@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import ipaddress
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from .optional_evidence import (
+    EvidenceGroup,
+    OptionalEvidenceModel,
+    fail_open_on_optional_evidence,
+)
+from .reason_codes import AgentEvidenceCode
 from .wire_model import WireModel, strict_json_datetime
 
 Capability = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")]
 MemoryPool = Literal["shared", "separate"]
 # "fabric" is an RDMA/ConnectX port (the QSFP cable between Sparks); it never
 # carries the NAS route, unlike the general-purpose "wired" RJ45 port.
-NetworkInterfaceKind = Literal["wired", "wifi", "fabric", "other"]
+# "tunnel" is a virtual overlay (Tailscale, WireGuard): a NAS route through it is
+# reported as such and is never a Wi-Fi warning.
+NetworkInterfaceKind = Literal["wired", "wifi", "fabric", "tunnel", "other"]
 InterfaceName = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$")]
 RuntimeVersion = Annotated[
     str, Field(min_length=1, max_length=256, pattern=r"^[\x00-\x7f]+$")
@@ -35,8 +43,27 @@ class NetworkInterface(WireModel):
     carrier: bool
 
 
-class InventoryRequest(WireModel):
-    """Canonical Controller body and Rust agent inventory wire shape."""
+class InventoryRequest(OptionalEvidenceModel, WireModel):
+    """Canonical Controller body and Rust agent inventory wire shape.
+
+    The mandatory core is the capacity, pool, capability and version evidence.
+    The network interfaces, the NAS route and the fabric pair are optional
+    evidence: when one is inconsistent it is dropped (and named in
+    ``evidence_warnings``) instead of refusing the core.
+    """
+
+    EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
+        EvidenceGroup(
+            AgentEvidenceCode.INVENTORY_NAS_ROUTE_DROPPED, (("nas_route_interface",),)
+        ),
+        EvidenceGroup(
+            AgentEvidenceCode.INVENTORY_NETWORK_DROPPED, (("network_interfaces",),)
+        ),
+        EvidenceGroup(
+            AgentEvidenceCode.INVENTORY_FABRIC_DROPPED,
+            (("fabric_address",), ("fabric_bandwidth_mbps",)),
+        ),
+    )
 
     model_config = ConfigDict(
         extra="forbid", strict=True, frozen=True, allow_inf_nan=False
@@ -97,3 +124,5 @@ class InventoryRequest(WireModel):
         if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
             raise ValueError("inventory observed_at must be timezone-aware")
         return self
+
+    drop_invalid_optional_evidence = fail_open_on_optional_evidence()

@@ -1061,6 +1061,18 @@ export interface components {
          */
         AdmissionCode: "admission.capacity_busy";
         /**
+         * AgentEvidenceCode
+         * @description Optional agent evidence that was dropped so the mandatory report is kept.
+         *
+         *     An agent report carries a mandatory core (identity, lease, capacity, outcome)
+         *     and optional evidence (NICs, the NAS route, fabric details, readings,
+         *     progress, diagnostics). Invalid optional evidence is never a reason to refuse
+         *     the core: the evidence is dropped and one of these words names what was lost,
+         *     on the agent that dropped it and on the Controller that received it.
+         * @enum {string}
+         */
+        AgentEvidenceCode: "agent_evidence.claim_hint_dropped" | "agent_evidence.failure_diagnostics_dropped" | "agent_evidence.inventory_fabric_dropped" | "agent_evidence.inventory_nas_route_dropped" | "agent_evidence.inventory_network_dropped" | "agent_evidence.inventory_network_interface_dropped" | "agent_evidence.progress_dropped" | "agent_evidence.telemetry_reading_dropped";
+        /**
          * AgentFailureKind
          * @enum {string}
          */
@@ -4918,7 +4930,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "wired" | "wifi" | "fabric" | "other";
+            kind: "wired" | "wifi" | "fabric" | "tunnel" | "other";
             /** Link Speed Mbps */
             link_speed_mbps?: number | null;
             /** Name */
@@ -5410,6 +5422,7 @@ export interface components {
          */
         ReasonCodeVocabulary: {
             admission_code: components["schemas"]["AdmissionCode"];
+            agent_evidence_code: components["schemas"]["AgentEvidenceCode"];
             artifact_lifecycle_code: components["schemas"]["ArtifactLifecycleCode"];
             cache_reference_reason: components["schemas"]["CacheReferenceReason"];
             catalog_code: components["schemas"]["CatalogCode"];
