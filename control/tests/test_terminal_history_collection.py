@@ -17,7 +17,7 @@ def history_sessions(postgres_engine: Engine) -> sessionmaker[Session]:
 
 
 def _job(
-    now: datetime, *, state: str = "succeeded", payload: dict | None = None
+    now: datetime, *, state: str = "succeeded", payload: dict[str, object] | None = None
 ) -> Job:
     return Job(
         id=str(uuid.uuid4()),

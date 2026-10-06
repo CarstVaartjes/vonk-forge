@@ -371,6 +371,16 @@ def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
     """Unknown accepted references defer retention instead of implying unused."""
     cutoff = now - GRACE
     selected = session.scalar(select(FleetProfileSelection.application_id))
+    if selected is not None and session.get(FleetProfileApplication, selected) is None:
+        log_event(
+            _LOGGER,
+            "history.references_unavailable",
+            service="control-worker",
+            table=FleetProfileApplication.__tablename__,
+            row_id=selected,
+            code="selected-application-missing",
+        )
+        return None
     specs = (
         (Job, "payload", or_(Job.state.not_in(_TERMINAL), Job.updated_at >= cutoff)),
         (
