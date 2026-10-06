@@ -51,6 +51,7 @@ from vonk_control.models import (
     RecipeBuild,
     User,
 )
+from vonk_control.operation_item_contract import OperationResultFacts
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     SUPERSEDED_PREPARATION_CODE,
@@ -954,7 +955,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
     # The operator-facing evidence bundle reuses this contract, so it must
     # carry the failure instead of a summary of "[]" -- including the table
     # name, which names the constraint the operator has to repair.
-    code, evidence_detail = failure_code(failure)
+    code, evidence_detail = failure_code(OperationResultFacts.model_validate(failure))
     assert code == "integrityerror"
     assert evidence_detail is not None and evidence_detail != "[]"
     assert "jobs.request_id" in evidence_detail

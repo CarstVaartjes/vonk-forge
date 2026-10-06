@@ -58,7 +58,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 146,
-    "unaudited": 362,
+    "unaudited": 360,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -1014,10 +1014,7 @@
         ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "_active_nodes", "mapping.node_unknown", 1],
         ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "_active_nodes", "mapping.nodes_invalid", 1],
         ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "_effective_parameters", "mapping.option_invalid", 1],
-        ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "_effective_settings", "mapping.parameter_type", 1],
-        ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "_effective_settings", "mapping.parameter_unknown", 2],
-        ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "_effective_settings", "mapping.parameter_value", 1],
-        ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "_effective_settings", "mapping.parameters_invalid", 2],
+        ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "_effective_settings", "mapping.parameter_unknown", 1],
         ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "_mapping_actor", "mapping.actor", 2],
         ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "candidate_placements", "mapping.node_count", 1],
         ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "effective_option_choices", "mapping.option_invalid", 1],
@@ -1653,7 +1650,6 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
       "sites": [
-        ["control/src/vonk_control/operation_api.py", "BoundedJSONError", "operation_detail_response", "profile-cancellation-receipt-for-operation", 1],
         ["control/src/vonk_control/operation_api.py", "OperationProjectionError", "_global_get_operation", "operation-projection-unavailable", 1],
         ["control/src/vonk_control/operation_api.py", "OperationProjectionError", "_global_list_operations", "operation-cursor-projection-unavailable", 1],
         ["control/src/vonk_control/operation_api.py", "OperationProjectionError", "_global_list_operations", "operation-projection-unavailable", 1]
@@ -1665,7 +1661,6 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class BoundedJSONError validates a contract or request; class CursorError validates a contract or request; class OperationProjectionError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/operation_api.py", "BoundedJSONError", "_agent_upgrade_diagnostics", "agent-upgrade-job", 2],
-        ["control/src/vonk_control/operation_api.py", "BoundedJSONError", "_evidence_download_projection", "message", 2],
         ["control/src/vonk_control/operation_api.py", "BoundedJSONError", "_required_bool", "message", 1],
         ["control/src/vonk_control/operation_api.py", "BoundedJSONError", "_required_text", "message", 1],
         ["control/src/vonk_control/operation_api.py", "CursorError", "_DurableOperationProjection.job_operations", "operation-cursor-is-invalid", 1],
@@ -2149,7 +2144,7 @@
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "FileSupervisorAcknowledger.__init__", "supervisor-acknowledgement-bounds-are-invalid", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_aware", "message", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_parse_time", "activation", 2],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-document-is-invalid", 2],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-document-is-invalid", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-file-is-unreadable", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-file-is-unsafe", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-is-unavailable", 1],
@@ -2752,11 +2747,10 @@
         ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._check_replayed_request", "agent-upgrade-request-key-was-already-used-differently", 2],
         ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._package", "agent-upgrade-package-is-invalid", 1],
         ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._repair_manifest", "agent-repair-manifest-does-not-match-its-package-descriptor", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._repair_manifest", "agent-repair-manifest-is-invalid", 1],
         ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService._repair_manifest", "agent-repair-package-url-is-not-canonical", 1],
         ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService.preview", "agent-repair-requires-exactly-its-explicit-spark", 1],
         ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "AgentUpgradeService.preview", "agent-upgrade-targets-are-invalid", 1],
-        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "_request_intent", "agent-upgrade-request-intent-is-invalid", 4],
+        ["control/src/vonk_control/agent_upgrades.py", "AgentUpgradeInvalid", "_request_intent", "agent-upgrade-request-intent-is-invalid", 1],
         ["control/src/vonk_control/agent_upgrades.py", "InvalidType", "AgentUpgradeService._current_package_once", "agent-release-artifact-record-is-not-an-object", 1],
         ["control/src/vonk_control/agent_upgrades.py", "InvalidValue", "AgentUpgradeService.__init__", "agent-upgrade-channel-is-invalid", 1],
         ["control/src/vonk_control/agent_upgrades.py", "InvalidValue", "AgentUpgradeService.resume", "agent-upgrade-worker-dispatch-is-not-stale", 1],

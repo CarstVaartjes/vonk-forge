@@ -31,6 +31,7 @@ from vonk_agent_protocol import (
     ModelCacheBlockerCode,
     ObservedAssignmentState,
     OperationFailureCode,
+    OperationProgress,
     ProfileReasonCode,
     ReservationState,
     RouteState,
@@ -179,6 +180,11 @@ from .operation_blockers import (
     make_blocker,
 )
 from .operation_contract import OperationFailureEvidence
+from .operation_item_contract import (
+    OperationItem,
+    OperationOwnerReference,
+    OperationResultFacts,
+)
 from .operation_progress import project_progress
 from .preparation_contract import RolloutPreparation, RuntimeImageIdentity
 from .profile_capacity import (
@@ -7612,7 +7618,7 @@ class FleetProfileService:
                     total=total,
                 )
 
-        def get_operation(operation_id: str) -> Mapping[str, object]:
+        def get_operation(operation_id: str) -> OperationItem:
             with self._sessions() as session:
                 row = session.get(FleetProfileApplication, operation_id)
                 if row is None:
@@ -7629,7 +7635,7 @@ class FleetProfileService:
 
     def _activity_item(
         self, session: Session, row: FleetProfileApplication
-    ) -> dict[str, object]:
+    ) -> OperationItem:
         """One Activity row, with retry facts read once in the row's session."""
 
         try:
@@ -7683,7 +7689,7 @@ class FleetProfileService:
         *,
         retry_available: bool = False,
         retrying: bool = False,
-    ) -> dict[str, object]:
+    ) -> OperationItem:
         """Project profile progress and its operator-visible failure into Activity.
 
         A single damaged historical row must not fail the whole page and must
@@ -7736,44 +7742,42 @@ class FleetProfileService:
                 detail=redact_text(reason),
                 retryable=retry_available,
                 uncertain=state in fleet_profile_states.NEEDS_OPERATOR,
-            ).model_dump(mode="json")
-        return {
-            "id": row.id,
-            "parent_id": typed_progress.retry_of_application_id,
-            "node_ids": list(cls._operation_scope(plan)),
-            "kind": typed_progress.operation_kind or "fleet-profile.apply",
-            "state": state,
-            "attempt": typed_progress.attempt,
-            "progress": {"phase": cls._operation_phase(row, plan, typed_progress)},
-            "created_at": _aware(row.created_at).isoformat(),
-            "updated_at": _aware(row.updated_at).isoformat(),
-            "supported_actions": ["retry"] if retry_available else [],
-            "owner": {
-                "kind": "fleet-profile-application",
-                "id": row.id,
-                "request_id": row.request_key,
-            },
-            "failure": failure,
-            "superseded_by": (
+            )
+        return OperationItem(
+            id=row.id,
+            parent_id=typed_progress.retry_of_application_id,
+            node_ids=list(cls._operation_scope(plan)),
+            kind=typed_progress.operation_kind or "fleet-profile.apply",
+            state=state,
+            attempt=typed_progress.attempt,
+            progress=OperationProgress.model_validate(
+                {"phase": cls._operation_phase(row, plan, typed_progress)}
+            ),
+            created_at=_aware(row.created_at).isoformat(),
+            updated_at=_aware(row.updated_at).isoformat(),
+            supported_actions=["retry"] if retry_available else [],
+            owner=OperationOwnerReference(
+                kind="fleet-profile-application",
+                id=row.id,
+                request_id=row.request_key,
+            ),
+            failure=failure,
+            superseded_by=(
                 typed_progress.superseded_by if state == "superseded" else None
             ),
-            "reason_code": (
+            reason_code=(
                 typed_progress.supersede_code if state == "superseded" else None
             ),
-            "result": result.model_dump(mode="json") if result is not None else None,
-            "cancellation": (
-                cancellation.model_dump(mode="json")
-                if cancellation is not None
-                else None
-            ),
-            "status_reason": (
+            result=OperationResultFacts.of(result),
+            cancellation=cancellation,
+            status_reason=(
                 redact_text(row.status_reason)
                 if (cancellation is not None or state in {"queued", "superseded"})
                 and row.status_reason is not None
                 else None
             ),
-            "blockers": (
-                [item.model_dump(mode="json") for item in typed_progress.blockers]
+            blockers=(
+                list(typed_progress.blockers)
                 if state
                 in job_states.words(
                     LifecycleState.QUEUED,
@@ -7783,13 +7787,13 @@ class FleetProfileService:
                 )
                 else []
             ),
-            "next_attempt_at": next_attempt.isoformat()
+            next_attempt_at=next_attempt.isoformat()
             if next_attempt is not None
             else None,
-        }
+        )
 
     @staticmethod
-    def _unreadable_operation_item(row: FleetProfileApplication) -> dict[str, object]:
+    def _unreadable_operation_item(row: FleetProfileApplication) -> OperationItem:
         """Project a damaged application instead of letting it break Activity.
 
         Durable columns stay authoritative for identity and declared scope;
@@ -7797,25 +7801,22 @@ class FleetProfileService:
         no retry is offered because intent cannot be proven.
         """
 
-        return {
-            "id": row.id,
-            "parent_id": None,
-            "node_ids": list(_persisted_profile_scope(row) or ()),
-            "kind": "fleet-profile.apply",
-            "state": row.state,
-            "attempt": 0,
-            "progress": None,
-            "created_at": _aware(row.created_at).isoformat(),
-            "updated_at": _aware(row.updated_at).isoformat(),
-            "supported_actions": [],
-            "owner": {
-                "kind": "fleet-profile-application",
-                "id": row.id,
-                "request_id": row.request_key,
-            },
-            "result": None,
-            "status_reason": "Stored profile application record is unreadable.",
-        }
+        return OperationItem(
+            id=row.id,
+            node_ids=list(_persisted_profile_scope(row) or ()),
+            kind="fleet-profile.apply",
+            state=row.state,
+            attempt=0,
+            created_at=_aware(row.created_at).isoformat(),
+            updated_at=_aware(row.updated_at).isoformat(),
+            supported_actions=[],
+            owner=OperationOwnerReference(
+                kind="fleet-profile-application",
+                id=row.id,
+                request_id=row.request_key,
+            ),
+            status_reason="Stored profile application record is unreadable.",
+        )
 
     def application(self, application_id: str) -> FleetProfileApplicationView:
         with self._sessions() as session:

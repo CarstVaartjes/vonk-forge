@@ -191,7 +191,7 @@ module defines its own.
 | `control/src/vonk_control/distribution_assignment.py` | declared | 1 | The Controller's record of one node's artifact distribution grant. |
 | `control/src/vonk_control/endpoint_contract.py` | controller-contract | 1 | Secret-free projection of one published recipe endpoint. |
 | `control/src/vonk_control/enrollment_contract.py` | controller-contract | 1 | Nonsecret operator enrollment status and request identity. |
-| `control/src/vonk_control/failure_evidence.py` | declared | 3 | Failure diagnostics rendered on request from durable failure rows. |
+| `control/src/vonk_control/failure_evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
 | `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
 | `control/src/vonk_control/fleet_profile_contract.py` | controller-contract | 50 | Strict public contracts for saved Fleet profiles and their applications. |
 | `control/src/vonk_control/fleet_projection.py` | declared | 12 | Bounded typed projection of PostgreSQL-authoritative Fleet state. |
@@ -204,9 +204,10 @@ module defines its own.
 | `control/src/vonk_control/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
 | `control/src/vonk_control/model_cache.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |
 | `control/src/vonk_control/model_cache_contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
-| `control/src/vonk_control/operation_api.py` | declared | 21 | Strict, secret-free representations for routine administrative operations. |
+| `control/src/vonk_control/operation_api.py` | declared | 20 | Strict, secret-free representations for routine administrative operations. |
 | `control/src/vonk_control/operation_blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
 | `control/src/vonk_control/operation_contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
+| `control/src/vonk_control/operation_item_contract.py` | controller-contract | 3 | One operation of any family as Activity projects it: the typed item, its owner and the failure facts of its stored result. |
 | `control/src/vonk_control/operator_projection_api.py` | declared | 10 | Singular operator API for Fleet, Model and Recipe projections. |
 | `control/src/vonk_control/preparation_contract.py` | controller-contract | 10 | Shared schema-2 truth for Controller-owned rollout preparation. |
 | `control/src/vonk_control/profile_stop_authority.py` | declared | 4 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |

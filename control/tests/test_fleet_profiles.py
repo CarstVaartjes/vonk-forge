@@ -61,6 +61,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.operation_api import OperationQuery
+from vonk_control.operation_item_contract import operation_item
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.preparation_contract import (
     ControllerAssetState,
@@ -843,13 +844,13 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
-        item = service._operation_item(row)
+        item = service._operation_item(row).model_dump(mode="json")
 
     assert item["id"] == application.id
     assert item["parent_id"] is None
     assert item["node_ids"] == [_node_id(1)]
     assert item["kind"] == "fleet-profile.apply"
-    assert item["progress"] == {"phase": "prepare"}
+    assert item["progress"]["phase"] == "prepare"
 
 
 def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
@@ -1562,7 +1563,12 @@ def test_activity_projection_keeps_valid_records_when_one_is_unreadable() -> Non
         OperationQuery(after=None, limit=10, state=None, node_id=None)
     )
 
-    items = {item["id"]: item for item in page.items}
+    items = {
+        operation_item(item).id: operation_item(item).model_dump(
+            mode="json", exclude_none=False
+        )
+        for item in page.items
+    }
     assert set(items) == {valid.id, damaged_id}
     assert items[valid.id]["failure"] is None
     assert items[valid.id]["node_ids"] == [_node_id(1)]
@@ -1593,7 +1599,7 @@ def test_activity_lists_a_record_with_retired_fields_and_new_work_proceeds() -> 
         row.plan = {**row.plan, "retired_plan_field": True}
 
     items = {
-        item["id"]: item
+        operation_item(item).id: operation_item(item).model_dump(mode="json")
         for item in service.operation_provider()
         .list_operations(OperationQuery(after=None, limit=10, state=None, node_id=None))
         .items

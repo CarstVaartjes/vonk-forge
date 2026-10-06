@@ -44,6 +44,8 @@ from .enrollment_contract import (
     EnrollmentId,
 )
 from .failure_evidence import (
+    AttemptPhase,
+    FailedAttempt,
     FailureEvidenceBundle,
     collect_failure,
     failed_attempt_condition,
@@ -57,6 +59,7 @@ from .library_projection import LibrarySelectorAmbiguous
 from .logging import current_request_id, log_event, redact_text
 from .models import AgentOperation, AgentOperationAttempt
 from .operation_api import bounded_error_responses
+from .operation_item_contract import OperationResultFacts
 from .request_fault import RequestFault
 from .strict_json import StrictJSONModel, stored_document_detail
 
@@ -590,17 +593,17 @@ class AgentFailureLogProvider:
             clock = _lease_clock(operation, attempt)
             observed_at = _aware(operation.updated_at)
             source_name = _agent_log_source(operation.kind)
-            item = {
-                "id": operation.id,
-                "attempt": attempt.attempt,
-                "kind": operation.kind,
-                "node_ids": [operation.node_id],
-                "updated_at": observed_at.isoformat(),
-                "source": "agent",
-                "progress": attempt.progress,
-                "result": result,
-            }
             try:
+                item = FailedAttempt(
+                    id=operation.id,
+                    attempt=attempt.attempt,
+                    kind=operation.kind,
+                    node_ids=[operation.node_id],
+                    updated_at=observed_at.isoformat(),
+                    source="agent",
+                    progress=AttemptPhase.model_validate(attempt.progress),
+                    result=OperationResultFacts.model_validate(result),
+                )
                 bundle = collect_failure(item, now=now)
             except Exception:  # noqa: BLE001 - one malformed row must not hide the rest
                 headline, level = _ATTEMPT_OUTCOME.get(

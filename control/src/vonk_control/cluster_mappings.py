@@ -438,18 +438,7 @@ def mapping_option_choices(parameters: Mapping[str, object]) -> dict[str, str]:
 def _recipe_definition(
     document: Mapping[str, object] | RecipeDefinition,
 ) -> RecipeDefinition:
-    if isinstance(document, RecipeDefinition):
-        return document
-    if not isinstance(document, Mapping):
-        raise ClusterMappingError(
-            ClusterMappingCode.RECIPE_UNRESOLVED, "the recipe document is invalid"
-        )
-    try:
-        return read_recipe(document)
-    except ValidationError as error:
-        raise ClusterMappingError(
-            ClusterMappingCode.RECIPE_UNRESOLVED, "the recipe document is invalid"
-        ) from error
+    return document if isinstance(document, RecipeDefinition) else read_recipe(document)
 
 
 def _effective_parameters(

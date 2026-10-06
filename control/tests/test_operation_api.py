@@ -57,6 +57,7 @@ from vonk_control.operation_api import (
     OperationQuery,
     durable_operation_services,
 )
+from vonk_control.operation_item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.strict_json import serialize_json_value
 
@@ -327,9 +328,9 @@ def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
         updated_at=datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
     )
     assert (
-        operation_api._operation_item(cast(AgentOperation, operation), None)[
-            "status_reason"
-        ]
+        operation_api._operation_item(
+            cast(AgentOperation, operation), None
+        ).status_reason
         == reason
     )
 
@@ -427,9 +428,13 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
                 selected = [
                     row
                     for row in selected
-                    if operation_api._operation_boundary(row) < query.after
+                    if operation_api._operation_boundary(operation_item(row))
+                    < query.after
                 ]
-            selected.sort(key=operation_api._operation_boundary, reverse=True)
+            selected.sort(
+                key=lambda row: operation_api._operation_boundary(operation_item(row)),
+                reverse=True,
+            )
             return OperationListPage(selected[: query.limit], None, total)
 
         def get_row(operation_id: str) -> dict[str, object]:
@@ -1106,7 +1111,7 @@ def test_durable_operation_keyset_pages_are_complete_and_aggregated(tmp_path) ->
     cursor = None
     while True:
         page = services.job_operations(job.id, cursor, 7)
-        found.extend(str(item["id"]) for item in page.items)
+        found.extend(operation_item(item).id for item in page.items)
         assert page.progress.operation is not None
         assert len(page.progress.operation.members) == 23
         assert page.progress.operation.total_bytes is None
@@ -1684,20 +1689,11 @@ def test_stored_evidence_projections_keep_absence_and_corruption_distinct() -> N
 
     identifier = "11111111-1111-4111-8111-111111111111"
 
-    assert operation_api._evidence_download_projection(None, identifier) is None
-    assert operation_api._evidence_download_projection({}, identifier) is None
-    assert (
-        operation_api._evidence_download_projection(
-            {"evidence_download": None}, identifier
-        )
-        is None
-    )
-    with pytest.raises(
-        BoundedJSONError, match="evidence download for operation .* is invalid"
-    ):
-        operation_api._evidence_download_projection(
-            {"evidence_download": {"href": 7}}, identifier
-        )
+    base = {"id": identifier, "kind": "node.probe", "state": "succeeded", "attempt": 1}
+    assert operation_item(base).evidence_download is None
+    assert operation_item({**base, "evidence_download": None}).evidence_download is None
+    with pytest.raises(ValueError, match="href"):
+        operation_item({**base, "evidence_download": {"href": 7}})
 
 
 def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None:
@@ -1735,9 +1731,7 @@ def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None
 
     detail = client.get(f"/api/operations/{value['id']}", headers=operator)
     assert detail.status_code == 503
-    assert detail.json()["detail"] == (
-        f"evidence download for operation {value['id']} is invalid"
-    )
+    assert detail.json()["detail"] == "operation projection unavailable"
 
     listed = client.get("/api/operations", headers=operator)
     assert listed.status_code == 200

@@ -229,7 +229,7 @@
     },
     {
       "path": "control/src/vonk_control/api.py",
-      "count": 4
+      "count": 3
     },
     {
       "path": "control/src/vonk_control/artifact_jobs.py",
@@ -304,12 +304,8 @@
       "count": 6
     },
     {
-      "path": "control/src/vonk_control/failure_evidence.py",
-      "count": 8
-    },
-    {
       "path": "control/src/vonk_control/fleet_profiles.py",
-      "count": 30
+      "count": 26
     },
     {
       "path": "control/src/vonk_control/harnesses/canonical.py",
@@ -369,7 +365,7 @@
     },
     {
       "path": "control/src/vonk_control/model_cache_api.py",
-      "count": 4
+      "count": 2
     },
     {
       "path": "control/src/vonk_control/model_cache_progress.py",
@@ -381,7 +377,7 @@
     },
     {
       "path": "control/src/vonk_control/operation_api.py",
-      "count": 29
+      "count": 8
     },
     {
       "path": "control/src/vonk_control/operation_blockers.py",
@@ -390,6 +386,10 @@
     {
       "path": "control/src/vonk_control/operation_contract.py",
       "count": 6
+    },
+    {
+      "path": "control/src/vonk_control/operation_item_contract.py",
+      "count": 2
     },
     {
       "path": "control/src/vonk_control/operation_progress.py",
@@ -454,10 +454,6 @@
     {
       "path": "control/src/vonk_control/recipe_stop_payloads.py",
       "count": 3
-    },
-    {
-      "path": "control/src/vonk_control/recipe_update_batches.py",
-      "count": 2
     },
     {
       "path": "control/src/vonk_control/recipe_update_notice.py",
