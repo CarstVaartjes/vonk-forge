@@ -21,6 +21,66 @@
       "title": "ActivateRequest",
       "type": "object"
     },
+    "ActivationManifest": {
+      "additionalProperties": false,
+      "description": "The facts one route generation's ``manifest.json`` records.",
+      "properties": {
+        "authority_id": {
+          "title": "Authority Id",
+          "type": "string"
+        },
+        "evidence_set_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidence Set Digest",
+          "type": "string"
+        },
+        "generation": {
+          "exclusiveMinimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "litellm_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Litellm Sha256",
+          "type": "string"
+        },
+        "plan_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Digest",
+          "type": "string"
+        },
+        "routes_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Routes Sha256",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "maintenance",
+            "published"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "generation",
+        "state",
+        "authority_id",
+        "plan_digest",
+        "evidence_set_digest",
+        "routes_sha256",
+        "litellm_sha256"
+      ],
+      "title": "ActivationManifest",
+      "type": "object"
+    },
     "ActivationMarker": {
       "additionalProperties": false,
       "properties": {
@@ -8497,6 +8557,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Vonk Agent Wire",
   "x-vonk-model-bases": {
+    "ActivationMarker": [
+      "ActivationManifest"
+    ],
     "InstallerAcceptanceBaselineRelease": [
       "InstallerReleaseIdentity"
     ],
@@ -8524,6 +8587,7 @@
   },
   "x-vonk-model-sources": {
     "ActivateRequest": "vonk_agent_protocol.enrollment.ActivateRequest",
+    "ActivationManifest": "vonk_agent_protocol.route_activation.ActivationManifest",
     "ActivationMarker": "vonk_agent_protocol.route_activation.ActivationMarker",
     "AgentClaim": "vonk_agent_protocol.contracts.AgentClaim",
     "AgentDirective": "vonk_agent_protocol.contracts.AgentDirective",
@@ -8659,6 +8723,7 @@
   },
   "x-vonk-models": {
     "ActivateRequest": "#/$defs/ActivateRequest",
+    "ActivationManifest": "#/$defs/ActivationManifest",
     "ActivationMarker": "#/$defs/ActivationMarker",
     "AgentClaim": "#/$defs/AgentClaim",
     "AgentDirective": "#/$defs/AgentDirective",
