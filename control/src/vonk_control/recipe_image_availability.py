@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from pydantic import ValidationError
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -53,7 +53,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
-from vonk_forge_contracts import RecipeDefinition, read_recipe
+from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from . import job_states, model_cache_states
 from .admission_locking import is_admission_contention
@@ -64,11 +64,14 @@ from .artifact_lifecycle import (
     check_removal_fence_nowait,
     clear_removal,
     dead_removal_identities,
+    has_pending_removal,
+    lock_reference_gates,
     lock_removal_fences,
     release_dead_removal_nowait,
     require_reference_open,
     reserve_removal_owners,
     retryable_artifact_database_error,
+    supersede_removal_nowait,
 )
 from .artifact_reference_scan import (
     MAX_ARTIFACT_OWNER_SCAN_BYTES,
@@ -835,6 +838,7 @@ class RecipeImageAvailabilityService:
         self._builder = builder
         self._clock = clock
         self._removal_gate_after: tuple[str, str] | None = None
+        self._removal_request_after: str | None = None
         self._lifecycle = ImageAvailabilityAdapter(clock=clock)
         self._model_cache = model_cache
         self._max_parallel = max_parallel
@@ -2074,6 +2078,124 @@ class RecipeImageAvailabilityService:
             intent = self._read_removal_intent(operation)
             return self._read_removal_result(operation, intent)
 
+    def reconcile_requested_removals(self, *, limit: int = 64) -> int:
+        """Reconcile only the exact deletion dependencies bound at acceptance."""
+        # This stored contract also imports the API response types. Resolve it
+        # after the service module has loaded, keeping that import seam acyclic.
+        from .job_documents import AvailabilityJobPayload
+
+        with self._sessions() as session:
+            accepted_requests = []
+            observed_request = False
+            for operation in session.scalars(
+                select(Job)
+                .where(
+                    Job.kind == OPERATION_KIND,
+                    Job.state.in_(
+                        job_states.words(LifecycleState.QUEUED, LifecycleState.BACKOFF)
+                    ),
+                )
+                .where(
+                    Job.id > self._removal_request_after
+                    if self._removal_request_after is not None
+                    else true()
+                )
+                .order_by(Job.id)
+                .limit(limit)
+            ):
+                observed_request = True
+                self._removal_request_after = operation.id
+                try:
+                    payload = read_stored_model(
+                        AvailabilityJobPayload,
+                        canonical_message(operation.payload),
+                        from_json=True,
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if payload.cancellation is not None:
+                    continue
+                for gate in session.scalars(
+                    select(ArtifactLifecycleGate).where(
+                        ArtifactLifecycleGate.artifact_kind == "runtime-image",
+                        ArtifactLifecycleGate.artifact_sha256.in_(
+                            payload.removal_archives or ()
+                        ),
+                        ArtifactLifecycleGate.removal_owner_kind == "recipe-image-job",
+                        ArtifactLifecycleGate.removal_owner_id.is_not(None),
+                    )
+                ):
+                    accepted_requests.append(
+                        (
+                            operation.id,
+                            ArtifactIdentity("runtime-image", gate.artifact_sha256),
+                        )
+                    )
+            if not observed_request:
+                self._removal_request_after = None
+        changed = 0
+        deadline = time.monotonic() + 0.25
+        for request_id, identity in accepted_requests[:limit]:
+            if time.monotonic() >= deadline:
+                break
+
+            def validate(
+                requester: ModelCacheOperation | Job,
+                remover: ModelCacheOperation | Job,
+                fence: str,
+                identity: ArtifactIdentity = identity,
+            ) -> bool:
+                if not isinstance(requester, Job) or not isinstance(remover, Job):
+                    return False
+                if (
+                    requester.kind != OPERATION_KIND
+                    or remover.kind != REMOVE_OPERATION_KIND
+                ):
+                    return False
+                try:
+                    payload = read_stored_model(
+                        AvailabilityJobPayload,
+                        canonical_message(requester.payload),
+                        from_json=True,
+                    )
+                    owner = self._read_removal_owner(remover)
+                except (TypeError, ValueError, RecipeImageAvailabilityError):
+                    return False
+                return (
+                    payload.cancellation is None
+                    and requester.authority_revision == payload.recipe_revision_id
+                    and requester.targets == [payload.recipe_revision_id]
+                    and payload.recipe_content_sha256
+                    == document_sha256(payload.recipe.model_dump(mode="json"))
+                    and identity.sha256 in (payload.removal_archives or ())
+                    and identity.sha256 in owner.plan.image_archives
+                    and owner.plan.intent.removal_fence == fence
+                )
+
+            def cancel(remover: ModelCacheOperation | Job, accepted_id: str) -> None:
+                assert isinstance(remover, Job)
+                self._lifecycle.supersede_removal(remover, accepted_id, self._clock())
+
+            try:
+                with (
+                    self._storage.publication_lock(identity.sha256),
+                    self._sessions.begin() as session,
+                ):
+                    changed += int(
+                        supersede_removal_nowait(
+                            session,
+                            identity,
+                            owner_kind="recipe-image-job",
+                            request_id=request_id,
+                            validate=validate,
+                            cancel=cancel,
+                            now=self._clock(),
+                        )
+                    )
+            except (RuntimeImagePreparationError, ArtifactLifecycleError, OSError):
+                continue
+        return changed
+
     def reconcile_removal_gates(self, *, limit: int = 64) -> int:
         with self._sessions() as session:
             identities = dead_removal_identities(
@@ -2136,6 +2258,7 @@ class RecipeImageAvailabilityService:
                 "recipe removal batch limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
+        self.reconcile_requested_removals()
         self.reconcile_removal_gates()
         advanced = 0
         boundary: tuple[datetime, str] | None = None
@@ -3797,22 +3920,36 @@ class RecipeImageAvailabilityService:
                 current_archives = tuple(
                     revision_archives(session, [recipe_revision_id])
                 )
-                try:
-                    require_reference_open(
-                        session,
-                        (
-                            ArtifactIdentity("runtime-image", archive)
-                            for archive in sorted(set(current_archives))
-                        ),
-                        now=self._clock(),
+                # This accepted request owns a durable wait, not available bytes.
+                # Gates still fence storage effects until the worker reconciles them.
+                lock_reference_gates(
+                    session,
+                    (
+                        ArtifactIdentity("runtime-image", archive)
+                        for archive in current_archives
+                    ),
+                    now=self._clock(),
+                )
+                payload["removal_archives"] = list(current_archives)
+                if has_pending_removal(
+                    session,
+                    (
+                        ArtifactIdentity("runtime-image", archive)
+                        for archive in current_archives
+                    ),
+                ):
+                    payload["blockers"] = dump_blockers(
+                        [
+                            make_blocker(
+                                ArtifactLifecycleCode.DELETION_IN_PROGRESS,
+                                "Waiting for the prior image removal fence to settle",
+                                severity="info",
+                            )
+                        ]
                     )
-                except ArtifactLifecycleError as error:
-                    raise RecipeImageAvailabilityRefused(
-                        error.code,
-                        error.detail,
-                        retryable=error.retryable,
-                        recovery_actions=("retry",) if error.retryable else (),
-                    ) from error
+                encoded = json.dumps(
+                    payload, sort_keys=True, separators=(",", ":")
+                ).encode()
                 self._lock_build_consumer(session, payload)
                 now = self._clock()
                 operation = self._lifecycle.new_job(
@@ -4415,6 +4552,7 @@ class RecipeImageAvailabilityService:
                 "availability claim limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
+        self.reconcile_requested_removals()
         owner_id = owner_id or str(uuid.uuid4())
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
@@ -4468,17 +4606,40 @@ class RecipeImageAvailabilityService:
                     continue
                 if not self._retry_due(payload, now):
                     continue
-                if operation.state in job_states.words(
-                    LifecycleState.BACKOFF
-                ) and self._park_for_model(operation, payload, now):
-                    # Only the model download is outstanding: no worker slot is
-                    # spent polling it, so ready work is never queued behind it.
-                    continue
                 if (
                     operation.state == "running"
                     and payload.claim_until is not None
                     and now < payload.claim_until
                 ):
+                    continue
+                if has_pending_removal(
+                    session,
+                    (
+                        ArtifactIdentity("runtime-image", archive)
+                        for archive in payload.removal_archives or ()
+                    ),
+                ):
+                    updated = self._record_blockers(
+                        operation,
+                        payload,
+                        [
+                            make_blocker(
+                                ArtifactLifecycleCode.DELETION_IN_PROGRESS,
+                                "Waiting for the prior image removal fence to settle",
+                                severity="info",
+                            )
+                        ],
+                    )
+                    updated = self._lifecycle.defer(
+                        operation, now, now + timedelta(seconds=5), payload=updated
+                    )
+                    operation.payload = serialize_json_value(updated)
+                    continue
+                if operation.state in job_states.words(
+                    LifecycleState.BACKOFF
+                ) and self._park_for_model(operation, payload, now):
+                    # Only the model download is outstanding: no worker slot is
+                    # spent polling it, so ready work is never queued behind it.
                     continue
                 self._lifecycle.claim(
                     operation,

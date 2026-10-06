@@ -392,12 +392,13 @@ def _add_revision(
     *,
     built: bool = True,
     archive: bytes = ARCHIVE,
+    document_id: str | None = None,
 ) -> CatalogDocumentRevision:
     """One active recipe revision and, unless ``built`` is false, its build."""
 
     revision = CatalogDocumentRevision(
         id=revision_id,
-        document_id="document-" + revision_id,
+        document_id=document_id or "document-" + revision_id,
         kind="recipe",
         publisher=recipe.identity.publisher,
         slug=recipe.identity.slug,

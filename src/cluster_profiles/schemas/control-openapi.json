@@ -2362,6 +2362,22 @@
             "title": "Recipe Revision Id",
             "type": "string"
           },
+          "removal_archives": {
+            "anyOf": [
+              {
+                "items": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Removal Archives"
+          },
           "removal_fence": {
             "anyOf": [
               {

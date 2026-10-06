@@ -68,6 +68,14 @@
   },
   "retry_loops": [
     {
+      "path": "control/src/vonk_control/model_cache.py",
+      "function": "ModelCacheService.reconcile_requested_removals",
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "reason": "The recurring worker tick and run_pending pass re-inventory accepted waiting requests after disposable cursor wrap; a busy exact storage lock retains the accepted receipt and the old removal fence, and the next pass retries the same canonical intent."
+    },
+    {
       "path": "control/src/vonk_control/distributed_recovery.py",
       "function": "DistributedRecoveryCoordinator.tick",
       "catches": [
@@ -2631,7 +2639,6 @@
       "reason": "Destructive-effect guard: a recipe cache removal and the references that compete with it are decided on one exact, reviewed scope. A review that cannot be sealed on consistent evidence, a reference scan that is unavailable (an unavailable scan does not prove an object unused), a changed scope at acceptance (reject changed effects instead of broadening consent) and an artifact reserved for removal all refuse here; the refusal names its retry or inspect action.",
       "sites": [
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService._model_removal_assets", "model_cache.review_invalid", 4],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService._start_request", "message", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService.remove_selector", "message", 4],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService.remove_selector", "model_cache.removal_scope_changed", 2],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService.review_removal", "message", 1],

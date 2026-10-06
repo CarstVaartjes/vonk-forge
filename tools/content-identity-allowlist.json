@@ -639,6 +639,20 @@
       "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
     },
     {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService.reconcile_requested_removals.validate",
+      "kind": "provenance_comparison",
+      "expression": "requester.authority_revision == payload.recipe_revision_id",
+      "reason": "Security and ownership edge: before cancelling an older remover, prove the durable accepted request row names the same exact authority and target as its canonical stored payload. This does not decide image reuse or content equivalence; a damaged request leaves the removal fence intact."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService.reconcile_requested_removals.validate",
+      "kind": "provenance_comparison",
+      "expression": "requester.targets == [payload.recipe_revision_id]",
+      "reason": "Security and ownership edge: before cancelling an older remover, prove the durable accepted request row names the same exact authority and target as its canonical stored payload. This does not decide image reuse or content equivalence; a damaged request leaves the removal fence intact."
+    },
+    {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService._apply_build_cleanup",
       "kind": "provenance_comparison",
