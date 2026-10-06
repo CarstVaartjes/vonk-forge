@@ -186,7 +186,7 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
     ] == [(original.id, [_node_id(1)])]
     clock[0] += timedelta(seconds=1)
     newer = profiles.apply(final_profile.id, request_key=_uuid(18304), actor="admin")
-    assert profiles.application(intermediate.id).state == "cancelled"
+    assert profiles.application(intermediate.id).state == "superseded"
     assert profiles.application(original.id).current_operation_id == original_child
     restarted = FleetProfileService(
         sessions,
