@@ -161,7 +161,32 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         actor="admin",
     )
     clock[0] += timedelta(seconds=1)
-    newer = profiles.apply(newer_profile.id, request_key=_uuid(18301), actor="admin")
+    intermediate = profiles.apply(
+        newer_profile.id, request_key=_uuid(18301), actor="admin"
+    )
+    # A second replacement supersedes the aggregate which borrowed A. The
+    # durable link must stay flattened to A's original executor, never transfer
+    # its child or promises to either later aggregate.
+    final_profile = profiles.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "A plus D",
+                "assignments": [
+                    choices[0],
+                    {**choices[1], "assignment_name": "lane-d"},
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    final_review = profiles.preview(final_profile.id)
+    assert [
+        (effect.application_id, effect.node_ids)
+        for effect in final_review.effects.adopted
+    ] == [(original.id, [_node_id(1)])]
+    clock[0] += timedelta(seconds=1)
+    newer = profiles.apply(final_profile.id, request_key=_uuid(18304), actor="admin")
+    assert profiles.application(intermediate.id).state == "cancelled"
     assert profiles.application(original.id).current_operation_id == original_child
     restarted = FleetProfileService(
         sessions,
