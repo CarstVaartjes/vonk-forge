@@ -1,23 +1,39 @@
 """Prove that an unknown-outcome raise is retried, instead of assuming it.
 
 A raise of an ``UnknownOutcomeError`` subclass is only an ``already-retried``
-handoff when the work that reaches it runs under a *known retry or observe loop*
-that catches it and goes on.  Raising the class does not make it so: where the
-raise stays and no caller retries it, it is still bookkeeping debt.
+handoff when *every* way the work reaches it runs under a known retry or observe
+loop that catches it and goes on.  Raising the class does not make it so: where
+the raise stays reachable without a loop, it is still bookkeeping debt.
 
 The proof has two reviewed parts and one mechanical part:
 
 * ``retry_loops`` in ``tools/blocker-allowlist.json`` lists the known loops, each
   ``{"path", "function", "catches", "reason"}`` (``catches`` names the
-  exceptions whose handler there retries or observes): the lifecycle tick, the observe pass or the
-  claim loop that re-runs the work.  A loop is declared by a person, with the
-  reason it retries.
-* A site is proven when a registered loop contains a ``try`` whose handler
-  catches the raised class (or a contract or local ancestor, never a builtin or a
-  bare ``Exception``), the handler does not raise, and the ``try`` body reaches
-  the raising function through the calls the code names (same module, or a name
-  the loop's module imports).  A call this analysis cannot resolve proves
-  nothing, so an unprovable site stays debt.
+  exceptions whose handler there retries or observes): the lifecycle tick, the
+  observe pass or the claim loop that re-runs the work.  A loop is declared by a
+  person, with the reason it retries.
+* ``call_edges`` declares where a call the code cannot name goes (a ``getattr``
+  with a computed name), ``{"path", "function", "calls", "reason"}``; the edge
+  keeps the ``try`` context of the dynamic call, so it can be looped.
+* The mechanical part walks the call graph of ``blocker_callgraph`` *backwards*
+  from the raising function (flow sensitive).  The exception leaves a function
+  through the first handler around the call that catches it:
+
+  - a registered loop whose handler names the class (or a contract or local
+    ancestor, never a builtin or ``Exception``) and does not raise: the path is
+    *retried*, and the walk of that path ends well;
+  - any other handler that catches it without raising (a swallow): the path is
+    *not* proven, because the loop never sees the exception;
+  - no handler: the exception climbs to the callers of that function.
+
+  A function nobody calls, a route or other decorated registration, a property,
+  an implicit dunder, a function whose reference escapes the graph and module
+  level code are *entries*: reaching one with the exception still unhandled is an
+  unlooped path.  A site is proven only when at least one path ends in a loop and
+  **no** path ends unhandled or swallowed.  Calls the graph cannot resolve add a
+  caller that must be proven too, and an edge inferred from a method name alone
+  never counts as evidence that a loop retries: it can only withdraw credit, so
+  an unprovable site stays debt.
 * ``test_blocker_retries`` runs this proof against the repository, so a loop that
   is renamed or stops catching fails the suite.
 """
@@ -36,21 +52,46 @@ from .blocker_boundaries import (
     REPO_ROOT,
     parsed_modules,
 )
+from .blocker_callgraph import (
+    CallGraph,
+    DeclaredEdge,
+    Function,
+    Tries,
+    handler_reraises,
+    iter_statements,
+)
 
-_TOO_BROAD = _BUILTIN_EXCEPTIONS | {"HTTPException"}
+__all__ = [
+    "UNKNOWN_BASE",
+    "Function",
+    "Proof",
+    "Prover",
+    "build_graph_for",
+    "demote_unproven",
+    "evaluate_retry_gate",
+    "loop_problems",
+    "promote_proven",
+    "proof_of",
+    "proven",
+    "registered_loops",
+    "unknown_classes",
+    "unproven_sites",
+]
+
+TOO_BROAD = _BUILTIN_EXCEPTIONS | {"HTTPException"}
 UNKNOWN_BASE = "UnknownOutcomeError"
-_MAX_DEPTH = 8
-
-
-@dataclass(frozen=True)
-class Function:
-    path: str
-    qualname: str
-    node: ast.AST
-
-    @property
-    def simple(self) -> str:
-        return self.qualname.rsplit(".", 1)[-1]
+PROVEN_FAMILY_REASON = (
+    "An unknown-outcome raise that a registered retry or observe loop catches "
+    "without re-raising and retries or reports to the lifecycle core, on every "
+    "call path that reaches it (see retry_loops for each loop and why it "
+    "retries). Proven by the AST test in control/tests/blocker_retries.py."
+)
+DEMOTED_REASON = (
+    "An unknown-outcome class is raised here, but no registered retry or "
+    "observe loop is proven to catch and retry it on every call path that "
+    "reaches it: counted as bookkeeping debt until a loop is registered in "
+    "retry_loops or the raise is removed."
+)
 
 
 def _name(node: ast.AST) -> str | None:
@@ -59,121 +100,6 @@ def _name(node: ast.AST) -> str | None:
     if isinstance(node, ast.Attribute):
         return node.attr
     return None
-
-
-def _functions(path: str, tree: ast.Module) -> list[Function]:
-    found: list[Function] = []
-
-    def walk(node: ast.AST, scope: tuple[str, ...]) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.ClassDef):
-                walk(child, (*scope, child.name))
-            elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                qualname = ".".join((*scope, child.name))
-                found.append(Function(path, qualname, child))
-                walk(child, (*scope, child.name))
-            else:
-                walk(child, scope)
-
-    walk(tree, ())
-    return found
-
-
-def _imported_modules(tree: ast.Module) -> dict[str, set[str]]:
-    """Name -> module stems a ``from .x import name`` binds it from."""
-
-    result: dict[str, set[str]] = defaultdict(set)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module is not None:
-            for alias in node.names:
-                result[alias.asname or alias.name].add(node.module.split(".")[-1])
-    return result
-
-
-@cache
-def _function_calls(function: Function) -> frozenset[str]:
-    return frozenset(_calls(function.node))
-
-
-def _calls(node: ast.AST) -> set[str]:
-    return {
-        name
-        for child in ast.walk(node)
-        if isinstance(child, ast.Call) and (name := _name(child.func)) is not None
-    }
-
-
-@dataclass(frozen=True)
-class Index:
-    functions: tuple[Function, ...]
-    by_path: Mapping[str, Mapping[str, tuple[Function, ...]]]
-    by_stem: Mapping[str, Mapping[str, tuple[Function, ...]]]
-    imports: Mapping[str, Mapping[str, set[str]]]
-    parents: Mapping[str, frozenset[str]]
-    trees: Mapping[str, ast.Module]
-
-    def resolve(self, path: str, name: str) -> tuple[Function, ...]:
-        found = list(self.by_path[path].get(name, ()))
-        for stem in self.imports[path].get(name, ()):
-            found.extend(self.by_stem.get(stem, {}).get(name, ()))
-        return tuple(found)
-
-    def catchable(self, exception_class: str) -> frozenset[str]:
-        """The names whose ``except`` catches ``exception_class``."""
-
-        seen = {exception_class}
-        queue = deque([exception_class])
-        while queue:
-            for parent in self.parents.get(queue.popleft(), ()):
-                if parent not in seen:
-                    seen.add(parent)
-                    queue.append(parent)
-        return frozenset(name for name in seen if name not in _TOO_BROAD)
-
-
-@cache
-def build_index() -> Index:
-    trees = {
-        module.relative_to(REPO_ROOT).as_posix(): tree
-        for module, tree in parsed_modules(CONTROL_SOURCE_ROOT).items()
-    }
-    functions: list[Function] = []
-    parents: dict[str, set[str]] = defaultdict(set)
-    for path, tree in trees.items():
-        functions.extend(_functions(path, tree))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                parents[node.name].update(
-                    name for base in node.bases if (name := _name(base)) is not None
-                )
-    by_path: dict[str, dict[str, list[Function]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
-    by_stem: dict[str, dict[str, list[Function]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
-    for function in functions:
-        by_path[function.path][function.simple].append(function)
-        stem = function.path.rsplit("/", 1)[-1].removesuffix(".py")
-        by_stem[stem][function.simple].append(function)
-    return Index(
-        tuple(functions),
-        {p: {n: tuple(v) for n, v in d.items()} for p, d in by_path.items()},
-        {p: {n: tuple(v) for n, v in d.items()} for p, d in by_stem.items()},
-        {path: _imported_modules(tree) for path, tree in trees.items()},
-        {name: frozenset(value) for name, value in parents.items()},
-        trees,
-    )
-
-
-@cache
-def unknown_classes() -> frozenset[str]:
-    """Local classes derived from the contract's unknown outcome."""
-
-    index = build_index()
-    return frozenset(
-        name for name in index.parents if UNKNOWN_BASE in index.catchable(name)
-    ) | {UNKNOWN_BASE}
 
 
 def _handlers_catching(try_node: ast.Try, names: frozenset[str]) -> bool:
@@ -185,87 +111,105 @@ def _handlers_catching(try_node: ast.Try, names: frozenset[str]) -> bool:
             if isinstance(handler.type, ast.Tuple)
             else [_name(handler.type)]
         )
-        if any(name in names for name in caught if name is not None) and not any(
-            isinstance(child, ast.Raise)
-            for statement in handler.body
-            for child in ast.walk(statement)
+        if any(name in names for name in caught if name is not None) and not (
+            handler_reraises(handler)
         ):
             return True
     return False
 
 
-def _reaches(
-    index: Index, path: str, seeds: set[str], target: Function, loop: Function
-) -> bool:
-    queue = deque((name, path, 0) for name in seeds)
-    seen: set[tuple[str, str]] = set()
-    while queue:
-        name, where, depth = queue.popleft()
-        for function in index.resolve(where, name):
-            if function == target:
-                return True
-            if depth >= _MAX_DEPTH or (function.path, function.qualname) in seen:
-                continue
-            seen.add((function.path, function.qualname))
-            queue.extend(
-                (called, function.path, depth + 1) for called in _calls(function.node)
+@dataclass(frozen=True)
+class Proof:
+    """Where the exception of a raise ends up, over every call path."""
+
+    #: A registered loop that catches it on at least one path.
+    loop: Function | None
+    #: Paths that end unhandled or swallowed: ``(kind, function)``.
+    unlooped: tuple[tuple[str, Function], ...]
+
+    @property
+    def proven(self) -> bool:
+        return self.loop is not None and not self.unlooped
+
+    @property
+    def reached_by_a_loop(self) -> bool:
+        """The old, flow-insensitive claim: some loop reaches the raise."""
+
+        return self.loop is not None
+
+
+class Prover:
+    """Backward proof over one call graph and one set of registered loops."""
+
+    def __init__(
+        self,
+        graph: CallGraph,
+        loops: Mapping[tuple[str, str], frozenset[str]],
+    ) -> None:
+        self.graph = graph
+        self.loops: dict[Function, frozenset[str]] = {}
+        for key, caught in loops.items():
+            function = graph.by_key.get(key)
+            if function is not None:
+                self.loops[function] = caught
+        self._memo: dict[tuple[Function, str], Proof] = {}
+
+    def prove(self, path: str, exception_class: str, function: str) -> Proof:
+        target = self.graph.by_key.get((path, function))
+        if target is None:
+            return Proof(None, ())
+        key = (target, exception_class)
+        if key not in self._memo:
+            self._memo[key] = self._trace(target, exception_class)
+        return self._memo[key]
+
+    def _trace(self, target: Function, exception_class: str) -> Proof:
+        graph = self.graph
+        loop: Function | None = None
+        unlooped: list[tuple[str, Function]] = []
+        queue: deque[tuple[Function, bool]] = deque()
+        queued: set[tuple[Function, bool]] = set()
+
+        def settle(where: Function, tries: Tries, guessed: bool) -> None:
+            # ``guessed``: the path crossed an edge the graph only inferred from a
+            # method name.  Such a path still has to end well (it may be real),
+            # but it is no evidence that a loop retries the raise.
+            nonlocal loop
+            outcome = graph.classify_try(
+                tries, exception_class, self.loops.get(where), TOO_BROAD
             )
-    return False
+            if outcome == "loop":
+                if not guessed:
+                    loop = loop or where
+            elif outcome == "swallowed":
+                unlooped.append(("swallowed", where))
+            elif (where, guessed) not in queued:
+                queued.add((where, guessed))
+                queue.append((where, guessed))
+
+        contexts = graph.facts[target].raises.get(exception_class) or [()]
+        for tries in contexts:
+            settle(target, tries, False)
+        while queue:
+            current, guessed = queue.popleft()
+            kind = graph.entries.get(current)
+            if kind is not None:
+                unlooped.append((kind, current))
+            for edge in graph.callers.get(current, ()):
+                settle(edge.caller, edge.tries, guessed or edge.kind == "fallback")
+        return Proof(loop, tuple(unlooped))
 
 
-@cache
-def _catchers(
-    path: str,
-    exception_class: str,
-    function: str,
-    allowed: frozenset[str] | None,
-    within: tuple[Function, ...] | None,
-) -> tuple[Function, ...]:
-    return tuple(_find_catchers(path, exception_class, function, allowed, within))
-
-
-def _find_catchers(
-    path: str,
-    exception_class: str,
-    function: str,
-    allowed: frozenset[str] | None = None,
-    within: Sequence[Function] | None = None,
-) -> list[Function]:
-    """Functions whose ``try`` catches ``exception_class`` raised in ``function``.
-
-    ``allowed`` narrows the handlers to the ones a loop's registration names.
-    """
-
-    index = build_index()
-    names = index.catchable(exception_class)
-    if allowed is not None:
-        names = names & allowed
-    targets = [
-        f
-        for f in index.by_path[path].get(function.rsplit(".", 1)[-1], ())
-        if f.qualname == function
-    ]
-    if not targets:
-        return []
-    target = targets[0]
-    found: list[Function] = []
-    for candidate in index.functions if within is None else within:
-        for node in ast.walk(candidate.node):
-            if not isinstance(node, ast.Try) or not _handlers_catching(node, names):
-                continue
-            body = ast.Module(body=node.body, type_ignores=[])
-            direct = candidate == target and any(
-                isinstance(child, ast.Raise)
-                and isinstance(child.exc, ast.Call)
-                and _name(child.exc.func) == exception_class
-                for child in ast.walk(body)
-            )
-            if direct or _reaches(
-                index, candidate.path, _calls(body), target, candidate
-            ):
-                found.append(candidate)
-                break
-    return found
+def _declared_edges(document: Mapping[str, object]) -> tuple[DeclaredEdge, ...]:
+    return tuple(
+        DeclaredEdge(
+            entry["path"],
+            entry["function"],
+            tuple((call["path"], call["function"]) for call in entry["calls"]),
+            str(entry.get("reason", "")),
+        )
+        for entry in document.get("call_edges", [])  # type: ignore[attr-defined]
+    )
 
 
 def registered_loops(
@@ -279,39 +223,115 @@ def registered_loops(
     }
 
 
+@cache
+def _repository_trees() -> Mapping[str, ast.Module]:
+    return {
+        module.relative_to(REPO_ROOT).as_posix(): tree
+        for module, tree in parsed_modules(CONTROL_SOURCE_ROOT).items()
+    }
+
+
+@cache
+def _graph(declared: tuple[DeclaredEdge, ...]) -> CallGraph:
+    return CallGraph(_repository_trees(), declared)
+
+
+def build_graph_for(document: Mapping[str, object]) -> CallGraph:
+    """The call graph of the repository, with the allowlist's declared edges."""
+
+    return _graph(_declared_edges(document))
+
+
+@cache
+def _prover(
+    declared: tuple[DeclaredEdge, ...],
+    loops: tuple[tuple[tuple[str, str], frozenset[str]], ...],
+) -> Prover:
+    return Prover(_graph(declared), dict(loops))
+
+
+def _prover_for(document: Mapping[str, object]) -> Prover:
+    loops = tuple(sorted(registered_loops(document).items(), key=lambda i: i[0]))
+    return _prover(_declared_edges(document), loops)
+
+
+@cache
+def unknown_classes() -> frozenset[str]:
+    """Local classes derived from the contract's unknown outcome."""
+
+    parents: dict[str, set[str]] = defaultdict(set)
+    for tree in _repository_trees().values():
+        for node in iter_statements(tree, into_defs=True):
+            if isinstance(node, ast.ClassDef):
+                parents[node.name].update(
+                    name for base in node.bases if (name := _name(base)) is not None
+                )
+
+    def ancestors(name: str) -> set[str]:
+        seen = {name}
+        queue = deque([name])
+        while queue:
+            for parent in parents.get(queue.popleft(), ()):
+                if parent not in seen:
+                    seen.add(parent)
+                    queue.append(parent)
+        return seen
+
+    return frozenset(name for name in parents if UNKNOWN_BASE in ancestors(name)) | {
+        UNKNOWN_BASE
+    }
+
+
+def proof_of(
+    document: Mapping[str, object], path: str, exception_class: str, function: str
+) -> Proof:
+    return _prover_for(document).prove(path, exception_class, function)
+
+
 def proven(
     document: Mapping[str, object], path: str, exception_class: str, function: str
 ) -> Function | None:
-    """The registered loop that retries this raise, or None."""
+    """The registered loop that retries this raise on every path, or None."""
 
-    index = build_index()
-    for (loop_path, loop_function), caught in registered_loops(document).items():
-        loops = [
-            f
-            for f in index.by_path[loop_path].get(loop_function.rsplit(".", 1)[-1], ())
-            if f.qualname == loop_function
-        ]
-        found = _catchers(path, exception_class, function, caught, tuple(loops))
-        if found:
-            return found[0]
-    return None
+    proof = proof_of(document, path, exception_class, function)
+    return proof.loop if proof.proven else None
 
 
 def loop_problems(document: Mapping[str, object]) -> list[str]:
     """A registered loop must exist and must catch something."""
 
-    index = build_index()
-    existing = {(f.path, f.qualname) for f in index.functions}
+    graph = build_graph_for(document)
     problems: list[str] = []
     for entry in document.get("retry_loops", []):  # type: ignore[attr-defined]
         key = (entry["path"], entry["function"])
-        if key not in existing:
+        if key not in graph.by_key:
             problems.append(f"retry loop does not exist; delete or rename it: {key}")
         if not entry.get("catches"):
             problems.append(f"retry loop must name the exceptions it retries: {key}")
         if len(str(entry.get("reason", "")).split()) < 5:
             problems.append(f"retry loop needs a written reason: {key}")
+    problems.extend(graph.declared_problems())
+    declared = {function for function in graph.dynamic_calls}
+    for edge in graph.declared:
+        function = graph.by_key.get((edge.path, edge.function))
+        if function is not None and function not in declared:
+            problems.append(
+                "declared call edge has no dynamic call to stand for; delete it: "
+                f"{(edge.path, edge.function)}"
+            )
     return problems
+
+
+def unproven_dynamic_calls(document: Mapping[str, object]) -> list[tuple[str, str]]:
+    """Functions with a ``getattr`` call of a computed name no edge declares."""
+
+    graph = build_graph_for(document)
+    declared = {(edge.path, edge.function) for edge in graph.declared}
+    return sorted(
+        (function.path, function.qualname)
+        for function in graph.dynamic_calls
+        if (function.path, function.qualname) not in declared
+    )
 
 
 def unproven_sites(
@@ -337,10 +357,30 @@ def evaluate_retry_gate(document: Mapping[str, object]) -> list[str]:
         for key in unproven_sites(document, family["sites"]):
             messages.append(
                 "already-retried claim is unproven: no registered retry loop "
-                "catches and retries this unknown-outcome raise; register the "
-                f"loop in retry_loops or count it as bookkeeping-debt: {key}"
+                "catches and retries this unknown-outcome raise on every call "
+                "path that reaches it; register the loop in retry_loops or "
+                f"count it as bookkeeping-debt: {key}"
             )
     return messages
+
+
+def _family(
+    families: list[dict[str, object]],
+    by_name: dict[str, dict[str, object]],
+    name: str,
+    category: str,
+    reason: str,
+) -> dict[str, object]:
+    family = by_name.get(name)
+    if family is None:
+        family = {"family": name, "category": category, "reason": reason, "sites": []}
+        by_name[name] = family
+        families.append(family)
+    return family
+
+
+def _stem(path: str) -> str:
+    return path.rsplit("/", 1)[-1].removesuffix(".py")
 
 
 def demote_unproven(document: dict[str, object]) -> int:
@@ -360,36 +400,51 @@ def demote_unproven(document: dict[str, object]) -> int:
                 keep.append(site)
         family["sites"] = keep
     by_name = {str(family["family"]): family for family in families}
-    reason = (
-        "An unknown-outcome class is raised here, but no registered retry or "
-        "observe loop is proven to catch and retry it: counted as bookkeeping "
-        "debt until a loop is registered in retry_loops or the raise is removed."
-    )
     for path, sites in sorted(moved.items()):
-        name = f"{path.rsplit('/', 1)[-1].removesuffix('.py')}.bookkeeping-debt"
-        family = by_name.get(name)
-        if family is None:
-            family = {
-                "family": name,
-                "category": "bookkeeping-debt",
-                "reason": reason,
-                "sites": [],
-            }
-            by_name[name] = family
-            families.append(family)
+        family = _family(
+            families,
+            by_name,
+            f"{_stem(path)}.bookkeeping-debt",
+            "bookkeeping-debt",
+            DEMOTED_REASON,
+        )
         family["sites"].extend(sites)  # type: ignore[attr-defined]
         family["sites"].sort(key=lambda site: tuple(site[:4]))  # type: ignore[attr-defined]
     document["fail_closed"] = [f for f in families if f["sites"]]
     return sum(len(sites) for sites in moved.values())
 
 
-def catchers(
-    path: str,
-    exception_class: str,
-    function: str,
-    allowed: frozenset[str] | None = None,
-    within: Sequence[Function] | None = None,
-) -> list[Function]:
-    """Public form of the catcher search (see ``_find_catchers``)."""
+def promote_proven(document: dict[str, object]) -> int:
+    """Move every proven unknown-outcome bookkeeping-debt site to ``proven-retry``.
 
-    return _find_catchers(path, exception_class, function, allowed, within)
+    A debt site moves only when its class is an unknown outcome and the proof
+    holds on every call path; the move is the whole credit, and it is undone by
+    ``demote_unproven`` the moment the proof stops holding.
+    """
+
+    families: list[dict[str, object]] = document["fail_closed"]  # type: ignore[assignment]
+    unknown = unknown_classes()
+    moved: dict[str, list[list[object]]] = defaultdict(list)
+    for family in families:
+        if family["category"] != "bookkeeping-debt":
+            continue
+        keep = []
+        for site in family["sites"]:  # type: ignore[attr-defined]
+            if site[1] in unknown and proven(document, site[0], site[1], site[2]):
+                moved[site[0]].append(site)
+            else:
+                keep.append(site)
+        family["sites"] = keep
+    by_name = {str(family["family"]): family for family in families}
+    for path, sites in sorted(moved.items()):
+        family = _family(
+            families,
+            by_name,
+            f"{_stem(path)}.proven-retry",
+            "already-retried",
+            PROVEN_FAMILY_REASON,
+        )
+        family["sites"].extend(sites)  # type: ignore[attr-defined]
+        family["sites"].sort(key=lambda site: tuple(site[:4]))  # type: ignore[attr-defined]
+    document["fail_closed"] = [f for f in families if f["sites"]]
+    return sum(len(sites) for sites in moved.values())

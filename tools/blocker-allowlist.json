@@ -57,9 +57,9 @@
   },
   "max_debt": 9,
   "debt_ceiling": {
-    "total": 72,
-    "unaudited": 366,
-    "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
+    "total": 146,
+    "unaudited": 365,
+    "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
   "categorized_raises": {
     "note": "Raises in a lifecycle or operation path that predate the rule that they use SecurityRefusalError, InvalidRequestError or UnknownOutcomeError. A module's count and the ceiling only fall: convert a raise to a categorized type, then lower the count.",
@@ -285,6 +285,7 @@
       "reason": "A Spark whose admission lock is held by another change is recorded as busy and the next candidate Spark is tried in the same selection loop; when every candidate is busy or occupied the wait is raised to the claim runner, which asks again on its bounded backoff, so a busy lock never fails the build."
     }
   ],
+  "call_edges": [],
   "operator_waits": [
     {
       "path": "control/src/vonk_control/recipe_operations.py",
@@ -608,8 +609,7 @@
       "category": "already-retried",
       "reason": "Admission or capacity busy and provider-transient errors that carry a retry; the owner retries them. Audit notes: (step 4) a missing or unverified object receipt is unknown, not final: the raise now names recovery=reverify with a retry hint, re-verifies the set (heals the row from the receipts, or queues one download of the missing objects), and the consumer's retry succeeds once it is done; the refusal ends nothing. Earlier notes: Carries recovery/retry_after metadata and is already retried by the download worker.",
       "sites": [
-        ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._model_storage_lock", "message", 1],
-        ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._publication_allowed", "message", 1]
+        ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._model_storage_lock", "message", 1]
       ]
     },
     {
@@ -778,14 +778,6 @@
       ]
     },
     {
-      "family": "runswitch.already-retried",
-      "category": "already-retried",
-      "reason": "Admission or capacity busy and provider-transient errors that carry a retry; the owner retries them.",
-      "sites": [
-        ["control/src/vonk_control/run_switch_operations.py", "RecipeBuildAdmissionBusy", "_lock_current_build_parent", "message", 1]
-      ]
-    },
-    {
       "family": "runswitch.phase-retried",
       "category": "already-retried",
       "reason": "Raised on the phase-advance path of a Run/Switch operation. A conflict that is not a reviewed security edge is caught at the phase checkpoint (fail -> the lifecycle core's bounded backoff, the same idempotent phase entered again) or, outside it, by the tick guard (_hold_after_advance_failure, same clock). Bookkeeping becomes unknown, then reconcile; a final verification that cannot be observed is observed again, never declared failed. Covered by test_run_switch_lifecycle.",
@@ -832,12 +824,7 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.execute", "run-switch.uninstall-abandon-failed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.execute", "run-switch.uninstall-start-failed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.execute", "run-switch.uninstall_target_unavailable", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_bound_workload_intent", "run-switch-workload-intent-is-unbound", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_build_receipt_in_session", "run-switch.container-build-receipt-unavailable", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_container_build_result", "run-switch.container-build-evidence-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-parent-invalid", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-plan-invalid", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_phase_result", "run-switch-phase-receipt-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_required_string", "run-switch-persisted-identity-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_started_operation_id", "run-switch-child-operation-identity-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch", 1],
@@ -868,14 +855,6 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "message", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "run-switch-retry-runtime-image-reference-is-invalid", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "_reserve_run_switch_assets", "message", 1]
-      ]
-    },
-    {
-      "family": "admission_locking.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class AdmissionLockBusy is a busy/pending/superseded handoff.",
-      "sites": [
-        ["control/src/vonk_control/admission_locking.py", "AdmissionLockBusy", "_raise_if_busy", "admission-lock-is-busy", 1]
       ]
     },
     {
@@ -1311,14 +1290,6 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CursorError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/fleet_events.py", "CursorError", "FleetEventRepository.replay_after", "fleet-event-cursor-is-invalid", 1]
-      ]
-    },
-    {
-      "family": "fleet_profiles.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: subclass of the admission-effect busy handoff.",
-      "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileResourceRecheckUnavailable", "RunSwitchFleetProfileAdapter.validate_resources_in_session", "profile-resource-admission-could-not-be-rechecked", 1]
       ]
     },
     {
@@ -1939,7 +1910,6 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._checkpoint_recipe_image_removal", "artifact.reference_changed", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._current_model_child", "recipe_image.model_cache_invalid", 2],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._ensure_model_child", "recipe_image.model_cache_invalid", 3],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._finish_recipe_removal", "artifact.reference_changed", 1],
@@ -1959,7 +1929,7 @@
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_missing", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.cancel", "recipe_image.cancel_busy", 2],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.remove_selector", "recipe_image.operation_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RuntimeImagePreparationUnknown", "RecipeImageAvailabilityService._advance_recipe_image_removal", "runtime_image.archive_mismatch", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._image_reference_intent_for_claim", "message", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._ensure_model_child", "exact-model-artifact-preparation-could-not-be-queued", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._resume_model_child", "model-artifact-operation-could-not-be-resumed", 1]
       ]
@@ -2259,11 +2229,8 @@
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RunSwitchInstallPreflightExpired is a busy/pending/superseded handoff; class RunSwitchIssuedWorkloadPending is a busy/pending/superseded handoff; class RunSwitchPostStopEvidencePending is a busy/pending/superseded handoff; the build parent changed: the phase replans.",
       "sites": [
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchInstallPreflightExpired", "RecipeLifecyclePhaseExecutor.execute", "run-switch.install-preflight-expired", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchIssuedWorkloadPending", "RecipeLifecyclePhaseExecutor._observe_older_issued", "message", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchIssuedWorkloadPending", "RecipeLifecyclePhaseExecutor.execute", "artifact-job-cancellation", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchPostStopEvidencePending", "RecipeLifecyclePhaseExecutor._require_post_stop_inventory", "spark", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchPostStopEvidencePending", "RecipeLifecyclePhaseExecutor._require_post_stop_inventory", "stop-receipt-for", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "_RunSwitchBuildParentChanged", "_lock_current_build_parent", "run-switch.container-build-parent-changed", 1]
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchPostStopEvidencePending", "RecipeLifecyclePhaseExecutor._require_post_stop_inventory", "stop-receipt-for", 1]
       ]
     },
     {
@@ -2514,11 +2481,7 @@
       "category": "already-retried",
       "reason": "Admission or capacity busy and provider-transient errors that carry a retry; the owner retries them.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionBusy", "FleetProfileService._admission_session", "profile-admission-is-busy", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionBusy", "FleetProfileService._admission_session", "profile-admission-is-busy-review-again-after-the-current-fl", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._admission_session", "profile-admission-is-busy-review-again-after-the-current-fl", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._prepare_pending_admission", "profile-admission-is-waiting-for-the-active-workload-owner-t", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "RunSwitchFleetProfileAdapter.validate_resources_in_session", "profile-resource-admission-is-waiting-for-capacity", 1]
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._prepare_pending_admission", "profile-admission-is-waiting-for-the-active-workload-owner-t", 2]
       ]
     },
     {
@@ -2527,16 +2490,6 @@
       "reason": "Exact artifact identity fence: a recovery must not silently replace the model or runtime image bound in the accepted plan (docs/engineering-principles: exact identity fails closed; an alternative must be an explicit new load). The recovery caller parks the receipt with the shown reason (profile.recovery_artifact_changed) and the identity is never re-hashed here.",
       "sites": [
         ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileRecoveryBindingConflict", "_require_recovery_preparation", "profile.recovery_artifact_changed", 1]
-      ]
-    },
-    {
-      "family": "profile.admission-retried",
-      "category": "already-retried",
-      "reason": "Admission waits that carry their own retry: a database constraint rejection mid-admission, an artifact owner holding its gate, and a build being cancelled. apply, the roster reconciliation and the pending-admission worker all park the request (_defer_pending_application) and retry it automatically with a visible next attempt.",
-      "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._queue_application", "message", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._reserve_preview_assets", "message", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionStorageError", "FleetProfileService._admission_session", "profile-admission-database-constraint", 1]
       ]
     },
     {
@@ -2629,7 +2582,6 @@
       "category": "already-retried",
       "reason": "Control flow, not a refusal: the availability execution claim was lost to a newer attempt or a cancel. _run catches it and returns without writing, and the new claim owner (or the cancel reconcile) carries the operation on, so the raise is the handoff itself.",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._image_reference_intent_for_claim", "message", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._persist_receipt", "message", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._run", "message", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._update_model_progress", "message", 2]
@@ -2977,15 +2929,6 @@
       ]
     },
     {
-      "family": "artifact_lifecycle.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ArtifactReferenceUnsettled is of the already-retried error type.",
-      "sites": [
-        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "lock_reference_gates", "artifact.reference_busy", 1],
-        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "lock_reference_gates", "artifact.reference_unavailable", 1]
-      ]
-    },
-    {
       "family": "artifact_lifecycle.security-edge",
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class ArtifactRemovalFenceLost is of the security-edge error type.",
@@ -3012,22 +2955,6 @@
       "sites": [
         ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceIdentityStale", "require_model_sets_open", "artifact.reference_identity_mismatch", 1],
         ["control/src/vonk_control/artifact_reference_scan.py", "InvalidValue", "require_model_sets_open", "explicit-model-object-identities-require-exactly-one-model-s", 1]
-      ]
-    },
-    {
-      "family": "artifact_reference_scan.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ArtifactReferenceUnsettled is of the already-retried error type; class BookkeepingUnknown is of the already-retried error type.",
-      "sites": [
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_profile_plan", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_run_switch_plan", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_run_switch_runtime_image_intent", "artifact.reference_scan_failed", 2],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings.account", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings.account", "artifact.reference_scan_limited", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings", "artifact.reference_scan_failed", 6],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings", "artifact.reference_scan_limited", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings.account", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings.account", "artifact.reference_scan_limited", 1]
       ]
     },
     {
@@ -3269,6 +3196,11 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: class InstallAdmissionBusy is an unknown outcome with no proven retry loop.",
       "sites": [
+        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._admit_workload_intent", "install.capacity_busy", 2],
+        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.capacity_busy", 1],
+        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.membership_changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._queue_in_session", "install.capacity_busy", 3],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._queue_prebuilt_build_in_session", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeReconciliationBlocked", "RecipeOperationService._reconciliation_authority_in_session.blocked", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._admit_workload_intent", "workload-intent-differs-across-the-target-sparks", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "recipe-build-service-is-unavailable", 1],
@@ -3284,7 +3216,9 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "prior-installation-intent-requires-exact-observation-before", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "recipe-installation-is-being-reconciled", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "stored-installation-plan-is-unreadable-it-is-recorded-and-t", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.stop", "the-run-s-route-withdrawal-has-not-settled-retry-the-stop", 1]
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.stop", "the-run-s-route-withdrawal-has-not-settled-retry-the-stop", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._admit_workload_intent", "run-capacity-writer-is-busy", 2],
+        ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._queue_in_session", "run-capacity-writer-is-busy", 3]
       ]
     },
     {
@@ -3309,6 +3243,7 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
+        ["control/src/vonk_control/admission_locking.py", "AdmissionLockBusy", "_raise_if_busy", "admission-lock-is-busy", 1],
         ["control/src/vonk_control/admission_locking.py", "AdmissionLockBusy", "acquire_admission_keys", "admission-lock", 1]
       ]
     },
@@ -3343,6 +3278,8 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
+        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "lock_reference_gates", "artifact.reference_busy", 1],
+        ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "lock_reference_gates", "artifact.reference_unavailable", 1],
         ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "require_reference_open", "artifact.deletion_in_progress", 1],
         ["control/src/vonk_control/artifact_lifecycle.py", "ArtifactReferenceUnsettled", "reserve_removal_owners", "artifact.deletion_busy", 1]
       ]
@@ -3352,10 +3289,19 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_profile_plan", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_run_switch_plan", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_run_switch_runtime_image_intent", "artifact.reference_scan_failed", 2],
         ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_objects", "artifact.reference_scan_failed", 3],
         ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings", "artifact.reference_scan_failed", 3],
         ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings", "artifact.reference_scan_limited", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "require_model_sets_open", "artifact.deletion_in_progress", 2]
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings.account", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings.account", "artifact.reference_scan_limited", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "require_model_sets_open", "artifact.deletion_in_progress", 2],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings", "artifact.reference_scan_failed", 6],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings", "artifact.reference_scan_limited", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings.account", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings.account", "artifact.reference_scan_limited", 1]
       ]
     },
     {
@@ -3373,7 +3319,15 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionBusy", "FleetProfileService._admission_session", "profile-admission-is-busy", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionBusy", "FleetProfileService._admission_session", "profile-admission-is-busy-review-again-after-the-current-fl", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._admission_session", "profile-admission-is-busy-review-again-after-the-current-fl", 2],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._queue_application", "message", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._reserve_preview_assets", "message", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "RunSwitchFleetProfileAdapter.validate_resources_in_session", "profile-resource-admission-is-waiting-for-capacity", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionStorageError", "FleetProfileService._admission_session", "profile-admission-database-constraint", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileChildPlanBlocked", "RunSwitchFleetProfileAdapter._start_child", "profile-child-plan-blocked", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileResourceRecheckUnavailable", "RunSwitchFleetProfileAdapter.validate_resources_in_session", "profile-resource-admission-could-not-be-rechecked", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._intended_profile", "persisted-application-intent-digest-is-inconsistent", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._intended_profile", "persisted-application-review-digest-is-inconsistent", 1],
         ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._intended_profile", "persisted-application-review-source-is-unavailable", 1],
@@ -3439,7 +3393,28 @@
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
         ["control/src/vonk_control/model_cache.py", "ModelCacheConflictUnknown", "ModelCacheService._require_managed_cache_coverage", "model_cache.coverage_incomplete", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheConflictUnknown", "ModelCacheService.cached_artifact_file", "model_cache.artifact_unverified", 1]
+        ["control/src/vonk_control/model_cache.py", "ModelCacheConflictUnknown", "ModelCacheService.cached_artifact_file", "model_cache.artifact_unverified", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._download_parallel_ranges", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._download_sequential", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_github_release_asset", "model_cache.source_unavailable", 2],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_http_response", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_source", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._raise_github_http_status", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._validate_github_release_asset", "model_cache.source_unavailable", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._append_part", "model-download-stopped-partial-files-preserved", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-cancelled-during-verification", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-stopped-partial-files-preserved", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-was-removed-during-verification", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_artifact", "model-download-was-removed-during-verification", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_locked", "cache-operation-document-is-unreadable", 2],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_locked", "model-download-cancellation-was-accepted-partial-files-pres", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_sequential", "download-interrupted-at-a-durable-checkpoint", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_split", "model-download-cancelled-during-assembly", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_split", "model-download-was-removed-during-assembly", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._require_transfer_running", "model-download-stopped-partial-files-preserved", 1],
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._sample_transfer.observe", "model-download-stopped-partial-files-preserved", 1],
+        ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._download_one_unique", "message", 2],
+        ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._publication_allowed", "message", 1]
       ]
     },
     {
@@ -3466,9 +3441,16 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
+        ["control/src/vonk_control/run_switch_operations.py", "RecipeBuildAdmissionBusy", "_lock_current_build_parent", "message", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.preflight", "run-switch.preflight-recipe-changed", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_bound_workload_intent", "run-switch-workload-intent-is-unbound", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_build_receipt_in_session", "run-switch.container-build-receipt-unavailable", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-parent-invalid", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-plan-invalid", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_phase_result", "run-switch-phase-receipt-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "artifact.reference_busy", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "message", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "_RunSwitchBuildParentChanged", "_lock_current_build_parent", "run-switch.container-build-parent-changed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "approved-recipe-build-is-no-longer-available", 1],
         ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "persisted-runswitch-plan-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-image-reference-changed-during-publication", 1],
@@ -3489,18 +3471,11 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._admit_workload_intent", "install.capacity_busy", 2],
         ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._install_once", "install.capacity_busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.capacity_busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.membership_changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._queue_in_session", "install.capacity_busy", 3],
         ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._reconcile_installation_once", "reconcile.capacity_busy", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._build_once", "message", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._queue_prebuilt_build_in_session", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeBuildOwnershipBusy", "RecipeOperationService._cancel_current_build", "build.consumer_busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._activate_job_run_once", "run-capacity-writer-is-busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._admit_workload_intent", "run-capacity-writer-is-busy", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._queue_in_session", "run-capacity-writer-is-busy", 3],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._start_once", "run-capacity-writer-is-busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "_RouteNotWithdrawn", "RecipeOperationService._dispatch_stop_after_withdrawal", "message", 1]
       ]
@@ -3522,36 +3497,34 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._download_parallel_ranges", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._download_sequential", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_github_release_asset", "model_cache.source_unavailable", 2],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_http_response", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._open_source", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._raise_github_http_status", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheStorageUnknown", "ModelCacheService._validate_github_release_asset", "model_cache.source_unavailable", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._append_part", "model-download-stopped-partial-files-preserved", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-cancelled-during-verification", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-stopped-partial-files-preserved", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._complete_download", "model-download-was-removed-during-verification", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_artifact", "model-download-was-removed-during-verification", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_locked", "cache-operation-document-is-unreadable", 2],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_locked", "model-download-cancellation-was-accepted-partial-files-pres", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_sequential", "download-interrupted-at-a-durable-checkpoint", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_split", "model-download-cancelled-during-assembly", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._download_split", "model-download-was-removed-during-assembly", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._require_transfer_running", "model-download-stopped-partial-files-preserved", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._run_download", "model-download-was-removed-before-publication", 1],
-        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._sample_transfer.observe", "model-download-stopped-partial-files-preserved", 1],
-        ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._download_one_unique", "message", 2]
+        ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._run_download", "model-download-was-removed-before-publication", 1]
       ]
     },
     {
-      "family": "catalog_sync.already-retried",
+      "family": "recipe_image_availability.proven-retry",
       "category": "already-retried",
-      "reason": "An unknown outcome raised on a path that a registered retry or observe loop (retry_loops, AST-proven by blocker_retries) catches and re-runs on its bounded backoff; the raise is the handoff to that loop, not a dead end.",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._checkpoint_recipe_image_removal", "artifact.reference_changed", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RuntimeImagePreparationUnknown", "RecipeImageAvailabilityService._advance_recipe_image_removal", "runtime_image.archive_mismatch", 1]
+      ]
+    },
+    {
+      "family": "catalog_sync.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_in_progress", 2],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1]
+      ]
+    },
+    {
+      "family": "run_switch_operations.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchIssuedWorkloadPending", "RecipeLifecyclePhaseExecutor._observe_older_issued", "message", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchIssuedWorkloadPending", "RecipeLifecyclePhaseExecutor.execute", "artifact-job-cancellation", 1]
       ]
     }
   ]

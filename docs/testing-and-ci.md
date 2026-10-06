@@ -394,7 +394,22 @@ whole transaction through `bounded_attempts` (`bounded_retry.py`, with
 only after the attempts are spent; and a loop that genuinely retries or reports
 an unknown outcome to the lifecycle core is declared in `retry_loops`, with the
 reason it retries, so the AST proof in `control/tests/blocker_retries.py` moves
-the raises it reaches to the module's `proven-retry` family. A raise that decides
+the raises it reaches to the module's `proven-retry` family. The proof walks the
+call graph of `control/tests/blocker_callgraph.py` backwards from the raise and
+credits it only when *every* call path from an entry (route, tick, a function
+nobody calls, a reference that escapes to a thread) ends in a registered loop
+that catches the class without re-raising: a path through a handler that swallows
+it, or around the loop's `try`, keeps the raise as debt. The graph follows calls
+on annotated attributes and parameters (a Protocol reaches every implementation),
+callbacks bound to the parameter they fill, and `getattr` of a literal name; a
+`getattr` of a computed name needs a `call_edges` entry (`path`, `function`,
+`calls`, `reason`), which keeps the `try` context of the dynamic call. A call on a
+receiver nothing types is read as a call of every method of that name (a name
+defined on four classes or more is taken for a library call). After a change to
+the code or to `retry_loops`, `python -m control.tests.blocker_classifier
+--rebalance` moves proven debt out and unproven credit back to debt, then
+`--write-baseline` records the counts: the debt ceiling rises when credit is
+withdrawn. A raise that decides
 a destructive effect (a removal gate, an uninstall or stop authority, a lease
 fence, a reviewed-intent integrity check) stays a `bookkeeping-debt` entry.
 
