@@ -413,6 +413,50 @@
         "title": "AgentOperationPayload",
         "type": "object"
       },
+      "AgentPackageSource": {
+        "additionalProperties": false,
+        "properties": {
+          "architecture": {
+            "const": "linux-arm64",
+            "title": "Architecture",
+            "type": "string"
+          },
+          "build_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Build Digest",
+            "type": "string"
+          },
+          "package": {
+            "$ref": "#/components/schemas/PackageRollbackSource"
+          },
+          "package_bytes": {
+            "maximum": 1073741824,
+            "minimum": 1,
+            "title": "Package Bytes",
+            "type": "integer"
+          },
+          "package_url": {
+            "pattern": "^https://install\\.vonkforge\\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\\.deb$",
+            "title": "Package Url",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "architecture",
+          "build_digest",
+          "package",
+          "package_bytes",
+          "package_url"
+        ],
+        "title": "AgentPackageSource",
+        "type": "object"
+      },
       "AgentResultState": {
         "description": "The state words of an agent result on the wire.\n\nThe wire keeps four words, shared with agents already deployed.  A typed\noutcome decides which one is truthful (``done`` is ``succeeded``, a\nconfirmed cancellation is ``cancelled``, any other definite failure is\n``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the\nController maps them onto its stored state values unchanged.",
         "enum": [
@@ -518,6 +562,366 @@
         "title": "AgentUpgradeIdentityResponse",
         "type": "object"
       },
+      "AgentUpgradePackage": {
+        "additionalProperties": false,
+        "description": "The signed package a rollout installs on every Spark it targets.",
+        "properties": {
+          "architecture": {
+            "const": "linux-arm64",
+            "title": "Architecture",
+            "type": "string"
+          },
+          "package_bytes": {
+            "maximum": 1073741824,
+            "minimum": 1,
+            "title": "Package Bytes",
+            "type": "integer"
+          },
+          "package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Package Sha256",
+            "type": "string"
+          },
+          "package_signature": {
+            "pattern": "^[0-9a-f]{128}$",
+            "title": "Package Signature",
+            "type": "string"
+          },
+          "package_url": {
+            "pattern": "^https://install\\.vonkforge\\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\\.deb$",
+            "title": "Package Url",
+            "type": "string"
+          },
+          "package_version": {
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$",
+            "title": "Package Version",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "target_binary_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Target Binary Digest",
+            "type": "string"
+          },
+          "target_build_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Target Build Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "architecture",
+          "package_bytes",
+          "package_sha256",
+          "package_signature",
+          "package_url",
+          "package_version",
+          "schema_version",
+          "target_binary_digest",
+          "target_build_digest"
+        ],
+        "title": "AgentUpgradePackage",
+        "type": "object"
+      },
+      "AgentUpgradePayload": {
+        "additionalProperties": false,
+        "description": "Signed package authority for the current agent upgrade operation.",
+        "properties": {
+          "architecture": {
+            "const": "linux-arm64",
+            "title": "Architecture",
+            "type": "string"
+          },
+          "package_bytes": {
+            "maximum": 1073741824,
+            "minimum": 1,
+            "title": "Package Bytes",
+            "type": "integer"
+          },
+          "package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Package Sha256",
+            "type": "string"
+          },
+          "package_signature": {
+            "pattern": "^[0-9a-f]{128}$",
+            "title": "Package Signature",
+            "type": "string"
+          },
+          "package_url": {
+            "pattern": "^https://install\\.vonkforge\\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\\.deb$",
+            "title": "Package Url",
+            "type": "string"
+          },
+          "package_version": {
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$",
+            "title": "Package Version",
+            "type": "string"
+          },
+          "rollback": {
+            "$ref": "#/components/schemas/PackageRollbackAuthority"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source_package_bytes": {
+            "maximum": 1073741824,
+            "minimum": 1,
+            "title": "Source Package Bytes",
+            "type": "integer"
+          },
+          "source_package_url": {
+            "pattern": "^https://install\\.vonkforge\\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\\.deb$",
+            "title": "Source Package Url",
+            "type": "string"
+          },
+          "target_binary_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Target Binary Digest",
+            "type": "string"
+          },
+          "target_build_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Target Build Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rollback",
+          "source_package_url",
+          "source_package_bytes",
+          "architecture",
+          "package_bytes",
+          "package_sha256",
+          "package_signature",
+          "package_url",
+          "package_version",
+          "schema_version",
+          "target_binary_digest",
+          "target_build_digest"
+        ],
+        "title": "AgentUpgradePayload",
+        "type": "object"
+      },
+      "AgentUpgradeRepairManifest": {
+        "additionalProperties": false,
+        "description": "The repair capsule's authority, bound to one Spark and the package.",
+        "properties": {
+          "authority_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Authority Sha256",
+            "type": "string"
+          },
+          "kind": {
+            "const": "agent-upgrade-repair",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "package": {
+            "$ref": "#/components/schemas/AgentUpgradePackage"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "authority_sha256",
+          "kind",
+          "node_id",
+          "package",
+          "schema_version"
+        ],
+        "title": "AgentUpgradeRepairManifest",
+        "type": "object"
+      },
+      "AgentUpgradeRequestIntent": {
+        "additionalProperties": false,
+        "description": "Which Sparks the operator asked for: all of them, or an explicit list.",
+        "properties": {
+          "all": {
+            "title": "All",
+            "type": "boolean"
+          },
+          "selectors": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Selectors"
+          }
+        },
+        "required": [
+          "all"
+        ],
+        "title": "AgentUpgradeRequestIntent",
+        "type": "object"
+      },
+      "AgentUpgradeResult": {
+        "additionalProperties": false,
+        "description": "Evidence emitted after the Rust agent reports an exact upgrade.",
+        "properties": {
+          "activation_receipt": {
+            "$ref": "#/components/schemas/PackageActivationReceipt"
+          },
+          "architecture": {
+            "const": "linux-arm64",
+            "title": "Architecture",
+            "type": "string"
+          },
+          "binary_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Binary Digest",
+            "type": "string"
+          },
+          "build_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Build Digest",
+            "type": "string"
+          },
+          "package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Package Sha256",
+            "type": "string"
+          },
+          "package_version": {
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$",
+            "title": "Package Version",
+            "type": "string"
+          },
+          "status": {
+            "const": "upgraded",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "architecture",
+          "binary_digest",
+          "build_digest",
+          "package_sha256",
+          "package_version",
+          "status",
+          "activation_receipt"
+        ],
+        "title": "AgentUpgradeResult",
+        "type": "object"
+      },
+      "AgentUpgradeRolloutPayload": {
+        "additionalProperties": false,
+        "description": "An upgrade rollout: the package, the order, and each Spark's rollback source.",
+        "properties": {
+          "node_order": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Node Order",
+            "type": "array"
+          },
+          "package": {
+            "$ref": "#/components/schemas/AgentUpgradePackage"
+          },
+          "repair_manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentUpgradeRepairManifest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "request_intent": {
+            "$ref": "#/components/schemas/AgentUpgradeRequestIntent"
+          },
+          "sources": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AgentPackageSource"
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Sources",
+            "type": "object"
+          }
+        },
+        "required": [
+          "node_order",
+          "package",
+          "request_intent",
+          "sources"
+        ],
+        "title": "AgentUpgradeRolloutPayload",
+        "type": "object"
+      },
+      "AgentUpgradeRolloutResult": {
+        "additionalProperties": false,
+        "description": "What a rollout skipped, and the newer rollout that replaced it.",
+        "properties": {
+          "skipped": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "propertyNames": {
+                  "maxLength": 128,
+                  "minLength": 1
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Skipped"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Superseded By"
+          }
+        },
+        "title": "AgentUpgradeRolloutResult",
+        "type": "object"
+      },
       "AgentUpgradeTargetDiagnosticsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -581,6 +985,38 @@
           "retry_queued"
         ],
         "title": "AgentUpgradeTargetDiagnosticsResponse",
+        "type": "object"
+      },
+      "ArtifactDistributionPayload": {
+        "additionalProperties": false,
+        "description": "The complete payload accepted by the artifact transfer operation.",
+        "properties": {
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest"
+        ],
+        "title": "ArtifactDistributionPayload",
+        "type": "object"
+      },
+      "ArtifactDistributionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "downloaded_bytes": {
+            "maximum": 17592186044416,
+            "minimum": 0,
+            "title": "Downloaded Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "downloaded_bytes"
+        ],
+        "title": "ArtifactDistributionResult",
         "type": "object"
       },
       "ArtifactFileDeclaration": {
@@ -1709,6 +2145,529 @@
         "title": "AssetAvailability",
         "type": "string"
       },
+      "AvailabilityJobPayload": {
+        "additionalProperties": false,
+        "description": "One image-availability operation: intent, identity, progress and what it holds.",
+        "properties": {
+          "blockers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/OperationBlocker"
+                },
+                "maxItems": 16,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Blockers"
+          },
+          "build_dependency": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeBuildDependency"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "build_input_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Build Input Sha256"
+          },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeOperationCancellationResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "claim_owner": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Claim Owner"
+          },
+          "claim_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Claim Until"
+          },
+          "effective_execution_key": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Effective Execution Key"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "force_rebuild": {
+            "title": "Force Rebuild",
+            "type": "boolean"
+          },
+          "identity_key": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Identity Key"
+          },
+          "image_reference_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeImageReferenceIntent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "image_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeImageReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "kind": {
+            "const": "recipe.image.availability.v2",
+            "title": "Kind",
+            "type": "string"
+          },
+          "model_child": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityModelChild"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "model_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Digest"
+          },
+          "prebuilt_pull": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prebuilt Pull"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/OperationProgress"
+          },
+          "recipe": {
+            "$ref": "#/components/schemas/RecipeDefinition"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "removal_fence": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Removal Fence"
+          },
+          "request": {
+            "discriminator": {
+              "mapping": {
+                "retry": "#/components/schemas/RecipeRetryIntent",
+                "revision": "#/components/schemas/RecipeRevisionIntent",
+                "selector": "#/components/schemas/RecipeSelectorIntent"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeSelectorIntent"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeRevisionIntent"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeRetryIntent"
+              }
+            ],
+            "title": "Request"
+          },
+          "retry": {
+            "$ref": "#/components/schemas/AvailabilityRetry"
+          },
+          "retry_after_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry After At"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/AvailabilityRuntime"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "const": "available",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stage"
+          },
+          "supersession": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilitySupersession"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "schema_version",
+          "kind",
+          "request",
+          "recipe_revision_id",
+          "recipe_content_sha256",
+          "recipe",
+          "runtime",
+          "force_rebuild",
+          "progress",
+          "retry"
+        ],
+        "title": "AvailabilityJobPayload",
+        "type": "object"
+      },
+      "AvailabilityJobResult": {
+        "additionalProperties": false,
+        "description": "The image an availability operation produced, with its model child.",
+        "properties": {
+          "build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Build Id"
+          },
+          "build_input_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Build Input Sha256"
+          },
+          "image_bytes": {
+            "minimum": 1,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "image_digest": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "local_image_config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Local Image Config Id"
+          },
+          "model_child": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityModelChild"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "model_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Digest"
+          },
+          "oci_archive_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Oci Archive Sha256",
+            "type": "string"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "recipe_content_sha256",
+          "image_digest",
+          "oci_archive_sha256",
+          "image_bytes"
+        ],
+        "title": "AvailabilityJobResult",
+        "type": "object"
+      },
+      "AvailabilityModelChild": {
+        "additionalProperties": false,
+        "description": "The model-cache child an availability operation waits on, as last seen.",
+        "properties": {
+          "artifact_set_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Set Sha256"
+          },
+          "artifacts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RecipeImageAvailabilityArtifact"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifacts"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "model_content_digests": {
+            "anyOf": [
+              {
+                "items": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Content Digests"
+          },
+          "plan_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Digest"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Key"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "backoff",
+              "observing",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ],
+        "title": "AvailabilityModelChild",
+        "type": "object"
+      },
       "AvailabilityOperationFailure": {
         "additionalProperties": false,
         "description": "Shared failure wire contract for model and image availability.",
@@ -1845,6 +2804,264 @@
         "title": "AvailabilityRecoveryAction",
         "type": "string"
       },
+      "AvailabilityRetry": {
+        "additionalProperties": false,
+        "properties": {
+          "automatic_attempts": {
+            "minimum": 0,
+            "title": "Automatic Attempts",
+            "type": "integer"
+          },
+          "operator_retries": {
+            "minimum": 0,
+            "title": "Operator Retries",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "automatic_attempts",
+          "operator_retries"
+        ],
+        "title": "AvailabilityRetry",
+        "type": "object"
+      },
+      "AvailabilityRuntime": {
+        "additionalProperties": false,
+        "description": "The runtime projection an availability operation prepares an image for.\n\nThe compiled adapter fields appear once the runtime is resolved; an\noperation that only reuses a cached image carries the identity subset.",
+        "properties": {
+          "adapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Adapter"
+          },
+          "adapter_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Adapter Version"
+          },
+          "architecture": {
+            "title": "Architecture",
+            "type": "string"
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RuntimeArgument"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Arguments"
+          },
+          "build_input_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Build Input Sha256"
+          },
+          "builder_node_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Builder Node Id"
+          },
+          "entrypoint": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Entrypoint"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RuntimeEnvironmentEntry"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Environment"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image"
+          },
+          "image_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image Bytes"
+          },
+          "input_intent_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Input Intent Sha256"
+          },
+          "interface": {
+            "title": "Interface",
+            "type": "string"
+          },
+          "placement_environment": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Placement Environment"
+          },
+          "recipe_revision_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recipe Revision Id"
+          },
+          "telemetry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeTelemetryProjection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "writable_paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WritablePath"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Writable Paths"
+          }
+        },
+        "required": [
+          "interface",
+          "architecture"
+        ],
+        "title": "AvailabilityRuntime",
+        "type": "object"
+      },
+      "AvailabilitySupersession": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "superseded_at": {
+            "format": "date-time",
+            "title": "Superseded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "recipe_revision_id",
+          "superseded_at"
+        ],
+        "title": "AvailabilitySupersession",
+        "type": "object"
+      },
       "BlockerCategory": {
         "description": "The categories of the blocker allowlist (fail-closed raises).",
         "enum": [
@@ -1934,6 +3151,32 @@
           "detail"
         ],
         "title": "BoundedErrorResponse",
+        "type": "object"
+      },
+      "BuildCleanupPhaseOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeBuildCleanupRequest"
+          }
+        },
+        "required": [
+          "operation_id",
+          "node_id",
+          "payload"
+        ],
+        "title": "BuildCleanupPhaseOperation",
         "type": "object"
       },
       "BuildCompatibilityEvidence": {
@@ -2072,6 +3315,32 @@
           "path"
         ],
         "title": "BuildPatch",
+        "type": "object"
+      },
+      "BuildPhaseOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeBuildRequest"
+          }
+        },
+        "required": [
+          "operation_id",
+          "node_id",
+          "payload"
+        ],
+        "title": "BuildPhaseOperation",
         "type": "object"
       },
       "BuildResourcesProjection": {
@@ -3922,6 +5191,52 @@
         "title": "DesiredAssignmentState",
         "type": "string"
       },
+      "DistributedRecoveryMarker": {
+        "additionalProperties": false,
+        "description": "What a recovery Stop remembers so the Start it interrupted can be re-issued.",
+        "properties": {
+          "deadline": {
+            "format": "date-time",
+            "title": "Deadline",
+            "type": "string"
+          },
+          "failed_rank": {
+            "minimum": 0,
+            "title": "Failed Rank",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "start_phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecoveryStartItem"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start Phases"
+          }
+        },
+        "required": [
+          "schema_version",
+          "failed_rank",
+          "deadline"
+        ],
+        "title": "DistributedRecoveryMarker",
+        "type": "object"
+      },
       "DistributionAssignmentState": {
         "description": "Whether a node may still fetch the artifacts of a distribution assignment.",
         "enum": [
@@ -3947,6 +5262,98 @@
         ],
         "title": "DistributionCode",
         "type": "string"
+      },
+      "DistributionJobPayload": {
+        "additionalProperties": false,
+        "description": "One target-copy child: the plan it serves and what each Spark must receive.",
+        "properties": {
+          "assignments": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodeDistributionAssignment"
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Assignments",
+            "type": "object"
+          },
+          "cached_nodes": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Cached Nodes",
+            "type": "array"
+          },
+          "phase": {
+            "enum": [
+              "transfer",
+              "verify",
+              "prepare",
+              "cleanup",
+              "stop",
+              "start",
+              "uninstall",
+              "final_verify"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/DistributionTransferProgress"
+          },
+          "target_order": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Target Order",
+            "type": "array"
+          },
+          "target_totals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
+            "title": "Target Totals",
+            "type": "object"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "plan_digest",
+          "phase",
+          "progress",
+          "cached_nodes",
+          "target_order",
+          "target_totals",
+          "assignments"
+        ],
+        "title": "DistributionJobPayload",
+        "type": "object"
       },
       "DistributionObject": {
         "additionalProperties": false,
@@ -3982,6 +5389,55 @@
           "kind"
         ],
         "title": "DistributionObject",
+        "type": "object"
+      },
+      "DistributionTransferProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_bytes": {
+            "minimum": 0,
+            "title": "Completed Bytes",
+            "type": "integer"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchMemberReceipt"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "phase": {
+            "enum": [
+              "transfer",
+              "verify",
+              "prepare",
+              "cleanup",
+              "stop",
+              "start",
+              "uninstall",
+              "final_verify"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "total_bytes": {
+            "minimum": 0,
+            "title": "Total Bytes",
+            "type": "integer"
+          },
+          "total_bytes_known": {
+            "title": "Total Bytes Known",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "phase",
+          "completed_bytes",
+          "total_bytes",
+          "total_bytes_known",
+          "members"
+        ],
+        "title": "DistributionTransferProgress",
         "type": "object"
       },
       "EffectiveParallelism": {
@@ -4130,6 +5586,13 @@
           "identity_sha256"
         ],
         "title": "EffectiveSettingsSelection",
+        "type": "object"
+      },
+      "EmptyJobResult": {
+        "additionalProperties": false,
+        "description": "A kind that records its outcome elsewhere stores no result document.",
+        "properties": {},
+        "title": "EmptyJobResult",
         "type": "object"
       },
       "EndpointResponse": {
@@ -9592,6 +11055,32 @@
         "title": "InstallPartialEvidence",
         "type": "object"
       },
+      "InstallPhaseOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeInstallPayload"
+          }
+        },
+        "required": [
+          "operation_id",
+          "node_id",
+          "payload"
+        ],
+        "title": "InstallPhaseOperation",
+        "type": "object"
+      },
       "InstallationNodeChange": {
         "additionalProperties": false,
         "properties": {
@@ -10484,7 +11973,32 @@
         "title": "JobResumeResponse",
         "type": "object"
       },
-      "JsonValue": {},
+      "JobRunPhaseOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeJobRunRequest"
+          }
+        },
+        "required": [
+          "operation_id",
+          "node_id",
+          "payload"
+        ],
+        "title": "JobRunPhaseOperation",
+        "type": "object"
+      },
       "LibraryAssessmentCode": {
         "description": "Why a library entry is not assessed runnable on the current fleet.",
         "enum": [
@@ -15679,6 +17193,223 @@
         "title": "OperatorSurface",
         "type": "string"
       },
+      "OutcomeDone": {
+        "additionalProperties": false,
+        "description": "The effect is established; ``result`` is the operation's success body.",
+        "properties": {
+          "kind": {
+            "const": "done",
+            "title": "Kind",
+            "type": "string",
+            "x-vonk-typed-tag": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimePreflightResult"
+              },
+              {
+                "$ref": "#/components/schemas/AgentInstallResult"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeStartResult"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeStopResult"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeReconcileResult"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeUninstallResult"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeBuildEvidence"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeBuildCleanupEvidence"
+              },
+              {
+                "$ref": "#/components/schemas/RecipeJobRunResult"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactDistributionResult"
+              },
+              {
+                "$ref": "#/components/schemas/AgentUpgradeResult"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "required": [
+          "kind",
+          "result"
+        ],
+        "title": "OutcomeDone",
+        "type": "object"
+      },
+      "OutcomeEvidence": {
+        "additionalProperties": false,
+        "description": "Typed facts an executor attaches to a failed or unknown outcome.\n\nEvery field is bounded and already sanitized by the agent; the Controller\nsanitizes again at ingress.  ``diagnostics`` holds the bounded diagnostic\nlogs, ``helper_error_code``/``helper_exit_code`` the privileged helper's own\nverdict, ``stage``/``diagnostic`` the phase and a one-line cause.",
+        "properties": {
+          "diagnostic": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Diagnostic"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "helper_error_code": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Helper Error Code"
+          },
+          "helper_exit_code": {
+            "anyOf": [
+              {
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Helper Exit Code"
+          },
+          "package_activation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PackageActivationReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stage"
+          }
+        },
+        "title": "OutcomeEvidence",
+        "type": "object"
+      },
+      "OutcomeFailed": {
+        "additionalProperties": false,
+        "description": "A definite failure.\n\n``receipt`` is the process receipt of a one-shot recipe job whose process\nran and exited nonzero; every other failure reports ``code`` and ``reason``.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/FailureCode"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentFailureKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "kind": {
+            "const": "failed",
+            "title": "Kind",
+            "type": "string",
+            "x-vonk-typed-tag": true
+          },
+          "reason": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeJobRunResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry After Seconds"
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "reason"
+        ],
+        "title": "OutcomeFailed",
+        "type": "object"
+      },
       "OutcomeKind": {
         "description": "What an executor reported, as the lifecycle core sees it.\n\n``done``, ``cancelled`` and a ``failed`` that is not retryable are\n*definite*: the executor says what happened, and the row ends there.\n``unknown`` (and a retryable failure) says the effect may or may not have\nhappened, which the core resolves by observing it.  On the agent wire a\ncancellation is a definite ``failed`` outcome with the\n``operation_cancelled`` code.",
         "enum": [
@@ -15689,6 +17420,70 @@
         ],
         "title": "OutcomeKind",
         "type": "string"
+      },
+      "OutcomeUnknown": {
+        "additionalProperties": false,
+        "description": "The executor could not establish the effect.",
+        "properties": {
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "kind": {
+            "const": "unknown",
+            "title": "Kind",
+            "type": "string",
+            "x-vonk-typed-tag": true
+          },
+          "reason": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeJobRunResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry After Seconds"
+          },
+          "wait_reason": {
+            "$ref": "#/components/schemas/WaitReason"
+          }
+        },
+        "required": [
+          "kind",
+          "wait_reason",
+          "reason"
+        ],
+        "title": "OutcomeUnknown",
+        "type": "object"
       },
       "OutputLimits": {
         "additionalProperties": false,
@@ -15826,6 +17621,72 @@
           "outcome"
         ],
         "title": "PackageActivationReceipt",
+        "type": "object"
+      },
+      "PackageRollbackAuthority": {
+        "additionalProperties": false,
+        "properties": {
+          "activation_deadline": {
+            "format": "int64",
+            "maximum": 9223372036854775807,
+            "minimum": 1,
+            "title": "Activation Deadline",
+            "type": "integer"
+          },
+          "attempt_nonce": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Attempt Nonce",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PackageRollbackSource"
+          }
+        },
+        "required": [
+          "source",
+          "attempt_nonce",
+          "activation_deadline"
+        ],
+        "title": "PackageRollbackAuthority",
+        "type": "object"
+      },
+      "PackageRollbackSource": {
+        "additionalProperties": false,
+        "properties": {
+          "binary_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Binary Sha256",
+            "type": "string"
+          },
+          "helper_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Helper Sha256",
+            "type": "string"
+          },
+          "package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Package Sha256",
+            "type": "string"
+          },
+          "package_signature": {
+            "pattern": "^[0-9a-f]{128}$",
+            "title": "Package Signature",
+            "type": "string"
+          },
+          "package_version": {
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~:-]{0,127}$",
+            "title": "Package Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "package_sha256",
+          "package_signature",
+          "package_version",
+          "binary_sha256",
+          "helper_sha256"
+        ],
+        "title": "PackageRollbackSource",
         "type": "object"
       },
       "ParameterDefinition": {
@@ -15967,6 +17828,359 @@
           "severity"
         ],
         "title": "PreparationReason",
+        "type": "object"
+      },
+      "ProfileJobRunStopAuthorization": {
+        "description": "Current accepted profile Stop and exact older one-shot effect.",
+        "properties": {
+          "installation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "minimum": 1,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "missing_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 31,
+            "title": "Missing Node Ids",
+            "type": "array"
+          },
+          "plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "profile_application_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Profile Application Id",
+            "type": "string"
+          },
+          "profile_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Profile Digest",
+            "type": "string"
+          },
+          "profile_operation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Profile Operation Id",
+            "type": "string"
+          },
+          "profile_plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Profile Plan Digest",
+            "type": "string"
+          },
+          "profile_step": {
+            "minimum": 0,
+            "title": "Profile Step",
+            "type": "integer"
+          },
+          "reachable_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Reachable Node Ids",
+            "type": "array"
+          },
+          "recipe_revision_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "run_generation": {
+            "minimum": 1,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Run Node Ids",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "stop_plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Stop Plan Digest",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileJobRunStopTarget"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "unissued_artifact_job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unissued Artifact Job Ids",
+            "type": "array"
+          },
+          "workload_intent_ordinal": {
+            "minimum": 1,
+            "title": "Workload Intent Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "profile_application_id",
+          "profile_operation_id",
+          "profile_digest",
+          "profile_plan_digest",
+          "profile_step",
+          "run_id",
+          "installation_id",
+          "recipe_revision_id",
+          "mapping_id",
+          "mapping_generation",
+          "run_generation",
+          "plan_digest",
+          "workload_intent_ordinal",
+          "run_node_ids",
+          "reachable_node_ids",
+          "stop_plan_digest"
+        ],
+        "title": "ProfileJobRunStopAuthorization",
+        "type": "object"
+      },
+      "ProfileJobRunStopJob": {
+        "description": "The one-shot Stop parent persisted for a current profile owner.",
+        "properties": {
+          "execution_mode": {
+            "const": "profile-jobrun-stop",
+            "title": "Execution Mode",
+            "type": "string"
+          },
+          "owner_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "const": "run",
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "phases": {
+            "items": {
+              "items": {
+                "$ref": "#/components/schemas/ProfileJobRunStopPhaseItem"
+              },
+              "type": "array"
+            },
+            "minItems": 1,
+            "title": "Phases",
+            "type": "array"
+          },
+          "plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "profile_application_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Profile Application Id",
+            "type": "string"
+          },
+          "profile_operation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Profile Operation Id",
+            "type": "string"
+          },
+          "profile_stop_authorization": {
+            "$ref": "#/components/schemas/ProfileJobRunStopAuthorization"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "minimum": 1,
+            "title": "Workload Intent Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest",
+          "workload_intent_ordinal",
+          "execution_mode",
+          "profile_application_id",
+          "profile_operation_id",
+          "profile_stop_authorization",
+          "phases"
+        ],
+        "title": "ProfileJobRunStopJob",
+        "type": "object"
+      },
+      "ProfileJobRunStopPhaseItem": {
+        "properties": {
+          "node_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeStopPayload"
+          }
+        },
+        "required": [
+          "operation_id",
+          "node_id",
+          "payload"
+        ],
+        "title": "ProfileJobRunStopPhaseItem",
+        "type": "object"
+      },
+      "ProfileJobRunStopTarget": {
+        "description": "One exact transient runtime and its durable JobRun source.",
+        "properties": {
+          "artifact_job_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Artifact Job Id",
+            "type": "string"
+          },
+          "node_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "source_job_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Source Job Id",
+            "type": "string"
+          },
+          "source_operation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Source Operation Id",
+            "type": "string"
+          },
+          "stop_payload_sha256": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Stop Payload Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_job_id",
+          "source_job_id",
+          "source_operation_id",
+          "node_id",
+          "stop_payload_sha256"
+        ],
+        "title": "ProfileJobRunStopTarget",
+        "type": "object"
+      },
+      "ProfilePartialStop": {
+        "additionalProperties": false,
+        "description": "The reachable ranks a profile Stop reaches and the ranks it cannot.",
+        "properties": {
+          "missing_node_ids": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 31,
+            "minItems": 1,
+            "title": "Missing Node Ids",
+            "type": "array"
+          },
+          "target_node_ids": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Target Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "target_node_ids",
+          "missing_node_ids"
+        ],
+        "title": "ProfilePartialStop",
         "type": "object"
       },
       "ProfileReasonCode": {
@@ -16481,6 +18695,122 @@
         "title": "RecipeBuildCleanupEvidence",
         "type": "object"
       },
+      "RecipeBuildCleanupParent": {
+        "additionalProperties": false,
+        "properties": {
+          "build_cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeOperationCancellationResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "owner_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "installation",
+              "run",
+              "recipe-build",
+              "artifact-job"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "$ref": "#/components/schemas/BuildCleanupPhaseOperation"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phases"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest"
+        ],
+        "title": "RecipeBuildCleanupParent",
+        "type": "object"
+      },
+      "RecipeBuildCleanupRequest": {
+        "additionalProperties": false,
+        "description": "Stop only the transient service belonging to one retained build attempt.",
+        "properties": {
+          "build_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Build Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "build_id",
+          "operation_id"
+        ],
+        "title": "RecipeBuildCleanupRequest",
+        "type": "object"
+      },
       "RecipeBuildCode": {
         "description": "Recipe image build planning and recording problems.",
         "enum": [
@@ -16556,6 +18886,35 @@
         "title": "RecipeBuildDefinition",
         "type": "object"
       },
+      "RecipeBuildDependency": {
+        "additionalProperties": false,
+        "description": "A request persisted before dispatch, then its exact lifecycle child.",
+        "properties": {
+          "operation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operation Id"
+          },
+          "request_key": {
+            "format": "uuid",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_key"
+        ],
+        "title": "RecipeBuildDependency",
+        "type": "object"
+      },
       "RecipeBuildEnvironmentArgument": {
         "additionalProperties": false,
         "properties": {
@@ -16617,6 +18976,25 @@
           "oci_layout_sha256"
         ],
         "title": "RecipeBuildEvidence",
+        "type": "object"
+      },
+      "RecipeBuildIntent": {
+        "additionalProperties": false,
+        "description": "The accepted producer's intent, independent of its current consumers.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "independent",
+              "dependency"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "RecipeBuildIntent",
         "type": "object"
       },
       "RecipeBuildLimits": {
@@ -16918,6 +19296,140 @@
         "title": "RecipeBuildOptions",
         "type": "object"
       },
+      "RecipeBuildParent": {
+        "additionalProperties": false,
+        "properties": {
+          "build_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeBuildIntent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "force_rebuild": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Force Rebuild"
+          },
+          "owner_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "installation",
+              "run",
+              "recipe-build",
+              "artifact-job"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "$ref": "#/components/schemas/BuildPhaseOperation"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phases"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "prebuilt_image": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prebuilt Image"
+          },
+          "prebuilt_node_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prebuilt Node Id"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest"
+        ],
+        "title": "RecipeBuildParent",
+        "type": "object"
+      },
       "RecipeBuildRequest": {
         "additionalProperties": false,
         "description": "Build one recipe image for linux/arm64.",
@@ -17011,6 +19523,363 @@
           "source_bundle_sha256"
         ],
         "title": "RecipeBuildRequest",
+        "type": "object"
+      },
+      "RecipeCacheRemovalCheckpoint": {
+        "additionalProperties": false,
+        "description": "Durable resumable progress for a recipe image and model-cache removal.",
+        "properties": {
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "image_index": {
+            "minimum": 0,
+            "title": "Image Index",
+            "type": "integer"
+          },
+          "image_pending_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Pending Bytes"
+          },
+          "image_reclaimed_bytes": {
+            "minimum": 0,
+            "title": "Image Reclaimed Bytes",
+            "type": "integer"
+          },
+          "model_index": {
+            "minimum": 0,
+            "title": "Model Index",
+            "type": "integer"
+          },
+          "model_reclaimed_bytes": {
+            "minimum": 0,
+            "title": "Model Reclaimed Bytes",
+            "type": "integer"
+          },
+          "retry_attempts": {
+            "minimum": 0,
+            "title": "Retry Attempts",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "image_index",
+          "image_pending_bytes",
+          "image_reclaimed_bytes",
+          "model_index",
+          "model_reclaimed_bytes",
+          "retry_attempts",
+          "failure"
+        ],
+        "title": "RecipeCacheRemovalCheckpoint",
+        "type": "object"
+      },
+      "RecipeCacheRemovalIntent": {
+        "additionalProperties": false,
+        "description": "Exact accepted removal request stored on its existing Job owner.",
+        "properties": {
+          "action": {
+            "const": "remove",
+            "title": "Action",
+            "type": "string"
+          },
+          "actor": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Actor",
+            "type": "string"
+          },
+          "kind": {
+            "const": "recipe.cache.remove.v2",
+            "title": "Kind",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "removal_fence": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Removal Fence",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "review_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Review Digest",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selector": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "with_model": {
+            "title": "With Model",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schema_version",
+          "kind",
+          "action",
+          "selector",
+          "actor",
+          "request_key",
+          "review_digest",
+          "recipe_revision_id",
+          "with_model",
+          "removal_fence"
+        ],
+        "title": "RecipeCacheRemovalIntent",
+        "type": "object"
+      },
+      "RecipeCacheRemovalModelChild": {
+        "additionalProperties": false,
+        "description": "One disjoint model-set removal child accepted with the recipe intent.",
+        "properties": {
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "selected_sets": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Selected Sets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "request_key",
+          "operation_id",
+          "plan_digest",
+          "selected_sets"
+        ],
+        "title": "RecipeCacheRemovalModelChild",
+        "type": "object"
+      },
+      "RecipeCacheRemovalOwner": {
+        "additionalProperties": false,
+        "description": "One accepted exact plan plus its canonical durable effect checkpoint.",
+        "properties": {
+          "checkpoint": {
+            "$ref": "#/components/schemas/RecipeCacheRemovalCheckpoint"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/RecipeCacheRemovalPlan"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "plan",
+          "checkpoint"
+        ],
+        "title": "RecipeCacheRemovalOwner",
+        "type": "object"
+      },
+      "RecipeCacheRemovalPlan": {
+        "additionalProperties": false,
+        "description": "Immutable exact targets bound to the current request owner.",
+        "properties": {
+          "image_archives": {
+            "items": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "title": "Image Archives",
+            "type": "array"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/RecipeCacheRemovalIntent"
+          },
+          "model_children": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeCacheRemovalModelChild"
+            },
+            "title": "Model Children",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "intent",
+          "image_archives",
+          "model_children"
+        ],
+        "title": "RecipeCacheRemovalPlan",
+        "type": "object"
+      },
+      "RecipeCacheRemovalResult": {
+        "additionalProperties": false,
+        "description": "Stored terminal summary, bound to the Job's immutable intent.",
+        "properties": {
+          "action": {
+            "const": "remove",
+            "title": "Action",
+            "type": "string"
+          },
+          "cancelled_builds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Cancelled Builds",
+            "type": "array"
+          },
+          "cancelled_operations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Cancelled Operations",
+            "type": "array"
+          },
+          "model_removals": {
+            "items": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "title": "Model Removals",
+            "type": "array"
+          },
+          "next_actions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Next Actions",
+            "type": "array"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "preserved": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Preserved",
+            "type": "array"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "reclaimed_bytes": {
+            "minimum": 0,
+            "title": "Reclaimed Bytes",
+            "type": "integer"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "review_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Review Digest",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selector": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "state": {
+            "const": "succeeded",
+            "title": "State",
+            "type": "string"
+          },
+          "with_model": {
+            "title": "With Model",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schema_version",
+          "action",
+          "selector",
+          "request_key",
+          "review_digest",
+          "operation_id",
+          "recipe_revision_id",
+          "with_model",
+          "state",
+          "reclaimed_bytes",
+          "model_removals",
+          "preserved",
+          "cancelled_operations",
+          "cancelled_builds",
+          "next_actions"
+        ],
+        "title": "RecipeCacheRemovalResult",
         "type": "object"
       },
       "RecipeCancellationRequest": {
@@ -18158,6 +21027,121 @@
         "title": "RecipeInputSlot",
         "type": "object"
       },
+      "RecipeInstallParent": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "owner_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "installation",
+              "run",
+              "recipe-build",
+              "artifact-job"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "$ref": "#/components/schemas/InstallPhaseOperation"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phases"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest"
+        ],
+        "title": "RecipeInstallParent",
+        "type": "object"
+      },
+      "RecipeInstallPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "compiled_execution_plan": {
+            "$ref": "#/components/schemas/CompiledExecutionPlan"
+          },
+          "expected_bytes": {
+            "maximum": 17592186044416,
+            "minimum": 0,
+            "title": "Expected Bytes",
+            "type": "integer"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "plan_digest",
+          "expected_bytes",
+          "compiled_execution_plan"
+        ],
+        "title": "RecipeInstallPayload",
+        "type": "object"
+      },
       "RecipeInstallationChange": {
         "additionalProperties": false,
         "properties": {
@@ -18264,6 +21248,135 @@
           "change_effect"
         ],
         "title": "RecipeIntegerSetting",
+        "type": "object"
+      },
+      "RecipeJobActivateParent": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "owner_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "installation",
+              "run",
+              "recipe-build",
+              "artifact-job"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest"
+        ],
+        "title": "RecipeJobActivateParent",
+        "type": "object"
+      },
+      "RecipeJobEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "elapsed_milliseconds": {
+            "maximum": 604800000,
+            "minimum": 0,
+            "title": "Elapsed Milliseconds",
+            "type": "integer"
+          },
+          "peak_memory_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Memory Bytes"
+          }
+        },
+        "required": [
+          "elapsed_milliseconds",
+          "peak_memory_bytes"
+        ],
+        "title": "RecipeJobEvidence",
+        "type": "object"
+      },
+      "RecipeJobFile": {
+        "additionalProperties": false,
+        "properties": {
+          "media_type": {
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "maximum": 1073741824,
+            "minimum": 0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "media_type",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "RecipeJobFile",
         "type": "object"
       },
       "RecipeJobInput": {
@@ -18444,6 +21557,352 @@
           "slots"
         ],
         "title": "RecipeJobOutput",
+        "type": "object"
+      },
+      "RecipeJobOutputLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_media_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Allowed Media Types",
+            "type": "array"
+          },
+          "max_file_bytes": {
+            "maximum": 1073741824,
+            "minimum": 1,
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "maximum": 32,
+            "minimum": 1,
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "max_total_bytes": {
+            "maximum": 2147483648,
+            "minimum": 1,
+            "title": "Max Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_files",
+          "max_file_bytes",
+          "max_total_bytes",
+          "allowed_media_types"
+        ],
+        "title": "RecipeJobOutputLimits",
+        "type": "object"
+      },
+      "RecipeJobOutputManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeJobFile"
+            },
+            "maxItems": 32,
+            "title": "Files",
+            "type": "array"
+          },
+          "manifest_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Manifest Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "total_bytes": {
+            "maximum": 2147483648,
+            "minimum": 0,
+            "title": "Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "total_bytes",
+          "files",
+          "manifest_sha256"
+        ],
+        "title": "RecipeJobOutputManifest",
+        "type": "object"
+      },
+      "RecipeJobOutputMapping": {
+        "additionalProperties": false,
+        "properties": {
+          "extensions": {
+            "items": {
+              "pattern": "^\\.[a-z0-9][a-z0-9._-]{0,15}$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Extensions",
+            "type": "array"
+          },
+          "media_type": {
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "slot": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+            "title": "Slot",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot",
+          "media_type",
+          "extensions"
+        ],
+        "title": "RecipeJobOutputMapping",
+        "type": "object"
+      },
+      "RecipeJobRunParent": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "owner_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "installation",
+              "run",
+              "recipe-build",
+              "artifact-job"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobRunPhaseOperation"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phases"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest"
+        ],
+        "title": "RecipeJobRunParent",
+        "type": "object"
+      },
+      "RecipeJobRunRequest": {
+        "additionalProperties": false,
+        "description": "One job run; interface, image, placement and timeout come from the plan.",
+        "properties": {
+          "compiled_execution_plan": {
+            "$ref": "#/components/schemas/CompiledExecutionPlan"
+          },
+          "input_manifest_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Input Manifest Sha256",
+            "type": "string"
+          },
+          "input_total_bytes": {
+            "maximum": 1073741824,
+            "minimum": 0,
+            "title": "Input Total Bytes",
+            "type": "integer"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeJobInputFile"
+            },
+            "maxItems": 32,
+            "title": "Inputs",
+            "type": "array"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "job_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "output_limits": {
+            "$ref": "#/components/schemas/RecipeJobOutputLimits"
+          },
+          "output_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeJobOutputMapping"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Output Mappings",
+            "type": "array"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "run_generation": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "run_id",
+          "installation_id",
+          "mapping_id",
+          "run_generation",
+          "recipe_revision_id",
+          "plan_digest",
+          "input_manifest_sha256",
+          "input_total_bytes",
+          "inputs",
+          "compiled_execution_plan",
+          "output_mappings",
+          "output_limits"
+        ],
+        "title": "RecipeJobRunRequest",
+        "type": "object"
+      },
+      "RecipeJobRunResult": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/RecipeJobEvidence"
+          },
+          "exit_code": {
+            "maximum": 255,
+            "minimum": 0,
+            "title": "Exit Code",
+            "type": "integer"
+          },
+          "job_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "output_manifest": {
+            "$ref": "#/components/schemas/RecipeJobOutputManifest"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "run_id",
+          "exit_code",
+          "output_manifest",
+          "evidence"
+        ],
+        "title": "RecipeJobRunResult",
         "type": "object"
       },
       "RecipeJobServingRequest": {
@@ -18805,6 +22264,21 @@
         "title": "RecipeOpenAIInterface",
         "type": "object"
       },
+      "RecipeOperationActivatedResult": {
+        "additionalProperties": false,
+        "properties": {
+          "activated": {
+            "const": true,
+            "title": "Activated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "activated"
+        ],
+        "title": "RecipeOperationActivatedResult",
+        "type": "object"
+      },
       "RecipeOperationCancellationResult": {
         "additionalProperties": false,
         "description": "Cancellation metadata merged into a pending lifecycle result.",
@@ -18978,6 +22452,258 @@
         ],
         "title": "RecipeOperationCode",
         "type": "string"
+      },
+      "RecipeOperationProgressResult": {
+        "additionalProperties": false,
+        "description": "Partial evidence retained while a multi-node operation is running.",
+        "properties": {
+          "launch_evidence": {
+            "anyOf": [
+              {
+                "patternProperties": {
+                  "^spk_[0-9a-f]{32}$": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AgentInstallResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeBuildEvidence"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeBuildCleanupEvidence"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeStartResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeStopResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeUninstallResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeReconcileResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RemovedRecipeNodeResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/AgentFailureResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/LifecycleCodeFailureResult"
+                      }
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Launch Evidence"
+          },
+          "node_evidence": {
+            "anyOf": [
+              {
+                "patternProperties": {
+                  "^spk_[0-9a-f]{32}$": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AgentInstallResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeBuildEvidence"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeBuildCleanupEvidence"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeStartResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeStopResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeUninstallResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeReconcileResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RemovedRecipeNodeResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/AgentFailureResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/LifecycleCodeFailureResult"
+                      }
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Node Evidence"
+          }
+        },
+        "title": "RecipeOperationProgressResult",
+        "type": "object"
+      },
+      "RecipeOperationResult": {
+        "additionalProperties": false,
+        "description": "Terminal aggregate emitted by the durable lifecycle job projector.",
+        "properties": {
+          "failed_nodes": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "title": "Failed Nodes",
+            "type": "array"
+          },
+          "launch_evidence": {
+            "anyOf": [
+              {
+                "patternProperties": {
+                  "^spk_[0-9a-f]{32}$": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AgentInstallResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeBuildEvidence"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeBuildCleanupEvidence"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeStartResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeStopResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeUninstallResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeReconcileResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RemovedRecipeNodeResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/AgentFailureResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/LifecycleCodeFailureResult"
+                      }
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Launch Evidence"
+          },
+          "node_evidence": {
+            "patternProperties": {
+              "^spk_[0-9a-f]{32}$": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AgentInstallResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeBuildEvidence"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeBuildCleanupEvidence"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeStartResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeStopResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeUninstallResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeReconcileResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RemovedRecipeNodeResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AgentFailureResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LifecycleCodeFailureResult"
+                  }
+                ]
+              }
+            },
+            "title": "Node Evidence",
+            "type": "object"
+          },
+          "recovery_error": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recovery Error"
+          },
+          "successful_nodes": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "title": "Successful Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "successful_nodes",
+          "failed_nodes",
+          "node_evidence"
+        ],
+        "title": "RecipeOperationResult",
+        "type": "object"
+      },
+      "RecipeOperationStoppedResult": {
+        "additionalProperties": false,
+        "properties": {
+          "stopped": {
+            "const": true,
+            "title": "Stopped",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "stopped"
+        ],
+        "title": "RecipeOperationStoppedResult",
+        "type": "object"
       },
       "RecipeOperatorRequest": {
         "additionalProperties": false,
@@ -19662,6 +23388,122 @@
         "title": "RecipeReadinessCheck",
         "type": "object"
       },
+      "RecipeReconcileParent": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "owner_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "installation",
+              "run",
+              "recipe-build",
+              "artifact-job"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReconcilePhaseOperation"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phases"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "reconciliation_authority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchReconciliationAuthority"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest"
+        ],
+        "title": "RecipeReconcileParent",
+        "type": "object"
+      },
+      "RecipeReconcilePayload": {
+        "additionalProperties": false,
+        "description": "Authority to remove one managed install with an invalid launch contract.",
+        "properties": {
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "plan_digest"
+        ],
+        "title": "RecipeReconcilePayload",
+        "type": "object"
+      },
       "RecipeReconcileResult": {
         "additionalProperties": false,
         "description": "A reconciliation succeeds with an empty result.",
@@ -20325,6 +24167,206 @@
         "title": "RecipeSetting",
         "type": "object"
       },
+      "RecipeStartParent": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "owner_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "installation",
+              "run",
+              "recipe-build",
+              "artifact-job"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "$ref": "#/components/schemas/StartPhaseOperation"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phases"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DistributedRecoveryMarker"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "start_anchored_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start Anchored At"
+          },
+          "start_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start Deadline"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest"
+        ],
+        "title": "RecipeStartParent",
+        "type": "object"
+      },
+      "RecipeStartPayload": {
+        "additionalProperties": false,
+        "description": "Start one rank; placement, image and addresses come from the plan.",
+        "properties": {
+          "compiled_execution_plan": {
+            "$ref": "#/components/schemas/CompiledExecutionPlan"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "rank-launch",
+                  "collective-readiness"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phase"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "run_generation": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "start_deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "format": "date-time",
+            "title": "Start Deadline"
+          }
+        },
+        "required": [
+          "run_id",
+          "installation_id",
+          "recipe_revision_id",
+          "mapping_id",
+          "plan_digest",
+          "compiled_execution_plan",
+          "run_generation"
+        ],
+        "title": "RecipeStartPayload",
+        "type": "object"
+      },
       "RecipeStartResult": {
         "additionalProperties": false,
         "description": "The serving rank reports its endpoint; every other rank reports ``{}``.",
@@ -20342,6 +24384,172 @@
           }
         },
         "title": "RecipeStartResult",
+        "type": "object"
+      },
+      "RecipeStopParent": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "owner_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "installation",
+              "run",
+              "recipe-build",
+              "artifact-job"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "$ref": "#/components/schemas/StopPhaseOperation"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phases"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "profile_partial_stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProfilePartialStop"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DistributedRecoveryMarker"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest"
+        ],
+        "title": "RecipeStopParent",
+        "type": "object"
+      },
+      "RecipeStopPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "cancel_pending_start": {
+            "default": false,
+            "title": "Cancel Pending Start",
+            "type": "boolean"
+          },
+          "compiled_execution_plan": {
+            "$ref": "#/components/schemas/CompiledExecutionPlan"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "run_generation": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "target_runtime_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Target Runtime Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "target_runtime_id",
+          "run_generation",
+          "installation_id",
+          "recipe_revision_id",
+          "mapping_id",
+          "plan_digest",
+          "compiled_execution_plan"
+        ],
+        "title": "RecipeStopPayload",
         "type": "object"
       },
       "RecipeStopResult": {
@@ -20427,6 +24635,129 @@
           "resources"
         ],
         "title": "RecipeTopologyRole",
+        "type": "object"
+      },
+      "RecipeUninstallParent": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_mode": {
+            "anyOf": [
+              {
+                "const": "one-shot-jobs",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Execution Mode"
+          },
+          "owner_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "installation",
+              "run",
+              "recipe-build",
+              "artifact-job"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "$ref": "#/components/schemas/UninstallPhaseOperation"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phases"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "owner_kind",
+          "owner_id",
+          "plan_digest"
+        ],
+        "title": "RecipeUninstallParent",
+        "type": "object"
+      },
+      "RecipeUninstallPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup_model_content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Model Content Sha256"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "plan_digest",
+          "recipe_content_sha256",
+          "cleanup_model_content_sha256"
+        ],
+        "title": "RecipeUninstallPayload",
         "type": "object"
       },
       "RecipeUninstallResult": {
@@ -20551,6 +24882,94 @@
         ],
         "title": "RecipeUpdateCode",
         "type": "string"
+      },
+      "RecipeUpdateDocument": {
+        "properties": {
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeOperationCancellationResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeUpdateChild"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "claim_owner": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Claim Owner"
+          },
+          "claim_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Claim Until"
+          },
+          "kind": {
+            "const": "recipe.cache.update.v2",
+            "default": "recipe.cache.update.v2",
+            "title": "Kind",
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Next Attempt At"
+          },
+          "next_child": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Next Child",
+            "type": "integer"
+          },
+          "request": {
+            "$ref": "#/components/schemas/RecipeUpdateScope"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request",
+          "children"
+        ],
+        "title": "RecipeUpdateDocument",
+        "type": "object"
       },
       "RecipeUpdateFailure": {
         "description": "Bounded admission failure or observation of the referenced child's failure.",
@@ -20974,6 +25393,52 @@
         ],
         "title": "ReconcileCode",
         "type": "string"
+      },
+      "ReconcilePhaseOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeReconcilePayload"
+          }
+        },
+        "required": [
+          "operation_id",
+          "node_id",
+          "payload"
+        ],
+        "title": "ReconcilePhaseOperation",
+        "type": "object"
+      },
+      "RecoveryStartItem": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeStartPayload"
+          }
+        },
+        "required": [
+          "node_id",
+          "payload"
+        ],
+        "title": "RecoveryStartItem",
+        "type": "object"
       },
       "RemovedRecipeNodeResult": {
         "additionalProperties": false,
@@ -21747,6 +26212,101 @@
         "title": "RunState",
         "type": "string"
       },
+      "RunSwitchApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "default": "run",
+            "enum": [
+              "install",
+              "run",
+              "switch"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "alias": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+            "title": "Alias",
+            "type": "string"
+          },
+          "invocation": {
+            "$ref": "#/components/schemas/InvocationMetadata"
+          },
+          "model_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Content Sha256",
+            "type": "string"
+          },
+          "option_choices": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 16,
+            "title": "Option Choices",
+            "type": "object"
+          },
+          "plan_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Digest"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Key"
+          },
+          "retention": {
+            "default": "retain-cached",
+            "enum": [
+              "retain-cached",
+              "reclaim-unreferenced"
+            ],
+            "title": "Retention",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "spark_group": {
+            "$ref": "#/components/schemas/SparkGroup"
+          }
+        },
+        "required": [
+          "model_content_sha256",
+          "recipe_revision_id",
+          "spark_group",
+          "alias"
+        ],
+        "title": "RunSwitchApplyRequest",
+        "type": "object"
+      },
       "RunSwitchAssessment": {
         "additionalProperties": false,
         "description": "Planner-owned admission and observations shared by operator reviews.",
@@ -22185,6 +26745,62 @@
           }
         },
         "title": "RunSwitchChildProgress",
+        "type": "object"
+      },
+      "RunSwitchCleanupIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup_mode": {
+            "default": "uninstall",
+            "enum": [
+              "uninstall",
+              "reconcile"
+            ],
+            "title": "Cleanup Mode",
+            "type": "string"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Digest"
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Key"
+          },
+          "type": {
+            "const": "cleanup",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "type"
+        ],
+        "title": "RunSwitchCleanupIntent",
         "type": "object"
       },
       "RunSwitchCleanupResult": {
@@ -22632,6 +27248,94 @@
         "title": "RunSwitchContainerBuildResult",
         "type": "object"
       },
+      "RunSwitchDistributionChildResult": {
+        "additionalProperties": false,
+        "description": "Durable projection of one target-copy child operation.\n\nA child Job has a different persisted shape from a parent phase receipt:\nit owns member progress and per-node handoff evidence.  Keeping that\nprojection separate prevents a progress snapshot from being accepted as\na completed phase result.",
+        "properties": {
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactVerificationEvidence"
+            },
+            "maxItems": 32,
+            "title": "Evidence",
+            "type": "array"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failure Kind"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/RunSwitchMemberReceipt"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Members",
+            "type": "array"
+          },
+          "phase": {
+            "const": "transfer",
+            "title": "Phase",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/RunSwitchChildProgress"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          },
+          "subphase": {
+            "const": "target-copy",
+            "title": "Subphase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "subphase",
+          "progress",
+          "members",
+          "evidence"
+        ],
+        "title": "RunSwitchDistributionChildResult",
+        "type": "object"
+      },
       "RunSwitchFinalVerifyResult": {
         "additionalProperties": false,
         "properties": {
@@ -22777,6 +27481,118 @@
           "ranks"
         ],
         "title": "RunSwitchInstallationVerifyResult",
+        "type": "object"
+      },
+      "RunSwitchJobPayload": {
+        "additionalProperties": false,
+        "description": "The reviewed plan, the request that asked for it and the live progress.",
+        "properties": {
+          "action": {
+            "enum": [
+              "install",
+              "run",
+              "switch",
+              "stop",
+              "cleanup"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "cleanup": "#/components/schemas/RunSwitchCleanupIntent",
+                    "profile-stop": "#/components/schemas/RunSwitchProfileStopIntent",
+                    "run": "#/components/schemas/RunSwitchRunIntent",
+                    "stop": "#/components/schemas/RunSwitchStopIntent"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RunSwitchRunIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchStopIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchCleanupIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchProfileStopIntent"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Intent"
+          },
+          "operation_kind": {
+            "enum": [
+              "recipe.run-switch.v2",
+              "recipe.stop.v2",
+              "recipe.cleanup.v2"
+            ],
+            "title": "Operation Kind",
+            "type": "string"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/RunSwitchPlan"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/RunSwitchOperationResult"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry Of"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "workload_intent_ordinal": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workload Intent Ordinal"
+          }
+        },
+        "required": [
+          "schema_version",
+          "operation_kind",
+          "action",
+          "plan_digest",
+          "plan",
+          "progress"
+        ],
+        "title": "RunSwitchJobPayload",
         "type": "object"
       },
       "RunSwitchMemberProgress": {
@@ -24272,6 +29088,31 @@
         "title": "RunSwitchPreparedResult",
         "type": "object"
       },
+      "RunSwitchProfileStopIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "profile_stop_scope": {
+            "$ref": "#/components/schemas/RunSwitchProfileStopScope"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "profile-stop",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "run_id",
+          "profile_stop_scope"
+        ],
+        "title": "RunSwitchProfileStopIntent",
+        "type": "object"
+      },
       "RunSwitchProfileStopScope": {
         "additionalProperties": false,
         "description": "Reviewed profile-only cleanup of the reachable ranks in a lost group.\n\nThe full accepted topology remains visible even though only its reachable\nsubset is sent Stop work.  Missing ranks are explicit so a partial cleanup\ncan never be presented as a successful full-group stop.",
@@ -24704,6 +29545,25 @@
         "title": "RunSwitchReconciliationTarget",
         "type": "object"
       },
+      "RunSwitchRunIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/RunSwitchApplyRequest"
+          },
+          "type": {
+            "const": "run",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "request"
+        ],
+        "title": "RunSwitchRunIntent",
+        "type": "object"
+      },
       "RunSwitchRuntimeImageReferenceIntent": {
         "additionalProperties": false,
         "description": "Exact image bytes provisionally protected by a current RunSwitch job.",
@@ -25041,6 +29901,62 @@
         "title": "RunSwitchStartResult",
         "type": "object"
       },
+      "RunSwitchStopIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "invocation": {
+            "$ref": "#/components/schemas/InvocationMetadata"
+          },
+          "plan_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plan Digest"
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Key"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "type": {
+            "const": "stop",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "type"
+        ],
+        "title": "RunSwitchStopIntent",
+        "type": "object"
+      },
       "RunSwitchStopResult": {
         "additionalProperties": false,
         "properties": {
@@ -25327,6 +30243,46 @@
         "title": "RunSwitchVerifyResult",
         "type": "object"
       },
+      "RuntimeArgument": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "setting": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Setting"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/pydantic__types__JsonValue",
+                "x-vonk-passthrough": "A structured engine argument value is the upstream recipe's own JSON (RuntimeArgumentValue in vonk_forge_contracts); the engine, not the Controller, defines its structure, and the mapping must keep it exact."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RuntimeArgument",
+        "type": "object"
+      },
       "RuntimeArgumentValue": {
         "anyOf": [
           {
@@ -25354,6 +30310,40 @@
             "type": "object"
           }
         ]
+      },
+      "RuntimeEnvironmentEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "RuntimeEnvironmentEntry",
+        "type": "object"
       },
       "RuntimeImageCode": {
         "description": "Runtime image preparation, receipt and registry problems.",
@@ -25646,6 +30636,68 @@
           "runtime_adapter_sha256"
         ],
         "title": "RuntimeImageReceipt",
+        "type": "object"
+      },
+      "RuntimeImageReferenceIntent": {
+        "additionalProperties": false,
+        "description": "Exact SQL coordination identity for an image archive publication.\n\nThis intent protects an archive while the existing availability owner is\npublishing it. It is not evidence that managed bytes or a receipt exist;\nthose facts remain owned by ``RuntimeImageStorage``.",
+        "properties": {
+          "attempt": {
+            "minimum": 1,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "claim_owner": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Claim Owner",
+            "type": "string"
+          },
+          "image_bytes": {
+            "maximum": 17592186044416,
+            "minimum": 1,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "oci_archive_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Oci Archive Sha256",
+            "type": "string"
+          },
+          "operation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "operation_id",
+          "recipe_revision_id",
+          "attempt",
+          "claim_owner",
+          "oci_archive_sha256",
+          "image_digest",
+          "image_bytes"
+        ],
+        "title": "RuntimeImageReferenceIntent",
         "type": "object"
       },
       "RuntimeImageStorageImpact": {
@@ -25978,6 +31030,44 @@
         "title": "RuntimePreflightFindingCode",
         "type": "string"
       },
+      "RuntimePreflightRequest": {
+        "additionalProperties": false,
+        "description": "Check this linux/arm64 host can run one recipe runtime.",
+        "properties": {
+          "fabric_connectivity": {
+            "enum": [
+              "none",
+              "connected"
+            ],
+            "title": "Fabric Connectivity",
+            "type": "string"
+          },
+          "fabric_minimum_mbps": {
+            "maximum": 18446744073709551615,
+            "minimum": 0,
+            "title": "Fabric Minimum Mbps",
+            "type": "integer"
+          },
+          "minimum_free_bytes": {
+            "maximum": 18446744073709551615,
+            "minimum": 0,
+            "title": "Minimum Free Bytes",
+            "type": "integer"
+          },
+          "source_build": {
+            "title": "Source Build",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_build",
+          "minimum_free_bytes",
+          "fabric_connectivity",
+          "fabric_minimum_mbps"
+        ],
+        "title": "RuntimePreflightRequest",
+        "type": "object"
+      },
       "RuntimePreflightResult": {
         "additionalProperties": false,
         "properties": {
@@ -26007,6 +31097,56 @@
           "findings"
         ],
         "title": "RuntimePreflightResult",
+        "type": "object"
+      },
+      "RuntimeTelemetryProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "engine_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Engine Version"
+          },
+          "metrics_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Metrics Format"
+          },
+          "metrics_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Metrics Path"
+          }
+        },
+        "required": [
+          "engine"
+        ],
+        "title": "RuntimeTelemetryProjection",
         "type": "object"
       },
       "SecurityRefusal": {
@@ -26522,6 +31662,32 @@
         "title": "SparkGroupNode",
         "type": "object"
       },
+      "StartPhaseOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeStartPayload"
+          }
+        },
+        "required": [
+          "operation_id",
+          "node_id",
+          "payload"
+        ],
+        "title": "StartPhaseOperation",
+        "type": "object"
+      },
       "StateAlias": {
         "description": "The retired spellings of a stored lifecycle state.\n\nThey are accepted as input for one release (API filters, CLI arguments) and\nadopted when an old row is read; nothing writes them any more.  This is the\nonly place the words may be spelled: the vocabulary ratchet allows them\nnowhere else.",
         "enum": [
@@ -26613,6 +31779,32 @@
         ],
         "title": "StopOutcome",
         "type": "string"
+      },
+      "StopPhaseOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeStopPayload"
+          }
+        },
+        "required": [
+          "operation_id",
+          "node_id",
+          "payload"
+        ],
+        "title": "StopPhaseOperation",
+        "type": "object"
       },
       "StopPlanCode": {
         "description": "Why a stop plan is stale or cannot be taken.",
@@ -27683,6 +32875,32 @@
         "title": "TopologyCode",
         "type": "string"
       },
+      "UninstallPhaseOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipeUninstallPayload"
+          }
+        },
+        "required": [
+          "operation_id",
+          "node_id",
+          "payload"
+        ],
+        "title": "UninstallPhaseOperation",
+        "type": "object"
+      },
       "UninstallPlanCode": {
         "description": "Why an uninstall plan is blocked or incomplete.",
         "enum": [
@@ -27858,6 +33076,30 @@
         ],
         "title": "WaitVerdict",
         "type": "string"
+      },
+      "WritablePath": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "persistent": {
+            "title": "Persistent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "persistent"
+        ],
+        "title": "WritablePath",
+        "type": "object"
       },
       "pydantic__types__JsonValue": {},
       "vonk_forge_contracts__recipe__JsonValue": {
@@ -34327,6 +39569,39 @@
     }
   },
   "x-vonk-json-columns": {
+    "agent_operation_attempts.progress": [
+      "OperationProgress"
+    ],
+    "agent_operation_attempts.result": [
+      "AgentFailureResult",
+      "AgentInstallResult",
+      "AgentUpgradeResult",
+      "ArtifactDistributionResult",
+      "OutcomeDone",
+      "OutcomeFailed",
+      "OutcomeUnknown",
+      "RecipeBuildCleanupEvidence",
+      "RecipeBuildEvidence",
+      "RecipeJobRunResult",
+      "RecipeReconcileResult",
+      "RecipeStartResult",
+      "RecipeStopResult",
+      "RecipeUninstallResult",
+      "RuntimePreflightResult"
+    ],
+    "agent_operations.payload": [
+      "AgentUpgradePayload",
+      "ArtifactDistributionPayload",
+      "RecipeBuildCleanupRequest",
+      "RecipeBuildRequest",
+      "RecipeInstallPayload",
+      "RecipeJobRunRequest",
+      "RecipeReconcilePayload",
+      "RecipeStartPayload",
+      "RecipeStopPayload",
+      "RecipeUninstallPayload",
+      "RuntimePreflightRequest"
+    ],
     "artifact_distribution_assignments.objects": [
       "DistributionObject"
     ],
@@ -34368,6 +39643,40 @@
       "RecipeInstallationPayload",
       "RecipeRunPayload",
       "RunNodePayload"
+    ],
+    "jobs.payload": [
+      "AgentUpgradeRolloutPayload",
+      "AvailabilityJobPayload",
+      "DistributionJobPayload",
+      "ProfileJobRunStopJob",
+      "RecipeBuildCleanupParent",
+      "RecipeBuildParent",
+      "RecipeCacheRemovalOwner",
+      "RecipeInstallParent",
+      "RecipeJobActivateParent",
+      "RecipeJobRunParent",
+      "RecipeReconcileParent",
+      "RecipeStartParent",
+      "RecipeStopParent",
+      "RecipeUninstallParent",
+      "RecipeUpdateDocument",
+      "RunSwitchJobPayload",
+      "RuntimePreflightRequest"
+    ],
+    "jobs.result": [
+      "AgentUpgradeRolloutResult",
+      "AvailabilityJobResult",
+      "EmptyJobResult",
+      "RecipeCacheRemovalResult",
+      "RecipeJobRunResult",
+      "RecipeOperationActivatedResult",
+      "RecipeOperationCancellationResult",
+      "RecipeOperationProgressResult",
+      "RecipeOperationResult",
+      "RecipeOperationStoppedResult",
+      "RecipeUpdateFailure",
+      "RunSwitchDistributionChildResult",
+      "RunSwitchOperationResult"
     ],
     "model_cache_operations.payload": [
       "ModelCacheDownloadPayload",

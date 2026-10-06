@@ -1172,6 +1172,26 @@ export interface components {
             /** State */
             state: string;
         };
+        /** AgentPackageSource */
+        AgentPackageSource: {
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Build Digest */
+            build_digest: string;
+            package: components["schemas"]["PackageRollbackSource"];
+            /** Package Bytes */
+            package_bytes: number;
+            /** Package Url */
+            package_url: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+        };
         /**
          * AgentResultState
          * @description The state words of an agent result on the wire.
@@ -1205,6 +1225,164 @@ export interface components {
             /** Version */
             version?: string | null;
         };
+        /**
+         * AgentUpgradePackage
+         * @description The signed package a rollout installs on every Spark it targets.
+         */
+        AgentUpgradePackage: {
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Package Bytes */
+            package_bytes: number;
+            /** Package Sha256 */
+            package_sha256: string;
+            /** Package Signature */
+            package_signature: string;
+            /** Package Url */
+            package_url: string;
+            /** Package Version */
+            package_version: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Target Binary Digest */
+            target_binary_digest: string;
+            /** Target Build Digest */
+            target_build_digest: string;
+        };
+        /**
+         * AgentUpgradePayload
+         * @description Signed package authority for the current agent upgrade operation.
+         */
+        AgentUpgradePayload: {
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Package Bytes */
+            package_bytes: number;
+            /** Package Sha256 */
+            package_sha256: string;
+            /** Package Signature */
+            package_signature: string;
+            /** Package Url */
+            package_url: string;
+            /** Package Version */
+            package_version: string;
+            rollback: components["schemas"]["PackageRollbackAuthority"];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Source Package Bytes */
+            source_package_bytes: number;
+            /** Source Package Url */
+            source_package_url: string;
+            /** Target Binary Digest */
+            target_binary_digest: string;
+            /** Target Build Digest */
+            target_build_digest: string;
+        };
+        /**
+         * AgentUpgradeRepairManifest
+         * @description The repair capsule's authority, bound to one Spark and the package.
+         */
+        AgentUpgradeRepairManifest: {
+            /** Authority Sha256 */
+            authority_sha256: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "agent-upgrade-repair";
+            /** Node Id */
+            node_id: string;
+            package: components["schemas"]["AgentUpgradePackage"];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * AgentUpgradeRequestIntent
+         * @description Which Sparks the operator asked for: all of them, or an explicit list.
+         */
+        AgentUpgradeRequestIntent: {
+            /** All */
+            all: boolean;
+            /**
+             * Selectors
+             * @default null
+             */
+            selectors: string[] | null;
+        };
+        /**
+         * AgentUpgradeResult
+         * @description Evidence emitted after the Rust agent reports an exact upgrade.
+         */
+        AgentUpgradeResult: {
+            activation_receipt: components["schemas"]["PackageActivationReceipt"];
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Binary Digest */
+            binary_digest: string;
+            /** Build Digest */
+            build_digest: string;
+            /** Package Sha256 */
+            package_sha256: string;
+            /** Package Version */
+            package_version: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "upgraded";
+        };
+        /**
+         * AgentUpgradeRolloutPayload
+         * @description An upgrade rollout: the package, the order, and each Spark's rollback source.
+         */
+        AgentUpgradeRolloutPayload: {
+            /** Node Order */
+            node_order: string[];
+            package: components["schemas"]["AgentUpgradePackage"];
+            /** @default null */
+            repair_manifest: components["schemas"]["AgentUpgradeRepairManifest"] | null;
+            request_intent: components["schemas"]["AgentUpgradeRequestIntent"];
+            /** Sources */
+            sources: {
+                [key: string]: components["schemas"]["AgentPackageSource"];
+            };
+        };
+        /**
+         * AgentUpgradeRolloutResult
+         * @description What a rollout skipped, and the newer rollout that replaced it.
+         */
+        AgentUpgradeRolloutResult: {
+            /**
+             * Skipped
+             * @default null
+             */
+            skipped: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Superseded By
+             * @default null
+             */
+            superseded_by: string | null;
+        };
         /** AgentUpgradeTargetDiagnosticsResponse */
         AgentUpgradeTargetDiagnosticsResponse: {
             /** Attempts */
@@ -1222,6 +1400,19 @@ export interface components {
             state: string;
             /** Target Proven */
             target_proven: boolean;
+        };
+        /**
+         * ArtifactDistributionPayload
+         * @description The complete payload accepted by the artifact transfer operation.
+         */
+        ArtifactDistributionPayload: {
+            /** Plan Digest */
+            plan_digest: string;
+        };
+        /** ArtifactDistributionResult */
+        ArtifactDistributionResult: {
+            /** Downloaded Bytes */
+            downloaded_bytes: number;
         };
         /** ArtifactFileDeclaration */
         ArtifactFileDeclaration: {
@@ -1584,6 +1775,186 @@ export interface components {
             subject: string;
         };
         /**
+         * AvailabilityJobPayload
+         * @description One image-availability operation: intent, identity, progress and what it holds.
+         */
+        AvailabilityJobPayload: {
+            /**
+             * Blockers
+             * @default null
+             */
+            blockers: components["schemas"]["OperationBlocker"][] | null;
+            /** @default null */
+            build_dependency: components["schemas"]["RecipeBuildDependency"] | null;
+            /**
+             * Build Input Sha256
+             * @default null
+             */
+            build_input_sha256: string | null;
+            /** @default null */
+            cancellation: components["schemas"]["RecipeOperationCancellationResult"] | null;
+            /**
+             * Claim Owner
+             * @default null
+             */
+            claim_owner: string | null;
+            /**
+             * Claim Until
+             * @default null
+             */
+            claim_until: string | null;
+            /**
+             * Effective Execution Key
+             * @default null
+             */
+            effective_execution_key: string | null;
+            /** @default null */
+            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /** Force Rebuild */
+            force_rebuild: boolean;
+            /**
+             * Identity Key
+             * @default null
+             */
+            identity_key: string | null;
+            /** @default null */
+            image_reference_intent: components["schemas"]["RuntimeImageReferenceIntent"] | null;
+            /** @default null */
+            image_result: components["schemas"]["RuntimeImageReceipt"] | null;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "recipe.image.availability.v2";
+            /** @default null */
+            model_child: components["schemas"]["AvailabilityModelChild"] | null;
+            /**
+             * Model Digest
+             * @default null
+             */
+            model_digest: string | null;
+            /**
+             * Prebuilt Pull
+             * @default null
+             */
+            prebuilt_pull: boolean | null;
+            progress: components["schemas"]["OperationProgress"];
+            recipe: components["schemas"]["RecipeDefinition"];
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Removal Fence
+             * @default null
+             */
+            removal_fence: string | null;
+            /** Request */
+            request: components["schemas"]["RecipeSelectorIntent"] | components["schemas"]["RecipeRevisionIntent"] | components["schemas"]["RecipeRetryIntent"];
+            retry: components["schemas"]["AvailabilityRetry"];
+            /**
+             * Retry After At
+             * @default null
+             */
+            retry_after_at: string | null;
+            runtime: components["schemas"]["AvailabilityRuntime"];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Stage
+             * @default null
+             */
+            stage: "available" | null;
+            /** @default null */
+            supersession: components["schemas"]["AvailabilitySupersession"] | null;
+        };
+        /**
+         * AvailabilityJobResult
+         * @description The image an availability operation produced, with its model child.
+         */
+        AvailabilityJobResult: {
+            /**
+             * Build Id
+             * @default null
+             */
+            build_id: string | null;
+            /**
+             * Build Input Sha256
+             * @default null
+             */
+            build_input_sha256: string | null;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /**
+             * Local Image Config Id
+             * @default null
+             */
+            local_image_config_id: string | null;
+            /** @default null */
+            model_child: components["schemas"]["AvailabilityModelChild"] | null;
+            /**
+             * Model Digest
+             * @default null
+             */
+            model_digest: string | null;
+            /** Oci Archive Sha256 */
+            oci_archive_sha256: string;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * AvailabilityModelChild
+         * @description The model-cache child an availability operation waits on, as last seen.
+         */
+        AvailabilityModelChild: {
+            /**
+             * Artifact Set Sha256
+             * @default null
+             */
+            artifact_set_sha256: string | null;
+            /**
+             * Artifacts
+             * @default null
+             */
+            artifacts: components["schemas"]["RecipeImageAvailabilityArtifact"][] | null;
+            /** @default null */
+            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /** Id */
+            id: string;
+            /**
+             * Model Content Digests
+             * @default null
+             */
+            model_content_digests: string[] | null;
+            /**
+             * Plan Digest
+             * @default null
+             */
+            plan_digest: string | null;
+            /** @default null */
+            progress: components["schemas"]["OperationProgress"] | null;
+            /**
+             * Request Key
+             * @default null
+             */
+            request_key: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
+        };
+        /**
          * AvailabilityOperationFailure
          * @description Shared failure wire contract for model and image availability.
          */
@@ -1619,6 +1990,107 @@ export interface components {
          * @enum {string}
          */
         AvailabilityRecoveryAction: "retry" | "resume" | "download_again" | "force_rebuild" | "open_model_access" | "configure_hf_token" | "check_access_and_resume" | "free_space" | "inspect";
+        /** AvailabilityRetry */
+        AvailabilityRetry: {
+            /** Automatic Attempts */
+            automatic_attempts: number;
+            /** Operator Retries */
+            operator_retries: number;
+        };
+        /**
+         * AvailabilityRuntime
+         * @description The runtime projection an availability operation prepares an image for.
+         *
+         *     The compiled adapter fields appear once the runtime is resolved; an
+         *     operation that only reuses a cached image carries the identity subset.
+         */
+        AvailabilityRuntime: {
+            /**
+             * Adapter
+             * @default null
+             */
+            adapter: string | null;
+            /**
+             * Adapter Version
+             * @default null
+             */
+            adapter_version: number | null;
+            /** Architecture */
+            architecture: string;
+            /**
+             * Arguments
+             * @default null
+             */
+            arguments: components["schemas"]["RuntimeArgument"][] | null;
+            /**
+             * Build Input Sha256
+             * @default null
+             */
+            build_input_sha256: string | null;
+            /**
+             * Builder Node Id
+             * @default null
+             */
+            builder_node_id: string | null;
+            /**
+             * Entrypoint
+             * @default null
+             */
+            entrypoint: string[] | null;
+            /**
+             * Environment
+             * @default null
+             */
+            environment: components["schemas"]["RuntimeEnvironmentEntry"][] | null;
+            /**
+             * Image
+             * @default null
+             */
+            image: string | null;
+            /**
+             * Image Bytes
+             * @default null
+             */
+            image_bytes: number | null;
+            /**
+             * Input Intent Sha256
+             * @default null
+             */
+            input_intent_sha256: string | null;
+            /** Interface */
+            interface: string;
+            /**
+             * Placement Environment
+             * @default null
+             */
+            placement_environment: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Recipe Revision Id
+             * @default null
+             */
+            recipe_revision_id: string | null;
+            /** @default null */
+            telemetry: components["schemas"]["RuntimeTelemetryProjection"] | null;
+            /**
+             * Writable Paths
+             * @default null
+             */
+            writable_paths: components["schemas"]["WritablePath"][] | null;
+        };
+        /** AvailabilitySupersession */
+        AvailabilitySupersession: {
+            /** Code */
+            code: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Superseded At
+             * Format: date-time
+             */
+            superseded_at: string;
+        };
         /**
          * BlockerCategory
          * @description The categories of the blocker allowlist (fail-closed raises).
@@ -1650,6 +2122,14 @@ export interface components {
             context?: components["schemas"]["ErrorContextResponse"] | null;
             /** Detail */
             detail: string;
+        };
+        /** BuildCleanupPhaseOperation */
+        BuildCleanupPhaseOperation: {
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            payload: components["schemas"]["RecipeBuildCleanupRequest"];
         };
         /** BuildCompatibilityEvidence */
         BuildCompatibilityEvidence: {
@@ -1690,6 +2170,14 @@ export interface components {
         BuildPatch: {
             /** Path */
             path: string;
+        };
+        /** BuildPhaseOperation */
+        BuildPhaseOperation: {
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            payload: components["schemas"]["RecipeBuildRequest"];
         };
         /** BuildResourcesProjection */
         BuildResourcesProjection: {
@@ -2323,6 +2811,29 @@ export interface components {
          */
         DesiredAssignmentState: "installed" | "running";
         /**
+         * DistributedRecoveryMarker
+         * @description What a recovery Stop remembers so the Start it interrupted can be re-issued.
+         */
+        DistributedRecoveryMarker: {
+            /**
+             * Deadline
+             * Format: date-time
+             */
+            deadline: string;
+            /** Failed Rank */
+            failed_rank: number;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Start Phases
+             * @default null
+             */
+            start_phases: components["schemas"]["RecoveryStartItem"][][] | null;
+        };
+        /**
          * DistributionAssignmentState
          * @description Whether a node may still fetch the artifacts of a distribution assignment.
          * @enum {string}
@@ -2334,6 +2845,37 @@ export interface components {
          * @enum {string}
          */
         DistributionCode: "distribution.assignment_conflict" | "distribution.expired" | "distribution.model_set_identity_unavailable" | "distribution.model_set_mismatch" | "distribution.object_invalid" | "distribution.object_unavailable" | "distribution.runtime_image_mismatch" | "distribution.unassigned" | "distribution.wrong_node";
+        /**
+         * DistributionJobPayload
+         * @description One target-copy child: the plan it serves and what each Spark must receive.
+         */
+        DistributionJobPayload: {
+            /** Assignments */
+            assignments: {
+                [key: string]: components["schemas"]["NodeDistributionAssignment"];
+            };
+            /** Cached Nodes */
+            cached_nodes: string[];
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify";
+            /** Plan Digest */
+            plan_digest: string;
+            progress: components["schemas"]["DistributionTransferProgress"];
+            /** Target Order */
+            target_order: string[];
+            /** Target Totals */
+            target_totals: {
+                [key: string]: number;
+            };
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
         /**
          * DistributionObject
          * @description One model file referenced by an assignment.
@@ -2350,6 +2892,22 @@ export interface components {
             name: string;
             /** Sha256 */
             sha256: string;
+        };
+        /** DistributionTransferProgress */
+        DistributionTransferProgress: {
+            /** Completed Bytes */
+            completed_bytes: number;
+            /** Members */
+            members: components["schemas"]["RunSwitchMemberReceipt"][];
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify";
+            /** Total Bytes */
+            total_bytes: number;
+            /** Total Bytes Known */
+            total_bytes_known: boolean;
         };
         /**
          * EffectiveParallelism
@@ -2395,6 +2953,11 @@ export interface components {
             max_batch_tokens?: number | null;
             parallelism: components["schemas"]["EffectiveParallelism"];
         };
+        /**
+         * EmptyJobResult
+         * @description A kind that records its outcome elsewhere stores no result document.
+         */
+        EmptyJobResult: Record<string, never>;
         /**
          * EndpointResponse
          * @description One published alias: clients use `api_base` with `alias` as the model.
@@ -4087,6 +4650,14 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** InstallPhaseOperation */
+        InstallPhaseOperation: {
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            payload: components["schemas"]["RecipeInstallPayload"];
+        };
         /** InstallationNodeChange */
         InstallationNodeChange: {
             /** Entity Id */
@@ -4382,7 +4953,14 @@ export interface components {
             /** State */
             state: string;
         };
-        JsonValue: unknown;
+        /** JobRunPhaseOperation */
+        JobRunPhaseOperation: {
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            payload: components["schemas"]["RecipeJobRunRequest"];
+        };
         /**
          * LibraryAssessmentCode
          * @description Why a library entry is not assessed runnable on the current fleet.
@@ -6042,6 +6620,82 @@ export interface components {
          */
         OperatorSurface: "resume" | "retire" | "retry" | "stop" | "automatic";
         /**
+         * OutcomeDone
+         * @description The effect is established; ``result`` is the operation's success body.
+         */
+        OutcomeDone: {
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "done";
+            /** Result */
+            result: components["schemas"]["RuntimePreflightResult"] | components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeJobRunResult"] | components["schemas"]["ArtifactDistributionResult"] | components["schemas"]["AgentUpgradeResult"];
+        };
+        /**
+         * OutcomeEvidence
+         * @description Typed facts an executor attaches to a failed or unknown outcome.
+         *
+         *     Every field is bounded and already sanitized by the agent; the Controller
+         *     sanitizes again at ingress.  ``diagnostics`` holds the bounded diagnostic
+         *     logs, ``helper_error_code``/``helper_exit_code`` the privileged helper's own
+         *     verdict, ``stage``/``diagnostic`` the phase and a one-line cause.
+         */
+        OutcomeEvidence: {
+            /**
+             * Diagnostic
+             * @default null
+             */
+            diagnostic: string | null;
+            /** @default null */
+            diagnostics: components["schemas"]["FailureDiagnostics"] | null;
+            /**
+             * Helper Error Code
+             * @default null
+             */
+            helper_error_code: string | null;
+            /**
+             * Helper Exit Code
+             * @default null
+             */
+            helper_exit_code: number | null;
+            /** @default null */
+            package_activation: components["schemas"]["PackageActivationReceipt"] | null;
+            /**
+             * Stage
+             * @default null
+             */
+            stage: string | null;
+        };
+        /**
+         * OutcomeFailed
+         * @description A definite failure.
+         *
+         *     ``receipt`` is the process receipt of a one-shot recipe job whose process
+         *     ran and exited nonzero; every other failure reports ``code`` and ``reason``.
+         */
+        OutcomeFailed: {
+            code: components["schemas"]["FailureCode"];
+            /** @default null */
+            evidence: components["schemas"]["OutcomeEvidence"] | null;
+            /** @default null */
+            failure_kind: components["schemas"]["AgentFailureKind"] | null;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "failed";
+            /** Reason */
+            reason: string;
+            /** @default null */
+            receipt: components["schemas"]["RecipeJobRunResult"] | null;
+            /**
+             * Retry After Seconds
+             * @default null
+             */
+            retry_after_seconds: number | null;
+        };
+        /**
          * OutcomeKind
          * @description What an executor reported, as the lifecycle core sees it.
          *
@@ -6054,6 +6708,29 @@ export interface components {
          * @enum {string}
          */
         OutcomeKind: "done" | "failed" | "cancelled" | "unknown";
+        /**
+         * OutcomeUnknown
+         * @description The executor could not establish the effect.
+         */
+        OutcomeUnknown: {
+            /** @default null */
+            evidence: components["schemas"]["OutcomeEvidence"] | null;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "unknown";
+            /** Reason */
+            reason: string;
+            /** @default null */
+            receipt: components["schemas"]["RecipeJobRunResult"] | null;
+            /**
+             * Retry After Seconds
+             * @default null
+             */
+            retry_after_seconds: number | null;
+            wait_reason: components["schemas"]["WaitReason"];
+        };
         /** OutputLimits */
         OutputLimits: {
             /** Allowed Media Types */
@@ -6106,6 +6783,30 @@ export interface components {
              */
             updated_at: number;
         };
+        /** PackageRollbackAuthority */
+        PackageRollbackAuthority: {
+            /**
+             * Activation Deadline
+             * Format: int64
+             */
+            activation_deadline: number;
+            /** Attempt Nonce */
+            attempt_nonce: string;
+            source: components["schemas"]["PackageRollbackSource"];
+        };
+        /** PackageRollbackSource */
+        PackageRollbackSource: {
+            /** Binary Sha256 */
+            binary_sha256: string;
+            /** Helper Sha256 */
+            helper_sha256: string;
+            /** Package Sha256 */
+            package_sha256: string;
+            /** Package Signature */
+            package_signature: string;
+            /** Package Version */
+            package_version: string;
+        };
         ParameterDefinition: components["schemas"]["StringParameter"] | components["schemas"]["IntegerParameter"] | components["schemas"]["FloatParameter"] | components["schemas"]["BooleanParameter"] | components["schemas"]["EnumParameter"];
         ParameterScalar: boolean | number | string;
         /**
@@ -6149,6 +6850,123 @@ export interface components {
              * @enum {string}
              */
             severity: "blocker" | "warning" | "info";
+        };
+        /**
+         * ProfileJobRunStopAuthorization
+         * @description Current accepted profile Stop and exact older one-shot effect.
+         */
+        ProfileJobRunStopAuthorization: {
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Missing Node Ids */
+            missing_node_ids?: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Profile Application Id */
+            profile_application_id: string;
+            /** Profile Digest */
+            profile_digest: string;
+            /** Profile Operation Id */
+            profile_operation_id: string;
+            /** Profile Plan Digest */
+            profile_plan_digest: string;
+            /** Profile Step */
+            profile_step: number;
+            /** Reachable Node Ids */
+            reachable_node_ids: string[];
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /** Run Id */
+            run_id: string;
+            /** Run Node Ids */
+            run_node_ids: string[];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Stop Plan Digest */
+            stop_plan_digest: string;
+            /** Targets */
+            targets?: components["schemas"]["ProfileJobRunStopTarget"][];
+            /** Unissued Artifact Job Ids */
+            unissued_artifact_job_ids?: string[];
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal: number;
+        };
+        /**
+         * ProfileJobRunStopJob
+         * @description The one-shot Stop parent persisted for a current profile owner.
+         */
+        ProfileJobRunStopJob: {
+            /**
+             * Execution Mode
+             * @constant
+             */
+            execution_mode: "profile-jobrun-stop";
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @constant
+             */
+            owner_kind: "run";
+            /** Phases */
+            phases: components["schemas"]["ProfileJobRunStopPhaseItem"][][];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Profile Application Id */
+            profile_application_id: string;
+            /** Profile Operation Id */
+            profile_operation_id: string;
+            profile_stop_authorization: components["schemas"]["ProfileJobRunStopAuthorization"];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal: number;
+        };
+        /** ProfileJobRunStopPhaseItem */
+        ProfileJobRunStopPhaseItem: {
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            payload: components["schemas"]["RecipeStopPayload"];
+        };
+        /**
+         * ProfileJobRunStopTarget
+         * @description One exact transient runtime and its durable JobRun source.
+         */
+        ProfileJobRunStopTarget: {
+            /** Artifact Job Id */
+            artifact_job_id: string;
+            /** Node Id */
+            node_id: string;
+            /** Source Job Id */
+            source_job_id: string;
+            /** Source Operation Id */
+            source_operation_id: string;
+            /** Stop Payload Sha256 */
+            stop_payload_sha256: string;
+        };
+        /**
+         * ProfilePartialStop
+         * @description The reachable ranks a profile Stop reaches and the ranks it cannot.
+         */
+        ProfilePartialStop: {
+            /** Missing Node Ids */
+            missing_node_ids: string[];
+            /** Target Node Ids */
+            target_node_ids: string[];
         };
         /**
          * ProfileReasonCode
@@ -6319,6 +7137,50 @@ export interface components {
          * @description The build service is stopped; the fenced attempt is the whole answer.
          */
         RecipeBuildCleanupEvidence: Record<string, never>;
+        /** RecipeBuildCleanupParent */
+        RecipeBuildCleanupParent: {
+            /** @default null */
+            build_cancellation: components["schemas"]["RecipeOperationCancellationResult"] | null;
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "installation" | "run" | "recipe-build" | "artifact-job";
+            /**
+             * Phases
+             * @default null
+             */
+            phases: components["schemas"]["BuildCleanupPhaseOperation"][][] | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
+        /**
+         * RecipeBuildCleanupRequest
+         * @description Stop only the transient service belonging to one retained build attempt.
+         */
+        RecipeBuildCleanupRequest: {
+            /** Build Id */
+            build_id: string;
+            /** Operation Id */
+            operation_id: string;
+        };
         /**
          * RecipeBuildCode
          * @description Recipe image build planning and recording problems.
@@ -6335,6 +7197,22 @@ export interface components {
             /** Patches */
             patches: components["schemas"]["BuildPatch"][];
         };
+        /**
+         * RecipeBuildDependency
+         * @description A request persisted before dispatch, then its exact lifecycle child.
+         */
+        RecipeBuildDependency: {
+            /**
+             * Operation Id
+             * @default null
+             */
+            operation_id: string | null;
+            /**
+             * Request Key
+             * Format: uuid
+             */
+            request_key: string;
+        };
         /** RecipeBuildEnvironmentArgument */
         RecipeBuildEnvironmentArgument: {
             /** Name */
@@ -6350,6 +7228,17 @@ export interface components {
             image_digest: string;
             /** Oci Layout Sha256 */
             oci_layout_sha256: string;
+        };
+        /**
+         * RecipeBuildIntent
+         * @description The accepted producer's intent, independent of its current consumers.
+         */
+        RecipeBuildIntent: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "independent" | "dependency";
         };
         /**
          * RecipeBuildLimits
@@ -6450,6 +7339,55 @@ export interface components {
             /** Unset Labels */
             unset_labels: string[];
         };
+        /** RecipeBuildParent */
+        RecipeBuildParent: {
+            /** @default null */
+            build_intent: components["schemas"]["RecipeBuildIntent"] | null;
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /**
+             * Force Rebuild
+             * @default null
+             */
+            force_rebuild: boolean | null;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "installation" | "run" | "recipe-build" | "artifact-job";
+            /**
+             * Phases
+             * @default null
+             */
+            phases: components["schemas"]["BuildPhaseOperation"][][] | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Prebuilt Image
+             * @default null
+             */
+            prebuilt_image: string | null;
+            /**
+             * Prebuilt Node Id
+             * @default null
+             */
+            prebuilt_node_id: string | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
         /**
          * RecipeBuildRequest
          * @description Build one recipe image for linux/arm64.
@@ -6479,6 +7417,153 @@ export interface components {
             source_bundle_bytes: number;
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
+        };
+        /**
+         * RecipeCacheRemovalCheckpoint
+         * @description Durable resumable progress for a recipe image and model-cache removal.
+         */
+        RecipeCacheRemovalCheckpoint: {
+            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /** Image Index */
+            image_index: number;
+            /** Image Pending Bytes */
+            image_pending_bytes: number | null;
+            /** Image Reclaimed Bytes */
+            image_reclaimed_bytes: number;
+            /** Model Index */
+            model_index: number;
+            /** Model Reclaimed Bytes */
+            model_reclaimed_bytes: number;
+            /** Retry Attempts */
+            retry_attempts: number;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * RecipeCacheRemovalIntent
+         * @description Exact accepted removal request stored on its existing Job owner.
+         */
+        RecipeCacheRemovalIntent: {
+            /**
+             * Action
+             * @constant
+             */
+            action: "remove";
+            /** Actor */
+            actor: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "recipe.cache.remove.v2";
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Removal Fence */
+            removal_fence: string;
+            /** Request Key */
+            request_key: string;
+            /** Review Digest */
+            review_digest: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /** Selector */
+            selector: string;
+            /** With Model */
+            with_model: boolean;
+        };
+        /**
+         * RecipeCacheRemovalModelChild
+         * @description One disjoint model-set removal child accepted with the recipe intent.
+         */
+        RecipeCacheRemovalModelChild: {
+            /** Operation Id */
+            operation_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Request Key */
+            request_key: string;
+            /** Selected Sets */
+            selected_sets: string[];
+        };
+        /**
+         * RecipeCacheRemovalOwner
+         * @description One accepted exact plan plus its canonical durable effect checkpoint.
+         */
+        RecipeCacheRemovalOwner: {
+            checkpoint: components["schemas"]["RecipeCacheRemovalCheckpoint"];
+            plan: components["schemas"]["RecipeCacheRemovalPlan"];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * RecipeCacheRemovalPlan
+         * @description Immutable exact targets bound to the current request owner.
+         */
+        RecipeCacheRemovalPlan: {
+            /** Image Archives */
+            image_archives: string[];
+            intent: components["schemas"]["RecipeCacheRemovalIntent"];
+            /** Model Children */
+            model_children: components["schemas"]["RecipeCacheRemovalModelChild"][];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * RecipeCacheRemovalResult
+         * @description Stored terminal summary, bound to the Job's immutable intent.
+         */
+        RecipeCacheRemovalResult: {
+            /**
+             * Action
+             * @constant
+             */
+            action: "remove";
+            /** Cancelled Builds */
+            cancelled_builds: string[];
+            /** Cancelled Operations */
+            cancelled_operations: string[];
+            /** Model Removals */
+            model_removals: string[];
+            /** Next Actions */
+            next_actions: string[];
+            /** Operation Id */
+            operation_id: string;
+            /** Preserved */
+            preserved: string[];
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Reclaimed Bytes */
+            reclaimed_bytes: number;
+            /** Request Key */
+            request_key: string;
+            /** Review Digest */
+            review_digest: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /** Selector */
+            selector: string;
+            /**
+             * State
+             * @constant
+             */
+            state: "succeeded";
+            /** With Model */
+            with_model: boolean;
         };
         /** RecipeCancellationRequest */
         RecipeCancellationRequest: {
@@ -6786,6 +7871,48 @@ export interface components {
             /** Min Files */
             min_files: number;
         };
+        /** RecipeInstallParent */
+        RecipeInstallParent: {
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "installation" | "run" | "recipe-build" | "artifact-job";
+            /**
+             * Phases
+             * @default null
+             */
+            phases: components["schemas"]["InstallPhaseOperation"][][] | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
+        /** RecipeInstallPayload */
+        RecipeInstallPayload: {
+            compiled_execution_plan: components["schemas"]["CompiledExecutionPlan"];
+            /** Expected Bytes */
+            expected_bytes: number;
+            /** Installation Id */
+            installation_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+        };
         /** RecipeInstallationChange */
         RecipeInstallationChange: {
             /** Entity Id */
@@ -6831,6 +7958,51 @@ export interface components {
             change_effect: "none" | "restart" | "reprepare" | "rebuild";
             /** Value */
             value: number;
+        };
+        /** RecipeJobActivateParent */
+        RecipeJobActivateParent: {
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "installation" | "run" | "recipe-build" | "artifact-job";
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
+        /** RecipeJobEvidence */
+        RecipeJobEvidence: {
+            /** Elapsed Milliseconds */
+            elapsed_milliseconds: number;
+            /** Peak Memory Bytes */
+            peak_memory_bytes: number | null;
+        };
+        /** RecipeJobFile */
+        RecipeJobFile: {
+            /** Media Type */
+            media_type: string;
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
         };
         /** RecipeJobInput */
         RecipeJobInput: {
@@ -6887,6 +8059,120 @@ export interface components {
             max_total_bytes: number;
             /** Slots */
             slots: components["schemas"]["RecipeOutputSlot"][];
+        };
+        /** RecipeJobOutputLimits */
+        RecipeJobOutputLimits: {
+            /** Allowed Media Types */
+            allowed_media_types: string[];
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+        };
+        /** RecipeJobOutputManifest */
+        RecipeJobOutputManifest: {
+            /** Files */
+            files: components["schemas"]["RecipeJobFile"][];
+            /** Manifest Sha256 */
+            manifest_sha256: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Total Bytes */
+            total_bytes: number;
+        };
+        /** RecipeJobOutputMapping */
+        RecipeJobOutputMapping: {
+            /** Extensions */
+            extensions: string[];
+            /** Media Type */
+            media_type: string;
+            /** Slot */
+            slot: string;
+        };
+        /** RecipeJobRunParent */
+        RecipeJobRunParent: {
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "installation" | "run" | "recipe-build" | "artifact-job";
+            /**
+             * Phases
+             * @default null
+             */
+            phases: components["schemas"]["JobRunPhaseOperation"][][] | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
+        /**
+         * RecipeJobRunRequest
+         * @description One job run; interface, image, placement and timeout come from the plan.
+         */
+        RecipeJobRunRequest: {
+            compiled_execution_plan: components["schemas"]["CompiledExecutionPlan"];
+            /** Input Manifest Sha256 */
+            input_manifest_sha256: string;
+            /** Input Total Bytes */
+            input_total_bytes: number;
+            /** Inputs */
+            inputs: components["schemas"]["RecipeJobInputFile"][];
+            /** Installation Id */
+            installation_id: string;
+            /** Job Id */
+            job_id: string;
+            /** Mapping Id */
+            mapping_id: string;
+            output_limits: components["schemas"]["RecipeJobOutputLimits"];
+            /** Output Mappings */
+            output_mappings: components["schemas"]["RecipeJobOutputMapping"][];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /** Run Id */
+            run_id: string;
+        };
+        /** RecipeJobRunResult */
+        RecipeJobRunResult: {
+            /** @default null */
+            diagnostics: components["schemas"]["FailureDiagnostics"] | null;
+            evidence: components["schemas"]["RecipeJobEvidence"];
+            /** Exit Code */
+            exit_code: number;
+            /** Job Id */
+            job_id: string;
+            output_manifest: components["schemas"]["RecipeJobOutputManifest"];
+            /**
+             * Reason
+             * @default null
+             */
+            reason: string | null;
+            /** Run Id */
+            run_id: string;
         };
         /**
          * RecipeJobServingRequest
@@ -6999,6 +8285,14 @@ export interface components {
             /** Port */
             port: number;
         };
+        /** RecipeOperationActivatedResult */
+        RecipeOperationActivatedResult: {
+            /**
+             * Activated
+             * @constant
+             */
+            activated: true;
+        };
         /**
          * RecipeOperationCancellationResult
          * @description Cancellation metadata merged into a pending lifecycle result.
@@ -7036,6 +8330,60 @@ export interface components {
          * @enum {string}
          */
         RecipeOperationCode: "recipe.operation_conflict";
+        /**
+         * RecipeOperationProgressResult
+         * @description Partial evidence retained while a multi-node operation is running.
+         */
+        RecipeOperationProgressResult: {
+            /**
+             * Launch Evidence
+             * @default null
+             */
+            launch_evidence: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+            /**
+             * Node Evidence
+             * @default null
+             */
+            node_evidence: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+        };
+        /**
+         * RecipeOperationResult
+         * @description Terminal aggregate emitted by the durable lifecycle job projector.
+         */
+        RecipeOperationResult: {
+            /** Failed Nodes */
+            failed_nodes: string[];
+            /**
+             * Launch Evidence
+             * @default null
+             */
+            launch_evidence: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+            /** Node Evidence */
+            node_evidence: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            };
+            /**
+             * Recovery Error
+             * @default null
+             */
+            recovery_error: string | null;
+            /** Successful Nodes */
+            successful_nodes: string[];
+        };
+        /** RecipeOperationStoppedResult */
+        RecipeOperationStoppedResult: {
+            /**
+             * Stopped
+             * @constant
+             */
+            stopped: true;
+        };
         /** RecipeOperatorRequest */
         RecipeOperatorRequest: {
             /** Request Key */
@@ -7246,6 +8594,50 @@ export interface components {
              * @enum {string}
              */
             state: "ready" | "blocked" | "unavailable";
+        };
+        /** RecipeReconcileParent */
+        RecipeReconcileParent: {
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "installation" | "run" | "recipe-build" | "artifact-job";
+            /**
+             * Phases
+             * @default null
+             */
+            phases: components["schemas"]["ReconcilePhaseOperation"][][] | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /** @default null */
+            reconciliation_authority: components["schemas"]["RunSwitchReconciliationAuthority"] | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
+        /**
+         * RecipeReconcilePayload
+         * @description Authority to remove one managed install with an invalid launch contract.
+         */
+        RecipeReconcilePayload: {
+            /** Installation Id */
+            installation_id: string;
+            /** Plan Digest */
+            plan_digest: string;
         };
         /**
          * RecipeReconcileResult
@@ -7478,6 +8870,80 @@ export interface components {
             /** Value */
             value: string | number | boolean;
         };
+        /** RecipeStartParent */
+        RecipeStartParent: {
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "installation" | "run" | "recipe-build" | "artifact-job";
+            /**
+             * Phases
+             * @default null
+             */
+            phases: components["schemas"]["StartPhaseOperation"][][] | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /** @default null */
+            recovery: components["schemas"]["DistributedRecoveryMarker"] | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Start Anchored At
+             * @default null
+             */
+            start_anchored_at: string | null;
+            /**
+             * Start Deadline
+             * @default null
+             */
+            start_deadline: string | null;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
+        /**
+         * RecipeStartPayload
+         * @description Start one rank; placement, image and addresses come from the plan.
+         */
+        RecipeStartPayload: {
+            compiled_execution_plan: components["schemas"]["CompiledExecutionPlan"];
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Id */
+            mapping_id: string;
+            /**
+             * Phase
+             * @default null
+             */
+            phase: ("rank-launch" | "collective-readiness") | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /** Run Id */
+            run_id: string;
+            /**
+             * Start Deadline
+             * Format: date-time
+             * @default null
+             */
+            start_deadline: string | null;
+        };
         /**
          * RecipeStartResult
          * @description The serving rank reports its endpoint; every other rank reports ``{}``.
@@ -7485,6 +8951,65 @@ export interface components {
         RecipeStartResult: {
             /** Endpoint */
             endpoint?: string | null;
+        };
+        /** RecipeStopParent */
+        RecipeStopParent: {
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "installation" | "run" | "recipe-build" | "artifact-job";
+            /**
+             * Phases
+             * @default null
+             */
+            phases: components["schemas"]["StopPhaseOperation"][][] | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /** @default null */
+            profile_partial_stop: components["schemas"]["ProfilePartialStop"] | null;
+            /** @default null */
+            recovery: components["schemas"]["DistributedRecoveryMarker"] | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
+        /** RecipeStopPayload */
+        RecipeStopPayload: {
+            /**
+             * Cancel Pending Start
+             * @default false
+             */
+            cancel_pending_start: boolean;
+            compiled_execution_plan: components["schemas"]["CompiledExecutionPlan"];
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /** Run Id */
+            run_id: string;
+            /** Target Runtime Id */
+            target_runtime_id: string;
         };
         /**
          * RecipeStopResult
@@ -7519,6 +9044,49 @@ export interface components {
             /** Name */
             name: string;
             resources: components["schemas"]["RecipeRoleResources"];
+        };
+        /** RecipeUninstallParent */
+        RecipeUninstallParent: {
+            /**
+             * Execution Mode
+             * @default null
+             */
+            execution_mode: "one-shot-jobs" | null;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "installation" | "run" | "recipe-build" | "artifact-job";
+            /**
+             * Phases
+             * @default null
+             */
+            phases: components["schemas"]["UninstallPhaseOperation"][][] | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
+        };
+        /** RecipeUninstallPayload */
+        RecipeUninstallPayload: {
+            /** Cleanup Model Content Sha256 */
+            cleanup_model_content_sha256: string | null;
+            /** Installation Id */
+            installation_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
         };
         /**
          * RecipeUninstallResult
@@ -7560,6 +9128,46 @@ export interface components {
          * @enum {string}
          */
         RecipeUpdateCode: "recipe_update.claim_lost" | "recipe_update.observation_invalid" | "recipe_update.operation_invalid" | "recipe_update.request_key_reused" | "recipe_update.scope_invalid" | "recipe-update.cancel-effect-unknown";
+        /** RecipeUpdateDocument */
+        RecipeUpdateDocument: {
+            /** @default null */
+            cancellation: components["schemas"]["RecipeOperationCancellationResult"] | null;
+            /** Children */
+            children: components["schemas"]["RecipeUpdateChild"][];
+            /**
+             * Claim Owner
+             * @default null
+             */
+            claim_owner: string | null;
+            /**
+             * Claim Until
+             * @default null
+             */
+            claim_until: string | null;
+            /**
+             * Kind
+             * @default recipe.cache.update.v2
+             * @constant
+             */
+            kind: "recipe.cache.update.v2";
+            /**
+             * Next Attempt At
+             * @default null
+             */
+            next_attempt_at: string | null;
+            /**
+             * Next Child
+             * @default 0
+             */
+            next_child: number;
+            request: components["schemas"]["RecipeUpdateScope"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
         /**
          * RecipeUpdateFailure
          * @description Bounded admission failure or observation of the referenced child's failure.
@@ -7702,6 +9310,20 @@ export interface components {
          * @enum {string}
          */
         ReconcileCode: "reconcile.active_effect_unknown" | "reconcile.agent_unavailable" | "reconcile.capacity_busy" | "reconcile.install_provenance_mismatch" | "reconcile.install_provenance_unavailable" | "reconcile.installation_effect_unknown" | "reconcile.installation_identity_mismatch" | "reconcile.installation_identity_unavailable" | "reconcile.membership_changed" | "reconcile.operation_active" | "reconcile.rank_membership_changed" | "reconcile.recipe_revision_unavailable" | "reconcile.spec_identity_mismatch";
+        /** ReconcilePhaseOperation */
+        ReconcilePhaseOperation: {
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            payload: components["schemas"]["RecipeReconcilePayload"];
+        };
+        /** RecoveryStartItem */
+        RecoveryStartItem: {
+            /** Node Id */
+            node_id: string;
+            payload: components["schemas"]["RecipeStartPayload"];
+        };
         /**
          * RemovedRecipeNodeResult
          * @description Result emitted by the Controller's logical uninstall projection.
@@ -7979,6 +9601,49 @@ export interface components {
          * @enum {string}
          */
         RunState: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
+        /** RunSwitchApplyRequest */
+        RunSwitchApplyRequest: {
+            /**
+             * Action
+             * @default run
+             * @enum {string}
+             */
+            action: "install" | "run" | "switch";
+            /** Alias */
+            alias: string;
+            invocation?: components["schemas"]["InvocationMetadata"];
+            /** Model Content Sha256 */
+            model_content_sha256: string;
+            /** Option Choices */
+            option_choices?: {
+                [key: string]: string;
+            };
+            /**
+             * Plan Digest
+             * @default null
+             */
+            plan_digest: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Request Key
+             * @default null
+             */
+            request_key: string | null;
+            /**
+             * Retention
+             * @default retain-cached
+             * @enum {string}
+             */
+            retention: "retain-cached" | "reclaim-unreferenced";
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            spark_group: components["schemas"]["SparkGroup"];
+        };
         /**
          * RunSwitchAssessment
          * @description Planner-owned admission and observations shared by operator reviews.
@@ -8111,6 +9776,32 @@ export interface components {
              */
             total_bytes_known: boolean;
         };
+        /** RunSwitchCleanupIntent */
+        RunSwitchCleanupIntent: {
+            /**
+             * Cleanup Mode
+             * @default uninstall
+             * @enum {string}
+             */
+            cleanup_mode: "uninstall" | "reconcile";
+            /** Installation Id */
+            installation_id: string;
+            /**
+             * Plan Digest
+             * @default null
+             */
+            plan_digest: string | null;
+            /**
+             * Request Key
+             * @default null
+             */
+            request_key: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "cleanup";
+        };
         /** RunSwitchCleanupResult */
         RunSwitchCleanupResult: {
             /** Nas Evicted */
@@ -8207,6 +9898,47 @@ export interface components {
              */
             subphase: "container-build";
         };
+        /**
+         * RunSwitchDistributionChildResult
+         * @description Durable projection of one target-copy child operation.
+         *
+         *     A child Job has a different persisted shape from a parent phase receipt:
+         *     it owns member progress and per-node handoff evidence.  Keeping that
+         *     projection separate prevents a progress snapshot from being accepted as
+         *     a completed phase result.
+         */
+        RunSwitchDistributionChildResult: {
+            /**
+             * Error Code
+             * @default null
+             */
+            error_code: string | null;
+            /** Evidence */
+            evidence: components["schemas"]["ArtifactVerificationEvidence"][];
+            /**
+             * Failure Kind
+             * @default null
+             */
+            failure_kind: string | null;
+            /** Members */
+            members: components["schemas"]["RunSwitchMemberReceipt"][];
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "transfer";
+            progress: components["schemas"]["RunSwitchChildProgress"];
+            /**
+             * Reason
+             * @default null
+             */
+            reason: string | null;
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "target-copy";
+        };
         /** RunSwitchFinalVerifyResult */
         RunSwitchFinalVerifyResult: {
             /** Final Verified */
@@ -8253,6 +9985,46 @@ export interface components {
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Unwithdrawn Routes */
             unwithdrawn_routes: number;
+        };
+        /**
+         * RunSwitchJobPayload
+         * @description The reviewed plan, the request that asked for it and the live progress.
+         */
+        RunSwitchJobPayload: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "install" | "run" | "switch" | "stop" | "cleanup";
+            /**
+             * Intent
+             * @default null
+             */
+            intent: (components["schemas"]["RunSwitchRunIntent"] | components["schemas"]["RunSwitchStopIntent"] | components["schemas"]["RunSwitchCleanupIntent"] | components["schemas"]["RunSwitchProfileStopIntent"]) | null;
+            /**
+             * Operation Kind
+             * @enum {string}
+             */
+            operation_kind: "recipe.run-switch.v2" | "recipe.stop.v2" | "recipe.cleanup.v2";
+            plan: components["schemas"]["RunSwitchPlan"];
+            /** Plan Digest */
+            plan_digest: string;
+            progress: components["schemas"]["RunSwitchOperationResult"];
+            /**
+             * Retry Of
+             * @default null
+             */
+            retry_of: string | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Workload Intent Ordinal
+             * @default null
+             */
+            workload_intent_ordinal: number | null;
         };
         /** RunSwitchMemberProgress */
         RunSwitchMemberProgress: {
@@ -8640,6 +10412,17 @@ export interface components {
              */
             subphase: "runtime-plan";
         };
+        /** RunSwitchProfileStopIntent */
+        RunSwitchProfileStopIntent: {
+            profile_stop_scope: components["schemas"]["RunSwitchProfileStopScope"];
+            /** Run Id */
+            run_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "profile-stop";
+        };
         /**
          * RunSwitchProfileStopScope
          * @description Reviewed profile-only cleanup of the reachable ranks in a lost group.
@@ -8778,6 +10561,15 @@ export interface components {
              */
             state: "pending" | "reconciled";
         };
+        /** RunSwitchRunIntent */
+        RunSwitchRunIntent: {
+            request: components["schemas"]["RunSwitchApplyRequest"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "run";
+        };
         /**
          * RunSwitchRuntimeImageReferenceIntent
          * @description Exact image bytes provisionally protected by a current RunSwitch job.
@@ -8904,6 +10696,33 @@ export interface components {
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
         };
+        /** RunSwitchStopIntent */
+        RunSwitchStopIntent: {
+            invocation?: components["schemas"]["InvocationMetadata"];
+            /**
+             * Plan Digest
+             * @default null
+             */
+            plan_digest: string | null;
+            /**
+             * Request Key
+             * @default null
+             */
+            request_key: string | null;
+            /** Run Id */
+            run_id: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "stop";
+        };
         /** RunSwitchStopResult */
         RunSwitchStopResult: {
             /**
@@ -9016,8 +10835,27 @@ export interface components {
             /** Verified Oci Layout Sha256 */
             verified_oci_layout_sha256: string;
         };
+        /** RuntimeArgument */
+        RuntimeArgument: {
+            /** Name */
+            name: string;
+            /**
+             * Setting
+             * @default null
+             */
+            setting: string | null;
+            /** @default null */
+            value: components["schemas"]["pydantic__types__JsonValue"] | null;
+        };
         RuntimeArgumentValue: string | number | boolean | components["schemas"]["vonk_forge_contracts__recipe__JsonValue"][] | {
             [key: string]: components["schemas"]["vonk_forge_contracts__recipe__JsonValue"];
+        };
+        /** RuntimeEnvironmentEntry */
+        RuntimeEnvironmentEntry: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string | number | boolean;
         };
         /**
          * RuntimeImageCode
@@ -9127,6 +10965,35 @@ export interface components {
              */
             schema_version: 2;
         };
+        /**
+         * RuntimeImageReferenceIntent
+         * @description Exact SQL coordination identity for an image archive publication.
+         *
+         *     This intent protects an archive while the existing availability owner is
+         *     publishing it. It is not evidence that managed bytes or a receipt exist;
+         *     those facts remain owned by ``RuntimeImageStorage``.
+         */
+        RuntimeImageReferenceIntent: {
+            /** Attempt */
+            attempt: number;
+            /** Claim Owner */
+            claim_owner: string;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Oci Archive Sha256 */
+            oci_archive_sha256: string;
+            /** Operation Id */
+            operation_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+        };
         /** RuntimeImageStorageImpact */
         RuntimeImageStorageImpact: {
             /** Build Id */
@@ -9220,6 +11087,23 @@ export interface components {
          * @enum {string}
          */
         RuntimePreflightFindingCode: "preflight_finding.architecture_mismatch" | "preflight_finding.available" | "preflight_finding.build_step_failed" | "preflight_finding.capabilities_not_zero" | "preflight_finding.controller_unreachable" | "preflight_finding.deadline_exceeded" | "preflight_finding.diagnostic_limit_exceeded" | "preflight_finding.directory_not_writable" | "preflight_finding.disk_reserve_insufficient" | "preflight_finding.fabric_requirement_unverified" | "preflight_finding.helper_call_join_failed" | "preflight_finding.helper_capabilities_not_zero" | "preflight_finding.helper_grant_invalid" | "preflight_finding.helper_grant_node_mismatch" | "preflight_finding.helper_grant_unauthorized" | "preflight_finding.helper_grant_unavailable" | "preflight_finding.helper_image_import_failed" | "preflight_finding.helper_inspection_outcome_invalid" | "preflight_finding.helper_installation_reconciliation_busy" | "preflight_finding.helper_installation_reconciliation_storage_unavailable" | "preflight_finding.helper_io_failed" | "preflight_finding.helper_message_framing_invalid" | "preflight_finding.helper_mount_namespace_unavailable" | "preflight_finding.helper_no_new_privileges_unavailable" | "preflight_finding.helper_operation_command_failed" | "preflight_finding.helper_operation_failed" | "preflight_finding.helper_operation_invalid" | "preflight_finding.helper_operation_invalid_artifact" | "preflight_finding.helper_operation_io" | "preflight_finding.helper_operation_stop_uncertain" | "preflight_finding.helper_operation_unsafe_path" | "preflight_finding.helper_outcome_malformed" | "preflight_finding.helper_peer_identity_invalid" | "preflight_finding.helper_probe_cleanup_failed" | "preflight_finding.helper_probe_invalid_result" | "preflight_finding.helper_proc_unavailable" | "preflight_finding.helper_protocol_invalid" | "preflight_finding.helper_rejection_malformed" | "preflight_finding.helper_request_arguments_presence_invalid" | "preflight_finding.helper_request_argument_nul_byte" | "preflight_finding.helper_request_attempt_invalid" | "preflight_finding.helper_request_bytes_invalid" | "preflight_finding.helper_request_document_invalid" | "preflight_finding.helper_request_encoding_invalid" | "preflight_finding.helper_request_installation_identity_invalid" | "preflight_finding.helper_request_invalid" | "preflight_finding.helper_request_ledger_failed" | "preflight_finding.helper_request_plan_binding_invalid" | "preflight_finding.helper_request_plan_bytes_invalid" | "preflight_finding.helper_request_replayed" | "preflight_finding.helper_request_schema_version_invalid" | "preflight_finding.helper_request_storage_invalid" | "preflight_finding.helper_response_unbound" | "preflight_finding.helper_runtime_endpoint_firewall_rejected" | "preflight_finding.helper_runtime_fabric_firewall_rejected" | "preflight_finding.helper_runtime_fabric_unavailable" | "preflight_finding.helper_runtime_image_identity_invalid" | "preflight_finding.helper_runtime_image_inspect_failed" | "preflight_finding.helper_runtime_image_load_failed" | "preflight_finding.helper_runtime_image_receipt_failed" | "preflight_finding.helper_runtime_process_exited" | "preflight_finding.helper_runtime_run_missing" | "preflight_finding.helper_sandbox_run_failed" | "preflight_finding.helper_stop_uncertain" | "preflight_finding.helper_system_clock_invalid" | "preflight_finding.helper_temporary_directory_unavailable" | "preflight_finding.memory_limit_exceeded" | "preflight_finding.mount_namespace_unavailable" | "preflight_finding.nonzero_without_output" | "preflight_finding.no_new_privileges_unavailable" | "preflight_finding.oci_runtime_unavailable" | "preflight_finding.patch_rejected" | "preflight_finding.permission_denied" | "preflight_finding.proc_mount_denied" | "preflight_finding.proc_unavailable" | "preflight_finding.runroot_exceeds_50_bytes" | "preflight_finding.signed_helper_probe_required" | "preflight_finding.storage_driver_failure" | "preflight_finding.subordinate_id_mapping_unavailable" | "preflight_finding.subprocess_unavailable" | "preflight_finding.systemd_scope_failure" | "preflight_finding.temporary_directory_unavailable" | "preflight_finding.temporary_storage_exhausted" | "preflight_finding.unclassified" | "preflight_finding.unclassified_podman_build_failure" | "preflight_finding.user_namespace_denied" | "preflight_finding.user_service_manager_unavailable";
+        /**
+         * RuntimePreflightRequest
+         * @description Check this linux/arm64 host can run one recipe runtime.
+         */
+        RuntimePreflightRequest: {
+            /**
+             * Fabric Connectivity
+             * @enum {string}
+             */
+            fabric_connectivity: "none" | "connected";
+            /** Fabric Minimum Mbps */
+            fabric_minimum_mbps: number;
+            /** Minimum Free Bytes */
+            minimum_free_bytes: number;
+            /** Source Build */
+            source_build: boolean;
+        };
         /** RuntimePreflightResult */
         RuntimePreflightResult: {
             /** Findings */
@@ -9228,6 +11112,26 @@ export interface components {
             fingerprint: string;
             /** Observed At */
             observed_at: number;
+        };
+        /** RuntimeTelemetryProjection */
+        RuntimeTelemetryProjection: {
+            /** Engine */
+            engine: string;
+            /**
+             * Engine Version
+             * @default null
+             */
+            engine_version: string | null;
+            /**
+             * Metrics Format
+             * @default null
+             */
+            metrics_format: string | null;
+            /**
+             * Metrics Path
+             * @default null
+             */
+            metrics_path: string | null;
         };
         /**
          * SecurityRefusal
@@ -9365,6 +11269,14 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** StartPhaseOperation */
+        StartPhaseOperation: {
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            payload: components["schemas"]["RecipeStartPayload"];
+        };
         /**
          * StateAlias
          * @description The retired spellings of a stored lifecycle state.
@@ -9405,6 +11317,14 @@ export interface components {
          * @enum {string}
          */
         StopOutcome: "confirmed" | "unconfirmed";
+        /** StopPhaseOperation */
+        StopPhaseOperation: {
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            payload: components["schemas"]["RecipeStopPayload"];
+        };
         /**
          * StopPlanCode
          * @description Why a stop plan is stale or cannot be taken.
@@ -9736,6 +11656,14 @@ export interface components {
          * @enum {string}
          */
         TopologyCode: "topology.fabric_insufficient" | "topology.invalid" | "topology.placement_invalid" | "topology.role_mismatch" | "topology.runtime_capability_missing";
+        /** UninstallPhaseOperation */
+        UninstallPhaseOperation: {
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            payload: components["schemas"]["RecipeUninstallPayload"];
+        };
         /**
          * UninstallPlanCode
          * @description Why an uninstall plan is blocked or incomplete.
@@ -9817,6 +11745,15 @@ export interface components {
          * @enum {string}
          */
         WaitVerdict: "KEEP" | "SELF-HEAL" | "FIX-ACTION" | "DERIVED";
+        /** WritablePath */
+        WritablePath: {
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /** Persistent */
+            persistent: boolean;
+        };
         pydantic__types__JsonValue: unknown;
         vonk_forge_contracts__recipe__JsonValue: string | number | boolean | components["schemas"]["vonk_forge_contracts__recipe__JsonValue"][] | {
             [key: string]: components["schemas"]["vonk_forge_contracts__recipe__JsonValue"];

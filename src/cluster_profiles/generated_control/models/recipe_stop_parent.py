@@ -16,6 +16,7 @@ from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.distributed_recovery_marker import DistributedRecoveryMarker
+  from ..models.profile_partial_stop import ProfilePartialStop
   from ..models.stop_phase_operation import StopPhaseOperation
 
 
@@ -36,6 +37,7 @@ class RecipeStopParent:
             schema_version (Literal[1]):
             execution_mode (Literal['one-shot-jobs'] | None | Unset):
             phases (list[list[StopPhaseOperation]] | None | Unset):
+            profile_partial_stop (None | ProfilePartialStop | Unset):
             recovery (DistributedRecoveryMarker | None | Unset):
             workload_intent_ordinal (int | None | Unset):
      """
@@ -46,6 +48,7 @@ class RecipeStopParent:
     schema_version: Literal[1]
     execution_mode: Literal['one-shot-jobs'] | None | Unset = UNSET
     phases: list[list[StopPhaseOperation]] | None | Unset = UNSET
+    profile_partial_stop: None | ProfilePartialStop | Unset = UNSET
     recovery: DistributedRecoveryMarker | None | Unset = UNSET
     workload_intent_ordinal: int | None | Unset = UNSET
 
@@ -55,6 +58,7 @@ class RecipeStopParent:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.distributed_recovery_marker import DistributedRecoveryMarker # noqa: PLC0415
+        from ..models.profile_partial_stop import ProfilePartialStop # noqa: PLC0415
         from ..models.stop_phase_operation import StopPhaseOperation # noqa: PLC0415
         owner_id = self.owner_id
 
@@ -88,6 +92,14 @@ class RecipeStopParent:
         else:
             phases = self.phases
 
+        profile_partial_stop: dict[str, Any] | None | Unset
+        if isinstance(self.profile_partial_stop, Unset):
+            profile_partial_stop = UNSET
+        elif isinstance(self.profile_partial_stop, ProfilePartialStop):
+            profile_partial_stop = self.profile_partial_stop.to_dict()
+        else:
+            profile_partial_stop = self.profile_partial_stop
+
         recovery: dict[str, Any] | None | Unset
         if isinstance(self.recovery, Unset):
             recovery = UNSET
@@ -115,6 +127,8 @@ class RecipeStopParent:
             field_dict["execution_mode"] = execution_mode
         if phases is not UNSET:
             field_dict["phases"] = phases
+        if profile_partial_stop is not UNSET:
+            field_dict["profile_partial_stop"] = profile_partial_stop
         if recovery is not UNSET:
             field_dict["recovery"] = recovery
         if workload_intent_ordinal is not UNSET:
@@ -127,6 +141,7 @@ class RecipeStopParent:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.distributed_recovery_marker import DistributedRecoveryMarker # noqa: PLC0415
+        from ..models.profile_partial_stop import ProfilePartialStop # noqa: PLC0415
         from ..models.stop_phase_operation import StopPhaseOperation # noqa: PLC0415
         d = dict(src_dict)
         owner_id = d.pop("owner_id")
@@ -186,6 +201,26 @@ class RecipeStopParent:
         phases = _parse_phases(d.pop("phases", UNSET))
 
 
+        def _parse_profile_partial_stop(data: object) -> None | ProfilePartialStop | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                profile_partial_stop_type_0 = ProfilePartialStop.from_dict(data)
+
+
+
+                return profile_partial_stop_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | ProfilePartialStop | Unset, data)
+
+        profile_partial_stop = _parse_profile_partial_stop(d.pop("profile_partial_stop", UNSET))
+
+
         def _parse_recovery(data: object) -> DistributedRecoveryMarker | None | Unset:
             if data is None:
                 return data
@@ -223,6 +258,7 @@ class RecipeStopParent:
             schema_version=schema_version,
             execution_mode=execution_mode,
             phases=phases,
+            profile_partial_stop=profile_partial_stop,
             recovery=recovery,
             workload_intent_ordinal=workload_intent_ordinal,
         )

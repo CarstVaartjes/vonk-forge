@@ -458,6 +458,7 @@ from .profile_job_run_stop_authorization import ProfileJobRunStopAuthorization
 from .profile_job_run_stop_job import ProfileJobRunStopJob
 from .profile_job_run_stop_phase_item import ProfileJobRunStopPhaseItem
 from .profile_job_run_stop_target import ProfileJobRunStopTarget
+from .profile_partial_stop import ProfilePartialStop
 from .profile_reason_code import ProfileReasonCode
 from .progress_phase import ProgressPhase
 from .projection_code import ProjectionCode
@@ -1280,6 +1281,7 @@ __all__ = (
     "ProfileJobRunStopJob",
     "ProfileJobRunStopPhaseItem",
     "ProfileJobRunStopTarget",
+    "ProfilePartialStop",
     "ProfileReasonCode",
     "ProgressPhase",
     "ProjectionCode",

@@ -43,7 +43,6 @@ class AvailabilityJobPayload:
     """ One image-availability operation: intent, identity, progress and what it holds.
 
         Attributes:
-            effective_execution_key (str):
             force_rebuild (bool):
             kind (Literal['recipe.image.availability.v2']):
             progress (OperationProgress): Canonical durable progress payload shared by Controller and agents.
@@ -63,6 +62,7 @@ class AvailabilityJobPayload:
             cancellation (None | RecipeOperationCancellationResult | Unset):
             claim_owner (None | str | Unset):
             claim_until (datetime.datetime | None | Unset):
+            effective_execution_key (None | str | Unset):
             failure (AvailabilityOperationFailure | None | Unset):
             identity_key (None | str | Unset):
             image_reference_intent (None | RuntimeImageReferenceIntent | Unset):
@@ -76,7 +76,6 @@ class AvailabilityJobPayload:
             supersession (AvailabilitySupersession | None | Unset):
      """
 
-    effective_execution_key: str
     force_rebuild: bool
     kind: Literal['recipe.image.availability.v2']
     progress: OperationProgress
@@ -93,6 +92,7 @@ class AvailabilityJobPayload:
     cancellation: None | RecipeOperationCancellationResult | Unset = UNSET
     claim_owner: None | str | Unset = UNSET
     claim_until: datetime.datetime | None | Unset = UNSET
+    effective_execution_key: None | str | Unset = UNSET
     failure: AvailabilityOperationFailure | None | Unset = UNSET
     identity_key: None | str | Unset = UNSET
     image_reference_intent: None | RuntimeImageReferenceIntent | Unset = UNSET
@@ -125,8 +125,6 @@ class AvailabilityJobPayload:
         from ..models.recipe_selector_intent import RecipeSelectorIntent # noqa: PLC0415
         from ..models.runtime_image_receipt import RuntimeImageReceipt # noqa: PLC0415
         from ..models.runtime_image_reference_intent import RuntimeImageReferenceIntent # noqa: PLC0415
-        effective_execution_key = self.effective_execution_key
-
         force_rebuild = self.force_rebuild
 
         kind = self.kind
@@ -202,6 +200,12 @@ class AvailabilityJobPayload:
             claim_until = self.claim_until.isoformat()
         else:
             claim_until = self.claim_until
+
+        effective_execution_key: None | str | Unset
+        if isinstance(self.effective_execution_key, Unset):
+            effective_execution_key = UNSET
+        else:
+            effective_execution_key = self.effective_execution_key
 
         failure: dict[str, Any] | None | Unset
         if isinstance(self.failure, Unset):
@@ -285,7 +289,6 @@ class AvailabilityJobPayload:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "effective_execution_key": effective_execution_key,
             "force_rebuild": force_rebuild,
             "kind": kind,
             "progress": progress,
@@ -309,6 +312,8 @@ class AvailabilityJobPayload:
             field_dict["claim_owner"] = claim_owner
         if claim_until is not UNSET:
             field_dict["claim_until"] = claim_until
+        if effective_execution_key is not UNSET:
+            field_dict["effective_execution_key"] = effective_execution_key
         if failure is not UNSET:
             field_dict["failure"] = failure
         if identity_key is not UNSET:
@@ -354,8 +359,6 @@ class AvailabilityJobPayload:
         from ..models.runtime_image_receipt import RuntimeImageReceipt # noqa: PLC0415
         from ..models.runtime_image_reference_intent import RuntimeImageReferenceIntent # noqa: PLC0415
         d = dict(src_dict)
-        effective_execution_key = d.pop("effective_execution_key")
-
         force_rebuild = d.pop("force_rebuild")
 
         kind = cast(Literal['recipe.image.availability.v2'] , d.pop("kind"))
@@ -525,6 +528,16 @@ class AvailabilityJobPayload:
             return cast(datetime.datetime | None | Unset, data)
 
         claim_until = _parse_claim_until(d.pop("claim_until", UNSET))
+
+
+        def _parse_effective_execution_key(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        effective_execution_key = _parse_effective_execution_key(d.pop("effective_execution_key", UNSET))
 
 
         def _parse_failure(data: object) -> AvailabilityOperationFailure | None | Unset:
@@ -702,7 +715,6 @@ class AvailabilityJobPayload:
 
 
         availability_job_payload = cls(
-            effective_execution_key=effective_execution_key,
             force_rebuild=force_rebuild,
             kind=kind,
             progress=progress,
@@ -719,6 +731,7 @@ class AvailabilityJobPayload:
             cancellation=cancellation,
             claim_owner=claim_owner,
             claim_until=claim_until,
+            effective_execution_key=effective_execution_key,
             failure=failure,
             identity_key=identity_key,
             image_reference_intent=image_reference_intent,
