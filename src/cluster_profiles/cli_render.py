@@ -10,8 +10,6 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
-from pydantic import TypeAdapter
-
 from . import cli_states
 from .cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
 
@@ -65,13 +63,14 @@ def _warn(message: str) -> None:
     )
 
 
-_PROJECTION_ISSUES = TypeAdapter(list[str])
-
-
 def _projection_issues(value: object) -> list[str]:
     if value is None:
         return []
-    return _PROJECTION_ISSUES.validate_python(value, strict=True)
+    if not isinstance(value, list) or any(
+        not isinstance(issue, str) for issue in value
+    ):
+        raise TypeError("expected a list of projection issues")
+    return [str(issue) for issue in value]
 
 
 def _words(value: object) -> str:
