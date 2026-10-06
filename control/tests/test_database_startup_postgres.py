@@ -5,7 +5,8 @@ from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy.engine import Engine
+from pytest import MonkeyPatch
+from sqlalchemy.engine import Connection, Engine
 from vonk_control.db import initialize_database
 
 
@@ -40,11 +41,11 @@ def test_concurrent_fresh_startup_migrates_once(postgres_engine: Engine) -> None
 
 def test_bookkeeping_adoption_failure_preserves_current_schema(
     postgres_engine: Engine,
-    monkeypatch,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     from vonk_control import db
 
-    def broken_adoption(connection):
+    def broken_adoption(connection: Connection) -> None:
         # PostgreSQL aborts the current transaction after this fault; only a
         # real savepoint prevents it from undoing schema reconciliation.
         connection.exec_driver_sql("SELECT * FROM missing_adoption_bookkeeping")
