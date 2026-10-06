@@ -5265,10 +5265,7 @@ mod tests {
     fn recipe_start_plan_for_authority(run_generation: u32) -> RecipeStartPayload {
         let compiled = compiled_plan_for_runtime_authority();
         RecipeStartPayload {
-            rank: compiled.runtime.placement.rank,
-            role: compiled.runtime.placement.role.clone(),
-            recipe_content_sha256: compiled.identity.recipe_revision_sha256.clone(),
-            stop_timeout_seconds: compiled.lifecycle.stop_timeout_seconds,
+            compiled_execution_plan: compiled,
             installation_id: runtime_effect_identity(run_generation).installation_id,
             mapping_id: uuid::Uuid::parse_str("70000000-0000-4000-8000-000000000007").unwrap(),
             phase: None,
