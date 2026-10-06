@@ -496,6 +496,10 @@ class _SwitchAdapter:
         del application_id, session
         return False
 
+    def failure_signature(self, application_id: str, *, session: Session) -> str | None:
+        del application_id, session
+        return None
+
     def start(
         self,
         *,

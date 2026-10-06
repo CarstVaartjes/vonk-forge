@@ -706,6 +706,37 @@ class FleetProfileAdapter:
             supersession=(code, by),
         ).row
 
+    def end_retry(
+        self,
+        application: FleetProfileApplication,
+        reason: str,
+        now: datetime,
+        *,
+        progress: dict[str, object],
+        session: Session | None = None,
+    ) -> bool:
+        """A failed load whose retry was still scheduled ends failed for good.
+
+        The retry owner decided that trying again cannot change the outcome (the
+        same failure repeated), so no attempt is scheduled any more: the row stays
+        ``failed`` with its typed evidence (``progress`` carries the blockers) and
+        its reason.  Nothing is issued or stopped.  False when the row is not a
+        failed one (it ended some other way meanwhile).
+        """
+
+        if application.state != State.FAILED.value:
+            return False
+        now = aware(now)
+        document = dict(progress)
+        document["retry_due_at"] = None
+        application.progress = document
+        application.status_reason = reason[:_MAX_REASON]
+        application.updated_at = now
+        hook_session = session or self._session
+        if self._after_state is not None and hook_session is not None:
+            self._after_state(hook_session, application)
+        return True
+
     def request_cancel(
         self,
         application: FleetProfileApplication,
