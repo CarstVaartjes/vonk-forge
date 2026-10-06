@@ -2327,8 +2327,12 @@ class RunSwitchFleetProfileAdapter:
             self._write_state(session, application, state)
             session.flush()
             return self._view_from_state(application, state)
-        pending_cancellation = self._observe_superseded_agent_effects(
-            session, application, state
+        pending_cancellation = (
+            None
+            if item.get("kind") == "stop"
+            else self._observe_superseded_agent_effects(
+                session, application, state, before_dispatch=True
+            )
         )
         if pending_cancellation is not None:
             # A newer selected effect may own the fence while an older executor
@@ -2446,6 +2450,8 @@ class RunSwitchFleetProfileAdapter:
         session: Session,
         application: FleetProfileApplication,
         state: dict[str, object],
+        *,
+        before_dispatch: bool = False,
     ) -> FleetProfileChildOperation | None:
         """Wait for older issued cancellation receipts before a switch succeeds."""
 
@@ -2476,12 +2482,21 @@ class RunSwitchFleetProfileAdapter:
         )
         if cancellation is None and adopted_scope is not None:
             scope_node_ids = list(adopted_scope)
-        AgentJobService.abandon_superseded_idempotent_operations_in_session(
-            session, scope_node_ids, ordinal, now
-        )
-        effects = AgentJobService.assess_superseded_agent_effects_in_session(
-            session, scope_node_ids, ordinal, now
-        )
+        if before_dispatch:
+            # A lost child has an unflushed mirror update. The new child's
+            # owner opens its own transaction, so this read must neither flush
+            # that update nor acquire mutation locks before dispatch.
+            with session.no_autoflush:
+                effects = AgentJobService.assess_superseded_agent_effects_in_session(
+                    session, scope_node_ids, ordinal, now
+                )
+        else:
+            AgentJobService.abandon_superseded_idempotent_operations_in_session(
+                session, scope_node_ids, ordinal, now
+            )
+            effects = AgentJobService.assess_superseded_agent_effects_in_session(
+                session, scope_node_ids, ordinal, now
+            )
         if not effects:
             state["observation_due_at"] = None
             state["observation_deadline_at"] = None
