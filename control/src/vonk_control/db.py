@@ -936,6 +936,11 @@ def adopt_legacy_rows(connection: Connection) -> None:
     adopted = adopt_legacy_operations(connection)
     if adopted:
         _LOGGER.info("Adopted %d cache operations onto the lifecycle schedule", adopted)
+    from .legacy_states import adopt_legacy_states
+
+    adopted = adopt_legacy_states(connection)
+    if adopted:
+        _LOGGER.info("Rewrote %d lifecycle rows onto the core state words", adopted)
 
 
 def initialize_database(
