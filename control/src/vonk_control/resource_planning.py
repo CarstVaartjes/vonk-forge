@@ -242,7 +242,10 @@ def memory_requirement(
     recipe_document: Mapping[str, object],
     memory: RecipeMemoryResources,
     role_name: str,
-    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    model_documents: Mapping[
+        tuple[str, str, str], ModelDefinition | Mapping[str, object]
+    ]
+    | None,
     *,
     settings: object | None = None,
     platform_floor_bytes: int = 0,
@@ -613,7 +616,10 @@ def resolve_effective_settings(value: object) -> SettingsResolution:
 
 def _selected_model_bytes(
     recipe_document: Mapping[str, object],
-    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    model_documents: Mapping[
+        tuple[str, str, str], ModelDefinition | Mapping[str, object]
+    ]
+    | None,
     role_name: str,
 ) -> int | None:
     if not model_documents:
@@ -631,8 +637,12 @@ def _selected_model_bytes(
             )
             if raw_model is None:
                 return None
-            model = ModelDefinition.model_validate_json(
-                json.dumps(raw_model, allow_nan=False), strict=True
+            model = (
+                raw_model
+                if isinstance(raw_model, ModelDefinition)
+                else ModelDefinition.model_validate_json(
+                    json.dumps(raw_model, allow_nan=False), strict=True
+                )
             )
             by_id = {file.id: file for file in model.files}
             selected_ids = {
@@ -652,7 +662,10 @@ def _selected_model_bytes(
 def _resource_evidence(
     recipe_document: Mapping[str, object],
     role_name: str,
-    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    model_documents: Mapping[
+        tuple[str, str, str], ModelDefinition | Mapping[str, object]
+    ]
+    | None,
     declared_total_bytes: int,
     settings: EffectiveResourceSettings | None,
 ) -> ResourceEvidence:
