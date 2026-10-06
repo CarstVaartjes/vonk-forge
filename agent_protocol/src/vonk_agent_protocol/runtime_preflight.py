@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from .reason_codes import RuntimePreflightFindingCode, adopt_preflight_finding_code
 from .wire_model import WireModel
 
 
@@ -19,9 +20,23 @@ class RuntimePreflightRequest(WireModel):
 
 
 class RuntimePreflightFinding(WireModel):
+    """One capability's verdict.
+
+    ``code`` travels as the word of a :class:`RuntimePreflightFindingCode` member.
+    It stays a pattern-bound string on the wire so an older agent's free-text
+    code (``available``, ``proc-mount-denied``) and a newer agent's word still
+    read; :attr:`finding_code` is the typed reading of either.
+    """
+
     capability: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,95}$")
     status: Literal["passed", "failed", "unknown"]
     code: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,95}$")
+
+    @property
+    def finding_code(self) -> RuntimePreflightFindingCode:
+        """The member that names ``code``, adopting a retired free-text spelling."""
+
+        return adopt_preflight_finding_code(self.code)
 
 
 class RuntimePreflightResult(WireModel):

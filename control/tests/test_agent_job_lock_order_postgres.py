@@ -12,6 +12,7 @@ from sqlalchemy import event, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control import agent_operation_states as aos
+from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import (
     AgentCertificate,
@@ -20,7 +21,6 @@ from vonk_control.models import (
     Base,
     Job,
 )
-from vonk_control.run_admission import RunAdmissionBusy
 
 from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
@@ -352,7 +352,7 @@ def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
                     recipe_stop_payload(NODES[index], plan_digest=REVISION),
                     operation_id=operation_ids[index],
                 )
-        except RunAdmissionBusy as error:
+        except AdmissionLockBusy as error:
             return error
 
     event.listen(postgres_engine, "after_cursor_execute", hold_first_key_owner)
@@ -364,7 +364,7 @@ def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
                 completed, _ = wait(futures, timeout=3, return_when=FIRST_COMPLETED)
                 assert len(completed) == 1, "contending enqueue did not return promptly"
                 refusal = next(iter(completed)).result()
-                assert isinstance(refusal, RunAdmissionBusy), refusal
+                assert isinstance(refusal, AdmissionLockBusy), refusal
                 assert len(observed_key_threads) == 2
                 with sessions() as observer:
                     visible = tuple(
@@ -387,7 +387,7 @@ def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
     busy_indexes = [
         index
         for index, result in enumerate(results)
-        if isinstance(result, RunAdmissionBusy)
+        if isinstance(result, AdmissionLockBusy)
     ]
     assert len(busy_indexes) == 1
     completed_index = 1 - busy_indexes[0]

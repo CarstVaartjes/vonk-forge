@@ -43,6 +43,7 @@ from vonk_control.recipe_builds import (
 )
 from vonk_control.recipe_image_availability import (
     SOURCE_POLICY_REFUSED_CODE,
+    BuildUnsettled,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
@@ -644,12 +645,13 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
         )
 
     if capacity_busy:
-        with pytest.raises(RecipeImageAvailabilityError) as failure:
-            execute()
-        assert failure.value.code == "recipe_image.build_capacity_wait"
-        assert failure.value.retryable
+        failure = execute()
+        assert isinstance(failure, BuildUnsettled)
+        assert failure.code == "recipe_image.build_capacity_wait"
+        assert failure.retryable
     else:
         result = execute()
+        assert not isinstance(result, BuildUnsettled)
         assert result["build_input_sha256"] == "b" * 64
     assert builds.plan_calls == 1
     production.close()
@@ -789,19 +791,19 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
             progress=lambda _progress: None,
         )
 
-    with pytest.raises(RecipeImageAvailabilityError) as failure:
-        execute()
-    assert failure.value.retryable
-    assert failure.value.code == "recipe_image.build_capacity_wait"
-    assert [item.code for item in failure.value.blockers] == [
-        "recipe_image.builder_occupied"
-    ]
+    failure = execute()
+    assert isinstance(failure, BuildUnsettled)
+    assert failure.retryable
+    assert failure.code == "recipe_image.build_capacity_wait"
+    assert [item.code for item in failure.blockers] == ["recipe_image.builder_occupied"]
 
     with sessions.begin() as session:
         busy = session.get(Job, busy_id)
         assert busy is not None
         busy.payload = dict(busy.payload) | {"image_result": {"done": True}}
-    assert execute()["builder_node_id"] == node_id
+    settled = execute()
+    assert not isinstance(settled, BuildUnsettled)
+    assert settled["builder_node_id"] == node_id
     production.close()
 
 
@@ -974,16 +976,18 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
         )
 
     if prebuilt:
-        assert execute()["builder_node_id"] == node_id
+        settled = execute()
+        assert not isinstance(settled, BuildUnsettled)
+        assert settled["builder_node_id"] == node_id
         with sessions() as session:
             waiting = session.get(Job, waiting_id)
             assert waiting is not None
             # It now holds no builder: a Spark build may take the Spark.
             assert waiting.payload["prebuilt_pull"] is True
     else:
-        with pytest.raises(RecipeImageAvailabilityError) as failure:
-            execute()
-        assert failure.value.code == "recipe_image.build_capacity_wait"
+        failure = execute()
+        assert isinstance(failure, BuildUnsettled)
+        assert failure.code == "recipe_image.build_capacity_wait"
     production.close()
 
 
@@ -1139,6 +1143,7 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
         force=False,
         progress=lambda _progress: None,
     )
+    assert not isinstance(result, BuildUnsettled)
     assert result["builder_node_id"] == node_id
     production.close()
 
@@ -1489,19 +1494,19 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
     )
     assert production.service._builder is not None
     claim = production.service.claim_pending(limit=1)[0]
-    with pytest.raises(RecipeImageAvailabilityError) as raised:
-        production.service._builder(
-            recipe,
-            {
-                "recipe_revision_id": "revision-builder",
-                "builder_node_id": "builder-node",
-            },
-            claim=claim,
-            build_input_sha256="b" * 64,
-            force=False,
-            progress=lambda _progress: None,
-        )
-    assert raised.value.code == "build.source_invalid"
+    raised = production.service._builder(
+        recipe,
+        {
+            "recipe_revision_id": "revision-builder",
+            "builder_node_id": "builder-node",
+        },
+        claim=claim,
+        build_input_sha256="b" * 64,
+        force=False,
+        progress=lambda _progress: None,
+    )
+    assert isinstance(raised, BuildUnsettled)
+    assert raised.code == "build.source_invalid"
     production.close()
 
 
@@ -1698,7 +1703,11 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         results = tuple(future.result(timeout=8) for future in futures)
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
-    selected = {result["builder_node_id"] for result in results}
+    selected = {
+        result["builder_node_id"]
+        for result in results
+        if not isinstance(result, BuildUnsettled)
+    }
     assert selected == set(node_ids)
     assert set(persisted_nodes) == set(node_ids)
     with sessions() as session:

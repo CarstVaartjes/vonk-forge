@@ -32,12 +32,13 @@ from .artifact_lifecycle import (
     ArtifactReferenceUnsettled,
     lock_reference_gates,
 )
-from .categorized_errors import BookkeepingUnknown, InvalidValue
+from .categorized_errors import InvalidValue
 from .content_identity import ImageContent, differing_image_fields
 from .fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfilePreview,
 )
+from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .machine_states import DISTRIBUTION_HELD, INSTALLATION_ACTIVE
 from .model_cache_contract import CacheManifest
 from .models import (
@@ -310,10 +311,16 @@ def model_set_reference_findings(
             for assignment in assignments:
                 publisher, separator, slug = assignment.recipe_selector.partition("/")
                 if not separator:
-                    raise BookkeepingUnknown(
-                        "stored recipe selector is invalid",
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    # A selector that names no publisher resolves to no recipe
+                    # revision, so it protects nothing: it is recorded and skipped
+                    # instead of deferring every removal.
+                    retire_as_unknown(
+                        "artifact-reference.recipe-selector",
+                        profile.id,
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        "a saved profile assignment names an invalid recipe selector",
                     )
+                    continue
                 revisions = session.scalars(
                     select(CatalogDocumentRevision)
                     .where(
@@ -557,10 +564,16 @@ def runtime_image_reference_findings(
             for assignment in assignments:
                 publisher, separator, slug = assignment.recipe_selector.partition("/")
                 if not separator:
-                    raise BookkeepingUnknown(
-                        "stored recipe selector is invalid",
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    # A selector that names no publisher resolves to no recipe
+                    # revision, so it protects nothing: it is recorded and skipped
+                    # instead of deferring every removal.
+                    retire_as_unknown(
+                        "artifact-reference.recipe-selector",
+                        profile.id,
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        "a saved profile assignment names an invalid recipe selector",
                     )
+                    continue
                 revision = session.scalar(
                     select(CatalogDocumentRevision)
                     .where(

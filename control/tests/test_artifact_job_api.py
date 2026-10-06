@@ -504,4 +504,4 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
         blob_path = service._blob_store.resolve(
             blob.storage_key, blob.sha256, blob.size_bytes
         )
-    assert blob_path.read_bytes() == content
+    assert blob_path is not None and blob_path.read_bytes() == content

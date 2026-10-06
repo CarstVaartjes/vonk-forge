@@ -20,6 +20,7 @@ from .blocker_boundaries import (
     CONTROL_SOURCE_ROOT,
     CONTROL_STATE_ARGUMENT,
     CONTROL_STATE_ASSIGNMENT,
+    REPO_ROOT,
     RUST_RESULT,
     RaiseSite,
     UncategorizedRaise,
@@ -333,7 +334,13 @@ def test_the_scan_covers_every_module_of_control_src() -> None:
     document = load_allowlist()
     audited = audited_paths(document)
     paths = {site.path for site in scan_raises()}
-    assert audited <= paths
+    # An audited module may have no raise left at all, so it is checked against
+    # the modules of control/src, not against the raises the scan still finds.
+    modules = {
+        module.relative_to(REPO_ROOT).as_posix()
+        for module in CONTROL_SOURCE_ROOT.rglob("*.py")
+    }
+    assert audited <= modules
     assert paths - audited, "raises outside the audited modules are scanned too"
 
 

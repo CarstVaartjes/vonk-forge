@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
-use vonk_agent_protocol::generated::{FailureCode, SecurityRefusalReason};
+use vonk_agent_protocol::generated::{HelperErrorCode, RuntimePreflightFindingCode};
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeAction, HostRuntimeRequest, HostRuntimeRequestRule, RecipeJobRunRequest,
     RecipeReconciliationIdentity, RecipeRunInspectionRequest, RecipeStartRequest,
@@ -19,8 +19,6 @@ use vonk_agent_protocol::{
 
 use crate::client::{AgentHttpClient, ClientError};
 use crate::failure_evidence::{FailureProcessLogs, sanitize_tail};
-use crate::outcome::{GRANT_REFUSALS, HELPER_IDENTITY_REFUSALS};
-use crate::vocabulary;
 
 /// The frame ceiling is owned by the wire contract so the agent, the upgrade
 /// channel and the privileged helper cannot drift.
@@ -50,7 +48,7 @@ pub enum HostRuntimeError {
     StopUncertain,
     #[error("host runtime helper rejected request: {code}")]
     HelperRejected {
-        code: String,
+        code: HelperErrorCode,
         diagnostic: Option<String>,
         /// The rejected container's own retained output, per stream, when the
         /// helper could read it. Absence is reported, never read as empty.
@@ -108,26 +106,54 @@ pub enum HelperProtocolCause {
 }
 
 impl HelperProtocolCause {
-    /// The stable, un-prefixed contract code. `preflight_code()` reports it in
-    /// the `helper_<code>` namespace.
-    pub fn code(self) -> &'static str {
+    /// The stable contract code of this cause.
+    pub fn code(self) -> HelperErrorCode {
         match self {
-            Self::RequestEncoding => "request_encoding_invalid",
-            Self::HelperCallJoin => "call_join_failed",
-            Self::MessageFraming => "message_framing_invalid",
-            Self::ResponseUnbound => "response_unbound",
-            Self::RejectionMalformed => "rejection_malformed",
-            Self::OutcomeMalformed => "outcome_malformed",
-            Self::RequestDocument => "request_document_invalid",
-            Self::RequestArgumentsPresence => "request_arguments_presence_invalid",
-            Self::RequestPlanBinding => "request_plan_binding_invalid",
-            Self::RequestInstallationIdentity => "request_installation_identity_invalid",
-            Self::RequestBytes => "request_bytes_invalid",
-            Self::RequestPlanBytes => "request_plan_bytes_invalid",
-            Self::RequestArgumentNulByte => "request_argument_nul_byte",
-            Self::RequestStorage => "request_storage_invalid",
-            Self::SystemClock => "system_clock_invalid",
-            Self::InspectionOutcome => "inspection_outcome_invalid",
+            Self::RequestEncoding => HelperErrorCode::RequestEncodingInvalid,
+            Self::HelperCallJoin => HelperErrorCode::CallJoinFailed,
+            Self::MessageFraming => HelperErrorCode::MessageFramingInvalid,
+            Self::ResponseUnbound => HelperErrorCode::ResponseUnbound,
+            Self::RejectionMalformed => HelperErrorCode::RejectionMalformed,
+            Self::OutcomeMalformed => HelperErrorCode::OutcomeMalformed,
+            Self::RequestDocument => HelperErrorCode::RequestDocumentInvalid,
+            Self::RequestArgumentsPresence => HelperErrorCode::RequestArgumentsPresenceInvalid,
+            Self::RequestPlanBinding => HelperErrorCode::RequestPlanBindingInvalid,
+            Self::RequestInstallationIdentity => {
+                HelperErrorCode::RequestInstallationIdentityInvalid
+            }
+            Self::RequestBytes => HelperErrorCode::RequestBytesInvalid,
+            Self::RequestPlanBytes => HelperErrorCode::RequestPlanBytesInvalid,
+            Self::RequestArgumentNulByte => HelperErrorCode::RequestArgumentNulByte,
+            Self::RequestStorage => HelperErrorCode::RequestStorageInvalid,
+            Self::SystemClock => HelperErrorCode::SystemClockInvalid,
+            Self::InspectionOutcome => HelperErrorCode::InspectionOutcomeInvalid,
+        }
+    }
+
+    /// The code this cause carries in failure evidence, in the `runtime_helper_`
+    /// namespace.
+    pub fn runtime_helper_code(self) -> HelperErrorCode {
+        match self {
+            Self::RequestEncoding => HelperErrorCode::RuntimeHelperRequestEncodingInvalid,
+            Self::HelperCallJoin => HelperErrorCode::RuntimeHelperCallJoinFailed,
+            Self::MessageFraming => HelperErrorCode::RuntimeHelperMessageFramingInvalid,
+            Self::ResponseUnbound => HelperErrorCode::RuntimeHelperResponseUnbound,
+            Self::RejectionMalformed => HelperErrorCode::RuntimeHelperRejectionMalformed,
+            Self::OutcomeMalformed => HelperErrorCode::RuntimeHelperOutcomeMalformed,
+            Self::RequestDocument => HelperErrorCode::RuntimeHelperRequestDocumentInvalid,
+            Self::RequestArgumentsPresence => {
+                HelperErrorCode::RuntimeHelperRequestArgumentsPresenceInvalid
+            }
+            Self::RequestPlanBinding => HelperErrorCode::RuntimeHelperRequestPlanBindingInvalid,
+            Self::RequestInstallationIdentity => {
+                HelperErrorCode::RuntimeHelperRequestInstallationIdentityInvalid
+            }
+            Self::RequestBytes => HelperErrorCode::RuntimeHelperRequestBytesInvalid,
+            Self::RequestPlanBytes => HelperErrorCode::RuntimeHelperRequestPlanBytesInvalid,
+            Self::RequestArgumentNulByte => HelperErrorCode::RuntimeHelperRequestArgumentNulByte,
+            Self::RequestStorage => HelperErrorCode::RuntimeHelperRequestStorageInvalid,
+            Self::SystemClock => HelperErrorCode::RuntimeHelperSystemClockInvalid,
+            Self::InspectionOutcome => HelperErrorCode::RuntimeHelperInspectionOutcomeInvalid,
         }
     }
 
@@ -149,38 +175,36 @@ impl HelperProtocolCause {
 }
 
 impl HostRuntimeError {
-    /// Bounded, non-sensitive evidence for the admission receipt.
-    pub fn preflight_code(&self) -> String {
+    /// The closed finding code this failure reports in a runtime preflight
+    /// result and, spelled without the finding prefix, in admission evidence.
+    pub fn finding_code(&self) -> RuntimePreflightFindingCode {
         match self {
-            Self::Io(_) => "helper_io_failed".to_owned(),
+            Self::Io(_) => RuntimePreflightFindingCode::PreflightFindingHelperIoFailed,
             Self::Controller(ClientError::Protocol) => {
-                SecurityRefusalReason::HelperGrantInvalid.to_string()
+                RuntimePreflightFindingCode::PreflightFindingHelperGrantInvalid
             }
             Self::Controller(ClientError::Controller(error))
                 if matches!(error.status, 401 | 403) =>
             {
-                SecurityRefusalReason::HelperGrantUnauthorized.to_string()
+                RuntimePreflightFindingCode::PreflightFindingHelperGrantUnauthorized
             }
-            Self::Controller(_) => "helper_grant_unavailable".to_owned(),
-            Self::HelperProtocol(cause) if stable_runtime_error_code(cause.code()) => {
-                format!("helper_{}", cause.code())
+            Self::Controller(_) => {
+                RuntimePreflightFindingCode::PreflightFindingHelperGrantUnavailable
             }
-            Self::HelperProtocolBound { cause, .. } if stable_runtime_error_code(cause.code()) => {
-                format!("helper_{}", cause.code())
-            }
-            // A cause that is not on the namespace allowlist keeps the previous
-            // opaque label, exactly as an unlisted helper rejection code does.
-            Self::HelperProtocol(_) | Self::HelperProtocolBound { .. } => {
-                "helper_protocol_invalid".to_owned()
+            Self::HelperProtocol(cause) | Self::HelperProtocolBound { cause, .. } => {
+                helper_finding_code(cause.code())
             }
             // An ambiguous stop is named for what it is, so it can never be
             // read as a malformed helper reply.
-            Self::StopUncertain => "helper_stop_uncertain".to_owned(),
-            Self::HelperRejected { code, .. } if stable_runtime_error_code(code) => {
-                format!("helper_{code}")
-            }
-            Self::HelperRejected { .. } => "helper_protocol_invalid".to_owned(),
+            Self::StopUncertain => RuntimePreflightFindingCode::PreflightFindingHelperStopUncertain,
+            Self::HelperRejected { code, .. } => helper_finding_code(*code),
         }
+    }
+
+    /// Bounded, non-sensitive evidence for the admission receipt: the finding
+    /// code's word without the finding prefix.
+    pub fn preflight_code(&self) -> String {
+        finding_word(self.finding_code())
     }
 
     /// Build the refusal for one canonical request rule, carrying the measured
@@ -515,7 +539,8 @@ fn require_bound_response(
 /// Every other code is produced after the helper knows the request, so an
 /// unbound reply claiming one is a reply this agent cannot account for.
 fn unbound_rejection_is_expected(code: &str) -> bool {
-    vocabulary::is_any(code, &GRANT_REFUSALS) || code == "request_invalid"
+    crate::helper_codes::runtime_rejection(code)
+        .is_some_and(crate::helper_codes::is_unbound_rejection)
 }
 
 /// The executed-outcome contract. A successful helper reply carries no
@@ -546,20 +571,24 @@ fn require_executed_outcome(
 }
 
 fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> HostRuntimeError {
-    let Some(code) = response.error_code.as_deref() else {
+    let Some(code) = response
+        .error_code
+        .as_deref()
+        .and_then(crate::helper_codes::runtime_rejection)
+    else {
         return HostRuntimeError::HelperProtocol(HelperProtocolCause::RejectionMalformed);
     };
     if response.status != "rejected"
         || response.exit_code.is_some()
         || response.process_running.is_some()
-        || !stable_runtime_error_code(code)
         || response.diagnostic.is_some()
-            && (action != HostRuntimeAction::RunInspect || code != "runtime_process_exited")
+            && (action != HostRuntimeAction::RunInspect
+                || code != HelperErrorCode::RuntimeProcessExited)
     {
         return HostRuntimeError::HelperProtocol(HelperProtocolCause::RejectionMalformed);
     }
     HostRuntimeError::HelperRejected {
-        code: code.to_owned(),
+        code,
         diagnostic: response
             .diagnostic
             .as_deref()
@@ -573,64 +602,114 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
     }
 }
 
-fn stable_runtime_error_code(value: &str) -> bool {
-    // Every code the privileged helper can name, not only the operation ones.
-    // The helper's grant, peer and request rejections were absent, so the agent
-    // reported each of them as an opaque protocol error even when the helper had
-    // said which check refused -- which is how a live privileged start became
-    // unattributable.
-    vocabulary::is_any(value, &GRANT_REFUSALS)
-        || vocabulary::is_any(value, &HELPER_IDENTITY_REFUSALS)
-        || vocabulary::is(value, SecurityRefusalReason::RequestReplayed)
-        || vocabulary::is_any(
-            value,
-            &[
-                FailureCode::OperationFailed,
-                FailureCode::InstallationReconciliationBusy,
-            ],
-        )
-        || matches!(
-            value,
-            "operation_invalid"
-            | "operation_unsafe_path"
-            | "operation_command_failed"
-            | "operation_stop_uncertain"
-            | "operation_io"
-            | "runtime_image_load_failed"
-            | "runtime_image_inspect_failed"
-            | "runtime_image_receipt_failed"
-            | "runtime_process_exited"
-            | "runtime_run_missing"
-            | "runtime_fabric_unavailable"
-            | "runtime_fabric_firewall_rejected"
-            | "runtime_endpoint_firewall_rejected"
-            | "installation_reconciliation_storage_unavailable"
-            | "request_invalid"
-            | "request_ledger_failed"
-            // The agent's own helper-protocol causes share the `helper_<code>`
-            // namespace, so this allowlist stays the single owner of the codes
-            // `preflight_code()` may name. A cause missing here keeps the
-            // previous opaque label instead of inventing an unowned code.
-            | "request_encoding_invalid"
-            | "call_join_failed"
-            | "message_framing_invalid"
-            | "response_unbound"
-            | "rejection_malformed"
-            | "outcome_malformed"
-            // The rest of the agent-side contracts share the same namespace.
-            | "request_document_invalid"
-            | "request_schema_version_invalid"
-            | "request_attempt_invalid"
-            | "request_arguments_presence_invalid"
-            | "request_plan_binding_invalid"
-            | "request_installation_identity_invalid"
-            | "request_bytes_invalid"
-            | "request_plan_bytes_invalid"
-            | "request_argument_nul_byte"
-            | "request_storage_invalid"
-            | "system_clock_invalid"
-            | "inspection_outcome_invalid"
-        )
+/// The finding code of a helper code.  A code the runtime boundary does not
+/// accept keeps the opaque `helper_protocol_invalid` label.
+fn helper_finding_code(code: HelperErrorCode) -> RuntimePreflightFindingCode {
+    use RuntimePreflightFindingCode as Finding;
+    match code {
+        HelperErrorCode::GrantInvalid => Finding::PreflightFindingHelperGrantInvalid,
+        HelperErrorCode::GrantNodeMismatch => Finding::PreflightFindingHelperGrantNodeMismatch,
+        HelperErrorCode::GrantUnauthorized => Finding::PreflightFindingHelperGrantUnauthorized,
+        HelperErrorCode::PeerIdentityInvalid => Finding::PreflightFindingHelperPeerIdentityInvalid,
+        HelperErrorCode::OperationInvalidArtifact => {
+            Finding::PreflightFindingHelperOperationInvalidArtifact
+        }
+        HelperErrorCode::RuntimeImageIdentityInvalid => {
+            Finding::PreflightFindingHelperRuntimeImageIdentityInvalid
+        }
+        HelperErrorCode::RequestReplayed => Finding::PreflightFindingHelperRequestReplayed,
+        HelperErrorCode::OperationFailed => Finding::PreflightFindingHelperOperationFailed,
+        HelperErrorCode::InstallationReconciliationBusy => {
+            Finding::PreflightFindingHelperInstallationReconciliationBusy
+        }
+        HelperErrorCode::OperationInvalid => Finding::PreflightFindingHelperOperationInvalid,
+        HelperErrorCode::OperationUnsafePath => Finding::PreflightFindingHelperOperationUnsafePath,
+        HelperErrorCode::OperationCommandFailed => {
+            Finding::PreflightFindingHelperOperationCommandFailed
+        }
+        HelperErrorCode::OperationStopUncertain => {
+            Finding::PreflightFindingHelperOperationStopUncertain
+        }
+        HelperErrorCode::OperationIo => Finding::PreflightFindingHelperOperationIo,
+        HelperErrorCode::RuntimeImageLoadFailed => {
+            Finding::PreflightFindingHelperRuntimeImageLoadFailed
+        }
+        HelperErrorCode::RuntimeImageInspectFailed => {
+            Finding::PreflightFindingHelperRuntimeImageInspectFailed
+        }
+        HelperErrorCode::RuntimeImageReceiptFailed => {
+            Finding::PreflightFindingHelperRuntimeImageReceiptFailed
+        }
+        HelperErrorCode::RuntimeProcessExited => {
+            Finding::PreflightFindingHelperRuntimeProcessExited
+        }
+        HelperErrorCode::RuntimeRunMissing => Finding::PreflightFindingHelperRuntimeRunMissing,
+        HelperErrorCode::RuntimeFabricUnavailable => {
+            Finding::PreflightFindingHelperRuntimeFabricUnavailable
+        }
+        HelperErrorCode::RuntimeFabricFirewallRejected => {
+            Finding::PreflightFindingHelperRuntimeFabricFirewallRejected
+        }
+        HelperErrorCode::RuntimeEndpointFirewallRejected => {
+            Finding::PreflightFindingHelperRuntimeEndpointFirewallRejected
+        }
+        HelperErrorCode::InstallationReconciliationStorageUnavailable => {
+            Finding::PreflightFindingHelperInstallationReconciliationStorageUnavailable
+        }
+        HelperErrorCode::RequestInvalid => Finding::PreflightFindingHelperRequestInvalid,
+        HelperErrorCode::RequestLedgerFailed => Finding::PreflightFindingHelperRequestLedgerFailed,
+        HelperErrorCode::RequestEncodingInvalid => {
+            Finding::PreflightFindingHelperRequestEncodingInvalid
+        }
+        HelperErrorCode::CallJoinFailed => Finding::PreflightFindingHelperCallJoinFailed,
+        HelperErrorCode::MessageFramingInvalid => {
+            Finding::PreflightFindingHelperMessageFramingInvalid
+        }
+        HelperErrorCode::ResponseUnbound => Finding::PreflightFindingHelperResponseUnbound,
+        HelperErrorCode::RejectionMalformed => Finding::PreflightFindingHelperRejectionMalformed,
+        HelperErrorCode::OutcomeMalformed => Finding::PreflightFindingHelperOutcomeMalformed,
+        HelperErrorCode::RequestDocumentInvalid => {
+            Finding::PreflightFindingHelperRequestDocumentInvalid
+        }
+        HelperErrorCode::RequestSchemaVersionInvalid => {
+            Finding::PreflightFindingHelperRequestSchemaVersionInvalid
+        }
+        HelperErrorCode::RequestAttemptInvalid => {
+            Finding::PreflightFindingHelperRequestAttemptInvalid
+        }
+        HelperErrorCode::RequestArgumentsPresenceInvalid => {
+            Finding::PreflightFindingHelperRequestArgumentsPresenceInvalid
+        }
+        HelperErrorCode::RequestPlanBindingInvalid => {
+            Finding::PreflightFindingHelperRequestPlanBindingInvalid
+        }
+        HelperErrorCode::RequestInstallationIdentityInvalid => {
+            Finding::PreflightFindingHelperRequestInstallationIdentityInvalid
+        }
+        HelperErrorCode::RequestBytesInvalid => Finding::PreflightFindingHelperRequestBytesInvalid,
+        HelperErrorCode::RequestPlanBytesInvalid => {
+            Finding::PreflightFindingHelperRequestPlanBytesInvalid
+        }
+        HelperErrorCode::RequestArgumentNulByte => {
+            Finding::PreflightFindingHelperRequestArgumentNulByte
+        }
+        HelperErrorCode::RequestStorageInvalid => {
+            Finding::PreflightFindingHelperRequestStorageInvalid
+        }
+        HelperErrorCode::SystemClockInvalid => Finding::PreflightFindingHelperSystemClockInvalid,
+        HelperErrorCode::InspectionOutcomeInvalid => {
+            Finding::PreflightFindingHelperInspectionOutcomeInvalid
+        }
+        _ => Finding::PreflightFindingHelperProtocolInvalid,
+    }
+}
+
+/// The finding code without its `preflight_finding.` domain prefix: the word
+/// an operator reads in an admission receipt.
+pub fn finding_word(code: RuntimePreflightFindingCode) -> String {
+    let word = code.to_string();
+    word.strip_prefix("preflight_finding.")
+        .map_or(word.clone(), str::to_owned)
 }
 
 fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, HostRuntimeError> {
@@ -741,8 +820,9 @@ fn call_helper(
 #[cfg(test)]
 mod tests {
     use super::{
-        HelperProtocolCause, HostRuntimeError, call_helper, require_bound_response,
-        require_executed_outcome, runtime_rejection, write_request,
+        HelperErrorCode, HelperProtocolCause, HostRuntimeError, RuntimePreflightFindingCode,
+        call_helper, finding_word, require_bound_response, require_executed_outcome,
+        runtime_rejection, write_request,
     };
     use std::fs;
     use std::io::{Read, Write};
@@ -870,7 +950,7 @@ mod tests {
             ),
             (
                 HostRuntimeError::HelperRejected {
-                    code: "operation_unsafe_path".to_owned(),
+                    code: HelperErrorCode::OperationUnsafePath,
                     diagnostic: None,
                     process_logs: None,
                 },
@@ -880,7 +960,7 @@ mod tests {
             // check, so the operator must see them rather than a protocol error.
             (
                 HostRuntimeError::HelperRejected {
-                    code: "grant_unauthorized".to_owned(),
+                    code: HelperErrorCode::GrantUnauthorized,
                     diagnostic: None,
                     process_logs: None,
                 },
@@ -888,7 +968,7 @@ mod tests {
             ),
             (
                 HostRuntimeError::HelperRejected {
-                    code: "grant_node_mismatch".to_owned(),
+                    code: HelperErrorCode::GrantNodeMismatch,
                     diagnostic: None,
                     process_logs: None,
                 },
@@ -896,7 +976,7 @@ mod tests {
             ),
             (
                 HostRuntimeError::HelperRejected {
-                    code: "request_replayed".to_owned(),
+                    code: HelperErrorCode::RequestReplayed,
                     diagnostic: None,
                     process_logs: None,
                 },
@@ -904,7 +984,7 @@ mod tests {
             ),
             (
                 HostRuntimeError::HelperRejected {
-                    code: "untrusted response detail".to_owned(),
+                    code: HelperErrorCode::ConcurrencyLimit,
                     diagnostic: None,
                     process_logs: None,
                 },
@@ -1414,10 +1494,11 @@ mod tests {
     }
 
     #[test]
-    fn every_helper_protocol_cause_is_on_the_stable_allowlist() {
-        // Wrong implementation: a cause whose code is absent from
-        // `stable_runtime_error_code` silently fell back to
-        // `helper_protocol_invalid`, which is the collapse this change removes.
+    fn every_helper_protocol_cause_names_its_own_finding_and_evidence_code() {
+        // Wrong implementation: a cause that fell back to
+        // `helper_protocol_invalid` is the collapse this change removes.
+        let mut findings = std::collections::BTreeSet::new();
+        let mut evidence = std::collections::BTreeSet::new();
         for cause in [
             HelperProtocolCause::RequestEncoding,
             HelperProtocolCause::HelperCallJoin,
@@ -1436,11 +1517,17 @@ mod tests {
             HelperProtocolCause::SystemClock,
             HelperProtocolCause::InspectionOutcome,
         ] {
-            assert!(
-                super::stable_runtime_error_code(cause.code()),
-                "{} is not on the helper_<code> allowlist",
-                cause.code()
+            let finding = HostRuntimeError::HelperProtocol(cause).finding_code();
+            assert_ne!(
+                finding,
+                RuntimePreflightFindingCode::PreflightFindingHelperProtocolInvalid,
+                "{cause:?} collapsed to the opaque label"
             );
+            assert_eq!(finding_word(finding), format!("helper_{}", cause.code()));
+            assert!(crate::helper_codes::is_distribution_evidence(
+                cause.runtime_helper_code()
+            ));
+            assert!(findings.insert(finding) && evidence.insert(cause.runtime_helper_code()));
         }
     }
 }

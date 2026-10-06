@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control import agent_operation_states as aos
+from vonk_control import agent_upgrades as agent_upgrades_module
 from vonk_control import job_states
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrade_status import (
@@ -1434,8 +1435,9 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(
     ],
 )
 def test_an_unresolvable_release_is_an_actionable_refusal(
-    tmp_path, artifacts, relay_status
+    tmp_path, monkeypatch, artifacts, relay_status
 ) -> None:
+    monkeypatch.setattr(agent_upgrades_module, "_RELEASE_PAUSES", (0.0, 0.0))
     generation = "9" * 64
     release = {"artifacts": artifacts, "channel": "dev", "generation": generation}
 
@@ -1469,6 +1471,109 @@ def test_an_unresolvable_release_is_an_actionable_refusal(
     assert detail.startswith("the current dev agent package could not be resolved")
     assert "install.vonkforge.ai" in detail
     assert detail.endswith("then retry")
+
+
+def test_a_release_that_is_mid_publication_is_fetched_again(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(agent_upgrades_module, "_RELEASE_PAUSES", (0.0, 0.0))
+    generation = "9" * 64
+    package_path = (
+        f"artifacts/dev/releases/{generation}/spark/current/"
+        "linux-arm64/vonk-forge-agent.deb"
+    )
+    signature_path = f"{package_path}.host.sig"
+    signature_raw = ("e" * 128 + "\n").encode()
+    release = {
+        "artifacts": {
+            "agent-package-linux-arm64": {
+                "architecture": "linux-arm64",
+                "host_signature": "e" * 128,
+                "package_version": PACKAGE["package_version"],
+                "path": package_path,
+                "sha256": PACKAGE["package_sha256"],
+                "size": PACKAGE["package_bytes"],
+                "target_binary_digest": PACKAGE["target_binary_digest"],
+                "target_build_digest": PACKAGE["target_build_digest"],
+            },
+            "agent-package-signature-linux-arm64": {
+                "path": signature_path,
+                "sha256": hashlib.sha256(signature_raw).hexdigest(),
+                "size": len(signature_raw),
+            },
+        },
+        "channel": "dev",
+        "generation": generation,
+    }
+    manifest_requests = 0
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal manifest_requests
+        if request.url.path == "/artifacts/dev/current.manifest":
+            manifest_requests += 1
+            if manifest_requests == 1:
+                return httpx2.Response(503)  # the channel is being published
+            return httpx2.Response(
+                200,
+                text=(
+                    f"generation={generation}\n"
+                    f"release_path=artifacts/dev/releases/{generation}/release.json\n"
+                ),
+            )
+        if request.url.path == f"/artifacts/dev/releases/{generation}/release.json":
+            return httpx2.Response(200, content=json.dumps(release).encode())
+        if request.url.path == f"/{signature_path}":
+            return httpx2.Response(200, content=signature_raw)
+        return httpx2.Response(404)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'candidate.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 8, 27, tzinfo=UTC)
+    upgrades = AgentUpgradeService(
+        sessions,
+        AgentJobService(sessions, clock=clock),
+        clock=clock,
+        release_api_url="http://caddy:8084",
+        transport=httpx2.MockTransport(handler),
+    )
+
+    assert upgrades.current_package()["package_sha256"] == PACKAGE["package_sha256"]
+    assert manifest_requests == 2
+
+
+@pytest.mark.parametrize(
+    "damage", ["node-order", "payload-digest", "sources", "extra-key"]
+)
+def test_resume_of_a_damaged_stored_plan_ends_the_rollout_instead_of_raising(
+    tmp_path, damage
+) -> None:
+    sessions, _operations, upgrades, job = _rollout(
+        tmp_path, f"damaged-{damage}", clock=Clock()
+    )
+    with sessions.begin() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None
+        payload = dict(stored.payload)
+        if damage == "node-order":
+            payload["node_order"] = []
+        elif damage == "sources":
+            payload["sources"] = {}
+        elif damage == "extra-key":
+            payload["undeclared"] = True
+        else:
+            stored.payload_digest = "0" * 64
+        stored.payload = payload
+
+    # No dispatch can be authorized from a plan that does not verify, and nothing
+    # re-derives it: the rollout ends failed with its reason, and resume returns.
+    upgrades.resume(job.id)
+
+    with sessions() as session:
+        ended = session.get(Job, job.id)
+        assert ended is not None
+        assert ended.state == "failed"
+        assert ended.status_reason is not None and "is invalid" in ended.status_reason
 
 
 def _operation_nodes(sessions, job_id: str) -> list[str]:

@@ -38,8 +38,8 @@ from vonk_control.models import (
 from vonk_control.oci_image_store import (
     STORE_BUSY,
     OciImageStore,
-    OciImageStoreError,
     StoredImage,
+    StoreUnknown,
 )
 from vonk_control.prebuilt_images import (
     PREBUILT_RETRY_AFTER,
@@ -197,7 +197,7 @@ class _Registry(OciImageStore):
         self,
         artifact_root: Path,
         *,
-        failure: OciImageStoreError | None = None,
+        failure: StoreUnknown | None = None,
         during_copy=None,
     ) -> None:
         super().__init__(artifact_root)
@@ -206,27 +206,27 @@ class _Registry(OciImageStore):
         self._during_copy = during_copy
         self.copied: list[str] = []
 
-    def import_reference(self, reference: str) -> StoredImage:
+    def import_reference(self, reference: str) -> StoredImage | StoreUnknown:
         self.copied.append(reference)
         if self._during_copy is not None:
             self._during_copy()
         if self._failure is not None:
-            raise self._failure
+            return self._failure
         address = reference.rsplit("@", 1)[1].removeprefix("sha256:")
         place_test_image(
             FilesystemRuntimeImageStorage(self._artifact_root), address, IMAGE_BYTES
         )
         image = self.read(f"sha256:{address}")
-        assert image is not None
+        assert isinstance(image, StoredImage)
         return image
 
-    def import_archive(self, archive: Path) -> StoredImage:
+    def import_archive(self, archive: Path) -> StoredImage | StoreUnknown:
         # A Spark upload converts to the image its bytes describe.
         place_test_image(
             FilesystemRuntimeImageStorage(self._artifact_root), ADDRESS, IMAGE_BYTES
         )
         image = self.read(f"sha256:{ADDRESS}")
-        assert image is not None
+        assert isinstance(image, StoredImage)
         return image
 
 
@@ -348,7 +348,7 @@ def test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark(
         clock=lambda: NOW,
         store=_Registry(
             tmp_path,
-            failure=OciImageStoreError("image_store.copy_failed", "manifest unknown"),
+            failure=StoreUnknown("image_store.copy_failed", "manifest unknown"),
         ),
     )
     assert importer.run_pending() == 1
@@ -584,7 +584,7 @@ def test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry(
         tmp_path,
         clock=lambda: now[0],
         store=_Registry(
-            tmp_path, failure=OciImageStoreError("image_store.copy_failed", "denied")
+            tmp_path, failure=StoreUnknown("image_store.copy_failed", "denied")
         ),
     )
     assert importer.run_pending() == 1
@@ -626,7 +626,7 @@ def test_a_busy_store_hands_the_pull_back_instead_of_failing_it(
         tmp_path,
         clock=lambda: NOW,
         store=_Registry(
-            tmp_path, failure=OciImageStoreError(STORE_BUSY, "storing another image")
+            tmp_path, failure=StoreUnknown(STORE_BUSY, "storing another image")
         ),
     )
     assert busy.run_pending() == 1

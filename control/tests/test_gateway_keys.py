@@ -196,3 +196,35 @@ def test_default_key_is_created_once_and_heals(tmp_path):
     path.unlink()
     assert service.ensure_default(path) is True
     assert litellm.keys["default"]["key"] == path.read_text().strip() != secret
+
+
+def test_the_default_key_is_asked_for_again_until_the_gateway_answers() -> None:
+    import asyncio
+
+    from vonk_control.gateway_keys import GatewayKeyError, keep_default_key
+
+    class _Service:
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        def ensure_default(self, path: object) -> bool:
+            self.attempts += 1
+            if self.attempts < 3:
+                raise GatewayKeyError("LiteLLM gateway is unavailable")
+            return True
+
+    service = _Service()
+
+    async def run() -> None:
+        await asyncio.wait_for(
+            keep_default_key(
+                service,  # type: ignore[arg-type]
+                asyncio.Event(),
+                first_delay=0.001,
+                maximum_delay=0.002,
+            ),
+            timeout=5,
+        )
+
+    asyncio.run(run())
+    assert service.attempts == 3

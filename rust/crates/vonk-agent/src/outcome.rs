@@ -17,13 +17,12 @@
 //! result body is assembled from loose JSON anywhere in the agent.
 
 use crate::failure_evidence::{self, FailureProcessLogs, sanitize_text};
-use crate::vocabulary;
 use vonk_agent_protocol::AgentClaim;
 use vonk_agent_protocol::generated::{
     AgentFailureKind, AgentOperation, AgentResultResult, AgentResultState, FailureCode,
-    OutcomeDone, OutcomeDoneKind, OutcomeDoneResult, OutcomeEvidence, OutcomeFailed,
-    OutcomeFailedKind, OutcomeUnknown, OutcomeUnknownKind, RecipeJobRunResult,
-    SecurityRefusalReason, WaitReason,
+    HelperErrorCode, OutcomeDone, OutcomeDoneKind, OutcomeDoneResult, OutcomeEvidence,
+    OutcomeFailed, OutcomeFailedKind, OutcomeUnknown, OutcomeUnknownKind, RecipeJobRunResult,
+    WaitReason,
 };
 
 /// The rule a refused request broke and the bound it was measured against.
@@ -45,7 +44,7 @@ pub struct Failure {
     pub retry_after_seconds: Option<u32>,
     pub stage: Option<String>,
     pub diagnostic: Option<String>,
-    pub helper_error_code: Option<String>,
+    pub helper_error_code: Option<HelperErrorCode>,
     pub helper_exit_code: Option<u32>,
     /// The rejected container's own output, when the helper read it.
     pub process_logs: Option<FailureProcessLogs>,
@@ -96,8 +95,8 @@ impl Failure {
         self
     }
 
-    pub fn helper(mut self, code: impl Into<String>, exit_code: Option<u32>) -> Self {
-        self.helper_error_code = Some(code.into());
+    pub fn helper(mut self, code: HelperErrorCode, exit_code: Option<u32>) -> Self {
+        self.helper_error_code = Some(code);
         self.helper_exit_code = exit_code;
         self
     }
@@ -133,7 +132,7 @@ pub struct UnknownEvidence {
     /// A bounded, non-sensitive cause: an error category or helper code.
     pub diagnostic: Option<String>,
     /// The privileged helper's own verdict, when it gave one.
-    pub helper_error_code: Option<String>,
+    pub helper_error_code: Option<HelperErrorCode>,
 }
 
 impl UnknownEvidence {
@@ -150,8 +149,8 @@ impl UnknownEvidence {
         self
     }
 
-    pub fn helper(mut self, code: impl Into<String>) -> Self {
-        self.helper_error_code = Some(code.into());
+    pub fn helper(mut self, code: HelperErrorCode) -> Self {
+        self.helper_error_code = Some(code);
         self
     }
 
@@ -164,10 +163,7 @@ impl UnknownEvidence {
                 .map(sanitize_text)
                 .map(|text| text.chars().take(512).collect::<String>())
                 .filter(|text| !text.is_empty()),
-            helper_error_code: self
-                .helper_error_code
-                .map(|code| code.chars().take(128).collect::<String>())
-                .filter(|code| !code.is_empty()),
+            helper_error_code: self.helper_error_code.map(|code| code.to_string()),
             helper_exit_code: None,
             package_activation: None,
             stage: Some(self.stage.to_owned()),
@@ -349,16 +345,14 @@ fn finish_failure(operation: &AgentOperation, failure: Failure) -> OutcomeFailed
             receipt: Some(receipt),
         };
     }
-    let helper_error_code = failure
+    let helper_code = failure
         .helper_error_code
-        .as_deref()
-        .filter(|code| helper_error_code_allowed(operation, code))
-        .map(str::to_owned);
+        .filter(|code| helper_error_code_allowed(operation, *code));
     // The helper's exit status accompanies only a failed package install.
     let helper_exit_code = failure
         .helper_exit_code
         .filter(|code| *code <= 255)
-        .filter(|_| helper_error_code.as_deref() == Some("package_install_failed"));
+        .filter(|_| helper_code == Some(HelperErrorCode::PackageInstallFailed));
     OutcomeFailed {
         kind: OutcomeFailedKind::Failed,
         code,
@@ -368,7 +362,7 @@ fn finish_failure(operation: &AgentOperation, failure: Failure) -> OutcomeFailed
         evidence: Some(OutcomeEvidence {
             diagnostics: Some(diagnostics),
             diagnostic: failure.diagnostic.as_deref().map(sanitize_text),
-            helper_error_code,
+            helper_error_code: helper_code.map(|code| code.to_string()),
             helper_exit_code,
             package_activation: None,
             stage: failure.stage.as_deref().map(sanitize_text),
@@ -378,81 +372,12 @@ fn finish_failure(operation: &AgentOperation, failure: Failure) -> OutcomeFailed
 }
 
 /// The helper codes that cross the wire, per operation.
-fn helper_error_code_allowed(operation: &AgentOperation, code: &str) -> bool {
+fn helper_error_code_allowed(operation: &AgentOperation, code: HelperErrorCode) -> bool {
     match operation {
-        AgentOperation::AgentUpgradeV1 => matches!(
-            code,
-            "package_verification_failed"
-                | "package_metadata_failed"
-                | "package_custody_failed"
-                | "package_install_failed"
-        ),
-        AgentOperation::ArtifactDistributionV1 => stable_runtime_helper_error_code(code),
+        AgentOperation::AgentUpgradeV1 => crate::helper_codes::is_upgrade_evidence(code),
+        AgentOperation::ArtifactDistributionV1 => {
+            crate::helper_codes::is_distribution_evidence(code)
+        }
         _ => false,
     }
-}
-
-/// The refusals a helper raises before it has trusted a grant.
-pub const GRANT_REFUSALS: [SecurityRefusalReason; 4] = [
-    SecurityRefusalReason::GrantInvalid,
-    SecurityRefusalReason::GrantNodeMismatch,
-    SecurityRefusalReason::GrantUnauthorized,
-    SecurityRefusalReason::PeerIdentityInvalid,
-];
-
-/// The identity refusals of an artifact or runtime image a helper names.
-pub const HELPER_IDENTITY_REFUSALS: [SecurityRefusalReason; 2] = [
-    SecurityRefusalReason::OperationInvalidArtifact,
-    SecurityRefusalReason::RuntimeImageIdentityInvalid,
-];
-
-/// The runtime helper's stable error vocabulary.
-pub fn stable_runtime_helper_error_code(value: &str) -> bool {
-    // The helper refuses before it trusts a grant; those refusals, and the other
-    // contract words it shares with the agent, are named by the generated enums.
-    vocabulary::is_any(value, &GRANT_REFUSALS)
-        || vocabulary::is(value, SecurityRefusalReason::RequestReplayed)
-        || vocabulary::is(value, FailureCode::OperationFailed)
-        || vocabulary::is_any(value, &HELPER_IDENTITY_REFUSALS)
-        || matches!(
-            value,
-            "operation_invalid"
-            | "operation_unsafe_path"
-            | "operation_command_failed"
-            | "operation_stop_uncertain"
-            | "operation_io"
-            | "runtime_image_load_failed"
-            | "runtime_image_inspect_failed"
-            | "runtime_image_receipt_failed"
-            | "runtime_helper_unavailable"
-            | "runtime_authority_unavailable"
-            | "runtime_helper_protocol_invalid"
-            // Any host runtime call can be refused before the helper trusts the
-            // grant, the image import included. Dropping those codes here left
-            // the normalized failure with no cause at all.
-            | "request_invalid"
-            | "request_ledger_failed"
-            // An agent-side helper-protocol cause keeps its own code here or
-            // normalization silently drops it from the Controller's failure
-            // body.
-            | "runtime_helper_request_encoding_invalid"
-            | "runtime_helper_call_join_failed"
-            | "runtime_helper_message_framing_invalid"
-            | "runtime_helper_response_unbound"
-            | "runtime_helper_rejection_malformed"
-            | "runtime_helper_outcome_malformed"
-            | "runtime_helper_request_document_invalid"
-            | "runtime_helper_request_schema_version_invalid"
-            | "runtime_helper_request_attempt_invalid"
-            | "runtime_helper_request_arguments_presence_invalid"
-            | "runtime_helper_request_plan_binding_invalid"
-            | "runtime_helper_request_installation_identity_invalid"
-            | "runtime_helper_request_bytes_invalid"
-            | "runtime_helper_request_plan_bytes_invalid"
-            | "runtime_helper_request_argument_nul_byte"
-            | "runtime_helper_request_storage_invalid"
-            | "runtime_helper_system_clock_invalid"
-            | "runtime_helper_inspection_outcome_invalid"
-            | "runtime_helper_stop_uncertain"
-        )
 }

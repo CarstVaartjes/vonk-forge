@@ -23,7 +23,13 @@ T = TypeVar("T", bound="RuntimePreflightFinding")
 
 @_attrs_define
 class RuntimePreflightFinding:
-    """
+    """ One capability's verdict.
+
+    ``code`` travels as the word of a :class:`RuntimePreflightFindingCode` member.
+    It stays a pattern-bound string on the wire so an older agent's free-text
+    code (``available``, ``proc-mount-denied``) and a newer agent's word still
+    read; :attr:`finding_code` is the typed reading of either.
+
         Attributes:
             capability (str):
             code (str):

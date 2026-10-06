@@ -1,8 +1,9 @@
 //! Typed, bounded runtime preflight evidence. The request contains no commands.
 use crate::ProtocolError;
 pub use crate::generated::{
-    RuntimePreflightFinding, RuntimePreflightFindingStatus as RuntimePreflightStatus,
-    RuntimePreflightRequest, RuntimePreflightResult,
+    RuntimePreflightFinding, RuntimePreflightFindingCode,
+    RuntimePreflightFindingStatus as RuntimePreflightStatus, RuntimePreflightRequest,
+    RuntimePreflightResult,
 };
 
 fn capability_name(value: &str) -> bool {
@@ -26,12 +27,7 @@ impl RuntimePreflightResult {
             || self.findings.len() > 96
             || self.findings.iter().enumerate().any(|(index, value)| {
                 !capability_name(&value.capability)
-                    || value.code.is_empty()
-                    || value.code.len() > 96
-                    || !value.code.as_bytes()[0].is_ascii_lowercase()
-                    || !value.code.bytes().all(|byte| {
-                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
-                    })
+                    || value.code.parse::<RuntimePreflightFindingCode>().is_err()
                     || self.findings[..index]
                         .iter()
                         .any(|old| old.capability == value.capability)

@@ -234,6 +234,7 @@ from .gateway_route_state import GatewayRouteState
 from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from .git_hub_release_asset import GitHubReleaseAsset
 from .git_hub_release_source import GitHubReleaseSource
+from .helper_error_code import HelperErrorCode
 from .image_store_code import ImageStoreCode
 from .install_admission_code import InstallAdmissionCode
 from .install_degraded_reason import InstallDegradedReason
@@ -586,6 +587,7 @@ from .runtime_image_storage_impact_running_coverage import RuntimeImageStorageIm
 from .runtime_image_storage_impact_spark_coverage import RuntimeImageStorageImpactSparkCoverage
 from .runtime_preflight_code import RuntimePreflightCode
 from .runtime_preflight_finding import RuntimePreflightFinding
+from .runtime_preflight_finding_code import RuntimePreflightFindingCode
 from .runtime_preflight_finding_status import RuntimePreflightFindingStatus
 from .runtime_preflight_result import RuntimePreflightResult
 from .security_refusal import SecurityRefusal
@@ -852,6 +854,7 @@ __all__ = (
     "GetFleetLogInfoSourceType0",
     "GitHubReleaseAsset",
     "GitHubReleaseSource",
+    "HelperErrorCode",
     "ImageStoreCode",
     "InstallAdmissionCode",
     "InstallationNodeChange",
@@ -1204,6 +1207,7 @@ __all__ = (
     "RuntimeImageStorageImpactSparkCoverage",
     "RuntimePreflightCode",
     "RuntimePreflightFinding",
+    "RuntimePreflightFindingCode",
     "RuntimePreflightFindingStatus",
     "RuntimePreflightResult",
     "SecurityRefusal",

@@ -369,6 +369,34 @@ class RecipeImageAvailabilityUnknown(UnknownOutcomeError, RecipeImageAvailabilit
         self.typed_reason = reason
 
 
+@dataclass(frozen=True, slots=True)
+class BuildUnsettled:
+    """A build observation that cannot settle yet: an unknown outcome, returned.
+
+    The builder hands it back instead of raising: the build is still queued or
+    running, its evidence is missing or changed, or its outcome is unconfirmed.
+    The claim runner records it through the lifecycle core (``_fail``), which
+    schedules the next attempt on its bounded backoff; ``retryable=False`` is
+    the one explicit owner decision that ends the operation.  The fields are the
+    ones ``_fail`` reads from any failure.
+    """
+
+    code: str
+    detail: str
+    reason: WaitReason
+    retryable: bool | None = None
+    retry_after_seconds: int | None = None
+    retry_time: str | None = None
+    recovery_actions: tuple[str, ...] = ()
+    log_excerpt: str | None = None
+    step: str | None = None
+    settled_build_operation_id: str | None = None
+    blockers: tuple[OperationBlocker, ...] = ()
+
+    def __str__(self) -> str:
+        return self.detail
+
+
 class _ModelQueueFailed(RecipeImageAvailabilityUnknown):
     """A Model cache call raised: the availability error carries its cause."""
 
@@ -411,7 +439,7 @@ class RecipeImageBuilder(Protocol):
         build_input_sha256: str,
         force: bool,
         progress: Callable[[Mapping[str, object]], None],
-    ) -> Mapping[str, object]: ...
+    ) -> Mapping[str, object] | BuildUnsettled: ...
 
 
 class RuntimeImageCacheStorage(RuntimeImageStorage, Protocol):
@@ -683,13 +711,24 @@ def _progress(
     return normalize_operation_progress(value)
 
 
-def _retryable(error: BaseException) -> bool:
+def _retryable(error: BaseException | BuildUnsettled) -> bool:
     """Classify by typed code; unknown failures retry with capped backoff."""
 
     code = getattr(error, "code", None)
-    if isinstance(code, str) and (
-        code in _TERMINAL_FAILURE_CODES or is_security_failure(code)
+    if isinstance(code, str) and is_security_failure(code):
+        return False
+    if isinstance(error, BuildUnsettled):
+        return error.retryable is not False
+    if (
+        isinstance(error, UnknownOutcomeError)
+        and not isinstance(error, ModelCacheError)
+        and getattr(error, "retryable", None) is not False
     ):
+        # An unknown outcome is not terminal on its own word: the next attempt
+        # reads the evidence again, on the core's bounded clock.  Only an
+        # explicit owner decision (``retryable=False``) ends it.
+        return True
+    if isinstance(code, str) and code in _TERMINAL_FAILURE_CODES:
         return False
     if isinstance(error, ModelCacheError):
         return not model_cache_failure_is_terminal(code)
@@ -712,7 +751,7 @@ def _is_database_busy(error: BaseException | None) -> bool:
     return False
 
 
-def _failure_code(error: BaseException) -> str:
+def _failure_code(error: BaseException | BuildUnsettled) -> str:
     """Return the stable operation failure code for an exception.
 
     Only the repository's own operation failures may contribute ``code``.
@@ -731,7 +770,7 @@ def _failure_code(error: BaseException) -> str:
     return code
 
 
-def _failure_detail(error: BaseException) -> str:
+def _failure_detail(error: BaseException | BuildUnsettled) -> str:
     """Return operator-facing failure text, never a non-string attribute.
 
     ``sqlalchemy.exc.StatementError`` initialises ``detail`` to an empty list,
@@ -758,14 +797,14 @@ def _failure_detail(error: BaseException) -> str:
     return f"{type(error).__name__}: {message}"
 
 
-def _retry_after(error: BaseException) -> int | None:
+def _retry_after(error: BaseException | BuildUnsettled) -> int | None:
     value = getattr(error, "retry_after_seconds", None)
     if type(value) is int and 0 <= value <= 86_400:
         return value
     return None
 
 
-def _log_excerpt(error: BaseException) -> str | None:
+def _log_excerpt(error: BaseException | BuildUnsettled) -> str | None:
     value = getattr(error, "log_excerpt", None)
     if not isinstance(value, str) or not value.strip():
         value = getattr(error, "detail", None)
@@ -1091,67 +1130,22 @@ class RecipeImageAvailabilityService:
     def _read_removal_result(
         self, operation: Job, intent: RecipeCacheRemovalIntent
     ) -> dict[str, object]:
+        """The removal's projection, rebuilt from its owner when the stored result
+        does not read: the owner's plan and checkpoint are the evidence, the
+        stored result only a copy of what they say."""
+
         owner = self._read_removal_owner(operation)
-        if owner.plan.intent != intent:
-            raise RecipeImageAvailabilityUnknown(
-                RecipeImageCode.OPERATION_INVALID,
-                "stored removal projection intent changed",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+        intent = owner.plan.intent
         if operation.state == "succeeded":
-            if not isinstance(operation.result, Mapping):
-                raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.OPERATION_INVALID,
-                    "successful removal has no stored result",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            try:
-                result = read_stored_model(
-                    RecipeCacheRemovalResult,
-                    json.dumps(
-                        serialize_json_value(operation.result),
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ),
-                    from_json=True,
-                )
-            except (TypeError, ValidationError) as error:
-                raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.OPERATION_INVALID,
-                    "stored recipe removal result is malformed",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                ) from error
-            if (
-                result.action != intent.action
-                or result.selector != intent.selector
-                or result.request_key != intent.request_key
-                or result.operation_id != operation.id
-                or result.recipe_revision_id != intent.recipe_revision_id
-                or result.review_digest != intent.review_digest
-                or result.with_model is not intent.with_model
-                or result.reclaimed_bytes
-                != owner.checkpoint.image_reclaimed_bytes
-                + owner.checkpoint.model_reclaimed_bytes
-                or result.model_removals
-                != [item.operation_id for item in owner.plan.model_children]
-                or owner.checkpoint.image_index != len(owner.plan.image_archives)
-                or owner.checkpoint.model_index != len(owner.plan.model_children)
-                or owner.checkpoint.failure is not None
-            ):
-                raise RecipeImageAvailabilityUnknown(
-                    RecipeImageCode.OPERATION_INVALID,
-                    "stored removal result does not match its accepted intent",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            document: dict[str, object] = result.model_dump(mode="json")
-            document["progress"] = self._removal_progress_document(operation, owner)
-            return document
-        if operation.result is not None:
-            raise RecipeImageAvailabilityUnknown(
-                RecipeImageCode.OPERATION_INVALID,
-                "unfinished recipe removal has a terminal result",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            stored = self._stored_removal_result(operation, intent, owner)
+            if stored is not None:
+                document: dict[str, object] = stored.model_dump(mode="json")
+                document["progress"] = self._removal_progress_document(operation, owner)
+                return document
+            _LOGGER.warning(
+                "recipe removal %s has no readable stored result; it is projected "
+                "from its checkpoint",
+                operation.id,
             )
         return {
             "schema_version": SCHEMA_VERSION,
@@ -1188,6 +1182,50 @@ class RecipeImageAvailabilityService:
                 child.operation_id for child in owner.plan.model_children
             ],
         }
+
+    @staticmethod
+    def _stored_removal_result(
+        operation: Job,
+        intent: RecipeCacheRemovalIntent,
+        owner: RecipeCacheRemovalOwner,
+    ) -> RecipeCacheRemovalResult | None:
+        """The stored result of a finished removal, or ``None`` when it is
+        missing, malformed or disagrees with the accepted intent."""
+
+        if not isinstance(operation.result, Mapping):
+            return None
+        try:
+            result = read_stored_model(
+                RecipeCacheRemovalResult,
+                json.dumps(
+                    serialize_json_value(operation.result),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                from_json=True,
+            )
+        except (TypeError, ValidationError):
+            return None
+        if (
+            result.action != intent.action
+            or result.selector != intent.selector
+            or result.request_key != intent.request_key
+            or result.operation_id != operation.id
+            or result.recipe_revision_id != intent.recipe_revision_id
+            or result.review_digest != intent.review_digest
+            or result.with_model is not intent.with_model
+            or result.reclaimed_bytes
+            != owner.checkpoint.image_reclaimed_bytes
+            + owner.checkpoint.model_reclaimed_bytes
+            or result.model_removals
+            != [item.operation_id for item in owner.plan.model_children]
+            or owner.checkpoint.image_index != len(owner.plan.image_archives)
+            or owner.checkpoint.model_index != len(owner.plan.model_children)
+            or owner.checkpoint.failure is not None
+        ):
+            return None
+        return result
 
     def _replay_removal(
         self,
@@ -4823,9 +4861,15 @@ class RecipeImageAvailabilityService:
                 if receipt is None or not self._storage.build_archive_available(
                     receipt.oci_archive_sha256, receipt.image_bytes
                 ):
-                    receipt = self._prepare_claimed_image(
+                    prepared = self._prepare_claimed_image(
                         claim, payload, recipe, runtime
                     )
+                    if isinstance(prepared, BuildUnsettled):
+                        # Unknown, not failed: the outcome is recorded and the
+                        # core schedules the next attempt on its bounded backoff.
+                        self._fail(claim, prepared)
+                        return
+                    receipt = prepared
                     # Removal holds the same lock and commits a durable fence
                     # before deleting Controller image bytes. Late verified
                     # bytes may remain reusable, but stale work cannot accept
@@ -4922,6 +4966,10 @@ class RecipeImageAvailabilityService:
                 )
         except _AvailabilityClaimLost:
             return
+        except UnknownOutcomeError as error:
+            # An unknown outcome is never a refusal: the failure is recorded and
+            # the lifecycle core schedules the next attempt on its bounded clock.
+            self._fail(claim, error)
         except Exception as error:  # noqa: BLE001 - persist failures at the background job boundary
             self._fail(claim, error)
         finally:
@@ -5169,7 +5217,7 @@ class RecipeImageAvailabilityService:
         payload: Mapping[str, object],
         recipe: RecipeDefinition,
         runtime: Mapping[str, object],
-    ) -> RuntimeImageReceipt:
+    ) -> RuntimeImageReceipt | BuildUnsettled:
         force_rebuild = payload.get("force_rebuild") is True
 
         def persist_provisional_reference(
@@ -5209,6 +5257,8 @@ class RecipeImageAvailabilityService:
             force=force_rebuild,
             progress=report,
         )
+        if isinstance(build_receipt, BuildUnsettled):
+            return build_receipt
         if not isinstance(build_receipt, Mapping):
             raise RecipeImageAvailabilityUnknown(
                 RecipeImageCode.BUILD_INVALID,
@@ -5543,7 +5593,7 @@ class RecipeImageAvailabilityService:
     def _fail(
         self,
         claim: RecipeImageAvailabilityClaim,
-        error: BaseException,
+        error: BaseException | BuildUnsettled,
     ) -> None:
         retryable = _retryable(error)
         code = _failure_code(error)

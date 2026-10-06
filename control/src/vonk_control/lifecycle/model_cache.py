@@ -68,6 +68,7 @@ from ..models import ModelCacheOperation
 from .adapter import Dispatch
 from .agent_operation import same_order
 from .core import transition
+from .evidence import Damaged
 from .reconciler import settle
 from .types import (
     TERMINAL_STATES,
@@ -182,7 +183,7 @@ class ModelCacheAdapter:
         *,
         clock: Callable[[], datetime] | None = None,
         effects: CacheEffects,
-        read_payload: Callable[[ModelCacheOperation], dict[str, object]],
+        read_payload: Callable[[ModelCacheOperation], dict[str, object] | Damaged],
         store_payload: Callable[[ModelCacheOperation, Mapping[str, object]], None],
         on_end: Callable[[ModelCacheOperation, Lifecycle, Lifecycle], None]
         | None = None,
@@ -207,10 +208,13 @@ class ModelCacheAdapter:
         """
 
         try:
-            return self._read_payload(operation)
+            payload = self._read_payload(operation)
         except Exception:  # noqa: BLE001 - corrupt bookkeeping is unknown, not fatal
+            payload = Damaged("the operation envelope does not read")
+        if isinstance(payload, Damaged):
             raw = operation.payload
             return raw if isinstance(raw, Mapping) else {}
+        return payload
 
     # ---------------------------------------------------------------- adopt
 
@@ -485,9 +489,12 @@ class ModelCacheAdapter:
         """Retire the legacy claim and retry clock; count a consumed attempt."""
 
         try:
-            payload = dict(self._read_payload(operation))
+            read = self._read_payload(operation)
         except Exception:  # noqa: BLE001 - leave a corrupt envelope for inspection
             return False
+        if isinstance(read, Damaged):
+            return False  # a corrupt envelope is left for inspection
+        payload = dict(read)
         updated = dict(payload)
         retry = payload.get("retry")
         retry_document = dict(retry) if isinstance(retry, Mapping) else None

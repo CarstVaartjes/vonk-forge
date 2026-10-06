@@ -7,8 +7,9 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from vonk_agent_protocol import RuntimePreflightCode
+from vonk_agent_protocol import RuntimePreflightCode, RuntimePreflightFindingCode
 from vonk_agent_protocol.runtime_preflight import (
+    RuntimePreflightFinding,
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
@@ -63,6 +64,22 @@ def mandatory_capabilities(request: RuntimePreflightRequest) -> tuple[str, ...]:
     return tuple(capabilities)
 
 
+def _finding_detail(finding: RuntimePreflightFinding) -> str:
+    """The finding's code as the contract spells it.
+
+    An older agent reported free text; it is read through the one legacy adapter.
+    A word no member spells stays visible as reported rather than disappearing
+    behind ``unclassified``.
+    """
+
+    adopted = finding.finding_code
+    if adopted is RuntimePreflightFindingCode.UNCLASSIFIED and (
+        finding.code != adopted.value
+    ):
+        return f"{adopted.value} ({finding.code})"
+    return adopted.value
+
+
 def admission_blockers(
     request: RuntimePreflightRequest,
     result: RuntimePreflightResult | None,
@@ -107,7 +124,8 @@ def admission_blockers(
             blockers.append(
                 RuntimePreflightBlocker(
                     RuntimePreflightCode.CAPABILITY_FAILED,
-                    f"Runtime capability {capability} failed: {finding.code}.",
+                    f"Runtime capability {capability} failed: "
+                    f"{_finding_detail(finding)}.",
                 )
             )
     return tuple(blockers)

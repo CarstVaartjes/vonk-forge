@@ -4,7 +4,8 @@ use crate::{
     inventory::available_disk_bytes,
     process::{ProcessDiskReserve, ProcessError, ProcessRunner, Program},
     recipe_builder::{
-        PodmanBuildStaging, podman_build_diagnostic, podman_storage_arguments_with_cgroup_manager,
+        PodmanBuildDiagnostic, PodmanBuildStaging, podman_build_diagnostic,
+        podman_storage_arguments_with_cgroup_manager,
     },
 };
 use std::{
@@ -15,6 +16,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tempfile::Builder;
+use vonk_agent_protocol::generated::RuntimePreflightFindingCode as Code;
 use vonk_agent_protocol::runtime_preflight::{
     RuntimePreflightFinding as Finding, RuntimePreflightRequest, RuntimePreflightResult,
     RuntimePreflightStatus as Status,
@@ -23,19 +25,23 @@ use vonk_agent_protocol::{canonical_json, hex_sha256};
 
 pub const PROBE_BINARY: &str = "/usr/lib/vonk-forge/vonk-runtime-probe";
 
-pub fn finding(capability: &str, passed: bool, failure: &str) -> Finding {
+/// The only place a finding is built: its code is a member of the contract's
+/// closed `RuntimePreflightFindingCode`, never a string.
+fn finding_with(capability: &str, status: Status, code: Code) -> Finding {
     Finding {
         capability: capability.into(),
-        status: if passed {
-            Status::Passed
-        } else {
-            Status::Failed
-        },
-        code: if passed {
-            "available".into()
-        } else {
-            failure.into()
-        },
+        status,
+        code: code.to_string(),
+    }
+}
+
+/// A passed or failed finding; a pass reports `available`, a failure the code
+/// that says why.
+pub fn finding(capability: &str, passed: bool, failure: Code) -> Finding {
+    if passed {
+        finding_with(capability, Status::Passed, Code::PreflightFindingAvailable)
+    } else {
+        finding_with(capability, Status::Failed, failure)
     }
 }
 
@@ -140,8 +146,16 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
         let mut findings = vec![
             // The agent package ships only for linux/arm64, the architecture
             // every recipe runtime targets, so a running agent satisfies it.
-            finding("architecture", true, "architecture_mismatch"),
-            finding("controller_reachable", true, "controller_unreachable"),
+            finding(
+                "architecture",
+                true,
+                Code::PreflightFindingArchitectureMismatch,
+            ),
+            finding(
+                "controller_reachable",
+                true,
+                Code::PreflightFindingControllerUnreachable,
+            ),
         ];
         for (capability, path) in [
             ("cache_writable", self.data_root.join("distribution")),
@@ -151,14 +165,18 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
             let writable = fs::create_dir_all(&path)
                 .and_then(|()| tempfile::tempfile_in(&path).map(|_| ()))
                 .is_ok();
-            findings.push(finding(capability, writable, "directory_not_writable"));
+            findings.push(finding(
+                capability,
+                writable,
+                Code::PreflightFindingDirectoryNotWritable,
+            ));
         }
         let disk_ok = available_disk_bytes(self.data_root)
             .is_ok_and(|free| free >= request.minimum_free_bytes);
         findings.push(finding(
             "disk_reserve",
             disk_ok,
-            "disk_reserve_insufficient",
+            Code::PreflightFindingDiskReserveInsufficient,
         ));
         let fabric_required = request.fabric_connectivity != "none";
         let fabric_ok = observed_fabric.is_some_and(|(kind, speed)| {
@@ -166,22 +184,21 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
                 && (!fabric_required || matches!(kind, "connected" | "full_mesh" | "switch"))
         });
         if fabric_required {
-            findings.push(Finding {
-                capability: "fabric".into(),
-                status: if observed_fabric.is_none() {
+            findings.push(finding_with(
+                "fabric",
+                if observed_fabric.is_none() {
                     Status::Unknown
                 } else if fabric_ok {
                     Status::Passed
                 } else {
                     Status::Failed
                 },
-                code: if fabric_ok {
-                    "available"
+                if fabric_ok {
+                    Code::PreflightFindingAvailable
                 } else {
-                    "fabric_requirement_unverified"
-                }
-                .into(),
-            });
+                    Code::PreflightFindingFabricRequirementUnverified
+                },
+            ));
         }
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -226,11 +243,11 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
                 &mut findings,
             )?;
         }
-        findings.push(Finding {
-            capability: "signed_helper_run".into(),
-            status: Status::Unknown,
-            code: "signed_helper_probe_required".into(),
-        });
+        findings.push(finding_with(
+            "signed_helper_run",
+            Status::Unknown,
+            Code::PreflightFindingSignedHelperProbeRequired,
+        ));
         let result = RuntimePreflightResult {
             fingerprint,
             observed_at: SystemTime::now()
@@ -271,7 +288,7 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
         findings.push(finding(
             "runroot_length",
             path_ok,
-            "runroot_exceeds_50_bytes",
+            Code::PreflightFindingRunrootExceeds50Bytes,
         ));
         if !path_ok {
             return Ok(());
@@ -346,7 +363,11 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
             arguments.extend(command);
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                findings.push(finding(capability, false, "deadline_exceeded"));
+                findings.push(finding(
+                    capability,
+                    false,
+                    Code::PreflightFindingDeadlineExceeded,
+                ));
                 break;
             }
             let outcome = self.runner.run_with_disk_reserve_cancellable(
@@ -359,7 +380,7 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
             match outcome {
                 Ok(output) => {
                     let passed = output.success;
-                    findings.push(finding(capability, passed, &probe_diagnostic(&output)));
+                    findings.push(finding(capability, passed, probe_diagnostic(&output)));
                     if !passed {
                         break;
                     }
@@ -370,10 +391,14 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
                         capability,
                         false,
                         match error {
-                            ProcessError::Timeout => "deadline_exceeded",
-                            ProcessError::StorageLimit => "disk_reserve_insufficient",
-                            ProcessError::OutputLimit => "diagnostic_limit_exceeded",
-                            _ => "subprocess_unavailable",
+                            ProcessError::Timeout => Code::PreflightFindingDeadlineExceeded,
+                            ProcessError::StorageLimit => {
+                                Code::PreflightFindingDiskReserveInsufficient
+                            }
+                            ProcessError::OutputLimit => {
+                                Code::PreflightFindingDiagnosticLimitExceeded
+                            }
+                            _ => Code::PreflightFindingSubprocessUnavailable,
                         },
                     ));
                     break;
@@ -385,30 +410,52 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
     }
 }
 
-fn probe_diagnostic(output: &crate::process::ProcessOutput) -> String {
+fn probe_diagnostic(output: &crate::process::ProcessOutput) -> Code {
     let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
     if stderr.contains("failed to connect to bus")
         || stderr.contains("failed to start transient")
         || stderr.contains("no medium found")
     {
-        return "user-service-manager-unavailable".into();
+        return Code::PreflightFindingUserServiceManagerUnavailable;
     }
     if stderr.contains("default oci runtime") && stderr.contains("not found") {
-        return "oci-runtime-unavailable".into();
+        return Code::PreflightFindingOciRuntimeUnavailable;
     }
     let diagnostic = String::from_utf8_lossy(&output.stdout);
     for (code, finding) in [
-        (21, "proc-unavailable"),
-        (22, "capabilities-not-zero"),
-        (23, "no-new-privileges-unavailable"),
-        (24, "mount-namespace-unavailable"),
-        (25, "temporary-directory-unavailable"),
+        (21, Code::PreflightFindingProcUnavailable),
+        (22, Code::PreflightFindingCapabilitiesNotZero),
+        (23, Code::PreflightFindingNoNewPrivilegesUnavailable),
+        (24, Code::PreflightFindingMountNamespaceUnavailable),
+        (25, Code::PreflightFindingTemporaryDirectoryUnavailable),
     ] {
         if diagnostic.contains(&format!("vonk-runtime-preflight-error:{code}")) {
-            return finding.into();
+            return finding;
         }
     }
-    podman_build_diagnostic(output).to_string()
+    podman_finding_code(podman_build_diagnostic(output))
+}
+
+/// The finding code of a classified podman failure.
+fn podman_finding_code(diagnostic: PodmanBuildDiagnostic) -> Code {
+    match diagnostic {
+        PodmanBuildDiagnostic::TemporaryStorageExhausted => {
+            Code::PreflightFindingTemporaryStorageExhausted
+        }
+        PodmanBuildDiagnostic::SubordinateIdMappingUnavailable => {
+            Code::PreflightFindingSubordinateIdMappingUnavailable
+        }
+        PodmanBuildDiagnostic::UserNamespaceDenied => Code::PreflightFindingUserNamespaceDenied,
+        PodmanBuildDiagnostic::ProcMountDenied => Code::PreflightFindingProcMountDenied,
+        PodmanBuildDiagnostic::PermissionDenied => Code::PreflightFindingPermissionDenied,
+        PodmanBuildDiagnostic::MemoryLimitExceeded => Code::PreflightFindingMemoryLimitExceeded,
+        PodmanBuildDiagnostic::StorageDriverFailure => Code::PreflightFindingStorageDriverFailure,
+        PodmanBuildDiagnostic::SystemdScopeFailure => Code::PreflightFindingSystemdScopeFailure,
+        PodmanBuildDiagnostic::PatchRejected => Code::PreflightFindingPatchRejected,
+        PodmanBuildDiagnostic::BuildStepFailed => Code::PreflightFindingBuildStepFailed,
+        PodmanBuildDiagnostic::NonzeroWithoutOutput => Code::PreflightFindingNonzeroWithoutOutput,
+        PodmanBuildDiagnostic::Unknown => Code::PreflightFindingUnclassifiedPodmanBuildFailure,
+    }
 }
 
 fn user_service_arguments(xdg: &Path, tmp: &Path) -> Vec<String> {
@@ -609,15 +656,21 @@ mod tests {
     #[test]
     fn proc_namespace_and_temporary_storage_failures_have_concrete_findings() {
         for (diagnostic, code) in [
-            ("crun: mount `proc` permission denied", "proc-mount-denied"),
+            (
+                "crun: mount `proc` permission denied",
+                Code::PreflightFindingProcMountDenied,
+            ),
             (
                 "cannot clone: Operation not permitted",
-                "user-namespace-denied",
+                Code::PreflightFindingUserNamespaceDenied,
             ),
-            ("no space left on device", "temporary-storage-exhausted"),
+            (
+                "no space left on device",
+                Code::PreflightFindingTemporaryStorageExhausted,
+            ),
             (
                 "fuse-overlayfs: storage driver failed",
-                "storage-driver-failure",
+                Code::PreflightFindingStorageDriverFailure,
             ),
         ] {
             let data = tempfile::tempdir().unwrap();
@@ -636,7 +689,7 @@ mod tests {
             }
             .run(&request(), "a".repeat(64), None, &|| false)
             .unwrap();
-            assert_eq!(status(&result, "podman_build").code, code);
+            assert_eq!(status(&result, "podman_build").code, code.to_string());
             assert_eq!(runner.calls.borrow().len(), 1);
         }
     }
@@ -661,7 +714,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             status(&result, "runroot_length").code,
-            "runroot_exceeds_50_bytes"
+            Code::PreflightFindingRunrootExceeds50Bytes.to_string()
         );
         assert_eq!(status(&result, "fabric").status, Status::Unknown);
         assert!(runner.calls.borrow().is_empty());

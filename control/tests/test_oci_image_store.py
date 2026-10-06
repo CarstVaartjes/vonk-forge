@@ -16,11 +16,16 @@ import time
 from pathlib import Path
 
 import pytest
-from vonk_control.oci_image_store import Collection, OciImageStore
+from vonk_control.oci_image_store import Collection, OciImageStore, StoredImage
 
 pytestmark = pytest.mark.skipif(
     shutil.which("skopeo") is None, reason="needs skopeo, as in the Controller image"
 )
+
+
+def _stored(answer: object) -> StoredImage:
+    assert isinstance(answer, StoredImage), answer
+    return answer
 
 
 def _layer(name: str, content: bytes) -> bytes:
@@ -66,13 +71,17 @@ def _docker_archive(path: Path, layers: list[bytes]) -> Path:
 def test_archives_share_their_base_layer_and_read_back_complete(tmp_path: Path) -> None:
     store = OciImageStore(tmp_path / "artifacts", skopeo=shutil.which("skopeo") or "")
     base = _layer("base.bin", b"b" * 200_000)
-    first = store.import_archive(
-        _docker_archive(tmp_path / "first.tar", [base, _layer("recipe", b"one")])
+    first = _stored(
+        store.import_archive(
+            _docker_archive(tmp_path / "first.tar", [base, _layer("recipe", b"one")])
+        )
     )
     blobs = store.root / "blobs/sha256"
     stored_after_first = {path.name for path in blobs.iterdir()}
-    second = store.import_archive(
-        _docker_archive(tmp_path / "second.tar", [base, _layer("recipe", b"two")])
+    second = _stored(
+        store.import_archive(
+            _docker_archive(tmp_path / "second.tar", [base, _layer("recipe", b"two")])
+        )
     )
     added = {path.name for path in blobs.iterdir()} - stored_after_first
 
@@ -95,7 +104,7 @@ def test_archives_share_their_base_layer_and_read_back_complete(tmp_path: Path) 
 def test_a_repeated_copy_marks_its_image_fresh_for_collection(tmp_path: Path) -> None:
     store = OciImageStore(tmp_path / "artifacts", skopeo=shutil.which("skopeo") or "")
     archive = _docker_archive(tmp_path / "image.tar", [_layer("base.bin", b"b" * 64)])
-    image = store.import_archive(archive)
+    image = _stored(store.import_archive(archive))
     blobs = store.root / "blobs/sha256"
     old = time.time() - 3600
     for blob in blobs.iterdir():
@@ -109,7 +118,9 @@ def test_a_repeated_copy_marks_its_image_fresh_for_collection(tmp_path: Path) ->
     for blob in blobs.iterdir():
         os.utime(blob, (old, old))
     removed = store.collect(lambda: (), grace_seconds=60)
-    assert removed is not None and removed.blobs_removed == len(image.blob_digests)
+    assert isinstance(removed, Collection) and removed.blobs_removed == len(
+        image.blob_digests
+    )
     assert store.read(image.manifest_digest) is None
     # The layout's index still names the collected image; storing it again
     # works all the same.

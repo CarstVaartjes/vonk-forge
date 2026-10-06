@@ -101,8 +101,8 @@ from .catalog_revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
 )
-from .categorized_errors import BookkeepingUnknown, InvalidType, InvalidValue
-from .categorized_faults import OperationInterrupted, StoredStateTypeDamaged
+from .categorized_errors import InvalidType, InvalidValue
+from .categorized_faults import OperationInterrupted
 from .failure_classification import is_security_failure
 from .lifecycle import (
     CancelRequested,
@@ -115,6 +115,7 @@ from .lifecycle import (
 )
 from .lifecycle.evidence import (
     BookkeepingReason,
+    Damaged,
     Residue,
     read_or_rebuild,
 )
@@ -732,16 +733,20 @@ class ArtifactSetManifest:
 
     @classmethod
     def from_document(cls, value: object) -> ArtifactSetManifest:
+        failure: Exception | None = None
+        wire: CacheManifest | None = None
         try:
             document = require_mapping(value, "cache manifest must be a JSON object")
-            _reject_non_json_containers(document)
             wire = CacheManifest.model_validate_json(canonical_message(document))
         except (TypeError, ValueError, ValidationError) as error:
+            failure = error
+        if wire is None or _has_python_tuple(value):
             code = (
                 ModelCacheCode.SCHEMA_UNSUPPORTED
-                if isinstance(error, ValidationError)
+                if isinstance(failure, ValidationError)
                 and any(
-                    issue.get("loc") == ("schema_version",) for issue in error.errors()
+                    issue.get("loc") == ("schema_version",)
+                    for issue in failure.errors()
                 )
                 else ModelCacheCode.MANIFEST_INVALID
             )
@@ -750,7 +755,7 @@ class ArtifactSetManifest:
                 if code == ModelCacheCode.SCHEMA_UNSUPPORTED
                 else "cache manifest shape is invalid"
             )
-            raise ModelCacheResolutionInvalid(code, detail) from error
+            raise ModelCacheResolutionInvalid(code, detail) from failure
         result = cls(
             model_content_sha256=_optional_digest(wire.model_content_sha256),
             recipe_revision_sha256=_optional_digest(wire.recipe_revision_sha256),
@@ -767,17 +772,17 @@ class ArtifactSetManifest:
         return result
 
 
-def _reject_non_json_containers(value: object) -> None:
-    """Keep Python-only tuple values from being normalized into JSON arrays."""
+def _has_python_tuple(value: object) -> bool:
+    """Whether a manifest document holds a Python-only tuple, which would be
+    normalized into a JSON array and so must be refused."""
 
     if isinstance(value, tuple):
-        raise StoredStateTypeDamaged("manifest JSON must use arrays, not tuples")
+        return True
     if isinstance(value, Mapping):
-        for item in value.values():
-            _reject_non_json_containers(item)
-    elif isinstance(value, list):
-        for item in value:
-            _reject_non_json_containers(item)
+        return any(_has_python_tuple(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_python_tuple(item) for item in value)
+    return False
 
 
 def _model_removal_intent_digest(
@@ -799,11 +804,13 @@ def _model_removal_intent_digest(
     )
 
 
-def _read_operation_payload(operation: ModelCacheOperation) -> dict[str, object]:
+def _read_operation_payload(
+    operation: ModelCacheOperation,
+) -> dict[str, object] | Damaged:
     """Read and normalize one persisted operation envelope.
 
-    A damaged envelope raises ``ValueError``/``TypeError``: the contract of
-    :func:`read_or_rebuild`, which every caller goes through (``_operation_payload``).
+    A damaged envelope is ``Damaged``: the contract of :func:`read_or_rebuild`,
+    which every caller goes through (``_operation_payload``).
     """
 
     return _parse_operation_envelope(operation, operation.payload)
@@ -811,7 +818,7 @@ def _read_operation_payload(operation: ModelCacheOperation) -> dict[str, object]
 
 def _parse_operation_envelope(
     operation: ModelCacheOperation, envelope: object
-) -> dict[str, object]:
+) -> dict[str, object] | Damaged:
     try:
         parsed = parse_model_cache_payload(operation.kind, envelope)
         if isinstance(
@@ -819,32 +826,32 @@ def _parse_operation_envelope(
         ) and operation.plan_digest != _model_removal_intent_digest(
             parsed, actor=operation.actor, request_key=operation.request_key
         ):
-            raise BookkeepingUnknown(
+            return Damaged(
                 "persisted model removal intent no longer matches its accepted plan"
             )
         if isinstance(parsed, (ModelCacheDownloadPayload, ModelCacheRepairPayload)):
-            _manifest_of_document(serialize_json_value(parsed.manifest))
+            manifest = _read_manifest_document(serialize_json_value(parsed.manifest))
+            if isinstance(manifest, Damaged):
+                return manifest
         return dict(
             require_mapping(serialize_json_value(parsed), "cache operation payload")
         )
-    except ValidationError as error:
-        raise BookkeepingUnknown(
-            "persisted cache operation payload is invalid"
-        ) from error
+    except ValidationError:
+        return Damaged("persisted cache operation payload is invalid")
 
 
-def _manifest_of_document(document: object) -> ArtifactSetManifest:
+def _read_manifest_document(document: object) -> ArtifactSetManifest | Damaged:
     """``ArtifactSetManifest.from_document`` for a *stored* document.
 
     The strict parser refuses a malformed manifest at ingress; a persisted copy
     that no longer parses is damaged state, which the caller reads through
-    :func:`read_or_rebuild`: it raises ``ValueError`` here.
+    :func:`read_or_rebuild`: it is ``Damaged`` here.
     """
 
     try:
         return ArtifactSetManifest.from_document(document)
     except ModelCacheResolutionError as error:
-        raise BookkeepingUnknown(error.detail) from error
+        return Damaged(error.detail)
 
 
 def _default_retry_state() -> dict[str, object]:
@@ -889,7 +896,8 @@ def _rebuild_operation_payload(
             candidate["result"] = _derived_result(operation, candidate)
     # A removal keeps its accepted plan (checked against its digest): only the
     # retry counters are bookkeeping that can be restarted.
-    return _parse_operation_envelope(operation, candidate)
+    rebuilt = _parse_operation_envelope(operation, candidate)
+    return None if isinstance(rebuilt, Damaged) else rebuilt
 
 
 def _derived_result(
@@ -953,13 +961,15 @@ def _operation_removal(
     return payload if isinstance(payload, Residue) else _removal_checkpoint(payload)
 
 
-def _read_removal_checkpoint(payload: Mapping[str, object]) -> ModelCacheRemovalPayload:
+def _read_removal_checkpoint(
+    payload: Mapping[str, object],
+) -> ModelCacheRemovalPayload | Damaged:
     try:
         parsed = parse_model_cache_payload("remove", payload)
-    except ValidationError as error:
-        raise BookkeepingUnknown("model removal payload is invalid") from error
+    except ValidationError:
+        return Damaged("model removal payload is invalid")
     if not isinstance(parsed, ModelCacheRemovalPayload):
-        raise StoredStateTypeDamaged("model removal payload is invalid")
+        return Damaged("model removal payload is invalid")
     return parsed
 
 
@@ -1000,17 +1010,15 @@ def _fresh_progress(now: datetime) -> ModelCacheOperationProgress:
 
 def _read_operation_progress(
     operation: ModelCacheOperation,
-) -> ModelCacheOperationProgress:
+) -> ModelCacheOperationProgress | Damaged:
     try:
         return read_stored_model(
             ModelCacheOperationProgress,
             canonical_message(operation.progress),
             from_json=True,
         )
-    except ValidationError as error:
-        raise BookkeepingUnknown(
-            "persisted cache operation progress is invalid"
-        ) from error
+    except ValidationError:
+        return Damaged("persisted cache operation progress is invalid")
 
 
 def _operation_progress(
@@ -1963,7 +1971,7 @@ class ModelCacheService:
         """Whether every object of the operation's set has a storage receipt."""
 
         try:
-            manifest = _manifest_of_document(payload["manifest"])
+            manifest = ArtifactSetManifest.from_document(payload["manifest"])
             return self._managed_cached_objects(manifest) == frozenset(
                 spec.sha256 for spec in manifest.artifacts
             )
@@ -1982,7 +1990,7 @@ class ModelCacheService:
 
         self._transfer_stop(operation_id).set()
         try:
-            manifest = _manifest_of_document(payload["manifest"])
+            manifest = ArtifactSetManifest.from_document(payload["manifest"])
         except (KeyError, TypeError, ValueError):
             return False  # unreadable: a writer may still be active
         return self._artifact_effects_settled(operation_id, manifest)
@@ -2081,14 +2089,14 @@ class ModelCacheService:
                     model_content_sha256=row.model_content_sha256,
                     recipe_revision_sha256=row.recipe_revision_sha256,
                 )
-            except ModelCacheError as error:
-                raise BookkeepingUnknown(error.detail) from error
+            except ModelCacheError:
+                return None
             return candidate if candidate.digest == row.artifact_set_sha256 else None
 
         value = read_or_rebuild(
             kind="model-cache-set",
             subject=row.artifact_set_sha256,
-            read=lambda: _manifest_of_document(row.manifest),
+            read=lambda: _read_manifest_document(row.manifest),
             rebuild=rebuild,
             reason=BookkeepingReason.PERSISTED_STATE_DAMAGED,
         )
@@ -2123,7 +2131,7 @@ class ModelCacheService:
         if set_digest is None:
             return
         try:
-            manifest = _manifest_of_document(payload["manifest"])
+            manifest = ArtifactSetManifest.from_document(payload["manifest"])
         except ValueError:
             return
         unique_specs = _unique_artifacts(manifest.artifacts)
@@ -3655,6 +3663,9 @@ class ModelCacheService:
             now=now,
         )
         stored_plan = _write_operation_payload("remove", plan)
+        removal_checkpoint = _removal_checkpoint(stored_plan)
+        # The plan was written one statement ago, so it reads back.
+        assert not isinstance(removal_checkpoint, Residue)
         operation = ModelCacheAdapter.new_operation(
             id=operation_id,
             request_key=request_key,
@@ -3663,7 +3674,7 @@ class ModelCacheService:
             attempt=1,
             artifact_set_sha256=None,
             plan_digest=_model_removal_intent_digest(
-                _read_removal_checkpoint(stored_plan),
+                removal_checkpoint,
                 actor=actor,
                 request_key=request_key,
             ),
@@ -5187,7 +5198,7 @@ class ModelCacheService:
             payload = self._payload_or_retire(operation)
             if payload is None:
                 return None
-            manifest = _manifest_of_document(payload["manifest"])
+            manifest = ArtifactSetManifest.from_document(payload["manifest"])
             if operation.artifact_set_sha256 is None:
                 operation.artifact_set_sha256 = manifest.digest
             transfer = dict(
@@ -5412,7 +5423,7 @@ class ModelCacheService:
                     "coverage": "complete",
                 },
             )
-        except InterruptedError as error:
+        except (OperationInterrupted, InterruptedError) as error:
             self._finish_partial(
                 operation_id, set_digest, manifest, str(error) or "download interrupted"
             )
@@ -6962,7 +6973,7 @@ class ModelCacheService:
                 if operation is not None and payload is not None:
                     # (an unreadable document is not checkpointed: the bytes
                     # are content-addressed and the claim loop reconciles it)
-                    manifest = _manifest_of_document(payload["manifest"])
+                    manifest = ArtifactSetManifest.from_document(payload["manifest"])
                     raw_transfer = payload.get("transfer")
                     transfer = (
                         dict(raw_transfer) if isinstance(raw_transfer, Mapping) else {}
@@ -7463,7 +7474,9 @@ class ModelCacheService:
             # The set is the manifest's own digest; the column is bookkeeping.
             previous_set = (
                 previous.artifact_set_sha256
-                or _manifest_of_document(previous_payload["manifest"]).digest
+                or ArtifactSetManifest.from_document(
+                    previous_payload["manifest"]
+                ).digest
             )
             self._require_model_sets_open(session, (previous_set,), now=now)
             retry.update(automatic_attempts=1, operator_retries=operator_retries + 1)
@@ -7572,7 +7585,7 @@ class ModelCacheService:
                 and prior_check.get("request_key") == request_key
             ):
                 return self._operation_view(previous)
-            manifest = _manifest_of_document(previous_payload["manifest"])
+            manifest = ArtifactSetManifest.from_document(previous_payload["manifest"])
             failure_artifact_key = failure.get("artifact_key")
             failed_artifact_key = (
                 failure_artifact_key
@@ -8816,7 +8829,7 @@ class ModelCacheService:
 
     @staticmethod
     def _payload_has_huggingface_source(payload: Mapping[str, object]) -> bool:
-        manifest = _manifest_of_document(payload["manifest"])
+        manifest = ArtifactSetManifest.from_document(payload["manifest"])
         for artifact in manifest.artifacts:
             source = artifact.source
             try:
@@ -10213,7 +10226,7 @@ class ModelCacheService:
                 payload = self._payload_or_none(operation)
                 if payload is None:
                     continue  # unreadable: its objects are not counted in flight
-                manifest = _manifest_of_document(payload["manifest"])
+                manifest = ArtifactSetManifest.from_document(payload["manifest"])
                 for item in manifest.artifacts:
                     in_flight_artifacts.setdefault(item.sha256, item.expected_bytes)
             protected_bytes = sum(

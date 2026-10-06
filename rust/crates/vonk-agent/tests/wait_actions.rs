@@ -23,7 +23,7 @@ use std::{
 
 use vonk_agent::outcome::{ExecutionResult, UnknownEvidence};
 use vonk_agent_protocol::generated::{
-    AgentOperation, AgentResultResult, AgentResultState, WaitReason,
+    AgentOperation, AgentResultResult, AgentResultState, HelperErrorCode, WaitReason,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,7 +214,7 @@ fn a_wait_reports_its_evidence_on_the_wire() {
         "workload stop remains unconfirmed",
         UnknownEvidence::at("stop")
             .because("helper_io_failed")
-            .helper("operation_io"),
+            .helper(HelperErrorCode::OperationIo),
     )
     .finish_for(&AgentOperation::RecipeStop);
 

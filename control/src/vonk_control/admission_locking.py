@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AdmissionCode, UnknownOutcomeError
 
+from .bounded_retry import REQUEST_PAUSES, bounded_attempts
 from .settings import DATABASE_WAIT_BUDGETS
 
 _BUSY_SQLSTATES = frozenset({"55P03", "40P01", "40001", "57014"})
@@ -62,6 +63,18 @@ class AdmissionLockBusy(UnknownOutcomeError, RuntimeError):
 #: An admission that has been refused this many times in a row stops trying and
 #: starts queueing (bounded by ``patient_admission_lock_timeout_ms``).
 PATIENT_AFTER_RETRIES = 3
+
+
+def admission_attempts() -> Iterator[int]:
+    """The attempts of one request-led admission (see ``bounded_retry``).
+
+    A try-lock refusal is contention that normally clears in milliseconds, so
+    a request that queues work retries it ``PATIENT_AFTER_RETRIES`` times in all
+    before it reports the refusal to its requester.
+    """
+
+    return bounded_attempts(REQUEST_PAUSES[: PATIENT_AFTER_RETRIES - 1])
+
 
 _PATIENCE_MS: ContextVar[int] = ContextVar("vonk_admission_patience_ms", default=0)
 

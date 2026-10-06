@@ -10,13 +10,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use reqwest::Client;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use vonk_agent_protocol::generated::HelperErrorCode;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
-use vonk_agent_protocol::generated::{FailureCode, SecurityRefusalReason};
 use vonk_agent_protocol::{AgentClaim, AgentUpgradeRequest, canonical_json, parse_strict};
 
 use crate::client::{AgentHttpClient, ClientError};
-use crate::outcome::GRANT_REFUSALS;
-use crate::vocabulary;
 
 const HELPER_SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock";
 /// Shared with the host-runtime frame and the privileged helper.
@@ -46,7 +44,7 @@ pub enum AgentUpgradeError {
     HelperRejected,
     #[error("agent upgrade helper rejected the request: {code}")]
     HelperRejectedWithCode {
-        code: String,
+        code: HelperErrorCode,
         exit_code: Option<i32>,
         diagnostic: Option<String>,
     },
@@ -72,11 +70,11 @@ impl AgentUpgradeError {
         }
     }
 
-    pub fn helper_diagnostics(&self) -> Option<(&str, Option<i32>)> {
+    pub fn helper_diagnostics(&self) -> Option<(HelperErrorCode, Option<i32>)> {
         match self {
             Self::HelperRejectedWithCode {
                 code, exit_code, ..
-            } => Some((code.as_str(), *exit_code)),
+            } => Some((*code, *exit_code)),
             _ => None,
         }
     }
@@ -285,6 +283,8 @@ pub(crate) fn validate_helper_response(
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     if response.status == "rejected" {
+        let reported = response.error_code.as_deref();
+        let code = reported.and_then(crate::helper_codes::upgrade_rejection);
         if response
             .request_id
             .map(|id| id.to_string())
@@ -293,18 +293,14 @@ pub(crate) fn validate_helper_response(
             || response
                 .exit_code
                 .is_some_and(|value| !(0..=255).contains(&value))
-            || (response.exit_code.is_some()
-                && response.error_code.as_deref() != Some("package_install_failed"))
-            || response
-                .error_code
-                .as_deref()
-                .is_some_and(|value| !stable_helper_error_code(value))
+            || (response.exit_code.is_some() && code != Some(HelperErrorCode::PackageInstallFailed))
+            || (reported.is_some() && code.is_none())
         {
             return Err(AgentUpgradeError::HelperResponseInvalid);
         }
-        return Err(match response.error_code.as_deref() {
-            Some(error_code) => AgentUpgradeError::HelperRejectedWithCode {
-                code: error_code.to_owned(),
+        return Err(match code {
+            Some(code) => AgentUpgradeError::HelperRejectedWithCode {
+                code,
                 exit_code: response.exit_code.map(|code| code as i32),
                 diagnostic: response
                     .diagnostic
@@ -327,26 +323,9 @@ pub(crate) fn validate_helper_response(
     Ok(())
 }
 
-fn stable_helper_error_code(value: &str) -> bool {
-    vocabulary::is_any(value, &GRANT_REFUSALS)
-        || vocabulary::is(value, SecurityRefusalReason::RequestReplayed)
-        || vocabulary::is(value, FailureCode::OperationFailed)
-        || matches!(
-            value,
-            "request_invalid"
-                | "request_ledger_failed"
-                | "package_preflight_failed"
-                | "package_verification_failed"
-                | "package_metadata_failed"
-                | "package_custody_failed"
-                | "package_install_failed"
-                | "concurrency_limit"
-        )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{AgentUpgradeError, HelperResponse, validate_helper_response};
+    use super::{AgentUpgradeError, HelperErrorCode, HelperResponse, validate_helper_response};
     use vonk_agent_protocol::{canonical_generated_json, parse_strict};
 
     fn response(status: &str) -> HelperResponse {
@@ -428,7 +407,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             error.helper_diagnostics(),
-            Some(("package_install_failed", Some(75)))
+            Some((HelperErrorCode::PackageInstallFailed, Some(75)))
         );
         assert_eq!(
             error.to_string(),

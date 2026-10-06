@@ -45,7 +45,7 @@ from .oci_image_store import (
     REFERENCED_MANIFEST_DAMAGED,
     Collection,
     OciImageStore,
-    OciImageStoreError,
+    StoreUnknown,
 )
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -91,24 +91,25 @@ class ImageStoreCollector:
     def collect(self) -> Collection | None:
         collection: Collection | None = None
         for _attempt in range(_MAX_REPAIRS):
-            try:
-                collection = self._store.collect(
-                    self._referenced_images, grace_seconds=GRACE.total_seconds()
-                )
+            answer = self._store.collect(
+                self._referenced_images, grace_seconds=GRACE.total_seconds()
+            )
+            if isinstance(answer, Collection):
+                collection = answer
                 break
-            except OciImageStoreError as error:
-                if error.code not in (
-                    REFERENCE_SCAN_FAILED,
-                    REFERENCED_MANIFEST_DAMAGED,
-                ):
-                    raise
-                # Nothing was removed: what the Controller still names is unknown.
-                _log_deferred(error.code, error.detail)
-                if error.code != REFERENCED_MANIFEST_DAMAGED or not (
-                    error.address and self._evict_damaged_receipt(error.address)
-                ):
-                    break
-                # The damaged image no longer holds the sweep back: go again.
+            if answer.code not in (
+                REFERENCE_SCAN_FAILED,
+                REFERENCED_MANIFEST_DAMAGED,
+            ):
+                # A busy store: nothing was removed, the next interval asks again.
+                break
+            # Nothing was removed: what the Controller still names is unknown.
+            _log_deferred(answer.code, answer.detail)
+            if answer.code != REFERENCED_MANIFEST_DAMAGED or not (
+                answer.address and self._evict_damaged_receipt(answer.address)
+            ):
+                break
+            # The damaged image no longer holds the sweep back: go again.
         uploads = self._collect_uploads()
         if collection is None:
             return None
@@ -169,8 +170,10 @@ class ImageStoreCollector:
         )
         return True
 
-    def _referenced_images(self) -> set[str]:
+    def _referenced_images(self) -> set[str] | StoreUnknown:
         referenced = self._receipt_addresses()
+        if isinstance(referenced, StoreUnknown):
+            return referenced
         now = self._clock()
         with self._sessions() as session:
             referenced.update(
@@ -185,8 +188,8 @@ class ImageStoreCollector:
             referenced.update(self._waiting_builds(session, now))
         return referenced
 
-    def _receipt_addresses(self) -> set[str]:
-        """Images with a receipt. An unreadable directory is an error, not none.
+    def _receipt_addresses(self) -> set[str] | StoreUnknown:
+        """Images with a receipt. An unreadable directory is unknown, not none.
 
         ``Path.glob`` silently yields nothing for a directory it may not list,
         which would read as "no image is published".
@@ -198,11 +201,11 @@ class ImageStoreCollector:
         except FileNotFoundError:
             return set()
         except OSError as error:
-            raise OciImageStoreError(
+            return StoreUnknown(
                 REFERENCE_SCAN_FAILED,
                 f"image receipts cannot be listed, so nothing was removed: "
-                f"{type(error).__name__}: {error}",
-            ) from error
+                f"{type(error).__name__}: {error}"[:512],
+            )
         return {
             match.group(1)
             for name in names

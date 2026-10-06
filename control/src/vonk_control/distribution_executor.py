@@ -41,6 +41,7 @@ from .models import (
     Job,
     RecipeBuild,
 )
+from .oci_image_store import StoreUnknown
 from .operation_progress import aggregate_progress, project_progress
 from .run_switch_contract import (
     ArtifactVerificationEvidence,
@@ -962,7 +963,7 @@ class DurableDistributionPhaseExecutor:
         storage = self._source_runtime_storage(self._distribution.source)
         layout = getattr(storage, "layout", None)
         image = layout.read(f"sha256:{address}") if layout is not None else None
-        if image is None:
+        if image is None or isinstance(image, StoreUnknown):
             raise RuntimeError("verified OCI runtime image identity is unavailable")
         return image.config_digest
 

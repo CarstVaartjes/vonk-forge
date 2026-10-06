@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import RuntimePreflightFindingCode, canonical_message
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
@@ -82,3 +82,18 @@ def test_agent_preflight_result_is_admitted_by_the_controller(tmp_path: Path) ->
             "Mandatory runtime capability signed_helper_run is unknown.",
         ),
     )
+
+
+def test_agent_preflight_codes_are_contract_members_not_free_text(
+    tmp_path: Path,
+) -> None:
+    probe = _probe("VONK_RUNTIME_PREFLIGHT_PROBE")
+    request = _request()
+
+    result = _run([probe, str(tmp_path)], request)
+
+    assert result.findings
+    for finding in result.findings:
+        # The agent writes a member's own word; it never needs the adapter.
+        assert RuntimePreflightFindingCode(finding.code) is finding.finding_code
+        assert finding.finding_code is not RuntimePreflightFindingCode.UNCLASSIFIED

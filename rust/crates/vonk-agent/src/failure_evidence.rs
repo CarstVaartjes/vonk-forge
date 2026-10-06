@@ -533,7 +533,7 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
     let code = [
         failure.code.map(|code| code.to_string()),
         failure.diagnostic.clone(),
-        failure.helper_error_code.clone(),
+        failure.helper_error_code.map(|code| code.to_string()),
     ]
     .into_iter()
     .flatten()

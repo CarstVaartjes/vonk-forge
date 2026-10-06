@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control import agent_operation_states as aos
+from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
 from vonk_control.enrollment import EnrollmentService
@@ -26,7 +27,6 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
-from vonk_control.run_admission import RunAdmissionBusy
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .recipe_stop_fixtures import recipe_stop_payload
@@ -710,7 +710,7 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
             "busy admission must release the caller promptly"
         )
         assert len(enqueue_errors) == 1
-        assert isinstance(enqueue_errors[0], RunAdmissionBusy)
+        assert isinstance(enqueue_errors[0], AdmissionLockBusy)
         release.set()
         finisher.join(timeout=5)
         enqueuer.join(timeout=5)
@@ -722,7 +722,7 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
 
     assert not finish_errors
     assert len(enqueue_errors) == 1
-    assert isinstance(enqueue_errors[0], RunAdmissionBusy)
+    assert isinstance(enqueue_errors[0], AdmissionLockBusy)
     assert state(sessions, parent_job.id) == "succeeded"
     # A fresh retry rechecks the completed parent instead of adding work to it.
     with pytest.raises(ValueError, match="terminal"):
