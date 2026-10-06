@@ -2150,7 +2150,9 @@ class RecipeImageAvailabilityService:
                 self._removal_request_after = operation.id
                 try:
                     payload = read_stored_model(
-                        AvailabilityJobPayload, operation.payload
+                        AvailabilityJobPayload,
+                        canonical_message(operation.payload),
+                        from_json=True,
                     )
                 except (TypeError, ValueError):
                     continue
@@ -2195,7 +2197,9 @@ class RecipeImageAvailabilityService:
                     return False
                 try:
                     payload = read_stored_model(
-                        AvailabilityJobPayload, requester.payload
+                        AvailabilityJobPayload,
+                        canonical_message(requester.payload),
+                        from_json=True,
                     )
                     owner = self._read_removal_owner(remover)
                 except (TypeError, ValueError, RecipeImageAvailabilityError):
@@ -4648,7 +4652,11 @@ class RecipeImageAvailabilityService:
                 # The admission snapshot is canonical; an unreadable legacy row
                 # continues through its existing preparation recovery path.
                 try:
-                    dependency = read_stored_model(AvailabilityJobPayload, payload)
+                    dependency = read_stored_model(
+                        AvailabilityJobPayload,
+                        canonical_message(payload),
+                        from_json=True,
+                    )
                 except (ValidationError, ValueError, TypeError):
                     dependency = None
                 if dependency is not None and has_pending_removal(
