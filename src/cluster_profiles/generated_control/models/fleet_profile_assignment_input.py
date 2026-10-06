@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.fleet_profile_assignment_input_desired_state import check_fleet_profile_assignment_input_desired_state
-from ..models.fleet_profile_assignment_input_desired_state import FleetProfileAssignmentInputDesiredState
+from ..models.desired_assignment_state import check_desired_assignment_state
+from ..models.desired_assignment_state import DesiredAssignmentState
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -37,7 +37,8 @@ class FleetProfileAssignmentInput:
             recipe_selector (str):
             spark_ids (list[str]):
             assignment_name (None | str | Unset):
-            desired_state (FleetProfileAssignmentInputDesiredState | Unset):  Default: 'running'.
+            desired_state (DesiredAssignmentState | Unset): What a fleet-profile assignment is asked to become on its
+                Sparks.
             model_variant (None | str | Unset):
             option_choices (FleetProfileAssignmentInputOptionChoices | Unset):
      """
@@ -45,7 +46,7 @@ class FleetProfileAssignmentInput:
     recipe_selector: str
     spark_ids: list[str]
     assignment_name: None | str | Unset = UNSET
-    desired_state: FleetProfileAssignmentInputDesiredState | Unset = 'running'
+    desired_state: DesiredAssignmentState | Unset = UNSET
     model_variant: None | str | Unset = UNSET
     option_choices: FleetProfileAssignmentInputOptionChoices | Unset = UNSET
 
@@ -122,11 +123,11 @@ class FleetProfileAssignmentInput:
 
 
         _desired_state = d.pop("desired_state", UNSET)
-        desired_state: FleetProfileAssignmentInputDesiredState | Unset
+        desired_state: DesiredAssignmentState | Unset
         if isinstance(_desired_state,  Unset):
             desired_state = UNSET
         else:
-            desired_state = check_fleet_profile_assignment_input_desired_state(_desired_state)
+            desired_state = check_desired_assignment_state(_desired_state)
 
 
 

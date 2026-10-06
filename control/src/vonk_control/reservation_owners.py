@@ -32,7 +32,12 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Text, cast, func, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import (
+    InstallationNodeState,
+    InstallationState,
+    LifecycleState,
+    ReservationState,
+)
 
 from . import job_states
 from .fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
@@ -139,7 +144,7 @@ def _a_rank_shows_an_effect(session: Session, installation_id: str) -> bool:
     """Whether a planned installation's member already reached its Spark."""
 
     return any(
-        member.state != "planned" or member.installed_bytes
+        member.state != InstallationNodeState.PLANNED or member.installed_bytes
         for member in session.scalars(
             select(InstallationNode).where(
                 InstallationNode.installation_id == installation_id
@@ -215,18 +220,20 @@ def _installation_owner(
     if installation is None:
         return ReservationOwner("installation", owner_id, "missing", True, noun)
     state = installation.state
-    if state == "uninstalled":
+    if state == InstallationState.UNINSTALLED:
         return ReservationOwner("installation", owner_id, state, True, noun)
-    if state == "installed":
+    if state == InstallationState.INSTALLED:
         return ReservationOwner("installation", owner_id, state, False, noun)
-    window = ADOPTION_WINDOW if state == "planned" else OWNER_SETTLE_GRACE
+    window = (
+        ADOPTION_WINDOW if state == InstallationState.PLANNED else OWNER_SETTLE_GRACE
+    )
     if not _settled(installation.updated_at, now, window):
         return ReservationOwner("installation", owner_id, state, False, noun)
     if _referencing_active_job(session, "installation", owner_id):
         return ReservationOwner("installation", owner_id, state, False, noun)
     if (
         _effect_is_uncertain(session, owner_id)
-        if state != "planned"
+        if state != InstallationState.PLANNED
         else _a_rank_shows_an_effect(session, owner_id)
     ):
         return ReservationOwner(
@@ -254,7 +261,11 @@ def release_dead_owner_reservations(
     released: list[ReservationOwner] = []
     owners = session.execute(
         select(ResourceReservation.owner_kind, ResourceReservation.owner_id)
-        .where(ResourceReservation.state.in_(("active", "promised")))
+        .where(
+            ResourceReservation.state.in_(
+                (ReservationState.ACTIVE, ReservationState.PROMISED)
+            )
+        )
         .distinct()
     ).all()
     for owner_kind, owner_id in sorted(owners):
@@ -265,7 +276,9 @@ def release_dead_owner_reservations(
             .where(
                 ResourceReservation.owner_kind == owner_kind,
                 ResourceReservation.owner_id == owner_id,
-                ResourceReservation.state.in_(("active", "promised")),
+                ResourceReservation.state.in_(
+                    (ReservationState.ACTIVE, ReservationState.PROMISED)
+                ),
             )
             .order_by(ResourceReservation.id)
             .with_for_update(skip_locked=True)
@@ -282,7 +295,7 @@ def release_dead_owner_reservations(
         if not owner.dead:
             continue
         for claim in claims:
-            claim.state = "released"
+            claim.state = ReservationState.RELEASED
             claim.released_at = now
         released.append(owner)
     return tuple(released)
@@ -319,9 +332,9 @@ def release_covered_installation_claims(
         .where(
             ResourceReservation.owner_kind == "installation",
             ResourceReservation.kind == "disk",
-            ResourceReservation.state == "active",
-            RecipeInstallation.state == "installed",
-            InstallationNode.state == "installed",
+            ResourceReservation.state == ReservationState.ACTIVE,
+            RecipeInstallation.state == InstallationState.INSTALLED,
+            InstallationNode.state == InstallationNodeState.INSTALLED,
         )
     ).all()
     for reservation, installation, node in rows:
@@ -350,19 +363,19 @@ def release_covered_installation_claims(
             select(ResourceReservation)
             .where(
                 ResourceReservation.id == reservation.id,
-                ResourceReservation.state == "active",
+                ResourceReservation.state == ReservationState.ACTIVE,
             )
             .with_for_update(skip_locked=True)
         )
         if locked is None:
             continue
-        locked.state = "released"
+        locked.state = ReservationState.RELEASED
         locked.released_at = now
         released.append(
             ReservationOwner(
                 "installation",
                 installation.id,
-                "installed",
+                InstallationState.INSTALLED.value,
                 False,
                 "installation",
                 "files already counted in free space",

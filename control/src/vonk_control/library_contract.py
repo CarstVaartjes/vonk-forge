@@ -6,12 +6,30 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, StringConstraints, model_validator
-from vonk_agent_protocol import LibraryProjectionCode
+from pydantic import (
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
+from vonk_agent_protocol import (
+    InstallationState,
+    LibraryProjectionCode,
+    PlacementInstallState,
+    PlacementLoadState,
+    RunState,
+    machine_adopter,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
 from .cursor_contract import MAX_CURSOR_LENGTH
+from .machine_states import (
+    InstallationStateField,
+    RouteStateField,
+    RunStateField,
+)
 from .model_cache_contract import ModelCacheOperationState
 from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
 from .strict_json import StrictJSONModel
@@ -92,10 +110,31 @@ class LibraryRecipeIdentity(_StrictModel):
     description: Annotated[str, StringConstraints(max_length=4_096)]
 
 
+_ActiveInstallationState = Annotated[
+    Literal[
+        InstallationState.PLANNED,
+        InstallationState.INSTALLING,
+        InstallationState.INSTALLED,
+        InstallationState.PARTIAL,
+        InstallationState.FAILED,
+    ],
+    BeforeValidator(machine_adopter(InstallationState)),
+]
+_LiveRunState = Annotated[
+    Literal[
+        RunState.PLANNED,
+        RunState.STARTING,
+        RunState.RUNNING,
+        RunState.STOPPING,
+    ],
+    BeforeValidator(machine_adopter(RunState)),
+]
+
+
 class LibraryInstallationSummary(_StrictModel):
     installation_id: UuidId
     recipe_revision_id: UuidId
-    state: Literal["planned", "installing", "installed", "partial", "failed"]
+    state: _ActiveInstallationState
     installed_rank_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     expected_rank_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
     complete: bool
@@ -105,8 +144,8 @@ class LibraryRunSummary(_StrictModel):
     run_id: UuidId
     installation_id: UuidId
     recipe_revision_id: UuidId
-    state: Literal["planned", "starting", "running", "stopping"]
-    route_state: Literal["withdrawn", "pending", "published", "failed"]
+    state: _LiveRunState
+    route_state: RouteStateField
     healthy_rank_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     expected_rank_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     healthy: bool
@@ -319,9 +358,7 @@ class OperationalInstallation(_StrictModel):
     recipe_revision_id: UuidId
     mapping_id: UuidId
     recipe_build_id: UuidId
-    state: Literal[
-        "planned", "installing", "installed", "partial", "failed", "uninstalled"
-    ]
+    state: InstallationStateField
     node_ids: list[NodeId] = Field(max_length=32)
 
 
@@ -330,10 +367,8 @@ class OperationalRun(_StrictModel):
     installation_id: UuidId
     mapping_id: UuidId
     recipe_revision_id: UuidId
-    state: Literal[
-        "planned", "starting", "running", "stopping", "stopped", "failed", "lost"
-    ]
-    route_state: Literal["withdrawn", "pending", "published", "failed"]
+    state: RunStateField
+    route_state: RouteStateField
     node_ids: list[NodeId] = Field(max_length=32)
 
 
@@ -471,8 +506,8 @@ class PlacementRecommendation(_StrictModel):
     eligible: bool
     ranking_scope: Literal["bounded-advisory"] = "bounded-advisory"
     score: PlacementScore
-    install_state: Literal["complete", "partial", "not_present", "unknown"]
-    load_state: Literal["loaded", "not_loaded", "unknown"]
+    install_state: PlacementInstallState
+    load_state: PlacementLoadState
     mapping_id: UuidId | None
     recipe_build_id: UuidId | None
     installation_ids: list[UuidId] = Field(max_length=16)

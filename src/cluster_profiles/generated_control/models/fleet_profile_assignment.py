@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.fleet_profile_assignment_desired_state import check_fleet_profile_assignment_desired_state
-from ..models.fleet_profile_assignment_desired_state import FleetProfileAssignmentDesiredState
+from ..models.desired_assignment_state import check_desired_assignment_state
+from ..models.desired_assignment_state import DesiredAssignmentState
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -29,7 +29,7 @@ T = TypeVar("T", bound="FleetProfileAssignment")
 class FleetProfileAssignment:
     """
         Attributes:
-            desired_state (FleetProfileAssignmentDesiredState):
+            desired_state (DesiredAssignmentState): What a fleet-profile assignment is asked to become on its Sparks.
             id (str):
             nodes (list[FleetProfileNode]):
             recipe_id (str):
@@ -41,7 +41,7 @@ class FleetProfileAssignment:
             option_choices (FleetProfileAssignmentOptionChoices | Unset):
      """
 
-    desired_state: FleetProfileAssignmentDesiredState
+    desired_state: DesiredAssignmentState
     id: str
     nodes: list[FleetProfileNode]
     recipe_id: str
@@ -122,7 +122,7 @@ class FleetProfileAssignment:
         from ..models.fleet_profile_assignment_option_choices import FleetProfileAssignmentOptionChoices # noqa: PLC0415
         from ..models.fleet_profile_node import FleetProfileNode # noqa: PLC0415
         d = dict(src_dict)
-        desired_state = check_fleet_profile_assignment_desired_state(d.pop("desired_state"))
+        desired_state = check_desired_assignment_state(d.pop("desired_state"))
 
 
 

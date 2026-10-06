@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi import Depends, FastAPI
 from pydantic import ValidationError
+from vonk_agent_protocol import CatalogSyncState
 from vonk_control.auth import Actor
 from vonk_control.catalog_api import (
     ManagedCatalogSyncProblem,
@@ -55,7 +56,7 @@ def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
         sync_id="00000000-0000-4000-8000-000000000001",
         request_key="00000000-0000-4000-8000-000000000002",
         trigger="manual",
-        state="partial",
+        state=CatalogSyncState.PARTIAL,
         repository="example/recipes",
         commit=None,
         expected_commit=None,

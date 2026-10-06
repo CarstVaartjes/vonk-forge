@@ -1,3 +1,5 @@
+from vonk_agent_protocol import DesiredAssignmentState, ReservationState
+
 """Capacity ownership from accepted profile intent to its exact child.
 
 The ordinary ResourceReservation row is the claim. Handoff changes its owner
@@ -93,7 +95,7 @@ def reserve_profile_disk(
                     amount_bytes=node.disk_required_bytes,
                     owner_kind="fleet-profile",
                     owner_id=application.id,
-                    state="active",
+                    state=ReservationState.ACTIVE,
                     plan_digest=application.plan_digest,
                     created_at=now,
                 )
@@ -154,7 +156,7 @@ def reserve_profile_memory(
                     amount_bytes=node.memory_required_bytes,
                     owner_kind="fleet-profile",
                     owner_id=application.id,
-                    state="promised",
+                    state=ReservationState.PROMISED,
                     plan_digest=application.plan_digest,
                     created_at=now,
                 )
@@ -179,7 +181,7 @@ def _validate_memory_claim(
         or claim.amount_bytes != requirement.memory_required_bytes
         or claim.owner_kind != "fleet-profile"
         or claim.owner_id != application.id
-        or claim.state != "promised"
+        or claim.state != ReservationState.PROMISED
         or claim.plan_digest != application.plan_digest
     ):
         raise ValueError("profile memory claim is missing or changed")
@@ -201,7 +203,10 @@ def inherited_profile_memory(
         tuple(node_memory),
         workload_intent_ordinal=workload_intent_ordinal,
     )
-    if assignment.desired_state != "running" or assignment.alias != alias:
+    if (
+        assignment.desired_state != DesiredAssignmentState.RUNNING
+        or assignment.alias != alias
+    ):
         raise ValueError("run is outside the profile memory claim")
     claims = {}
     for requirement in requirements:
@@ -395,7 +400,7 @@ def _profile_build_memory_claim(
     )
     if image.build_id != build.id or assignment.alias != plan.alias:
         raise ValueError("build is outside the reviewed profile preparation")
-    if assignment.desired_state != "running":
+    if assignment.desired_state != DesiredAssignmentState.RUNNING:
         return None
     requirement = next(
         item for item in requirements if item.node_id == build.builder_node_id
@@ -465,7 +470,7 @@ def reserve_profile_ports(
                         amount_bytes=0,
                         owner_kind="fleet-profile",
                         owner_id=application.id,
-                        state="promised",
+                        state=ReservationState.PROMISED,
                         plan_digest=application.plan_digest,
                         created_at=now,
                     )
@@ -489,7 +494,10 @@ def inherited_profile_ports(
         tuple(node_ports),
         workload_intent_ordinal=workload_intent_ordinal,
     )
-    if assignment.desired_state != "running" or assignment.alias != alias:
+    if (
+        assignment.desired_state != DesiredAssignmentState.RUNNING
+        or assignment.alias != alias
+    ):
         raise ValueError("run is outside the profile port claim")
     expected = {
         (node.node_id, port) for node in requirements for port in node.ports_required
@@ -513,7 +521,7 @@ def inherited_profile_ports(
         claim.owner_kind != "fleet-profile"
         or claim.owner_id != application_id
         or claim.kind != "port"
-        or claim.state != "promised"
+        or claim.state != ReservationState.PROMISED
         or claim.node_id != ids[claim.id][0]
         or claim.resource_key != str(ids[claim.id][1])
         or claim.plan_digest != application.plan_digest
@@ -714,7 +722,7 @@ def inherited_profile_disk(
     claims: dict[str, ResourceReservation] = {}
     for node_id, claim in found.items():
         if (
-            claim.state == "active"
+            claim.state == ReservationState.ACTIVE
             and claim.owner_kind == "fleet-profile"
             and claim.owner_id == application_id
         ):
@@ -725,7 +733,7 @@ def inherited_profile_disk(
             ):
                 claims[node_id] = claim
             else:
-                claim.state = "released"
+                claim.state = ReservationState.RELEASED
                 claim.released_at = now
     return claims
 
@@ -758,7 +766,7 @@ def prepared_profile_installation(
         workload_intent_ordinal=workload_intent_ordinal,
     )
     if set(claims) != set(node_ids) or any(
-        claim.state != "active" for claim in claims.values()
+        claim.state != ReservationState.ACTIVE for claim in claims.values()
     ):
         return None
     if all(
@@ -789,12 +797,14 @@ def release_unassigned_profile_claims(
         .where(
             ResourceReservation.owner_kind == "fleet-profile",
             ResourceReservation.owner_id == application.id,
-            ResourceReservation.state.in_(("active", "promised")),
+            ResourceReservation.state.in_(
+                (ReservationState.ACTIVE, ReservationState.PROMISED)
+            ),
         )
         .order_by(ResourceReservation.id)
         .with_for_update(nowait=True)
     ):
-        claim.state = "released"
+        claim.state = ReservationState.RELEASED
         claim.released_at = now
 
 
@@ -821,7 +831,7 @@ def restore_released_profile_claims(
         .where(
             ResourceReservation.owner_kind == "fleet-profile",
             ResourceReservation.owner_id == application.id,
-            ResourceReservation.state == "released",
+            ResourceReservation.state == ReservationState.RELEASED,
             ResourceReservation.plan_digest == application.plan_digest,
         )
         .order_by(ResourceReservation.id)
@@ -829,7 +839,11 @@ def restore_released_profile_claims(
     ):
         try:
             with session.begin_nested():
-                claim.state = "active" if claim.kind == "disk" else "promised"
+                claim.state = (
+                    ReservationState.ACTIVE
+                    if claim.kind == "disk"
+                    else ReservationState.PROMISED
+                )
                 claim.released_at = None
                 session.flush()
         except IntegrityError:

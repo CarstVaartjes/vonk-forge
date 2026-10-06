@@ -8,10 +8,10 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.enrollment_grant_state import check_enrollment_grant_state
+from ..models.enrollment_grant_state import EnrollmentGrantState
 from ..models.enrollment_grant_status_purpose import check_enrollment_grant_status_purpose
 from ..models.enrollment_grant_status_purpose import EnrollmentGrantStatusPurpose
-from ..models.enrollment_grant_status_state import check_enrollment_grant_status_state
-from ..models.enrollment_grant_status_state import EnrollmentGrantStatusState
 from typing import cast
 import datetime
 
@@ -35,7 +35,7 @@ class EnrollmentGrantStatus:
             node_id (None | str):
             purpose (EnrollmentGrantStatusPurpose):
             revoked_at (datetime.datetime | None):
-            state (EnrollmentGrantStatusState):
+            state (EnrollmentGrantState): The standing of an enrollment grant.
      """
 
     consumed_at: datetime.datetime | None
@@ -45,7 +45,7 @@ class EnrollmentGrantStatus:
     node_id: None | str
     purpose: EnrollmentGrantStatusPurpose
     revoked_at: datetime.datetime | None
-    state: EnrollmentGrantStatusState
+    state: EnrollmentGrantState
 
 
 
@@ -163,7 +163,7 @@ class EnrollmentGrantStatus:
         revoked_at = _parse_revoked_at(d.pop("revoked_at"))
 
 
-        state = check_enrollment_grant_status_state(d.pop("state"))
+        state = check_enrollment_grant_state(d.pop("state"))
 
 
 

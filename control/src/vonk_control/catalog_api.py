@@ -20,6 +20,7 @@ from .catalog_sync_contract import (
     ManagedCatalogWithdrawnRecipe,
 )
 from .library_contract import UuidId
+from .machine_states import CatalogSyncStateField
 from .strict_json import StrictJSONModel
 
 CATALOG_OPERATION_IDS = {
@@ -57,7 +58,7 @@ class ManagedCatalogSyncResponse(StrictModel):
     sync_id: UuidId
     request_key: UuidId
     trigger: Literal["manual", "automatic"]
-    state: Literal["syncing", "current", "partial", "failed"]
+    state: CatalogSyncStateField
     repository: str = Field(min_length=1, max_length=200)
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     expected_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")

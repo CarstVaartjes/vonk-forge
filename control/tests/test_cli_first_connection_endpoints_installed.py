@@ -8,14 +8,17 @@ import shlex
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    DesiredAssignmentState,
+    ObservedAssignmentState,
+    canonical_message,
+)
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -213,7 +216,7 @@ def _seed_profile_application_for_run(
     run_id: str,
     *,
     profile_number: int = 1,
-    desired_state: Literal["installed", "running"] = "running",
+    desired_state: DesiredAssignmentState = DesiredAssignmentState.RUNNING,
     alias: str | None = None,
     selected: bool = False,
 ) -> tuple[FleetProfileService, str, str, str]:
@@ -233,7 +236,11 @@ def _seed_profile_application_for_run(
         recipe = session.get(CatalogDocument, revision.document_id)
         build = session.get(RecipeBuild, installation.recipe_build_id)
         assert recipe is not None and build is not None
-        assignment_alias = None if desired_state == "installed" else alias or run.alias
+        assignment_alias = (
+            None
+            if desired_state == DesiredAssignmentState.INSTALLED
+            else alias or run.alias
+        )
 
         # The route fixture is intentionally small. Give its installed group the
         # same complete image identity the production owner validates before it
@@ -323,7 +330,9 @@ def _seed_profile_application_for_run(
                     recipe_title=recipe.title,
                     desired_state=desired_state,
                     current_state=(
-                        "installed" if desired_state == "installed" else "running"
+                        ObservedAssignmentState.INSTALLED
+                        if desired_state == DesiredAssignmentState.INSTALLED
+                        else ObservedAssignmentState.RUNNING
                     ),
                     node_ids=node_ids,
                     actions=[],
@@ -409,7 +418,10 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
 
     profiles, installed_profile_id, _application_id, _installed_assignment_id = (
         _seed_profile_application_for_run(
-            sessions, run_id, profile_number=1, desired_state="installed"
+            sessions,
+            run_id,
+            profile_number=1,
+            desired_state=DesiredAssignmentState.INSTALLED,
         )
     )
     _seed_profile_application_for_run(

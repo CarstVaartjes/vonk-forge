@@ -6,6 +6,7 @@ from copy import deepcopy
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import DesiredAssignmentState
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileNode,
@@ -298,7 +299,7 @@ def test_profile_assignment_says_when_it_runs_an_older_revision() -> None:
             id=_uuid(399),
             recipe_revision_id=revision_id,
             topology_name="solo",
-            desired_state="running",
+            desired_state=DesiredAssignmentState.RUNNING,
             alias="update-run",
             nodes=[
                 FleetProfileNode(

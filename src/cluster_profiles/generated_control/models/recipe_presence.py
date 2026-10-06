@@ -10,10 +10,8 @@ from ..types import UNSET, Unset
 
 from ..models.install_degraded_reason import check_install_degraded_reason
 from ..models.install_degraded_reason import InstallDegradedReason
-from ..models.recipe_presence_group_state import check_recipe_presence_group_state
-from ..models.recipe_presence_group_state import RecipePresenceGroupState
-from ..models.recipe_presence_rank_state import check_recipe_presence_rank_state
-from ..models.recipe_presence_rank_state import RecipePresenceRankState
+from ..models.installation_state import check_installation_state
+from ..models.installation_state import InstallationState
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -32,12 +30,12 @@ class RecipePresence:
         Attributes:
             complete (bool):
             expected_rank_count (int):
-            group_state (RecipePresenceGroupState):
+            group_state (InstallationState): The condition of a recipe installation across its Sparks.
             installation_id (str):
             member_node_ids (list[str]):
             present_ranks (list[int]):
             rank (int):
-            rank_state (RecipePresenceRankState):
+            rank_state (InstallationState): The condition of a recipe installation across its Sparks.
             recipe_id (str):
             recipe_revision_id (str):
             role (str):
@@ -51,12 +49,12 @@ class RecipePresence:
 
     complete: bool
     expected_rank_count: int
-    group_state: RecipePresenceGroupState
+    group_state: InstallationState
     installation_id: str
     member_node_ids: list[str]
     present_ranks: list[int]
     rank: int
-    rank_state: RecipePresenceRankState
+    rank_state: InstallationState
     recipe_id: str
     recipe_revision_id: str
     role: str
@@ -166,7 +164,7 @@ class RecipePresence:
 
         expected_rank_count = d.pop("expected_rank_count")
 
-        group_state = check_recipe_presence_group_state(d.pop("group_state"))
+        group_state = check_installation_state(d.pop("group_state"))
 
 
 
@@ -181,7 +179,7 @@ class RecipePresence:
 
         rank = d.pop("rank")
 
-        rank_state = check_recipe_presence_rank_state(d.pop("rank_state"))
+        rank_state = check_installation_state(d.pop("rank_state"))
 
 
 

@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import DesiredAssignmentState, EndpointState, LifecycleState
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -1250,9 +1250,13 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
                 FleetProfileEndpointAssignmentIntent(
                     assignment_id="00000000-0000-4000-8000-000000000103",
                     recipe_title="Qwen",
-                    desired_state="running",
+                    desired_state=DesiredAssignmentState.RUNNING,
                     alias="qwen",
-                    state="not-published-yet" if published else "withdrawn",
+                    state=(
+                        EndpointState.NOT_PUBLISHED_YET
+                        if published
+                        else EndpointState.WITHDRAWN
+                    ),
                     expected_run_id=run_id if published else None,
                 ),
             ),
@@ -1295,9 +1299,9 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
                 FleetProfileEndpointAssignmentIntent(
                     assignment_id="00000000-0000-4000-8000-000000000103",
                     recipe_title="Qwen",
-                    desired_state="running",
+                    desired_state=DesiredAssignmentState.RUNNING,
                     alias="qwen",
-                    state="not-published-yet",
+                    state=EndpointState.NOT_PUBLISHED_YET,
                     expected_run_id="00000000-0000-4000-8000-000000000104",
                 ),
             ),

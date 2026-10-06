@@ -885,6 +885,17 @@
       "title": "ArtifactPreparation",
       "type": "string"
     },
+    "AssetAvailability": {
+      "description": "What is known about a model asset on a Spark's disk.",
+      "enum": [
+        "verified",
+        "partial",
+        "missing",
+        "unknown"
+      ],
+      "title": "AssetAvailability",
+      "type": "string"
+    },
     "BlockerCategory": {
       "description": "The categories of the blocker allowlist (fail-closed raises).",
       "enum": [
@@ -994,6 +1005,30 @@
         "recipe.topology_changed"
       ],
       "title": "CatalogSyncCode",
+      "type": "string"
+    },
+    "CatalogSyncState": {
+      "description": "The outcome of a catalog synchronization, as the catalog shows it.",
+      "enum": [
+        "syncing",
+        "current",
+        "partial",
+        "failed"
+      ],
+      "title": "CatalogSyncState",
+      "type": "string"
+    },
+    "CertificateState": {
+      "description": "The standing of a node's client certificate, as the fleet projection shows it.",
+      "enum": [
+        "valid",
+        "missing",
+        "not-yet-valid",
+        "expired",
+        "revoked",
+        "inactive"
+      ],
+      "title": "CertificateState",
       "type": "string"
     },
     "ClaimRequest": {
@@ -1818,6 +1853,15 @@
       "title": "ControllerErrorCode",
       "type": "string"
     },
+    "DesiredAssignmentState": {
+      "description": "What a fleet-profile assignment is asked to become on its Sparks.",
+      "enum": [
+        "installed",
+        "running"
+      ],
+      "title": "DesiredAssignmentState",
+      "type": "string"
+    },
     "DistributionAssignment": {
       "additionalProperties": false,
       "description": "What one node fetches for a distribution plan.\n\nModel files are downloaded as objects. The runtime image is not an\nobject: the node pulls it by manifest digest from the Controller's\nlayered image store, and only the layers it lacks travel.",
@@ -1849,6 +1893,16 @@
       ],
       "title": "DistributionAssignment",
       "type": "object"
+    },
+    "DistributionAssignmentState": {
+      "description": "Whether a node may still fetch the artifacts of a distribution assignment.",
+      "enum": [
+        "active",
+        "revoked",
+        "expired"
+      ],
+      "title": "DistributionAssignmentState",
+      "type": "string"
     },
     "DistributionCode": {
       "description": "Why a distribution assignment object cannot be served to a Spark.",
@@ -1901,6 +1955,19 @@
       ],
       "title": "DistributionObject",
       "type": "object"
+    },
+    "EndpointState": {
+      "description": "Whether the endpoint of a fleet-profile assignment can be reached.",
+      "enum": [
+        "installed-only",
+        "not-published-yet",
+        "published",
+        "expired",
+        "withdrawn",
+        "unavailable"
+      ],
+      "title": "EndpointState",
+      "type": "string"
     },
     "EnrollmentBootstrapResponse": {
       "additionalProperties": false,
@@ -2012,6 +2079,17 @@
       ],
       "title": "EnrollmentEvidence",
       "type": "object"
+    },
+    "EnrollmentGrantState": {
+      "description": "The standing of an enrollment grant.",
+      "enum": [
+        "pending",
+        "expired",
+        "consumed",
+        "revoked"
+      ],
+      "title": "EnrollmentGrantState",
+      "type": "string"
     },
     "EnrollmentSubmitRequest": {
       "additionalProperties": false,
@@ -2503,6 +2581,16 @@
       ],
       "title": "FailureProperty",
       "type": "object"
+    },
+    "GatewayRouteState": {
+      "description": "What the inference gateway currently serves: published routes, or maintenance.\n\n``unavailable`` is the Controller's own word for a gateway whose marker it\ncannot read; the gateway never writes it.",
+      "enum": [
+        "published",
+        "maintenance",
+        "unavailable"
+      ],
+      "title": "GatewayRouteState",
+      "type": "string"
     },
     "HostHelperGrantClaims": {
       "additionalProperties": false,
@@ -3080,6 +3168,30 @@
       ],
       "title": "InstallVonkDebOperation",
       "type": "object"
+    },
+    "InstallationNodeState": {
+      "description": "The condition of one rank of an installation on its Spark.",
+      "enum": [
+        "planned",
+        "installed",
+        "failed",
+        "uninstalled"
+      ],
+      "title": "InstallationNodeState",
+      "type": "string"
+    },
+    "InstallationState": {
+      "description": "The condition of a recipe installation across its Sparks.",
+      "enum": [
+        "planned",
+        "installing",
+        "installed",
+        "partial",
+        "failed",
+        "uninstalled"
+      ],
+      "title": "InstallationState",
+      "type": "string"
     },
     "InstallerAcceptanceBaselineRelease": {
       "additionalProperties": false,
@@ -3838,11 +3950,32 @@
         "artifact_preparation": {
           "$ref": "#/$defs/ArtifactPreparation"
         },
+        "asset_availability": {
+          "$ref": "#/$defs/AssetAvailability"
+        },
         "blocker_category": {
           "$ref": "#/$defs/BlockerCategory"
         },
+        "catalog_sync_state": {
+          "$ref": "#/$defs/CatalogSyncState"
+        },
+        "certificate_state": {
+          "$ref": "#/$defs/CertificateState"
+        },
+        "desired_assignment_state": {
+          "$ref": "#/$defs/DesiredAssignmentState"
+        },
+        "distribution_assignment_state": {
+          "$ref": "#/$defs/DistributionAssignmentState"
+        },
         "effect": {
           "$ref": "#/$defs/LifecycleEffect"
+        },
+        "endpoint_state": {
+          "$ref": "#/$defs/EndpointState"
+        },
+        "enrollment_grant_state": {
+          "$ref": "#/$defs/EnrollmentGrantState"
         },
         "error_category": {
           "$ref": "#/$defs/ErrorCategory"
@@ -3853,6 +3986,15 @@
         "failure_code": {
           "$ref": "#/$defs/FailureCode"
         },
+        "gateway_route_state": {
+          "$ref": "#/$defs/GatewayRouteState"
+        },
+        "installation_node_state": {
+          "$ref": "#/$defs/InstallationNodeState"
+        },
+        "installation_state": {
+          "$ref": "#/$defs/InstallationState"
+        },
         "invalid_request_reason": {
           "$ref": "#/$defs/InvalidRequestReason"
         },
@@ -3862,8 +4004,17 @@
         "migration_step": {
           "$ref": "#/$defs/MigrationStep"
         },
+        "model_cache_operator_status": {
+          "$ref": "#/$defs/ModelCacheOperatorStatus"
+        },
+        "model_file_state": {
+          "$ref": "#/$defs/ModelFileState"
+        },
         "observation_cause": {
           "$ref": "#/$defs/ObservationCause"
+        },
+        "observed_assignment_state": {
+          "$ref": "#/$defs/ObservedAssignmentState"
         },
         "operator_action": {
           "$ref": "#/$defs/OperatorActionName"
@@ -3874,11 +4025,29 @@
         "outcome_kind": {
           "$ref": "#/$defs/OutcomeKind"
         },
+        "placement_install_state": {
+          "$ref": "#/$defs/PlacementInstallState"
+        },
+        "placement_load_state": {
+          "$ref": "#/$defs/PlacementLoadState"
+        },
+        "reservation_state": {
+          "$ref": "#/$defs/ReservationState"
+        },
         "resource_blocker_code": {
           "$ref": "#/$defs/ResourceBlockerCode"
         },
+        "route_publication_state": {
+          "$ref": "#/$defs/RoutePublicationState"
+        },
+        "route_state": {
+          "$ref": "#/$defs/RouteState"
+        },
         "run_admission_code": {
           "$ref": "#/$defs/RunAdmissionCode"
+        },
+        "run_state": {
+          "$ref": "#/$defs/RunState"
         },
         "security_refusal_reason": {
           "$ref": "#/$defs/SecurityRefusalReason"
@@ -3925,7 +4094,26 @@
         "security_refusal_reason",
         "failure_code",
         "run_admission_code",
-        "resource_blocker_code"
+        "resource_blocker_code",
+        "installation_state",
+        "installation_node_state",
+        "distribution_assignment_state",
+        "run_state",
+        "route_state",
+        "route_publication_state",
+        "certificate_state",
+        "enrollment_grant_state",
+        "model_file_state",
+        "catalog_sync_state",
+        "reservation_state",
+        "gateway_route_state",
+        "desired_assignment_state",
+        "endpoint_state",
+        "observed_assignment_state",
+        "asset_availability",
+        "placement_install_state",
+        "placement_load_state",
+        "model_cache_operator_status"
       ],
       "title": "LifecycleVocabulary",
       "type": "object"
@@ -4050,6 +4238,25 @@
       "title": "ModelCacheCode",
       "type": "string"
     },
+    "ModelCacheOperatorStatus": {
+      "description": "The operator-facing word of a model-cache operation that is not a stored state.\n\n``accepted``: the request is recorded and not yet picked up.  Every other state\nan operator sees is a :class:`~vonk_agent_protocol.LifecycleState` (a cancel\nunder way is ``observing`` with its cancellation intent).",
+      "enum": [
+        "accepted"
+      ],
+      "title": "ModelCacheOperatorStatus",
+      "type": "string"
+    },
+    "ModelFileState": {
+      "description": "The condition of one model file a node holds.",
+      "enum": [
+        "partial",
+        "verified",
+        "missing",
+        "corrupt"
+      ],
+      "title": "ModelFileState",
+      "type": "string"
+    },
     "NetworkInterface": {
       "additionalProperties": false,
       "description": "One NIC as the agent reads it from sysfs.",
@@ -4121,6 +4328,19 @@
         "lease-lapsed"
       ],
       "title": "ObservationCause",
+      "type": "string"
+    },
+    "ObservedAssignmentState": {
+      "description": "Where a fleet-profile assignment stands on the Sparks, as observed.",
+      "enum": [
+        "not-placed",
+        "placed",
+        "installing",
+        "installed",
+        "running",
+        "degraded"
+      ],
+      "title": "ObservedAssignmentState",
       "type": "string"
     },
     "OperationCheckpoint": {
@@ -5121,6 +5341,27 @@
       ],
       "title": "PackageRollbackSource",
       "type": "object"
+    },
+    "PlacementInstallState": {
+      "description": "How much of a placement's installation is already on its Sparks.",
+      "enum": [
+        "complete",
+        "partial",
+        "not_present",
+        "unknown"
+      ],
+      "title": "PlacementInstallState",
+      "type": "string"
+    },
+    "PlacementLoadState": {
+      "description": "Whether a placement's recipe is loaded on its Sparks.",
+      "enum": [
+        "loaded",
+        "not_loaded",
+        "unknown"
+      ],
+      "title": "PlacementLoadState",
+      "type": "string"
     },
     "PrebuiltImageCode": {
       "description": "Why a prebuilt runtime image is, or is not, used.",
@@ -7071,6 +7312,17 @@
       "title": "RequestValidationProblem",
       "type": "object"
     },
+    "ReservationState": {
+      "description": "The standing of a resource reservation.",
+      "enum": [
+        "active",
+        "promised",
+        "released",
+        "expired"
+      ],
+      "title": "ReservationState",
+      "type": "string"
+    },
     "ResourceBlockerCode": {
       "description": "The capacity-fit codes the resource planner gives a node that cannot fit.\n\n``insufficient`` is the family prefix a run admission maps onto\n``run.insufficient_memory``; the planner itself names the exact\n``insufficient_capacity*`` member.",
       "enum": [
@@ -7136,6 +7388,29 @@
       "title": "ResourceTermProblem",
       "type": "string"
     },
+    "RoutePublicationState": {
+      "description": "The phases of one atomic route publication.",
+      "enum": [
+        "withdrawal-pending",
+        "routes-withdrawn",
+        "publication-pending",
+        "completed",
+        "failed"
+      ],
+      "title": "RoutePublicationState",
+      "type": "string"
+    },
+    "RouteState": {
+      "description": "Whether a run's inference route is published to the gateway.",
+      "enum": [
+        "withdrawn",
+        "pending",
+        "published",
+        "failed"
+      ],
+      "title": "RouteState",
+      "type": "string"
+    },
     "RunAdmissionCode": {
       "description": "The typed codes a run admission names for a refusal, blocker or wait.\n\n``capacity_busy`` is lock contention only.  Every other reason an admission\nmust wait or is refused carries its own member, so a waiting operation shows\nthe real cause.  The retryable blockers (a plan that may become admissible\nby itself) are a subset the Controller derives from these members.",
       "enum": [
@@ -7172,6 +7447,20 @@
         "route-not-published"
       ],
       "title": "RunDegradedReason",
+      "type": "string"
+    },
+    "RunState": {
+      "description": "The condition of a recipe run (and of each of its ranks).",
+      "enum": [
+        "planned",
+        "starting",
+        "running",
+        "stopping",
+        "stopped",
+        "failed",
+        "lost"
+      ],
+      "title": "RunState",
       "type": "string"
     },
     "RunSwitchCode": {

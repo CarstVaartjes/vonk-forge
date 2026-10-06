@@ -62,6 +62,7 @@ from typing import Any
 from sqlalchemy import Select, delete, exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import InstallationState, RunState
 
 from .agent_jobs import release_owned_reservations_in_session
 from .logging import log_event
@@ -100,7 +101,7 @@ _FINISHED = ("succeeded", "failed", "cancelled", "superseded")
 _FINISHED_BUILDS = ("succeeded", "failed")
 # Neither holds ports, memory or a place on a Spark (see STOPPABLE_RUN_STATES),
 # and nothing ever moves a failed run on to stopped.
-_DEAD_RUNS = ("stopped", "failed")
+_DEAD_RUNS = (RunState.STOPPED, RunState.FAILED)
 _IN_FLIGHT_BUILDS = ("planned", "building")
 # A uuid (a revision, installation or run id) or a sha256 (a source bundle).
 _TOKEN = re.compile(
@@ -351,7 +352,7 @@ class CatalogRevisionCollector:
             select(
                 exists().where(
                     RecipeInstallation.recipe_revision_id == revision.id,
-                    RecipeInstallation.state != "uninstalled",
+                    RecipeInstallation.state != InstallationState.UNINSTALLED,
                 )
             )
         ):
@@ -600,7 +601,7 @@ def live_tokens(session: Session, now: datetime) -> frozenset[str]:
 
     sources = (
         select(RecipeInstallation.plan).where(
-            RecipeInstallation.state != "uninstalled"
+            RecipeInstallation.state != InstallationState.UNINSTALLED
         ),
         select(RecipeRun.plan).where(RecipeRun.state.not_in(_DEAD_RUNS)),
         select(RecipeBuild.plan).where(RecipeBuild.state.in_(_IN_FLIGHT_BUILDS)),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import AssetAvailability, canonical_message
 from vonk_control import cache_removal_review as review_contract
 from vonk_control.cache_removal_review import (
     CacheRemovalAsset,
@@ -25,7 +25,7 @@ def _content(
         kind="model-set",
         sha256="a" * 64,
         expected_bytes=128,
-        availability="verified",
+        availability=AssetAvailability.VERIFIED,
         available_bytes=128,
         disposition="remove",
     )
@@ -33,7 +33,7 @@ def _content(
         kind="model-object",
         sha256="b" * 64,
         expected_bytes=256,
-        availability="unknown",
+        availability=AssetAvailability.UNKNOWN,
         available_bytes=300,
         disposition="retain-shared",
     )
@@ -88,7 +88,7 @@ def test_review_digest_binds_model_choice_and_observed_storage_bytes() -> None:
         kind="model-object",
         sha256="b" * 64,
         expected_bytes=256,
-        availability="unknown",
+        availability=AssetAvailability.UNKNOWN,
         available_bytes=400,
         disposition="retain-shared",
     )
@@ -113,7 +113,7 @@ def test_review_validation_rejects_stale_digest_and_false_verified_bytes() -> No
             kind="runtime-image",
             sha256="e" * 64,
             expected_bytes=50,
-            availability="verified",
+            availability=AssetAvailability.VERIFIED,
             available_bytes=49,
             disposition="remove",
         )

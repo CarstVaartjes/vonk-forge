@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import InstallationState, RunState, adopt_machine_state
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -53,6 +54,7 @@ from .library_contract import (
     _utc,
 )
 from .library_image_presence import ImageKey, ImagePresenceIndex
+from .machine_states import RUN_LIVE
 from .model_cache_contract import DIGEST_PATTERN, UUID_PATTERN
 from .models import (
     CatalogDocumentRevision,
@@ -86,8 +88,8 @@ class LibrarySelectorAmbiguous(ValueError):
 
 
 _LIBRARY_ORDER = "catalog"
-_ACTIVE_RUN_STATES = ("planned", "starting", "running", "stopping")
-_RUN_STATES = (*_ACTIVE_RUN_STATES, "stopped", "failed", "lost")
+_ACTIVE_RUN_STATES = RUN_LIVE
+_RUN_STATES = tuple(RunState)
 _LOCAL_STATE_PRIORITY = {
     "unknown": 0,
     "not_cached": 0,
@@ -582,7 +584,7 @@ class LibraryProjection:
             ).all()
             run_nodes = session.execute(
                 select(RunNode.run_id, RunNode.node_id).where(
-                    RunNode.state == "running"
+                    RunNode.state == RunState.RUNNING
                 )
             ).all()
             # A head that reuses a predecessor's build by content has no build
@@ -698,14 +700,15 @@ class LibraryProjection:
         ) in installations:
             controller = _controller_state(
                 {
-                    "planned": "preparing",
-                    "installing": "preparing",
-                    "installed": "cached",
-                    "partial": "preparing",
-                    "failed": "failed",
-                    "uninstalled": "unknown",
+                    InstallationState.PLANNED: "preparing",
+                    InstallationState.INSTALLING: "preparing",
+                    InstallationState.INSTALLED: "cached",
+                    InstallationState.PARTIAL: "preparing",
+                    InstallationState.FAILED: "failed",
+                    InstallationState.UNINSTALLED: "unknown",
                 },
-                installation_state,
+                adopt_machine_state(InstallationState, installation_state)
+                or installation_state,
                 "persisted installation state is invalid",
             )
             installation_revision[installation_id] = installation_revision_id

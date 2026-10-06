@@ -16,7 +16,12 @@ from typing import Protocol
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import CatalogSyncCode, canonical_message
+from vonk_agent_protocol import (
+    CatalogSyncCode,
+    CatalogSyncState,
+    LifecycleState,
+    canonical_message,
+)
 
 from .bounded_json import require_integer, require_sequence
 from .catalog_service import CatalogService
@@ -223,7 +228,7 @@ class ManagedRecipeCatalogSyncService:
 
     def _expire(self, run: RecipeLibrarySyncRun) -> None:
         failed = json.loads(canonical_message(_result(run.result)))
-        failed["state"] = "failed"
+        failed["state"] = CatalogSyncState.FAILED.value
         run.state = "failed"
         run.active_slot = None
         run.result = json.loads(canonical_message(_result(failed)))
@@ -322,7 +327,7 @@ class ManagedRecipeCatalogSyncService:
             # fetched again.
             if (
                 current is not None
-                and _result(current.result).state == "current"
+                and _result(current.result).state == CatalogSyncState.CURRENT
                 and current.controller_marker == _controller_marker()
             ):
                 return _view(current)
@@ -356,7 +361,7 @@ class ManagedRecipeCatalogSyncService:
                 latest.completed_at = now
                 return
             failed = json.loads(canonical_message(_result(_empty_result())))
-            failed["state"] = "failed"
+            failed["state"] = CatalogSyncState.FAILED.value
             failed["problems"] = [{"recipe_uri": None, "code": code, "detail": detail}]
             session.add(
                 RecipeLibrarySyncRun(
@@ -571,7 +576,9 @@ class ManagedRecipeCatalogSyncService:
                     code=CatalogSyncCode.PREBUILT_IMAGES_FAILED,
                     detail=str(error)[:256] or type(error).__name__,
                 )
-        result["state"] = "partial" if result["problems"] else "current"
+        result["state"] = (
+            CatalogSyncState.PARTIAL if result["problems"] else CatalogSyncState.CURRENT
+        ).value
         return result
 
     def _store_source_bundle(self, item: RecipeLibraryItem, actor: str) -> None:
@@ -669,7 +676,7 @@ class ManagedRecipeCatalogSyncService:
                 problems.append(
                     {"recipe_uri": None, "code": code[:128], "detail": detail[:256]}
                 )
-            failed["state"] = "failed"
+            failed["state"] = CatalogSyncState.FAILED.value
             failed["problems"] = problems
             run.state = "failed"
             run.active_slot = None
@@ -756,7 +763,7 @@ def catalog_sync_failure_reason(error: Exception) -> str:
 
 
 # An unreadable record is neither current nor failed: the next sync redoes it.
-_UNREAD_OUTCOME = "partial"
+_UNREAD_OUTCOME = CatalogSyncState.PARTIAL.value
 
 
 def _result(value: object) -> ManagedCatalogSyncResult:
@@ -787,7 +794,7 @@ def _empty_result() -> dict[str, object]:
         canonical_message(
             ManagedCatalogSyncResult(
                 schema_version=1,
-                state="current",
+                state=CatalogSyncState.CURRENT,
                 imported_count=0,
                 updated_count=0,
                 unchanged_count=0,
@@ -809,7 +816,9 @@ def _view(row: RecipeLibrarySyncRun | None) -> CatalogSyncView:
         id=row.id,
         request_key=row.request_key,
         trigger=row.trigger,
-        state="syncing" if row.state == "running" else result.state,
+        state=CatalogSyncState.SYNCING
+        if row.state == LifecycleState.RUNNING
+        else result.state,
         repository=row.repository,
         expected_commit=row.expected_commit,
         commit=row.observed_commit,

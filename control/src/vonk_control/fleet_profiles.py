@@ -21,12 +21,20 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
+    DesiredAssignmentState,
+    EndpointState,
+    InstallationNodeState,
+    InstallationState,
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     ModelCacheBlockerCode,
+    ObservedAssignmentState,
     OperationFailureCode,
     ProfileReasonCode,
+    ReservationState,
+    RouteState,
+    RunState,
     RunSwitchCode,
     RuntimeImageCode,
     SecurityRefusalError,
@@ -227,7 +235,13 @@ _STORED_ASSIGNMENTS = TypeAdapter(
 )
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _ACTIVE_INSTALL_STATES = frozenset(
-    {"planned", "installing", "installed", "partial", "failed"}
+    {
+        InstallationState.PLANNED,
+        InstallationState.INSTALLING,
+        InstallationState.INSTALLED,
+        InstallationState.PARTIAL,
+        InstallationState.FAILED,
+    }
 )
 # A child that waits for an operator (a legacy Run/Switch state, healed by its own
 # tick) is still in progress: the application mirrors it as running and observes
@@ -237,10 +251,10 @@ _CHILD_PENDING_STATES = frozenset(
         "queued",
         "pending",
         "leased",
-        "running",
-        "starting",
-        "stopping",
-        "installing",
+        RunState.RUNNING,
+        RunState.STARTING,
+        RunState.STOPPING,
+        InstallationState.INSTALLING,
         *job_states.words(LifecycleState.NEEDS_OPERATOR),
     }
 )
@@ -257,12 +271,12 @@ _OPERATION_STATE_ADAPTER = TypeAdapter(FleetProfileOperationState)
 # Human labels for the loaded application's live assignment state.  "Running"
 # is reported only once the run is up on every member and its route published.
 _OBSERVED_ASSIGNMENT_LABELS: Mapping[FleetProfileAssignmentState, str] = {
-    "not-placed": "Not placed",
-    "placed": "Placed",
-    "installing": "Installing",
-    "installed": "Installed",
-    "running": "Running",
-    "degraded": "Degraded",
+    ObservedAssignmentState.NOT_PLACED: "Not placed",
+    ObservedAssignmentState.PLACED: "Placed",
+    ObservedAssignmentState.INSTALLING: "Installing",
+    ObservedAssignmentState.INSTALLED: "Installed",
+    ObservedAssignmentState.RUNNING: "Running",
+    ObservedAssignmentState.DEGRADED: "Degraded",
 }
 _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
@@ -1601,7 +1615,9 @@ class RunSwitchFleetProfileAdapter:
         assignment: FleetProfileAssignment,
     ) -> tuple[RunSwitchPlacementAction, str]:
         return (
-            "install" if assignment.desired_state == "installed" else "switch",
+            "install"
+            if assignment.desired_state == DesiredAssignmentState.INSTALLED
+            else "switch",
             assignment.alias or assignment.recipe_title.lower().replace(" ", "-"),
         )
 
@@ -1747,7 +1763,9 @@ class RunSwitchFleetProfileAdapter:
                     select(ResourceReservation)
                     .where(
                         ResourceReservation.node_id.in_(node_ids),
-                        ResourceReservation.state.in_(("active", "promised")),
+                        ResourceReservation.state.in_(
+                            (ReservationState.ACTIVE, ReservationState.PROMISED)
+                        ),
                     )
                     .order_by(ResourceReservation.node_id, ResourceReservation.id)
                     .with_for_update(nowait=True)
@@ -2677,7 +2695,11 @@ class RunSwitchFleetProfileAdapter:
                     assignment is not None
                     and expected is not None
                     and kind
-                    == ("install" if assignment.desired_state == "installed" else "run")
+                    == (
+                        "install"
+                        if assignment.desired_state == DesiredAssignmentState.INSTALLED
+                        else "run"
+                    )
                     and (plan.action, plan.alias) == expected
                     and plan.recipe_revision_id == assignment.recipe_revision_id
                     and [node.model_dump() for node in plan.spark_group.nodes]
@@ -3334,7 +3356,7 @@ def _switch_queue(
     run_groups = [
         {node.node_id for node in assignment.nodes}
         for assignment in work
-        if assignment.desired_state == "running"
+        if assignment.desired_state == DesiredAssignmentState.RUNNING
     ]
 
     def stop_item(effect: FleetProfileRunEffect) -> dict[str, object]:
@@ -3361,7 +3383,9 @@ def _switch_queue(
         *(stop_item(effect) for effect in stops if effect not in replaced),
         *(
             {
-                "kind": "install" if assignment.desired_state == "installed" else "run",
+                "kind": "install"
+                if assignment.desired_state == DesiredAssignmentState.INSTALLED
+                else "run",
                 "id": assignment.id,
             }
             for assignment in work
@@ -4051,7 +4075,7 @@ class FleetProfileService:
             ]
             alias = (
                 self._assignment_selector(choice)
-                if choice.desired_state == "running"
+                if choice.desired_state == DesiredAssignmentState.RUNNING
                 else None
             )
             result.append(
@@ -4425,20 +4449,20 @@ class FleetProfileService:
             )
         projected: list[FleetProfileEndpointAssignmentIntent] = []
         for assignment in intended.assignments:
-            if assignment.desired_state == "installed":
+            if assignment.desired_state == DesiredAssignmentState.INSTALLED:
                 projected.append(
                     FleetProfileEndpointAssignmentIntent(
                         assignment_id=assignment.id,
                         recipe_title=assignment.recipe_title,
-                        desired_state="installed",
+                        desired_state=DesiredAssignmentState.INSTALLED,
                         alias=assignment.alias,
-                        state="installed-only",
+                        state=EndpointState.INSTALLED_ONLY,
                     )
                 )
                 continue
 
             if assignment.alias is None:
-                state = "unavailable"
+                state = EndpointState.UNAVAILABLE
                 run_id = None
             else:
                 current = self._assignment_state(session, assignment)
@@ -4446,35 +4470,35 @@ class FleetProfileService:
                 if (
                     run is not None
                     and run.alias == assignment.alias
-                    and run.state == "running"
-                    and run.route_state == "published"
+                    and run.state == RunState.RUNNING
+                    and run.route_state == RouteState.PUBLISHED
                 ):
-                    state = "not-published-yet"
+                    state = EndpointState.NOT_PUBLISHED_YET
                     run_id = run.id
-                elif run is not None and run.route_state == "pending":
-                    state = "not-published-yet"
+                elif run is not None and run.route_state == RouteState.PENDING:
+                    state = EndpointState.NOT_PUBLISHED_YET
                     run_id = None
-                elif run is not None and run.route_state == "failed":
-                    state = "unavailable"
+                elif run is not None and run.route_state == RouteState.FAILED:
+                    state = EndpointState.UNAVAILABLE
                     run_id = None
                 elif application_state == LifecycleState.SUCCEEDED:
-                    state = "withdrawn"
+                    state = EndpointState.WITHDRAWN
                     run_id = None
                 elif application_state in {
                     LifecycleState.FAILED,
                     LifecycleState.CANCELLED,
                     LifecycleState.SUPERSEDED,
                 }:
-                    state = "unavailable"
+                    state = EndpointState.UNAVAILABLE
                     run_id = None
                 else:
-                    state = "not-published-yet"
+                    state = EndpointState.NOT_PUBLISHED_YET
                     run_id = None
             projected.append(
                 FleetProfileEndpointAssignmentIntent(
                     assignment_id=assignment.id,
                     recipe_title=assignment.recipe_title,
-                    desired_state="running",
+                    desired_state=DesiredAssignmentState.RUNNING,
                     alias=assignment.alias,
                     state=state,
                     expected_run_id=run_id,
@@ -4937,7 +4961,8 @@ class FleetProfileService:
                     not state.installation_ready for state in control.states.values()
                 ),
                 starts=sum(
-                    item.desired_state == "running" and "switch" in item.actions
+                    item.desired_state == DesiredAssignmentState.RUNNING
+                    and "switch" in item.actions
                     for item in assignment_previews
                 ),
                 stops=sum(effect.action == "stop" for effect in run_effects),
@@ -5083,8 +5108,8 @@ class FleetProfileService:
                 )
             if (
                 state.run is not None
-                and assignment.desired_state == "running"
-                and state.current_state == "running"
+                and assignment.desired_state == DesiredAssignmentState.RUNNING
+                and state.current_state == ObservedAssignmentState.RUNNING
             ):
                 desired_run_ids.add(state.run.id)
             if state.current_state != assignment.desired_state:
@@ -6688,8 +6713,9 @@ class FleetProfileService:
             runtime_assignments = {
                 item.id
                 for item in frozen_assignments
-                if item.desired_state == "running"
-                and control.states[item.id].current_state != "running"
+                if item.desired_state == DesiredAssignmentState.RUNNING
+                and control.states[item.id].current_state
+                != ObservedAssignmentState.RUNNING
             }
             reserve_profile_ports(
                 session,
@@ -8016,9 +8042,9 @@ class FleetProfileService:
                     sorted(
                         (assignment.id, state.current_state)
                         for assignment in selected.intended.assignments
-                        if assignment.desired_state == "running"
+                        if assignment.desired_state == DesiredAssignmentState.RUNNING
                         for state in (self._assignment_state(session, assignment),)
-                        if state.current_state != "running"
+                        if state.current_state != ObservedAssignmentState.RUNNING
                     )
                 )
             if not roster_changed and not drift_signature:
@@ -10289,7 +10315,7 @@ class FleetProfileService:
                 break
         if mapping is None:
             return cls._AssignmentState(
-                current_state="not-placed",
+                current_state=ObservedAssignmentState.NOT_PLACED,
                 mapping=None,
                 installation=None,
                 run=None,
@@ -10319,7 +10345,7 @@ class FleetProfileService:
         )
         if installation is None:
             return cls._AssignmentState(
-                current_state="placed",
+                current_state=ObservedAssignmentState.PLACED,
                 mapping=mapping,
                 installation=None,
                 run=None,
@@ -10333,11 +10359,14 @@ class FleetProfileService:
             )
         )
         exact_installed = (
-            installation.state == "installed"
+            installation.state == InstallationState.INSTALLED
             and len(install_members) == len(expected)
             and {(node.node_id, node.rank, node.role) for node in install_members}
             == {(node.node_id, node.rank, node.role) for node in assignment.nodes}
-            and all(node.state == "installed" for node in install_members)
+            and all(
+                node.state == InstallationNodeState.INSTALLED
+                for node in install_members
+            )
             and (
                 installation_matches_runtime_image(
                     installation,
@@ -10359,9 +10388,10 @@ class FleetProfileService:
         )
         if not exact_installed:
             state: FleetProfileAssignmentState = (
-                "installing"
-                if installation.state in {"planned", "installing"}
-                else "degraded"
+                ObservedAssignmentState.INSTALLING
+                if installation.state
+                in {InstallationState.PLANNED, InstallationState.INSTALLING}
+                else ObservedAssignmentState.DEGRADED
             )
             return cls._AssignmentState(
                 current_state=state,
@@ -10381,7 +10411,7 @@ class FleetProfileService:
         )
         if run is None:
             return cls._AssignmentState(
-                current_state="installed",
+                current_state=ObservedAssignmentState.INSTALLED,
                 mapping=mapping,
                 installation=installation,
                 run=None,
@@ -10400,16 +10430,20 @@ class FleetProfileService:
             )
         )
         healthy = (
-            run.state == "running"
-            and run.route_state == "published"
+            run.state == RunState.RUNNING
+            and run.route_state == RouteState.PUBLISHED
             and len(run_members) == len(expected)
             and live_run_node_ids == {node.node_id for node in run_members}
             and {(node.node_id, node.rank, node.role) for node in run_members}
             == {(node.node_id, node.rank, node.role) for node in assignment.nodes}
-            and all(node.state == "running" for node in run_members)
+            and all(node.state == RunState.RUNNING for node in run_members)
         )
         return cls._AssignmentState(
-            current_state="running" if healthy else "degraded",
+            current_state=(
+                ObservedAssignmentState.RUNNING
+                if healthy
+                else ObservedAssignmentState.DEGRADED
+            ),
             mapping=mapping,
             installation=installation,
             run=run,

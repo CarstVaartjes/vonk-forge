@@ -38,13 +38,16 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
+    AssetAvailability,
     CacheReferenceReason,
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     ModelCacheBlockerCode,
     ModelCacheCode,
+    ModelFileState,
     OperationMemberProgress,
+    RunState,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -83,7 +86,6 @@ from .artifact_reference_scan import (
 )
 from .bounded_json import mapping, require_integer, require_mapping, require_sequence
 from .cache_removal_review import (
-    AssetAvailability,
     AssetDisposition,
     CacheRemovalAsset,
     CacheRemovalBlocker,
@@ -122,6 +124,7 @@ from .lifecycle.model_cache import (
     legacy_retry_due,
 )
 from .logging import log_event, redact_text
+from .machine_states import INSTALLATION_ACTIVE
 from .model_cache_contract import (
     UUID_PATTERN,
     CacheManifest,
@@ -3343,29 +3346,29 @@ class ModelCacheService:
             try:
                 verified_bytes = self._stored_object(digest, expected_bytes)
             except OSError:
-                object_status[digest] = ("unknown", None)
+                object_status[digest] = (AssetAvailability.UNKNOWN, None)
                 continue
             if verified_bytes is not None:
-                object_status[digest] = ("verified", verified_bytes)
+                object_status[digest] = (AssetAvailability.VERIFIED, verified_bytes)
                 continue
             try:
                 metadata = self._object_path(digest).lstat()
             except (FileNotFoundError, NotADirectoryError):
-                object_status[digest] = ("missing", 0)
+                object_status[digest] = (AssetAvailability.MISSING, 0)
                 continue
             except OSError:
-                object_status[digest] = ("unknown", None)
+                object_status[digest] = (AssetAvailability.UNKNOWN, None)
                 continue
             if not stat.S_ISREG(metadata.st_mode):
-                object_status[digest] = ("unknown", None)
+                object_status[digest] = (AssetAvailability.UNKNOWN, None)
                 continue
             observed_bytes = metadata.st_size
             if observed_bytes < expected_bytes:
-                availability: AssetAvailability = "partial"
+                availability: AssetAvailability = AssetAvailability.PARTIAL
             else:
                 # Includes an exact-size file without its verified receipt
                 # and a file larger than the expected length. Neither is ready.
-                availability = "unknown"
+                availability = AssetAvailability.UNKNOWN
             object_status[digest] = (availability, observed_bytes)
 
         def partial_status(
@@ -3380,25 +3383,27 @@ class ModelCacheService:
                         workers=_PARALLEL_RANGE_WORKERS,
                     )
                 except (OSError, ValueError):
-                    return "unknown", None
+                    return AssetAvailability.UNKNOWN, None
                 if available == 0:
-                    return "missing", 0
+                    return AssetAvailability.MISSING, 0
                 return (
-                    "partial" if available < expected_bytes else "unknown",
+                    AssetAvailability.PARTIAL
+                    if available < expected_bytes
+                    else AssetAvailability.UNKNOWN,
                     available,
                 )
             try:
                 metadata = partial.lstat()
             except (FileNotFoundError, NotADirectoryError):
-                return "missing", 0
+                return AssetAvailability.MISSING, 0
             except OSError:
-                return "unknown", None
+                return AssetAvailability.UNKNOWN, None
             if not stat.S_ISREG(metadata.st_mode):
-                return "unknown", None
+                return AssetAvailability.UNKNOWN, None
             observed = metadata.st_size
             if observed < expected_bytes:
-                return "partial", observed
-            return "unknown", observed
+                return AssetAvailability.PARTIAL, observed
+            return AssetAvailability.UNKNOWN, observed
 
         assets: list[CacheRemovalAsset] = []
         delete_objects = set(scope.delete_objects)
@@ -3418,16 +3423,20 @@ class ModelCacheService:
                 if any(count is None for count in observed_counts)
                 else sum(count for count in observed_counts if count is not None)
             )
-            if statuses and all(item[0] == "verified" for item in statuses):
-                availability: AssetAvailability = "verified"
-            elif statuses and all(item[0] == "missing" for item in statuses):
-                availability = "missing"
-            elif any(item[0] == "unknown" for item in statuses):
-                availability = "unknown"
+            if statuses and all(
+                item[0] == AssetAvailability.VERIFIED for item in statuses
+            ):
+                availability: AssetAvailability = AssetAvailability.VERIFIED
+            elif statuses and all(
+                item[0] == AssetAvailability.MISSING for item in statuses
+            ):
+                availability = AssetAvailability.MISSING
+            elif any(item[0] == AssetAvailability.UNKNOWN for item in statuses):
+                availability = AssetAvailability.UNKNOWN
             elif statuses:
-                availability = "partial"
+                availability = AssetAvailability.PARTIAL
             else:
-                availability = "unknown"
+                availability = AssetAvailability.UNKNOWN
             assets.append(
                 CacheRemovalAsset(
                     kind="model-set",
@@ -5603,7 +5612,7 @@ class ModelCacheService:
                 operation_id=operation_id,
                 set_digest=set_digest,
                 actual_bytes=0,
-                state="corrupt",
+                state=ModelFileState.CORRUPT,
             )
             raise ModelCacheStorageRefused(
                 ModelCacheCode.DIGEST_MISMATCH,
@@ -5747,7 +5756,7 @@ class ModelCacheService:
                         operation_id=operation_id,
                         set_digest=set_digest,
                         actual_bytes=latest[0],
-                        state="partial",
+                        state=ModelFileState.PARTIAL,
                         completed_artifacts=completed_artifacts,
                     )
                 except Exception as error:  # noqa: BLE001 - propagate sampler failures to owner
@@ -5980,7 +5989,7 @@ class ModelCacheService:
                 operation_id=operation_id,
                 set_digest=set_digest,
                 actual_bytes=durable_received,
-                state="partial",
+                state=ModelFileState.PARTIAL,
                 completed_artifacts=completed_artifacts,
             )
             if spec.kind == "github-release.asset" and isinstance(
@@ -6000,7 +6009,7 @@ class ModelCacheService:
                 operation_id=operation_id,
                 set_digest=set_digest,
                 actual_bytes=received,
-                state="partial",
+                state=ModelFileState.PARTIAL,
             )
             raise ModelCacheStorageRefused(
                 ModelCacheCode.SOURCE_TRUNCATED,
@@ -6038,7 +6047,7 @@ class ModelCacheService:
                 operation_id=operation_id,
                 set_digest=set_digest,
                 actual_bytes=0,
-                state="corrupt",
+                state=ModelFileState.CORRUPT,
             )
             raise ModelCacheStorageRefused(
                 ModelCacheCode.DIGEST_MISMATCH,
@@ -6182,7 +6191,7 @@ class ModelCacheService:
                     operation_id=operation_id,
                     set_digest=set_digest,
                     actual_bytes=part.stat().st_size if part.exists() else 0,
-                    state="partial",
+                    state=ModelFileState.PARTIAL,
                     completed_artifacts=completed_artifacts,
                 )
                 return False
@@ -6231,7 +6240,7 @@ class ModelCacheService:
                     operation_id=operation_id,
                     set_digest=set_digest,
                     actual_bytes=part.stat().st_size if part.exists() else 0,
-                    state="partial",
+                    state=ModelFileState.PARTIAL,
                     completed_artifacts=completed_artifacts,
                 )
             return completed
@@ -6243,7 +6252,7 @@ class ModelCacheService:
                 actual_bytes=range_partial_bytes(
                     part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS
                 ),
-                state="partial",
+                state=ModelFileState.PARTIAL,
                 completed_artifacts=completed_artifacts,
             )
             if spec.kind == "github-release.asset" and isinstance(
@@ -7014,7 +7023,9 @@ class ModelCacheService:
                     operation.progress = self._progress(
                         manifest,
                         previous=old_progress.model_dump(mode="json"),
-                        phase="downloading" if state == "partial" else "verifying",
+                        phase="downloading"
+                        if state == ModelFileState.PARTIAL
+                        else "verifying",
                         completed_artifacts=max(old_completed, completed_artifacts),
                         downloaded_bytes=max(old_downloaded, received),
                         expected_bytes=total,
@@ -7025,7 +7036,11 @@ class ModelCacheService:
                     operation.updated_at = now
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
-                    row.state = "downloading" if state == "partial" else "verifying"
+                    row.state = (
+                        "downloading"
+                        if state == ModelFileState.PARTIAL
+                        else "verifying"
+                    )
                     row.verified_bytes = self._verified_bytes(session, set_digest)
                     row.updated_at = now
             self._progress_checkpoint_at[operation_id] = now
@@ -9482,7 +9497,11 @@ class ModelCacheService:
                 # receipt alone cannot invent bytes.
                 stored = self._stored_object(spec.sha256, spec.expected_bytes)
                 actual = stored or 0
-                state = "verified" if stored is not None else "missing"
+                state = (
+                    ModelFileState.VERIFIED
+                    if stored is not None
+                    else ModelFileState.MISSING
+                )
                 if stored is not None and spec.sha256 not in seen:
                     unique_bytes += spec.expected_bytes
                     seen.add(spec.sha256)
@@ -9647,9 +9666,7 @@ class ModelCacheService:
             cache_model_digests = self._cache_model_content_digests(row)
             installations = session.scalars(
                 select(RecipeInstallation).where(
-                    RecipeInstallation.state.in_(
-                        ["planned", "installing", "installed", "partial"]
-                    ),
+                    RecipeInstallation.state.in_(INSTALLATION_ACTIVE),
                 )
             )
             if any(
@@ -9662,7 +9679,11 @@ class ModelCacheService:
             running_revision_ids = session.scalars(
                 select(RecipeInstallation.recipe_revision_id)
                 .join(RecipeRun, RecipeRun.installation_id == RecipeInstallation.id)
-                .where(RecipeRun.state.in_(["planned", "starting", "running"]))
+                .where(
+                    RecipeRun.state.in_(
+                        [RunState.PLANNED, RunState.STARTING, RunState.RUNNING]
+                    )
+                )
             )
             if any(
                 self._recipe_references_cache(session, revision_id, cache_model_digests)

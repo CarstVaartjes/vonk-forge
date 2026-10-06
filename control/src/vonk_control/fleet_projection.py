@@ -15,10 +15,16 @@ from pydantic import (
 from sqlalchemy import Row, case, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    CertificateState,
+    InstallationNodeState,
+    InstallationState,
     InstallDegradedReason,
     NodeOfflineReason,
     ProjectionCode,
+    ReservationState,
+    RouteState,
     RunDegradedReason,
+    RunState,
 )
 from vonk_agent_protocol.inventory import NetworkInterface
 from vonk_forge_contracts import RecipeDefinition, read_recipe
@@ -26,6 +32,13 @@ from vonk_forge_contracts import RecipeDefinition, read_recipe
 from .auth import CursorError
 from .cluster_mappings import mapping_option_choices
 from .fleet_events import FleetEventDraft, FleetEventRepository
+from .machine_states import (
+    CertificateStateField,
+    InstallationStateField,
+    RouteStateField,
+    RunStateField,
+    read_state,
+)
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -132,16 +145,6 @@ Text256 = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 Rank = Annotated[int, Field(ge=0, le=_MAX_FLEET_NODES - 1)]
 
 AgentState = Literal["unregistered", "pending", "active", "retired", "revoked"]
-CertificateState = Literal[
-    "valid", "missing", "not-yet-valid", "expired", "revoked", "inactive"
-]
-InstallationState = Literal[
-    "planned", "installing", "installed", "partial", "failed", "uninstalled"
-]
-RunState = Literal[
-    "planned", "starting", "running", "stopping", "stopped", "failed", "lost"
-]
-RouteState = Literal["withdrawn", "pending", "published", "failed"]
 # Database rows and decoded JSON carry these closed values as plain strings, so
 # they are read back through the declared alias instead of an unchecked
 # assignment into the typed projection model.
@@ -149,12 +152,12 @@ _AGENT_STATE_ADAPTER = TypeAdapter(AgentState)
 _INSTALL_DEGRADED_REASON_ADAPTER = TypeAdapter(InstallDegradedReason)
 _RUN_DEGRADED_REASON_ADAPTER = TypeAdapter(RunDegradedReason)
 _CERTIFICATE_OFFLINE_REASONS: Mapping[CertificateState, NodeOfflineReason | None] = {
-    "valid": None,
-    "missing": NodeOfflineReason.CERTIFICATE_MISSING,
-    "not-yet-valid": NodeOfflineReason.CERTIFICATE_NOT_YET_VALID,
-    "expired": NodeOfflineReason.CERTIFICATE_EXPIRED,
-    "revoked": NodeOfflineReason.CERTIFICATE_REVOKED,
-    "inactive": NodeOfflineReason.CERTIFICATE_INACTIVE,
+    CertificateState.VALID: None,
+    CertificateState.MISSING: NodeOfflineReason.CERTIFICATE_MISSING,
+    CertificateState.NOT_YET_VALID: NodeOfflineReason.CERTIFICATE_NOT_YET_VALID,
+    CertificateState.EXPIRED: NodeOfflineReason.CERTIFICATE_EXPIRED,
+    CertificateState.REVOKED: NodeOfflineReason.CERTIFICATE_REVOKED,
+    CertificateState.INACTIVE: NodeOfflineReason.CERTIFICATE_INACTIVE,
 }
 
 
@@ -293,8 +296,8 @@ class InstallPartialEvidence(_StrictModel):
     #: empty for a reason about the group as a whole.
     affected_ranks: list[Rank] = Field(max_length=_MAX_FLEET_NODES)
     reason: InstallDegradedReason
-    group_state: InstallationState
-    rank_state: InstallationState
+    group_state: InstallationStateField
+    rank_state: InstallationStateField
     installed_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
     required_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
 
@@ -311,7 +314,7 @@ class ProjectionReason(_StrictModel):
 
 class NodeConnection(_StrictModel):
     agent_state: AgentState
-    certificate_state: CertificateState
+    certificate_state: CertificateStateField
     online_state: Literal["online", "offline", "unregistered"]
     offline_reason: NodeOfflineReason | None
     last_seen_at: datetime | None
@@ -386,8 +389,8 @@ class RecipePresence(_StrictModel):
     member_node_ids: list[NodeId] = Field(max_length=_MAX_FLEET_NODES)
     rank: Rank
     role: Text64
-    group_state: InstallationState
-    rank_state: InstallationState
+    group_state: InstallationStateField
+    rank_state: InstallationStateField
     complete: bool
     degraded_reason: InstallDegradedReason | None = None
     affected_ranks: list[Rank] = Field(
@@ -409,9 +412,9 @@ class RunPresence(_StrictModel):
     member_node_ids: list[NodeId] = Field(max_length=_MAX_FLEET_NODES)
     rank: Rank
     role: Text64
-    run_state: RunState
-    route_state: RouteState
-    rank_state: RunState
+    run_state: RunStateField
+    route_state: RouteStateField
+    rank_state: RunStateField
     rank_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     rank_fresh: bool
     group_state: Literal["healthy", "degraded"]
@@ -768,7 +771,7 @@ class FleetProjection:
             )
             .where(
                 InstallationNode.node_id.in_(node_ids),
-                RecipeInstallation.state != "uninstalled",
+                RecipeInstallation.state != InstallationState.UNINSTALLED,
             )
             .group_by(RecipeInstallation.id, RecipeInstallation.updated_at)
             .order_by(
@@ -890,10 +893,14 @@ class FleetProjection:
             )
             affected: list[int] = []
             expectations = _installation_payload_expectations(installation.plan)
-            if reason is None and installation.state != "installed":
+            if reason is None and installation.state != InstallationState.INSTALLED:
                 reason = InstallDegradedReason.INSTALLATION_NOT_INSTALLED
             if reason is None:
-                affected = [node.rank for node in nodes if node.state != "installed"]
+                affected = [
+                    node.rank
+                    for node in nodes
+                    if node.state != InstallationNodeState.INSTALLED
+                ]
                 if affected:
                     reason = InstallDegradedReason.RANK_NOT_INSTALLED
             if reason is None:
@@ -920,8 +927,8 @@ class FleetProjection:
                         member_node_ids=member_node_ids,
                         rank=node.rank,
                         role=node.role,
-                        group_state=installation.state,
-                        rank_state=node.state,
+                        group_state=read_state(InstallationState, installation.state),
+                        rank_state=read_state(InstallationState, node.state),
                         complete=reason is None,
                         degraded_reason=reason,
                         affected_ranks=affected,
@@ -954,7 +961,7 @@ class FleetProjection:
             group = sorted(grouped[run_id], key=lambda value: value[0].rank)
             nodes = [value[0] for value in group]
             run = group[0][1]
-            if run.state in {"stopped", "failed", "lost"}:
+            if run.state in {RunState.STOPPED, RunState.FAILED, RunState.LOST}:
                 continue
             mapping = group[0][2]
             revision = group[0][4]
@@ -982,13 +989,13 @@ class FleetProjection:
                     <= age_delta
                     < timedelta(seconds=self._run_rank_fresh_seconds),
                 )
-            if reason is None and run.state != "running":
+            if reason is None and run.state != RunState.RUNNING:
                 reason = RunDegradedReason.RUN_NOT_RUNNING
-            if reason is None and any(node.state != "running" for node in nodes):
+            if reason is None and any(node.state != RunState.RUNNING for node in nodes):
                 reason = RunDegradedReason.RANK_NOT_RUNNING
             if reason is None and any(not freshness[node.id][1] for node in nodes):
                 reason = RunDegradedReason.RANK_STALE
-            if reason is None and run.route_state != "published":
+            if reason is None and run.route_state != RouteState.PUBLISHED:
                 reason = RunDegradedReason.ROUTE_NOT_PUBLISHED
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
@@ -1010,16 +1017,18 @@ class FleetProjection:
                         member_node_ids=member_node_ids,
                         rank=node.rank,
                         role=node.role,
-                        run_state=run.state,
-                        route_state=run.route_state,
-                        rank_state=node.state,
+                        run_state=read_state(RunState, run.state),
+                        route_state=read_state(RouteState, run.route_state),
+                        rank_state=read_state(RunState, node.state),
                         rank_age_seconds=rank_age,
                         rank_fresh=rank_fresh,
                         group_state="healthy" if reason is None else "degraded",
                         healthy=reason is None,
                         degraded_reason=reason,
                         route_reason=(
-                            run.route_error if run.route_state != "published" else None
+                            run.route_error
+                            if run.route_state != RouteState.PUBLISHED
+                            else None
                         ),
                         option_choices=mapping_option_choices(mapping.parameters),
                         recipe_update=update,
@@ -1039,7 +1048,9 @@ class FleetProjection:
             .join(RunNode, RunNode.run_id == RecipeRun.id)
             .where(
                 RunNode.node_id.in_(node_ids),
-                RecipeRun.state.not_in({"stopped", "failed", "lost"}),
+                RecipeRun.state.not_in(
+                    {RunState.STOPPED, RunState.FAILED, RunState.LOST}
+                ),
             )
             .group_by(RecipeRun.id, RecipeRun.updated_at)
             .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())
@@ -1103,7 +1114,9 @@ class FleetProjection:
             )
             .where(
                 ResourceReservation.node_id.in_(node_ids),
-                ResourceReservation.state.in_(("active", "promised")),
+                ResourceReservation.state.in_(
+                    (ReservationState.ACTIVE, ReservationState.PROMISED)
+                ),
             )
             .group_by(ResourceReservation.node_id, ResourceReservation.kind)
             .order_by(ResourceReservation.node_id, ResourceReservation.kind)
@@ -1337,20 +1350,20 @@ class FleetProjection:
         value: AgentCertificate | None, current: datetime
     ) -> CertificateState:
         if value is None:
-            return "missing"
+            return CertificateState.MISSING
         if (
             value.state == "revoked"
             or value.revoked_at is not None
             or value.ca_revoked_at is not None
         ):
-            return "revoked"
+            return CertificateState.REVOKED
         if value.state != "active":
-            return "inactive"
+            return CertificateState.INACTIVE
         if _utc(value.not_before) > current:
-            return "not-yet-valid"
+            return CertificateState.NOT_YET_VALID
         if _utc(value.not_after) <= current:
-            return "expired"
-        return "valid"
+            return CertificateState.EXPIRED
+        return CertificateState.VALID
 
     def _inventory(
         self, value: NodeInventorySnapshot | None, current: datetime

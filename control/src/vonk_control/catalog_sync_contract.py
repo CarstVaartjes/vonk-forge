@@ -1,8 +1,9 @@
 """Canonical durable catalog synchronization evidence shared with the API."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import BeforeValidator, ConfigDict, Field
+from vonk_agent_protocol import CatalogSyncState, machine_adopter
 
 from .library_contract import UuidId
 from .strict_json import StrictJSONModel
@@ -39,9 +40,19 @@ class ManagedCatalogStaleRecipe(StrictModel):
     stale_run_count: int = Field(ge=0)
 
 
+_SyncResultState = Annotated[
+    Literal[
+        CatalogSyncState.CURRENT,
+        CatalogSyncState.PARTIAL,
+        CatalogSyncState.FAILED,
+    ],
+    BeforeValidator(machine_adopter(CatalogSyncState)),
+]
+
+
 class ManagedCatalogSyncResult(StrictModel):
     schema_version: Literal[1]
-    state: Literal["current", "partial", "failed"]
+    state: _SyncResultState
     imported_count: int = Field(ge=0)
     updated_count: int = Field(ge=0)
     unchanged_count: int = Field(ge=0)

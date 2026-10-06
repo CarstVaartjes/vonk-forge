@@ -14,8 +14,12 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InstallAdmissionCode,
+    InstallationNodeState,
+    InstallationState,
     InvalidRequestError,
     InvalidRequestReason,
+    ModelFileState,
+    ReservationState,
     RuntimePreflightCode,
     UnknownOutcomeError,
     WaitReason,
@@ -610,7 +614,7 @@ class InstallAdmissionService:
                     session.scalars(
                         select(NodeArtifact).where(
                             NodeArtifact.node_id == mapping_node.node_id,
-                            NodeArtifact.state == "verified",
+                            NodeArtifact.state == ModelFileState.VERIFIED,
                         )
                     )
                 )
@@ -981,7 +985,7 @@ class InstallAdmissionService:
             image_digest=plan.image_digest,
             plan_digest=plan.plan_digest,
             plan=persisted_plan,
-            state="planned",
+            state=InstallationState.PLANNED,
             actor=actor,
             created_at=now,
             updated_at=now,
@@ -1023,7 +1027,7 @@ class InstallAdmissionService:
                     node_id=node.node_id,
                     rank=node.rank,
                     role=node.role,
-                    state="planned",
+                    state=InstallationNodeState.PLANNED,
                     required_bytes=node.required_bytes,
                     installed_bytes=0,
                     updated_at=now,
@@ -1045,7 +1049,7 @@ class InstallAdmissionService:
                         amount_bytes=node.required_bytes,
                         owner_kind="installation",
                         owner_id=installation.id,
-                        state="active",
+                        state=ReservationState.ACTIVE,
                         plan_digest=plan.plan_digest,
                         created_at=now,
                     )

@@ -12,8 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
+    InstallationState,
     InvalidRequestError,
     InvalidRequestReason,
+    RunState,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -239,8 +241,8 @@ def _service_run_authority(
         or stored.recipe_revision_id != authority.revision.id
         or action is ContainerRuntimeAction.START
         and (
-            run.state not in {"starting", "running"}
-            or authority.installation.state != "installed"
+            run.state not in {RunState.STARTING, RunState.RUNNING}
+            or authority.installation.state != InstallationState.INSTALLED
             or authority.mapping.state != "ready"
             or authority.revision.state != "active"
         )
@@ -293,8 +295,8 @@ def _job_run_authority(
         )
     if action is ContainerRuntimeAction.START and (
         request.run_generation != run.run_generation
-        or run.state != "running"
-        or authority.installation.state != "installed"
+        or run.state != RunState.RUNNING
+        or authority.installation.state != InstallationState.INSTALLED
         or authority.mapping.state != "ready"
         or authority.revision.state != "active"
     ):

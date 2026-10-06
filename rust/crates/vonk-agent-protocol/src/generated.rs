@@ -786,6 +786,53 @@ impl ::std::convert::TryFrom<::std::string::String> for ArtifactPreparation {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AssetAvailability {
+    #[serde(rename = "verified")]
+    Verified,
+    #[serde(rename = "partial")]
+    Partial,
+    #[serde(rename = "missing")]
+    Missing,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for AssetAvailability {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Verified => f.write_str("verified"),
+            Self::Partial => f.write_str("partial"),
+            Self::Missing => f.write_str("missing"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for AssetAvailability {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "verified" => Ok(Self::Verified),
+            "partial" => Ok(Self::Partial),
+            "missing" => Ok(Self::Missing),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AssetAvailability {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AssetAvailability {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum BlockerCategory {
     #[serde(rename = "security-edge")]
     SecurityEdge,
@@ -1140,6 +1187,108 @@ impl ::std::convert::TryFrom<&str> for CatalogSyncCode {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for CatalogSyncCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CatalogSyncState {
+    #[serde(rename = "syncing")]
+    Syncing,
+    #[serde(rename = "current")]
+    Current,
+    #[serde(rename = "partial")]
+    Partial,
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl ::std::fmt::Display for CatalogSyncState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Syncing => f.write_str("syncing"),
+            Self::Current => f.write_str("current"),
+            Self::Partial => f.write_str("partial"),
+            Self::Failed => f.write_str("failed"),
+        }
+    }
+}
+impl ::std::str::FromStr for CatalogSyncState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "syncing" => Ok(Self::Syncing),
+            "current" => Ok(Self::Current),
+            "partial" => Ok(Self::Partial),
+            "failed" => Ok(Self::Failed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CatalogSyncState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CatalogSyncState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateState {
+    #[serde(rename = "valid")]
+    Valid,
+    #[serde(rename = "missing")]
+    Missing,
+    #[serde(rename = "not-yet-valid")]
+    NotYetValid,
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "revoked")]
+    Revoked,
+    #[serde(rename = "inactive")]
+    Inactive,
+}
+impl ::std::fmt::Display for CertificateState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Valid => f.write_str("valid"),
+            Self::Missing => f.write_str("missing"),
+            Self::NotYetValid => f.write_str("not-yet-valid"),
+            Self::Expired => f.write_str("expired"),
+            Self::Revoked => f.write_str("revoked"),
+            Self::Inactive => f.write_str("inactive"),
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "valid" => Ok(Self::Valid),
+            "missing" => Ok(Self::Missing),
+            "not-yet-valid" => Ok(Self::NotYetValid),
+            "expired" => Ok(Self::Expired),
+            "revoked" => Ok(Self::Revoked),
+            "inactive" => Ok(Self::Inactive),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateState {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -1669,6 +1818,45 @@ impl ::std::convert::TryFrom<::std::string::String> for ControllerErrorCode {
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DesiredAssignmentState {
+    #[serde(rename = "installed")]
+    Installed,
+    #[serde(rename = "running")]
+    Running,
+}
+impl ::std::fmt::Display for DesiredAssignmentState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Installed => f.write_str("installed"),
+            Self::Running => f.write_str("running"),
+        }
+    }
+}
+impl ::std::str::FromStr for DesiredAssignmentState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "installed" => Ok(Self::Installed),
+            "running" => Ok(Self::Running),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for DesiredAssignmentState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for DesiredAssignmentState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -1676,6 +1864,49 @@ pub struct DistributionAssignment {
     pub objects: ::std::vec::Vec<DistributionObject>,
     pub oci_image_config_digest: ::std::string::String,
     pub oci_image_digest: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DistributionAssignmentState {
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "revoked")]
+    Revoked,
+    #[serde(rename = "expired")]
+    Expired,
+}
+impl ::std::fmt::Display for DistributionAssignmentState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Active => f.write_str("active"),
+            Self::Revoked => f.write_str("revoked"),
+            Self::Expired => f.write_str("expired"),
+        }
+    }
+}
+impl ::std::str::FromStr for DistributionAssignmentState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "active" => Ok(Self::Active),
+            "revoked" => Ok(Self::Revoked),
+            "expired" => Ok(Self::Expired),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for DistributionAssignmentState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for DistributionAssignmentState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
@@ -1760,6 +1991,61 @@ pub struct DistributionObject {
     pub name: ::std::string::String,
     pub sha256: ::std::string::String,
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EndpointState {
+    #[serde(rename = "installed-only")]
+    InstalledOnly,
+    #[serde(rename = "not-published-yet")]
+    NotPublishedYet,
+    #[serde(rename = "published")]
+    Published,
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "withdrawn")]
+    Withdrawn,
+    #[serde(rename = "unavailable")]
+    Unavailable,
+}
+impl ::std::fmt::Display for EndpointState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::InstalledOnly => f.write_str("installed-only"),
+            Self::NotPublishedYet => f.write_str("not-published-yet"),
+            Self::Published => f.write_str("published"),
+            Self::Expired => f.write_str("expired"),
+            Self::Withdrawn => f.write_str("withdrawn"),
+            Self::Unavailable => f.write_str("unavailable"),
+        }
+    }
+}
+impl ::std::str::FromStr for EndpointState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "installed-only" => Ok(Self::InstalledOnly),
+            "not-published-yet" => Ok(Self::NotPublishedYet),
+            "published" => Ok(Self::Published),
+            "expired" => Ok(Self::Expired),
+            "withdrawn" => Ok(Self::Withdrawn),
+            "unavailable" => Ok(Self::Unavailable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for EndpointState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for EndpointState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -1783,6 +2069,53 @@ pub struct EnrollmentEvidence {
     pub hardware_fingerprint: ::std::string::String,
     pub host_key_fingerprint: ::std::string::String,
     pub node_id: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EnrollmentGrantState {
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "consumed")]
+    Consumed,
+    #[serde(rename = "revoked")]
+    Revoked,
+}
+impl ::std::fmt::Display for EnrollmentGrantState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Pending => f.write_str("pending"),
+            Self::Expired => f.write_str("expired"),
+            Self::Consumed => f.write_str("consumed"),
+            Self::Revoked => f.write_str("revoked"),
+        }
+    }
+}
+impl ::std::str::FromStr for EnrollmentGrantState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "expired" => Ok(Self::Expired),
+            "consumed" => Ok(Self::Consumed),
+            "revoked" => Ok(Self::Revoked),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for EnrollmentGrantState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for EnrollmentGrantState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -2289,6 +2622,49 @@ pub struct FailureLogTail {
 pub struct FailureProperty {
     pub name: ::std::string::String,
     pub value: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum GatewayRouteState {
+    #[serde(rename = "published")]
+    Published,
+    #[serde(rename = "maintenance")]
+    Maintenance,
+    #[serde(rename = "unavailable")]
+    Unavailable,
+}
+impl ::std::fmt::Display for GatewayRouteState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Published => f.write_str("published"),
+            Self::Maintenance => f.write_str("maintenance"),
+            Self::Unavailable => f.write_str("unavailable"),
+        }
+    }
+}
+impl ::std::str::FromStr for GatewayRouteState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "published" => Ok(Self::Published),
+            "maintenance" => Ok(Self::Maintenance),
+            "unavailable" => Ok(Self::Unavailable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for GatewayRouteState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for GatewayRouteState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -2873,6 +3249,108 @@ pub struct InstallVonkDebOperation {
     pub rollback: PackageRollbackAuthority,
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum InstallationNodeState {
+    #[serde(rename = "planned")]
+    Planned,
+    #[serde(rename = "installed")]
+    Installed,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "uninstalled")]
+    Uninstalled,
+}
+impl ::std::fmt::Display for InstallationNodeState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Planned => f.write_str("planned"),
+            Self::Installed => f.write_str("installed"),
+            Self::Failed => f.write_str("failed"),
+            Self::Uninstalled => f.write_str("uninstalled"),
+        }
+    }
+}
+impl ::std::str::FromStr for InstallationNodeState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "planned" => Ok(Self::Planned),
+            "installed" => Ok(Self::Installed),
+            "failed" => Ok(Self::Failed),
+            "uninstalled" => Ok(Self::Uninstalled),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InstallationNodeState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InstallationNodeState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum InstallationState {
+    #[serde(rename = "planned")]
+    Planned,
+    #[serde(rename = "installing")]
+    Installing,
+    #[serde(rename = "installed")]
+    Installed,
+    #[serde(rename = "partial")]
+    Partial,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "uninstalled")]
+    Uninstalled,
+}
+impl ::std::fmt::Display for InstallationState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Planned => f.write_str("planned"),
+            Self::Installing => f.write_str("installing"),
+            Self::Installed => f.write_str("installed"),
+            Self::Partial => f.write_str("partial"),
+            Self::Failed => f.write_str("failed"),
+            Self::Uninstalled => f.write_str("uninstalled"),
+        }
+    }
+}
+impl ::std::str::FromStr for InstallationState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "planned" => Ok(Self::Planned),
+            "installing" => Ok(Self::Installing),
+            "installed" => Ok(Self::Installed),
+            "partial" => Ok(Self::Partial),
+            "failed" => Ok(Self::Failed),
+            "uninstalled" => Ok(Self::Uninstalled),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for InstallationState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for InstallationState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -3717,20 +4195,39 @@ impl ::std::convert::TryFrom<::std::string::String> for LifecycleSubject {
 pub struct LifecycleVocabulary {
     pub agent_result_state: AgentResultState,
     pub artifact_preparation: ArtifactPreparation,
+    pub asset_availability: AssetAvailability,
     pub blocker_category: BlockerCategory,
+    pub catalog_sync_state: CatalogSyncState,
+    pub certificate_state: CertificateState,
+    pub desired_assignment_state: DesiredAssignmentState,
+    pub distribution_assignment_state: DistributionAssignmentState,
     pub effect: LifecycleEffect,
+    pub endpoint_state: EndpointState,
+    pub enrollment_grant_state: EnrollmentGrantState,
     pub error_category: ErrorCategory,
     pub event_kind: LifecycleEventKind,
     pub failure_code: FailureCode,
+    pub gateway_route_state: GatewayRouteState,
+    pub installation_node_state: InstallationNodeState,
+    pub installation_state: InstallationState,
     pub invalid_request_reason: InvalidRequestReason,
     pub lifecycle_subject: LifecycleSubject,
     pub migration_step: MigrationStep,
+    pub model_cache_operator_status: ModelCacheOperatorStatus,
+    pub model_file_state: ModelFileState,
     pub observation_cause: ObservationCause,
+    pub observed_assignment_state: ObservedAssignmentState,
     pub operator_action: OperatorActionName,
     pub operator_surface: OperatorSurface,
     pub outcome_kind: OutcomeKind,
+    pub placement_install_state: PlacementInstallState,
+    pub placement_load_state: PlacementLoadState,
+    pub reservation_state: ReservationState,
     pub resource_blocker_code: ResourceBlockerCode,
+    pub route_publication_state: RoutePublicationState,
+    pub route_state: RouteState,
     pub run_admission_code: RunAdmissionCode,
+    pub run_state: RunState,
     pub security_refusal_reason: SecurityRefusalReason,
     pub state: LifecycleState,
     pub state_alias: StateAlias,
@@ -4281,6 +4778,88 @@ impl ::std::convert::TryFrom<::std::string::String> for ModelCacheCode {
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ModelCacheOperatorStatus {
+    #[serde(rename = "accepted")]
+    Accepted,
+}
+impl ::std::fmt::Display for ModelCacheOperatorStatus {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Accepted => f.write_str("accepted"),
+        }
+    }
+}
+impl ::std::str::FromStr for ModelCacheOperatorStatus {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "accepted" => Ok(Self::Accepted),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ModelCacheOperatorStatus {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ModelCacheOperatorStatus {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ModelFileState {
+    #[serde(rename = "partial")]
+    Partial,
+    #[serde(rename = "verified")]
+    Verified,
+    #[serde(rename = "missing")]
+    Missing,
+    #[serde(rename = "corrupt")]
+    Corrupt,
+}
+impl ::std::fmt::Display for ModelFileState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Partial => f.write_str("partial"),
+            Self::Verified => f.write_str("verified"),
+            Self::Missing => f.write_str("missing"),
+            Self::Corrupt => f.write_str("corrupt"),
+        }
+    }
+}
+impl ::std::str::FromStr for ModelFileState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "partial" => Ok(Self::Partial),
+            "verified" => Ok(Self::Verified),
+            "missing" => Ok(Self::Missing),
+            "corrupt" => Ok(Self::Corrupt),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ModelFileState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ModelFileState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -4456,6 +5035,61 @@ impl ::std::convert::TryFrom<&str> for ObservationCause {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for ObservationCause {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ObservedAssignmentState {
+    #[serde(rename = "not-placed")]
+    NotPlaced,
+    #[serde(rename = "placed")]
+    Placed,
+    #[serde(rename = "installing")]
+    Installing,
+    #[serde(rename = "installed")]
+    Installed,
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "degraded")]
+    Degraded,
+}
+impl ::std::fmt::Display for ObservedAssignmentState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::NotPlaced => f.write_str("not-placed"),
+            Self::Placed => f.write_str("placed"),
+            Self::Installing => f.write_str("installing"),
+            Self::Installed => f.write_str("installed"),
+            Self::Running => f.write_str("running"),
+            Self::Degraded => f.write_str("degraded"),
+        }
+    }
+}
+impl ::std::str::FromStr for ObservedAssignmentState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "not-placed" => Ok(Self::NotPlaced),
+            "placed" => Ok(Self::Placed),
+            "installing" => Ok(Self::Installing),
+            "installed" => Ok(Self::Installed),
+            "running" => Ok(Self::Running),
+            "degraded" => Ok(Self::Degraded),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ObservedAssignmentState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ObservedAssignmentState {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -5232,6 +5866,96 @@ pub struct PackageRollbackSource {
     pub package_sha256: ::std::string::String,
     pub package_signature: ::std::string::String,
     pub package_version: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum PlacementInstallState {
+    #[serde(rename = "complete")]
+    Complete,
+    #[serde(rename = "partial")]
+    Partial,
+    #[serde(rename = "not_present")]
+    NotPresent,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for PlacementInstallState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Complete => f.write_str("complete"),
+            Self::Partial => f.write_str("partial"),
+            Self::NotPresent => f.write_str("not_present"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for PlacementInstallState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "complete" => Ok(Self::Complete),
+            "partial" => Ok(Self::Partial),
+            "not_present" => Ok(Self::NotPresent),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for PlacementInstallState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for PlacementInstallState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum PlacementLoadState {
+    #[serde(rename = "loaded")]
+    Loaded,
+    #[serde(rename = "not_loaded")]
+    NotLoaded,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for PlacementLoadState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Loaded => f.write_str("loaded"),
+            Self::NotLoaded => f.write_str("not_loaded"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for PlacementLoadState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "loaded" => Ok(Self::Loaded),
+            "not_loaded" => Ok(Self::NotLoaded),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for PlacementLoadState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for PlacementLoadState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
@@ -6935,6 +7659,53 @@ pub struct RequestValidationProblem {
     pub issues: ::std::vec::Vec<RequestValidationIssue>,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ReservationState {
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "promised")]
+    Promised,
+    #[serde(rename = "released")]
+    Released,
+    #[serde(rename = "expired")]
+    Expired,
+}
+impl ::std::fmt::Display for ReservationState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Active => f.write_str("active"),
+            Self::Promised => f.write_str("promised"),
+            Self::Released => f.write_str("released"),
+            Self::Expired => f.write_str("expired"),
+        }
+    }
+}
+impl ::std::str::FromStr for ReservationState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "active" => Ok(Self::Active),
+            "promised" => Ok(Self::Promised),
+            "released" => Ok(Self::Released),
+            "expired" => Ok(Self::Expired),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ReservationState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ReservationState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
 pub enum ResourceBlockerCode {
     #[serde(rename = "resource.capacity_unknown")]
@@ -7227,6 +7998,104 @@ impl ::std::convert::TryFrom<::std::string::String> for ResourceTermProblem {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RoutePublicationState {
+    #[serde(rename = "withdrawal-pending")]
+    WithdrawalPending,
+    #[serde(rename = "routes-withdrawn")]
+    RoutesWithdrawn,
+    #[serde(rename = "publication-pending")]
+    PublicationPending,
+    #[serde(rename = "completed")]
+    Completed,
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl ::std::fmt::Display for RoutePublicationState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::WithdrawalPending => f.write_str("withdrawal-pending"),
+            Self::RoutesWithdrawn => f.write_str("routes-withdrawn"),
+            Self::PublicationPending => f.write_str("publication-pending"),
+            Self::Completed => f.write_str("completed"),
+            Self::Failed => f.write_str("failed"),
+        }
+    }
+}
+impl ::std::str::FromStr for RoutePublicationState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "withdrawal-pending" => Ok(Self::WithdrawalPending),
+            "routes-withdrawn" => Ok(Self::RoutesWithdrawn),
+            "publication-pending" => Ok(Self::PublicationPending),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RoutePublicationState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RoutePublicationState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RouteState {
+    #[serde(rename = "withdrawn")]
+    Withdrawn,
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "published")]
+    Published,
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl ::std::fmt::Display for RouteState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Withdrawn => f.write_str("withdrawn"),
+            Self::Pending => f.write_str("pending"),
+            Self::Published => f.write_str("published"),
+            Self::Failed => f.write_str("failed"),
+        }
+    }
+}
+impl ::std::str::FromStr for RouteState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "withdrawn" => Ok(Self::Withdrawn),
+            "pending" => Ok(Self::Pending),
+            "published" => Ok(Self::Published),
+            "failed" => Ok(Self::Failed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RouteState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RouteState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
 pub enum RunAdmissionCode {
     #[serde(rename = "run.plan_invalid")]
@@ -7378,6 +8247,65 @@ impl ::std::convert::TryFrom<&str> for RunDegradedReason {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for RunDegradedReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RunState {
+    #[serde(rename = "planned")]
+    Planned,
+    #[serde(rename = "starting")]
+    Starting,
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "stopping")]
+    Stopping,
+    #[serde(rename = "stopped")]
+    Stopped,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "lost")]
+    Lost,
+}
+impl ::std::fmt::Display for RunState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Planned => f.write_str("planned"),
+            Self::Starting => f.write_str("starting"),
+            Self::Running => f.write_str("running"),
+            Self::Stopping => f.write_str("stopping"),
+            Self::Stopped => f.write_str("stopped"),
+            Self::Failed => f.write_str("failed"),
+            Self::Lost => f.write_str("lost"),
+        }
+    }
+}
+impl ::std::str::FromStr for RunState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "planned" => Ok(Self::Planned),
+            "starting" => Ok(Self::Starting),
+            "running" => Ok(Self::Running),
+            "stopping" => Ok(Self::Stopping),
+            "stopped" => Ok(Self::Stopped),
+            "failed" => Ok(Self::Failed),
+            "lost" => Ok(Self::Lost),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RunState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RunState {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -11400,6 +12328,69 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactPreparation {
         })
     }
 }
+impl AssetAvailability {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Partial => "partial",
+            Self::Missing => "missing",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for AssetAvailability {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for AssetAvailability {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for AssetAvailability {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AssetAvailability {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("AssetAvailability", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "verified")]
+            Verified,
+            #[serde(rename = "partial")]
+            Partial,
+            #[serde(rename = "missing")]
+            Missing,
+            #[serde(rename = "unknown")]
+            Unknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Verified => Self::Verified,
+            Raw::Partial => Self::Partial,
+            Raw::Missing => Self::Missing,
+            Raw::Unknown => Self::Unknown,
+        })
+    }
+}
 impl BlockerCategory {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -11830,6 +12821,140 @@ impl<'de> ::serde::Deserialize<'de> for CatalogSyncCode {
             Raw::CatalogSyncStateInvalid => Self::CatalogSyncStateInvalid,
             Raw::CatalogSyncTriggerInvalid => Self::CatalogSyncTriggerInvalid,
             Raw::RecipeTopologyChanged => Self::RecipeTopologyChanged,
+        })
+    }
+}
+impl CatalogSyncState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Syncing => "syncing",
+            Self::Current => "current",
+            Self::Partial => "partial",
+            Self::Failed => "failed",
+        }
+    }
+}
+impl ::std::ops::Deref for CatalogSyncState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CatalogSyncState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CatalogSyncState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CatalogSyncState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("CatalogSyncState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "syncing")]
+            Syncing,
+            #[serde(rename = "current")]
+            Current,
+            #[serde(rename = "partial")]
+            Partial,
+            #[serde(rename = "failed")]
+            Failed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Syncing => Self::Syncing,
+            Raw::Current => Self::Current,
+            Raw::Partial => Self::Partial,
+            Raw::Failed => Self::Failed,
+        })
+    }
+}
+impl CertificateState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Valid => "valid",
+            Self::Missing => "missing",
+            Self::NotYetValid => "not-yet-valid",
+            Self::Expired => "expired",
+            Self::Revoked => "revoked",
+            Self::Inactive => "inactive",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("CertificateState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "valid")]
+            Valid,
+            #[serde(rename = "missing")]
+            Missing,
+            #[serde(rename = "not-yet-valid")]
+            NotYetValid,
+            #[serde(rename = "expired")]
+            Expired,
+            #[serde(rename = "revoked")]
+            Revoked,
+            #[serde(rename = "inactive")]
+            Inactive,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Valid => Self::Valid,
+            Raw::Missing => Self::Missing,
+            Raw::NotYetValid => Self::NotYetValid,
+            Raw::Expired => Self::Expired,
+            Raw::Revoked => Self::Revoked,
+            Raw::Inactive => Self::Inactive,
         })
     }
 }
@@ -12581,6 +13706,61 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
         })
     }
 }
+impl DesiredAssignmentState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Installed => "installed",
+            Self::Running => "running",
+        }
+    }
+}
+impl ::std::ops::Deref for DesiredAssignmentState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for DesiredAssignmentState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for DesiredAssignmentState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for DesiredAssignmentState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("DesiredAssignmentState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "installed")]
+            Installed,
+            #[serde(rename = "running")]
+            Running,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Installed => Self::Installed,
+            Raw::Running => Self::Running,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for DistributionAssignment {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -12600,6 +13780,65 @@ impl<'de> ::serde::Deserialize<'de> for DistributionAssignment {
             objects: raw.objects,
             oci_image_config_digest: raw.oci_image_config_digest,
             oci_image_digest: raw.oci_image_digest,
+        })
+    }
+}
+impl DistributionAssignmentState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Revoked => "revoked",
+            Self::Expired => "expired",
+        }
+    }
+}
+impl ::std::ops::Deref for DistributionAssignmentState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for DistributionAssignmentState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for DistributionAssignmentState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for DistributionAssignmentState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("DistributionAssignmentState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "active")]
+            Active,
+            #[serde(rename = "revoked")]
+            Revoked,
+            #[serde(rename = "expired")]
+            Expired,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Active => Self::Active,
+            Raw::Revoked => Self::Revoked,
+            Raw::Expired => Self::Expired,
         })
     }
 }
@@ -12715,6 +13954,77 @@ impl<'de> ::serde::Deserialize<'de> for DistributionObject {
         })
     }
 }
+impl EndpointState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::InstalledOnly => "installed-only",
+            Self::NotPublishedYet => "not-published-yet",
+            Self::Published => "published",
+            Self::Expired => "expired",
+            Self::Withdrawn => "withdrawn",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+impl ::std::ops::Deref for EndpointState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for EndpointState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for EndpointState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for EndpointState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("EndpointState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "installed-only")]
+            InstalledOnly,
+            #[serde(rename = "not-published-yet")]
+            NotPublishedYet,
+            #[serde(rename = "published")]
+            Published,
+            #[serde(rename = "expired")]
+            Expired,
+            #[serde(rename = "withdrawn")]
+            Withdrawn,
+            #[serde(rename = "unavailable")]
+            Unavailable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::InstalledOnly => Self::InstalledOnly,
+            Raw::NotPublishedYet => Self::NotPublishedYet,
+            Raw::Published => Self::Published,
+            Raw::Expired => Self::Expired,
+            Raw::Withdrawn => Self::Withdrawn,
+            Raw::Unavailable => Self::Unavailable,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for EnrollmentBootstrapResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -12771,6 +14081,69 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentEvidence {
             hardware_fingerprint: raw.hardware_fingerprint,
             host_key_fingerprint: raw.host_key_fingerprint,
             node_id: raw.node_id,
+        })
+    }
+}
+impl EnrollmentGrantState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Expired => "expired",
+            Self::Consumed => "consumed",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+impl ::std::ops::Deref for EnrollmentGrantState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for EnrollmentGrantState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for EnrollmentGrantState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for EnrollmentGrantState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("EnrollmentGrantState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "pending")]
+            Pending,
+            #[serde(rename = "expired")]
+            Expired,
+            #[serde(rename = "consumed")]
+            Consumed,
+            #[serde(rename = "revoked")]
+            Revoked,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Pending => Self::Pending,
+            Raw::Expired => Self::Expired,
+            Raw::Consumed => Self::Consumed,
+            Raw::Revoked => Self::Revoked,
         })
     }
 }
@@ -13256,6 +14629,65 @@ impl<'de> ::serde::Deserialize<'de> for FailureProperty {
         Ok(Self {
             name: raw.name,
             value: raw.value,
+        })
+    }
+}
+impl GatewayRouteState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Published => "published",
+            Self::Maintenance => "maintenance",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+impl ::std::ops::Deref for GatewayRouteState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for GatewayRouteState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for GatewayRouteState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for GatewayRouteState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("GatewayRouteState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "published")]
+            Published,
+            #[serde(rename = "maintenance")]
+            Maintenance,
+            #[serde(rename = "unavailable")]
+            Unavailable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Published => Self::Published,
+            Raw::Maintenance => Self::Maintenance,
+            Raw::Unavailable => Self::Unavailable,
         })
     }
 }
@@ -13890,6 +15322,140 @@ impl<'de> ::serde::Deserialize<'de> for InstallVonkDebOperation {
             package_signature: raw.package_signature,
             rollback: raw.rollback,
             type_: raw.type_,
+        })
+    }
+}
+impl InstallationNodeState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Planned => "planned",
+            Self::Installed => "installed",
+            Self::Failed => "failed",
+            Self::Uninstalled => "uninstalled",
+        }
+    }
+}
+impl ::std::ops::Deref for InstallationNodeState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InstallationNodeState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InstallationNodeState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallationNodeState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallationNodeState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "planned")]
+            Planned,
+            #[serde(rename = "installed")]
+            Installed,
+            #[serde(rename = "failed")]
+            Failed,
+            #[serde(rename = "uninstalled")]
+            Uninstalled,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Planned => Self::Planned,
+            Raw::Installed => Self::Installed,
+            Raw::Failed => Self::Failed,
+            Raw::Uninstalled => Self::Uninstalled,
+        })
+    }
+}
+impl InstallationState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Planned => "planned",
+            Self::Installing => "installing",
+            Self::Installed => "installed",
+            Self::Partial => "partial",
+            Self::Failed => "failed",
+            Self::Uninstalled => "uninstalled",
+        }
+    }
+}
+impl ::std::ops::Deref for InstallationState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for InstallationState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for InstallationState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallationState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("InstallationState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "planned")]
+            Planned,
+            #[serde(rename = "installing")]
+            Installing,
+            #[serde(rename = "installed")]
+            Installed,
+            #[serde(rename = "partial")]
+            Partial,
+            #[serde(rename = "failed")]
+            Failed,
+            #[serde(rename = "uninstalled")]
+            Uninstalled,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Planned => Self::Planned,
+            Raw::Installing => Self::Installing,
+            Raw::Installed => Self::Installed,
+            Raw::Partial => Self::Partial,
+            Raw::Failed => Self::Failed,
+            Raw::Uninstalled => Self::Uninstalled,
         })
     }
 }
@@ -14956,20 +16522,39 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
         struct Raw {
             pub agent_result_state: AgentResultState,
             pub artifact_preparation: ArtifactPreparation,
+            pub asset_availability: AssetAvailability,
             pub blocker_category: BlockerCategory,
+            pub catalog_sync_state: CatalogSyncState,
+            pub certificate_state: CertificateState,
+            pub desired_assignment_state: DesiredAssignmentState,
+            pub distribution_assignment_state: DistributionAssignmentState,
             pub effect: LifecycleEffect,
+            pub endpoint_state: EndpointState,
+            pub enrollment_grant_state: EnrollmentGrantState,
             pub error_category: ErrorCategory,
             pub event_kind: LifecycleEventKind,
             pub failure_code: FailureCode,
+            pub gateway_route_state: GatewayRouteState,
+            pub installation_node_state: InstallationNodeState,
+            pub installation_state: InstallationState,
             pub invalid_request_reason: InvalidRequestReason,
             pub lifecycle_subject: LifecycleSubject,
             pub migration_step: MigrationStep,
+            pub model_cache_operator_status: ModelCacheOperatorStatus,
+            pub model_file_state: ModelFileState,
             pub observation_cause: ObservationCause,
+            pub observed_assignment_state: ObservedAssignmentState,
             pub operator_action: OperatorActionName,
             pub operator_surface: OperatorSurface,
             pub outcome_kind: OutcomeKind,
+            pub placement_install_state: PlacementInstallState,
+            pub placement_load_state: PlacementLoadState,
+            pub reservation_state: ReservationState,
             pub resource_blocker_code: ResourceBlockerCode,
+            pub route_publication_state: RoutePublicationState,
+            pub route_state: RouteState,
             pub run_admission_code: RunAdmissionCode,
+            pub run_state: RunState,
             pub security_refusal_reason: SecurityRefusalReason,
             pub state: LifecycleState,
             pub state_alias: StateAlias,
@@ -14983,20 +16568,39 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
         Ok(Self {
             agent_result_state: raw.agent_result_state,
             artifact_preparation: raw.artifact_preparation,
+            asset_availability: raw.asset_availability,
             blocker_category: raw.blocker_category,
+            catalog_sync_state: raw.catalog_sync_state,
+            certificate_state: raw.certificate_state,
+            desired_assignment_state: raw.desired_assignment_state,
+            distribution_assignment_state: raw.distribution_assignment_state,
             effect: raw.effect,
+            endpoint_state: raw.endpoint_state,
+            enrollment_grant_state: raw.enrollment_grant_state,
             error_category: raw.error_category,
             event_kind: raw.event_kind,
             failure_code: raw.failure_code,
+            gateway_route_state: raw.gateway_route_state,
+            installation_node_state: raw.installation_node_state,
+            installation_state: raw.installation_state,
             invalid_request_reason: raw.invalid_request_reason,
             lifecycle_subject: raw.lifecycle_subject,
             migration_step: raw.migration_step,
+            model_cache_operator_status: raw.model_cache_operator_status,
+            model_file_state: raw.model_file_state,
             observation_cause: raw.observation_cause,
+            observed_assignment_state: raw.observed_assignment_state,
             operator_action: raw.operator_action,
             operator_surface: raw.operator_surface,
             outcome_kind: raw.outcome_kind,
+            placement_install_state: raw.placement_install_state,
+            placement_load_state: raw.placement_load_state,
+            reservation_state: raw.reservation_state,
             resource_blocker_code: raw.resource_blocker_code,
+            route_publication_state: raw.route_publication_state,
+            route_state: raw.route_state,
             run_admission_code: raw.run_admission_code,
+            run_state: raw.run_state,
             security_refusal_reason: raw.security_refusal_reason,
             state: raw.state,
             state_alias: raw.state_alias,
@@ -15555,6 +17159,120 @@ impl<'de> ::serde::Deserialize<'de> for ModelCacheCode {
         })
     }
 }
+impl ModelCacheOperatorStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+        }
+    }
+}
+impl ::std::ops::Deref for ModelCacheOperatorStatus {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ModelCacheOperatorStatus {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ModelCacheOperatorStatus {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ModelCacheOperatorStatus {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ModelCacheOperatorStatus", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "accepted")]
+            Accepted,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Accepted => Self::Accepted,
+        })
+    }
+}
+impl ModelFileState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Partial => "partial",
+            Self::Verified => "verified",
+            Self::Missing => "missing",
+            Self::Corrupt => "corrupt",
+        }
+    }
+}
+impl ::std::ops::Deref for ModelFileState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ModelFileState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ModelFileState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ModelFileState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ModelFileState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "partial")]
+            Partial,
+            #[serde(rename = "verified")]
+            Verified,
+            #[serde(rename = "missing")]
+            Missing,
+            #[serde(rename = "corrupt")]
+            Corrupt,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Partial => Self::Partial,
+            Raw::Verified => Self::Verified,
+            Raw::Missing => Self::Missing,
+            Raw::Corrupt => Self::Corrupt,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for NetworkInterface {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -15749,6 +17467,77 @@ impl<'de> ::serde::Deserialize<'de> for ObservationCause {
         Ok(match raw {
             Raw::ReportedUnknown => Self::ReportedUnknown,
             Raw::LeaseLapsed => Self::LeaseLapsed,
+        })
+    }
+}
+impl ObservedAssignmentState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NotPlaced => "not-placed",
+            Self::Placed => "placed",
+            Self::Installing => "installing",
+            Self::Installed => "installed",
+            Self::Running => "running",
+            Self::Degraded => "degraded",
+        }
+    }
+}
+impl ::std::ops::Deref for ObservedAssignmentState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ObservedAssignmentState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ObservedAssignmentState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ObservedAssignmentState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ObservedAssignmentState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "not-placed")]
+            NotPlaced,
+            #[serde(rename = "placed")]
+            Placed,
+            #[serde(rename = "installing")]
+            Installing,
+            #[serde(rename = "installed")]
+            Installed,
+            #[serde(rename = "running")]
+            Running,
+            #[serde(rename = "degraded")]
+            Degraded,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::NotPlaced => Self::NotPlaced,
+            Raw::Placed => Self::Placed,
+            Raw::Installing => Self::Installing,
+            Raw::Installed => Self::Installed,
+            Raw::Running => Self::Running,
+            Raw::Degraded => Self::Degraded,
         })
     }
 }
@@ -16536,6 +18325,128 @@ impl<'de> ::serde::Deserialize<'de> for PackageRollbackSource {
             package_sha256: raw.package_sha256,
             package_signature: raw.package_signature,
             package_version: raw.package_version,
+        })
+    }
+}
+impl PlacementInstallState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Partial => "partial",
+            Self::NotPresent => "not_present",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for PlacementInstallState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for PlacementInstallState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for PlacementInstallState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for PlacementInstallState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("PlacementInstallState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "complete")]
+            Complete,
+            #[serde(rename = "partial")]
+            Partial,
+            #[serde(rename = "not_present")]
+            NotPresent,
+            #[serde(rename = "unknown")]
+            Unknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Complete => Self::Complete,
+            Raw::Partial => Self::Partial,
+            Raw::NotPresent => Self::NotPresent,
+            Raw::Unknown => Self::Unknown,
+        })
+    }
+}
+impl PlacementLoadState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Loaded => "loaded",
+            Self::NotLoaded => "not_loaded",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for PlacementLoadState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for PlacementLoadState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for PlacementLoadState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for PlacementLoadState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("PlacementLoadState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "loaded")]
+            Loaded,
+            #[serde(rename = "not_loaded")]
+            NotLoaded,
+            #[serde(rename = "unknown")]
+            Unknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Loaded => Self::Loaded,
+            Raw::NotLoaded => Self::NotLoaded,
+            Raw::Unknown => Self::Unknown,
         })
     }
 }
@@ -18820,6 +20731,69 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
         })
     }
 }
+impl ReservationState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Promised => "promised",
+            Self::Released => "released",
+            Self::Expired => "expired",
+        }
+    }
+}
+impl ::std::ops::Deref for ReservationState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ReservationState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ReservationState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ReservationState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ReservationState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "active")]
+            Active,
+            #[serde(rename = "promised")]
+            Promised,
+            #[serde(rename = "released")]
+            Released,
+            #[serde(rename = "expired")]
+            Expired,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Active => Self::Active,
+            Raw::Promised => Self::Promised,
+            Raw::Released => Self::Released,
+            Raw::Expired => Self::Expired,
+        })
+    }
+}
 impl ResourceBlockerCode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -19166,6 +21140,136 @@ impl<'de> ::serde::Deserialize<'de> for ResourceTermProblem {
         })
     }
 }
+impl RoutePublicationState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::WithdrawalPending => "withdrawal-pending",
+            Self::RoutesWithdrawn => "routes-withdrawn",
+            Self::PublicationPending => "publication-pending",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+impl ::std::ops::Deref for RoutePublicationState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RoutePublicationState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RoutePublicationState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RoutePublicationState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RoutePublicationState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "withdrawal-pending")]
+            WithdrawalPending,
+            #[serde(rename = "routes-withdrawn")]
+            RoutesWithdrawn,
+            #[serde(rename = "publication-pending")]
+            PublicationPending,
+            #[serde(rename = "completed")]
+            Completed,
+            #[serde(rename = "failed")]
+            Failed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::WithdrawalPending => Self::WithdrawalPending,
+            Raw::RoutesWithdrawn => Self::RoutesWithdrawn,
+            Raw::PublicationPending => Self::PublicationPending,
+            Raw::Completed => Self::Completed,
+            Raw::Failed => Self::Failed,
+        })
+    }
+}
+impl RouteState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Withdrawn => "withdrawn",
+            Self::Pending => "pending",
+            Self::Published => "published",
+            Self::Failed => "failed",
+        }
+    }
+}
+impl ::std::ops::Deref for RouteState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RouteState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RouteState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RouteState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RouteState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "withdrawn")]
+            Withdrawn,
+            #[serde(rename = "pending")]
+            Pending,
+            #[serde(rename = "published")]
+            Published,
+            #[serde(rename = "failed")]
+            Failed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Withdrawn => Self::Withdrawn,
+            Raw::Pending => Self::Pending,
+            Raw::Published => Self::Published,
+            Raw::Failed => Self::Failed,
+        })
+    }
+}
 impl RunAdmissionCode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -19354,6 +21458,81 @@ impl<'de> ::serde::Deserialize<'de> for RunDegradedReason {
             Raw::RankNotRunning => Self::RankNotRunning,
             Raw::RankStale => Self::RankStale,
             Raw::RouteNotPublished => Self::RouteNotPublished,
+        })
+    }
+}
+impl RunState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Planned => "planned",
+            Self::Starting => "starting",
+            Self::Running => "running",
+            Self::Stopping => "stopping",
+            Self::Stopped => "stopped",
+            Self::Failed => "failed",
+            Self::Lost => "lost",
+        }
+    }
+}
+impl ::std::ops::Deref for RunState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RunState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RunState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RunState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RunState", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "planned")]
+            Planned,
+            #[serde(rename = "starting")]
+            Starting,
+            #[serde(rename = "running")]
+            Running,
+            #[serde(rename = "stopping")]
+            Stopping,
+            #[serde(rename = "stopped")]
+            Stopped,
+            #[serde(rename = "failed")]
+            Failed,
+            #[serde(rename = "lost")]
+            Lost,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Planned => Self::Planned,
+            Raw::Starting => Self::Starting,
+            Raw::Running => Self::Running,
+            Raw::Stopping => Self::Stopping,
+            Raw::Stopped => Self::Stopped,
+            Raw::Failed => Self::Failed,
+            Raw::Lost => Self::Lost,
         })
     }
 }

@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints
 
+from .machine_states import EnrollmentGrantStateField
 from .strict_json import StrictJSONModel
 
 ENROLLMENT_ID_PATTERN = (
@@ -17,7 +18,7 @@ class EnrollmentGrantStatus(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     id: EnrollmentId
-    state: Literal["pending", "expired", "consumed", "revoked"]
+    state: EnrollmentGrantStateField
     purpose: Literal["new-node", "re-enroll"]
     node_id: str | None = Field(pattern=r"^spk_[0-9a-f]{32}$")
     display_name: str | None

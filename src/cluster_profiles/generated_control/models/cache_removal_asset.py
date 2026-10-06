@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.cache_removal_asset_availability import CacheRemovalAssetAvailability
-from ..models.cache_removal_asset_availability import check_cache_removal_asset_availability
+from ..models.asset_availability import AssetAvailability
+from ..models.asset_availability import check_asset_availability
 from ..models.cache_removal_asset_disposition import CacheRemovalAssetDisposition
 from ..models.cache_removal_asset_disposition import check_cache_removal_asset_disposition
 from ..models.cache_removal_asset_kind import CacheRemovalAssetKind
@@ -31,7 +31,7 @@ class CacheRemovalAsset:
     """ One exact cache identity and its owner-reported storage condition.
 
         Attributes:
-            availability (CacheRemovalAssetAvailability):
+            availability (AssetAvailability): What is known about a model asset on a Spark's disk.
             disposition (CacheRemovalAssetDisposition):
             kind (CacheRemovalAssetKind):
             sha256 (str):
@@ -39,7 +39,7 @@ class CacheRemovalAsset:
             expected_bytes (int | None | Unset):
      """
 
-    availability: CacheRemovalAssetAvailability
+    availability: AssetAvailability
     disposition: CacheRemovalAssetDisposition
     kind: CacheRemovalAssetKind
     sha256: str
@@ -92,7 +92,7 @@ class CacheRemovalAsset:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        availability = check_cache_removal_asset_availability(d.pop("availability"))
+        availability = check_asset_availability(d.pop("availability"))
 
 
 
