@@ -137,12 +137,11 @@ OUTCOME_KINDS = frozenset(
     {OutcomeKind.DONE.value, OutcomeKind.FAILED.value, OutcomeKind.UNKNOWN.value}
 )
 
-#: ``AgentResult.state`` for each outcome arm.  The wire keeps the four legacy
-#: state words; the arm decides which one is truthful.
+#: ``AgentResult.state`` for each outcome arm; unknown effects are observed.
 DONE_STATE = AgentResultState.SUCCEEDED
 FAILED_STATE = AgentResultState.FAILED
 CANCELLED_STATE = AgentResultState.CANCELLED
-UNKNOWN_STATE = AgentResultState.WAITING_FOR_OPERATOR
+UNKNOWN_STATE = AgentResultState.OBSERVING
 
 
 def outcome_state(

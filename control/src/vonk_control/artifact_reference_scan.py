@@ -137,6 +137,7 @@ def require_model_sets_open(
     *,
     now: datetime,
     object_digests: Iterable[str] = (),
+    allow_pending_removal: bool = False,
 ) -> dict[str, tuple[str, ...]]:
     """Lock exact set gates, validate memberships, then lock every object gate.
 
@@ -153,7 +154,9 @@ def require_model_sets_open(
         (ArtifactIdentity("model-set", digest) for digest in requested),
         now=now,
     )
-    if any(row.removal_owner_id is not None for row in set_rows):
+    if not allow_pending_removal and any(
+        row.removal_owner_id is not None for row in set_rows
+    ):
         raise ArtifactReferenceUnsettled(
             ArtifactLifecycleCode.DELETION_IN_PROGRESS,
             "a model artifact set is reserved for removal",
@@ -188,7 +191,9 @@ def require_model_sets_open(
         ArtifactIdentity("model-object", digest) for digest in sorted(all_objects)
     )
     object_rows = lock_reference_gates(session, object_identities, now=now)
-    if any(row.removal_owner_id is not None for row in object_rows):
+    if not allow_pending_removal and any(
+        row.removal_owner_id is not None for row in object_rows
+    ):
         raise ArtifactReferenceUnsettled(
             ArtifactLifecycleCode.DELETION_IN_PROGRESS,
             "a model artifact object is reserved for removal",

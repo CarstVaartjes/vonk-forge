@@ -363,6 +363,7 @@ class AvailabilityJobPayload(_Document):
     cancellation: RecipeOperationCancellationResult | None = None
     prebuilt_pull: bool | None = None
     removal_fence: UuidText | None = None
+    removal_archives: list[DigestText] | None = None
     supersession: AvailabilitySupersession | None = None
 
 

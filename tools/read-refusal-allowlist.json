@@ -1,0 +1,370 @@
+{
+  "schema": 1,
+  "inventory_note": "Initial T1 syntax inventory; all findings are unaudited debt, not approved behavior. Lower counts as owning tracks repair them. New exceptions require a fixed reason and justification.",
+  "debt": [
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "artifact",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "distribution_manifest",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "distribution_object",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "enrollment_bootstrap",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "install_agent_routes.distribution_manifest",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "install_agent_routes.distribution_object",
+      "kind": "get-refusal",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "install_agent_routes.enrollment_bootstrap",
+      "kind": "get-refusal",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "install_agent_routes.recipe_run_disposition",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "recipe_run_disposition",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "source_bundle",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/api.py",
+      "function": "create_app.fleet_event_stream",
+      "kind": "get-refusal",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/api.py",
+      "function": "create_app.job_view",
+      "kind": "get-refusal",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/api.py",
+      "function": "create_app.operation_view",
+      "kind": "get-refusal",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/api.py",
+      "function": "create_app.operations_view",
+      "kind": "get-refusal",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_api.py",
+      "function": "agent_input",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_api.py",
+      "function": "capabilities",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_api.py",
+      "function": "download_result",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_api.py",
+      "function": "install_artifact_job_routes.agent_input",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_api.py",
+      "function": "install_artifact_job_routes.download_result",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_api.py",
+      "function": "job_by_request_id",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_api.py",
+      "function": "job_status",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/artifact_job_api.py",
+      "function": "list_jobs",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/catalog_api.py",
+      "function": "get_managed_recipe_catalog_sync_status",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/failure_evidence_api.py",
+      "function": "install_failure_evidence_routes.evidence",
+      "kind": "get-refusal",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "get_profile",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "get_profile_definition",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "install_fleet_profile_routes.get_profile",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "install_fleet_profile_routes.get_profile_definition",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "install_fleet_profile_routes.list_profiles",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "install_fleet_profile_routes.profile_application",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "install_fleet_profile_routes.profile_application_by_request",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "install_fleet_profile_routes.profile_endpoints",
+      "kind": "get-refusal",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "install_fleet_profile_routes.profile_progress",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "list_profiles",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "profile_application",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "profile_application_by_request",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profile_api.py",
+      "function": "profile_progress",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "list_gateway_keys",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/installation_reconciliation_api.py",
+      "function": "install_installation_reconciliation_routes.run_switch_operation",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/installation_reconciliation_api.py",
+      "function": "run_switch_operation",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/library_api.py",
+      "function": "model_detail",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/library_api.py",
+      "function": "model_library",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/library_api.py",
+      "function": "recipe_detail",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/library_api.py",
+      "function": "recipe_library",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache_api.py",
+      "function": "get_request",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache_api.py",
+      "function": "review_removal",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "fleet_detail",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "fleet_locks",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "fleet_loginfo",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "fleet_status",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "get_enrollment",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "install_operator_projection_routes.fleet_locks",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "install_operator_projection_routes.fleet_loginfo",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "install_operator_projection_routes.get_enrollment",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/profile_application_cancel_api.py",
+      "function": "install_profile_application_cancel_route.get_profile_application_cancellation",
+      "kind": "get-refusal",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability_api.py",
+      "function": "get_operation",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability_api.py",
+      "function": "get_request",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability_api.py",
+      "function": "install_recipe_operator_routes.review_remove",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability_api.py",
+      "function": "review_remove",
+      "kind": "get-helper-refusal",
+      "count": 1
+    }
+  ],
+  "exceptions": [
+    {
+      "path": "control/src/vonk_control/agent_api.py",
+      "function": "install_agent_routes.source_bundle",
+      "kind": "get-refusal",
+      "count": 2,
+      "reason": "security-edge",
+      "justification": "The authenticated agent source transfer must preserve explicit denied-access HTTP403; its existing HTTP503 reports actual source storage outage without inventing bundle bytes. These are transport authorization/dependency refusals, not damaged stored progress admission gates."
+    }
+  ]
+}

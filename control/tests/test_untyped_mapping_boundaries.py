@@ -106,6 +106,36 @@ def test_loader_requires_a_reason(tmp_path: Path) -> None:
 
 
 def test_untyped_mapping_annotations_only_go_down() -> None:
-    """The gate itself, over ``control/src`` and ``agent_protocol/src``."""
+    """The gate itself, over all four declared source and tooling roots."""
 
     assert evaluate_gate(scan_sites(), load_allowlist()) == []
+
+
+def test_extensionless_python_tool_is_not_invisible(tmp_path, monkeypatch):
+    from . import untyped_mapping_boundaries as scanner
+
+    monkeypatch.setattr(scanner, "REPO_ROOT", tmp_path)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    tool = scripts / "check-sample"
+    tool.write_text(
+        "#!/usr/bin/env -S uv run python\ndef f(x: dict[str, object]): pass\n"
+    )
+    assert scanner.scan_sites([scripts])[0].path == "scripts/check-sample"
+    tool.write_text("#!/usr/bin/env -S uv run python\ndef f(x: dict[str, str]): pass\n")
+    assert scanner.scan_sites([scripts]) == []
+
+
+def test_generated_extension_dicts_do_not_hide_authored_cli_debt(tmp_path, monkeypatch):
+    from . import untyped_mapping_boundaries as scanner
+
+    monkeypatch.setattr(scanner, "REPO_ROOT", tmp_path)
+    root = tmp_path / "src" / "cluster_profiles"
+    generated = root / "generated_control"
+    generated.mkdir(parents=True)
+    annotation = "def f(data: dict[str, object]): pass\n"
+    (generated / "generated.py").write_text(annotation)
+    (root / "authored.py").write_text(annotation)
+    assert [site.path for site in scanner.scan_sites([root])] == [
+        "src/cluster_profiles/authored.py"
+    ]

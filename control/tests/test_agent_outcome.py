@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentProtocolError,
     AgentResult,
+    AgentResultState,
     FailureCode,
     OutcomeDone,
     OutcomeFailed,
@@ -157,7 +158,7 @@ def test_a_legacy_body_is_read_as_the_outcome_it_always_meant(
     LEGACY,
     ids=lambda value: value if isinstance(value, str) else "",
 )
-def test_a_legacy_report_is_stored_exactly_as_it_arrived(
+def test_a_legacy_body_is_stored_with_its_adopted_state(
     operation: str, state: str, body: dict[str, Any], _arm: type, _detail: object
 ) -> None:
     message = _message(state, body)
@@ -165,6 +166,7 @@ def test_a_legacy_report_is_stored_exactly_as_it_arrived(
     stored, _outcome = stored_report(operation, message)
 
     assert stored is message
+    assert stored.state == AgentResultState(state)
 
 
 def _old_report_event(
@@ -257,7 +259,7 @@ def test_the_lifecycle_event_equals_the_one_derived_before_the_typed_contract(
 TYPED = [
     (
         "recipe.stop",
-        "waiting-for-operator",
+        "observing",
         {
             "kind": "unknown",
             "wait_reason": "stop-unconfirmed",
@@ -327,7 +329,7 @@ def test_a_typed_report_derives_the_event_its_stored_legacy_twin_derives(
 
 def test_a_typed_report_keeps_its_state_word_and_projects_to_the_stored_body() -> None:
     typed = _message(
-        "waiting-for-operator",
+        "observing",
         {
             "kind": "unknown",
             "wait_reason": "stop-unconfirmed",
@@ -337,7 +339,7 @@ def test_a_typed_report_keeps_its_state_word_and_projects_to_the_stored_body() -
 
     stored, outcome = stored_report("recipe.stop", typed)
 
-    assert stored.state == "waiting-for-operator"
+    assert stored.state is AgentResultState.OBSERVING
     assert dict(stored.result)["wait_reason"] == "stop-unconfirmed"
     assert "kind" not in dict(stored.result)
     assert outcome is typed.result

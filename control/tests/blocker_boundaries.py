@@ -68,7 +68,6 @@ from vonk_agent_protocol import (
     CATEGORIZED_ERROR_BASES,
     LEGACY_WAIT_STATE,
     REASON_CODE_ENUMS,
-    AgentResultState,
     BlockerCategory,
     FailureCode,
     InvalidRequestReason,
@@ -179,9 +178,9 @@ class RaiseSite:
 
 
 #: The contract names of the stored wait state (``vonk_agent_protocol``):
-#: ``LEGACY_WAIT_STATE`` and ``AgentResultState.WAITING_FOR_OPERATOR[.value]``.
+#: ``LEGACY_WAIT_STATE`` and ``LifecycleState.NEEDS_OPERATOR[.value]``.
 _WAIT_CONTRACT_NAME = "LEGACY_WAIT_STATE"
-_WAIT_CONTRACT_MEMBER = AgentResultState.WAITING_FOR_OPERATOR.name
+_WAIT_CONTRACT_MEMBER = "NEEDS_OPERATOR"
 #: The stored wait word of a kind on the core vocabulary (``LifecycleState.NEEDS_OPERATOR``).
 _STORED_WAIT_MEMBER = LifecycleState.NEEDS_OPERATOR.name
 
@@ -343,19 +342,18 @@ def parsed_modules(root: Path) -> Mapping[Path, ast.Module]:
 
 _RUST_FN = re.compile(r"^\s*(?:pub(?:\([a-z]+\))?\s+)?(?:async\s+)?fn\s+(\w+)")
 _RUST_IMPL = re.compile(r"^\s*impl(?:<[^>]*>)?\s+(?:[\w:<>, ]+\s+for\s+)?(\w+)")
-#: The constructors of an unknown outcome (a wait reason, never a free body); each
-#: of their callers is its own site, and their own bodies are not.
-_RUST_CONSTRUCTORS = frozenset({"unconfirmed", "unconfirmed_job"})
+#: Unknown outcome constructors emit observing, never an operator wait. Only
+#: explicit operator-state construction is a wait site.
 _RUST_WAIT_CALL = re.compile(
-    r"\b(?:unconfirmed|unconfirmed_job)\(|ExecutionResult::[Uu]nknown\("
+    r'AgentResultState::NeedsOperator|"needs-operator"|"waiting-for-operator"'
 )
 
 
 def scan_rust_waits(source: str, *, path: str) -> list[WaitSite]:
-    """Callers of an unknown-outcome constructor, keyed by their enclosing function.
+    """Explicit operator-state construction, keyed by its enclosing function.
 
-    The agent builds a wait only through ``ExecutionResult::unknown`` (or the
-    ``unconfirmed`` helpers around it), each naming a typed wait reason."""
+    Typed unknown outcomes are automatic observations, not operator waits.
+    """
 
     sites: list[WaitSite] = []
     function = "<module>"
@@ -367,14 +365,12 @@ def scan_rust_waits(source: str, *, path: str) -> list[WaitSite]:
         declared = _RUST_FN.match(line)
         if declared:
             function = declared.group(1)
-            if declared.group(1) not in _RUST_CONSTRUCTORS and not line.startswith(
-                "fn "
-            ):
+            if not line.startswith("fn "):
                 function = f"{owner}::{function}" if owner else function
         stripped = line.strip()
-        if stripped.startswith("//") or function in _RUST_CONSTRUCTORS:
+        if stripped.startswith("//"):
             continue
-        if _RUST_WAIT_CALL.search(line) and not declared:
+        if _RUST_WAIT_CALL.search(line):
             sites.append(WaitSite(path, function, RUST_RESULT, number))
     return sites
 

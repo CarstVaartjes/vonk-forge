@@ -492,6 +492,8 @@ fn enum_string_impl(item: &syn::ItemEnum) -> Option<Vec<Item>> {
                 attr.parse_nested_meta(|meta| {
                     if meta.path.is_ident("rename") {
                         text = meta.value()?.parse::<syn::LitStr>()?.value();
+                    } else if meta.path.is_ident("alias") {
+                        let _ = meta.value()?.parse::<syn::LitStr>()?;
                     }
                     Ok(())
                 })
@@ -607,6 +609,16 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
         .get("x-vonk-model-bases")
         .cloned()
         .unwrap_or(json!({}));
+    let read_aliases = schema["$defs"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter_map(|(name, definition)| {
+            definition
+                .get("x-vonk-read-aliases")
+                .map(|aliases| (name.clone(), aliases.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
     typed_tags(&mut schema);
     prepare(&mut schema);
     exclusive_empty_unions(&mut schema);
@@ -659,6 +671,23 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
             Item::Enum(item) => item.ident.to_string(),
             _ => continue,
         };
+        if let Item::Enum(enumeration) = item
+            && let Some(aliases) = read_aliases.get(&name).and_then(Value::as_object)
+        {
+            for variant in &mut enumeration.variants {
+                for (old, current) in aliases {
+                    let current = current.as_str().unwrap();
+                    if variant.attrs.iter().any(|attr| {
+                        attr.meta
+                            .to_token_stream()
+                            .to_string()
+                            .contains(&format!("\"{current}\""))
+                    }) {
+                        variant.attrs.push(parse_quote!(#[serde(alias = #old)]));
+                    }
+                }
+            }
+        }
         if eq_types.contains(&name) {
             let attrs = match item {
                 Item::Struct(item) => &mut item.attrs,

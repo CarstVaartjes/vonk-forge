@@ -33,7 +33,7 @@ from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
@@ -75,12 +75,14 @@ from .artifact_lifecycle import (
     check_removal_fence_nowait,
     clear_removal,
     dead_removal_identities,
+    has_pending_removal,
     lock_removal_fences,
     reference_gate_is_open_nowait,
     release_dead_removal_nowait,
     removal_fences_match,
     reserve_removal,
     retryable_artifact_database_error,
+    supersede_removal_nowait,
 )
 from .artifact_reference_scan import (
     model_set_objects,
@@ -110,6 +112,7 @@ from .categorized_faults import OperationInterrupted
 from .failure_classification import is_security_failure
 from .lifecycle import (
     CancelRequested,
+    Effect,
     Lifecycle,
     Outcome,
     Reconciler,
@@ -178,6 +181,7 @@ from .models import (
     ArtifactLifecycleGate,
     CatalogDocumentRevision,
     FleetProfile,
+    Job,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
@@ -1940,6 +1944,7 @@ class ModelCacheService:
         self._streams = StreamGovernor(max_download_streams)
         self._clock = clock or (lambda: datetime.now(UTC))
         self._removal_gate_after: tuple[str, str] | None = None
+        self._removal_request_after: str | None = None
         self._http = http_client
         # Local file and caller-supplied HTTP sources are useful for isolated
         # fixture tests, but are never enabled by the production constructor.
@@ -4176,6 +4181,153 @@ class ModelCacheService:
             operation.last_error = redact_text(detail)[:512]
             _store_operation_payload(operation, "remove", checkpoint)
 
+    def reconcile_requested_removals(self, *, limit: int = 64) -> int:
+        """Accepted newer downloads fence older removers before transfer dispatch."""
+        if isinstance(self._sessions, Session):
+            return 0  # a borrowed SQL transaction cannot precede a storage lock
+        with self._session() as session:
+            accepted_requests = []
+            observed_request = False
+            for operation in session.scalars(
+                select(ModelCacheOperation)
+                .where(
+                    ModelCacheOperation.kind.in_(("download", "repair")),
+                    ModelCacheOperation.state.in_(model_cache_states.LIVE),
+                )
+                .where(
+                    ModelCacheOperation.id > self._removal_request_after
+                    if self._removal_request_after is not None
+                    else true()
+                )
+                .order_by(ModelCacheOperation.id)
+                .limit(limit)
+            ):
+                observed_request = True
+                self._removal_request_after = operation.id
+                payload = self._payload_or_none(operation)
+                if payload is None or payload.get("cancellation") is not None:
+                    continue
+                manifest = ArtifactSetManifest.from_document(payload["manifest"])
+                identities = (
+                    ArtifactIdentity("model-set", manifest.digest),
+                    *(
+                        ArtifactIdentity("model-object", digest)
+                        for digest in sorted(
+                            {item.sha256 for item in manifest.artifacts}
+                        )
+                    ),
+                )
+                identity_map = {(item.kind, item.sha256): item for item in identities}
+                for gate in session.scalars(
+                    select(ArtifactLifecycleGate).where(
+                        ArtifactLifecycleGate.removal_owner_kind
+                        == "model-cache-operation",
+                        ArtifactLifecycleGate.removal_owner_id.is_not(None),
+                        or_(
+                            and_(
+                                ArtifactLifecycleGate.artifact_kind == "model-set",
+                                ArtifactLifecycleGate.artifact_sha256
+                                == manifest.digest,
+                            ),
+                            and_(
+                                ArtifactLifecycleGate.artifact_kind == "model-object",
+                                ArtifactLifecycleGate.artifact_sha256.in_(
+                                    tuple(item.sha256 for item in manifest.artifacts)
+                                ),
+                            ),
+                        ),
+                    )
+                ):
+                    accepted_requests.append(
+                        (
+                            operation.id,
+                            identity_map[(gate.artifact_kind, gate.artifact_sha256)],
+                        )
+                    )
+            if not observed_request:
+                self._removal_request_after = None
+        changed = 0
+        deadline = time.monotonic() + 0.25
+        for request_id, identity in accepted_requests[:limit]:
+            if time.monotonic() >= deadline:
+                break
+
+            def validate(
+                requester: ModelCacheOperation | Job,
+                remover: ModelCacheOperation | Job,
+                fence: str,
+                identity: ArtifactIdentity = identity,
+            ) -> bool:
+                if not isinstance(requester, ModelCacheOperation) or not isinstance(
+                    remover, ModelCacheOperation
+                ):
+                    return False
+                if (
+                    requester.kind not in ("download", "repair")
+                    or remover.kind != "remove"
+                ):
+                    return False
+                payload = self._payload_or_none(requester)
+                removal = _operation_removal(remover)
+                if (
+                    payload is None
+                    or payload.get("cancellation") is not None
+                    or isinstance(removal, Residue)
+                ):
+                    return False
+                manifest = ArtifactSetManifest.from_document(payload["manifest"])
+                if (
+                    requester.artifact_set_sha256 != manifest.digest
+                    or payload.get("artifact_set_sha256") != manifest.digest
+                    or requester.plan_digest != payload.get("plan_digest")
+                ):
+                    return False
+                wanted = (
+                    manifest.digest == identity.sha256
+                    if identity.kind == "model-set"
+                    else any(
+                        item.sha256 == identity.sha256 for item in manifest.artifacts
+                    )
+                )
+                covered = identity.sha256 in (
+                    removal.selected
+                    if identity.kind == "model-set"
+                    else removal.delete_objects
+                )
+                return wanted and covered and removal.removal_fence == fence
+
+            def cancel(remover: ModelCacheOperation | Job, accepted_id: str) -> None:
+                assert isinstance(remover, ModelCacheOperation)
+                reason = f"Removal superseded by accepted model request {accepted_id}"
+                self._lifecycle.settle(
+                    remover,
+                    Reported(Outcome.CANCELLED, effect=Effect.UNKNOWN, reason=reason),
+                    self._clock(),
+                )
+                remover.last_error = reason
+
+            try:
+                with (
+                    self._model_storage_lock(
+                        identity.sha256, model_set=identity.kind == "model-set"
+                    ),
+                    self._session(write=True) as session,
+                ):
+                    changed += int(
+                        supersede_removal_nowait(
+                            session,
+                            identity,
+                            owner_kind="model-cache-operation",
+                            request_id=request_id,
+                            validate=validate,
+                            cancel=cancel,
+                            now=self._clock(),
+                        )
+                    )
+            except (_ArtifactWriterBusy, ArtifactLifecycleError, OSError):
+                continue  # the queued request retries; no transfer slot is held
+        return changed
+
     def reconcile_removal_gates(self, *, limit: int = 64) -> int:
         # A retained caller transaction cannot safely precede an artifact lock.
         if isinstance(self._sessions, Session):
@@ -5028,6 +5180,7 @@ class ModelCacheService:
                         object_digests=tuple(
                             item.sha256 for item in manifest.artifacts
                         ),
+                        allow_pending_removal=True,
                     )
                     self._ensure_set(session, manifest)
                     operation = ModelCacheAdapter.new_operation(
@@ -5050,6 +5203,25 @@ class ModelCacheService:
                         created_at=now,
                         updated_at=now,
                     )
+                    if has_pending_removal(
+                        session,
+                        (
+                            ArtifactIdentity("model-set", set_digest),
+                            *(
+                                ArtifactIdentity("model-object", item.sha256)
+                                for item in manifest.artifacts
+                            ),
+                        ),
+                    ):
+                        self._store_failure(
+                            operation,
+                            _cache_failure(
+                                ArtifactLifecycleCode.DELETION_IN_PROGRESS,
+                                "Waiting for the prior model removal fence to settle",
+                                retryable=True,
+                                recovery="retry",
+                            ),
+                        )
                     session.add(operation)
                     session.flush()
                     operation_id = operation.id
@@ -6307,6 +6479,7 @@ class ModelCacheService:
         *,
         now: datetime,
         object_digests: Sequence[str] = (),
+        allow_pending_removal: bool = False,
     ) -> dict[str, tuple[str, ...]]:
         try:
             return require_model_sets_open(
@@ -6314,6 +6487,7 @@ class ModelCacheService:
                 set_digests,
                 now=now,
                 object_digests=object_digests,
+                allow_pending_removal=allow_pending_removal,
             )
         except ArtifactLifecycleError as error:
             raise ModelCacheConflictRefused(
@@ -8680,6 +8854,7 @@ class ModelCacheService:
             raise InvalidValue("cache worker batch limit is invalid")
         self._reconcile_pending_cancellations()
         self._resume_after_credential_change()
+        self.reconcile_requested_removals()
         rows = self._claim_operations(limit=limit, respect_backoff=False)
         for operation_id, kind in rows:
             with self._session() as session:
@@ -8713,6 +8888,7 @@ class ModelCacheService:
         # but never occupy a transfer slot while waiting: each artifact lock
         # and SQL ownership check is nonblocking and a contended step is
         # durably deferred before this bounded local filesystem action returns.
+        self.reconcile_requested_removals()
         removal_steps = self.advance_removals(
             limit=min(requested, self._max_parallel_downloads)
         )
@@ -9055,6 +9231,38 @@ class ModelCacheService:
                         and self._payload_has_huggingface_source(payload)
                     ):
                         continue
+                manifest = ArtifactSetManifest.from_document(payload["manifest"])
+                if has_pending_removal(
+                    session,
+                    (
+                        ArtifactIdentity("model-set", manifest.digest),
+                        *(
+                            ArtifactIdentity("model-object", item.sha256)
+                            for item in manifest.artifacts
+                        ),
+                    ),
+                ):
+                    self._lifecycle.settle(
+                        operation,
+                        Reported(
+                            Outcome.UNKNOWN,
+                            retry_after=now + timedelta(seconds=_RETRY_BASE_SECONDS),
+                            reason="Waiting for the prior model removal fence to settle",
+                        ),
+                        now,
+                        consume_retry=False,
+                    )
+                    self._store_failure(
+                        operation,
+                        _cache_failure(
+                            ArtifactLifecycleCode.DELETION_IN_PROGRESS,
+                            "Waiting for the prior model removal fence to settle",
+                            retryable=True,
+                            recovery="retry",
+                            retry_time=_iso(operation.next_action_at),
+                        ),
+                    )
+                    continue
                 if self._capacity_holds(operation, payload, now):
                     continue
                 if not self._lifecycle.claim(

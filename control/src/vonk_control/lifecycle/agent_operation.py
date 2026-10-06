@@ -41,8 +41,8 @@ What ``effect`` means for an order: ``issued`` while an attempt holds a live lea
 re-establishes whatever the old attempt left); ``unknown`` for an irreversible kind
 whose attempt ended without a receipt.
 
-Irreversible kinds are ``recipe.job.run.v1`` (a user's job may have run) and, until
-a build owner proves a re-claim safe, ``recipe.build.v1`` and its cleanup.  An
+Only ``recipe.job.run.v1`` is irreversible (a user's job may have run).
+Builds and build cleanup are rebuildable and retry automatically.  An
 agent upgrade is *not* irreversible here: its claim already refuses to install over
 any binary other than the exact rollback source, so a retry behind the dpkg safety
 fence cannot repeat a visible effect.
@@ -62,7 +62,9 @@ from vonk_agent_protocol import (
     AgentOperation,
     InvalidRequestReason,
     LifecycleState,
+    LifecycleSubject,
     OperationProgress,
+    adopt_state,
     canonical_message,
 )
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentResultPayload
@@ -109,8 +111,6 @@ if TYPE_CHECKING:
 IRREVERSIBLE_OPERATIONS = frozenset(
     {
         AgentOperation.RECIPE_JOB_RUN.value,
-        AgentOperation.RECIPE_BUILD.value,
-        AgentOperation.RECIPE_BUILD_CLEANUP.value,
     }
 )
 #: The word of a parent *job* that waits (the job table converts with its own kind).
@@ -130,7 +130,7 @@ ENDED_PARENT_STATES = frozenset(
 #: States in which a parent's aggregate considers an order finished (a waiting
 #: order is final for the aggregate: the parent then waits with it).
 AGGREGATE_FINAL_STATES = frozenset(
-    {"cancelled", "compensated", "failed", "succeeded", *aos.PARKED}
+    {"cancelled", "compensated", "failed", "succeeded", aos.NEEDS_OPERATOR}
 )
 #: The operator actions of a parked order (the same pair the Job endpoints take).
 OPERATOR_ACTIONS = (ActionName.RESUME.value, ActionName.RETIRE.value)
@@ -753,7 +753,7 @@ class AgentOperationAdapter:
         that the target runs); the core then decides what happens to it.
         """
 
-        operation.state = aos.NEEDS_OPERATOR
+        operation.state = aos.OBSERVING
         operation.next_action_at = None
         operation.observe_count = 0
         operation.retry_disposition = None
@@ -803,6 +803,16 @@ def aggregate_parent_state(
     outcome wins: failed, then waiting, then cancelled, then succeeded.
     """
 
+    children = [
+        (
+            (LifecycleState.BACKOFF.value if scheduled else adopted.state.value)
+            if (adopted := adopt_state(LifecycleSubject.AGENT_OPERATION, state))
+            is not None
+            else state,
+            scheduled,
+        )
+        for state, scheduled in children
+    ]
     final = AGGREGATE_FINAL_STATES
     retrying = [
         i
@@ -818,12 +828,20 @@ def aggregate_parent_state(
         and not cancel_requested
     ):
         return "queued"
+    # A definite sibling failure can end the batch once the other effects are
+    # no longer executing. The caller then cancels their pending retries so a
+    # failed parent cannot strand unclaimable work. Observations alone never
+    # end a batch or turn it into an operator wait.
+    if any(state == LifecycleState.FAILED for state, _ in children) and all(
+        state in final or state in aos.PARKED for state, _ in children
+    ):
+        return LifecycleState.FAILED.value
     if not children or any(state not in final for state, _ in children):
         return None
     states = {state for state, _ in children}
     if "failed" in states:
         return "failed"
-    if states & set(aos.PARKED):
+    if aos.NEEDS_OPERATOR in states:
         return WAITING
     if "cancelled" in states:
         return "cancelled"
