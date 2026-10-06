@@ -4222,15 +4222,14 @@ class FleetProfileService:
     def _definition(row: FleetProfile) -> FleetProfileDefinition:
         """Read exact authoring intent; partial reconstruction could delete choices."""
 
-        return read_stored_model(
-            FleetProfileDefinition,
+        return FleetProfileDefinition.model_validate_json(
             canonical_message(
                 {
                     name: getattr(row, name)
                     for name in FleetProfileDefinition.model_fields
                 }
             ),
-            from_json=True,
+            strict=True,
         )
 
     @staticmethod
