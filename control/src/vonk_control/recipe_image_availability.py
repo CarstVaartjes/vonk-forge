@@ -4601,6 +4601,8 @@ class RecipeImageAvailabilityService:
                 )
                 if not self._retry_due(payload, now):
                     continue
+                if self._holds_live_lease(payload, now):
+                    continue
                 # The admission snapshot is canonical; an unreadable legacy row
                 # continues through its existing preparation recovery path.
                 try:
@@ -4629,6 +4631,7 @@ class RecipeImageAvailabilityService:
                     self._lifecycle.defer(
                         operation, now, now + timedelta(seconds=5), payload=updated
                     )
+                    operation.payload = updated
                     continue
                 if operation.state in job_states.words(
                     LifecycleState.BACKOFF
