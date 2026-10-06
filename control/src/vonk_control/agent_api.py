@@ -44,7 +44,9 @@ from vonk_agent_protocol import (
     RecipeRunObservationsWire,
     RouteState,
     RunState,
+    SecurityRefusalError,
     SignedHostHelperGrant,
+    SourceBundleCode,
     canonical_message,
 )
 from vonk_agent_protocol.claims import ClaimRequest
@@ -112,7 +114,11 @@ from .reservation_owners import run_has_live_operation
 from .runtime_image_preparation import (
     IMAGE_CACHE_DIRECTORY,
 )
-from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
+from .source_bundles import (
+    SourceBundleError,
+    SourceBundleStoreProtocol,
+    SourceBundleUnknown,
+)
 from .strict_json import ControllerAPIRoute, StrictJSONModel
 from .telemetry import TelemetryRepository, TelemetrySampleInput
 
@@ -1322,7 +1328,21 @@ def install_agent_routes(
                 )
         try:
             bundle = required.source_bundles.get(source_sha256)
-        except SourceBundleError:
+        except SourceBundleUnknown:
+            raise
+        except SourceBundleError as error:
+            if isinstance(error, SecurityRefusalError):
+                raise HTTPException(
+                    status_code=403,
+                    detail="source bundle access was denied",
+                    headers={"x-vonk-error-code": error.code},
+                ) from None
+            if error.code == SourceBundleCode.STORAGE_UNAVAILABLE:
+                raise HTTPException(
+                    status_code=503,
+                    detail="source bundle storage is temporarily unavailable",
+                    headers={"x-vonk-error-code": error.code},
+                ) from None
             raise HTTPException(
                 status_code=409, detail="source bundle storage is inconsistent"
             ) from None

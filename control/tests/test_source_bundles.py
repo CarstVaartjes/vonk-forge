@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import io
 import tarfile
+from pathlib import Path
 
 import pytest
 from vonk_control.source_bundles import (
     BundleLimits,
     SourceBundleError,
     SourceBundleStore,
+    generate_source_bundle,
     inspect_source_bundle,
 )
 
@@ -130,3 +132,91 @@ def test_postgres_source_bundle_metadata_roundtrip_and_strict_reads(postgres_eng
         first.manifest
     )
     assert store.get(bundle.sha256).manifest == first.manifest
+
+
+@pytest.mark.parametrize("fault", ["io", "permission"])
+def test_existing_verified_bundle_is_not_replaced_when_read_is_unknown(
+    tmp_path, monkeypatch, fault
+):
+    import errno
+
+    from vonk_agent_protocol import SecurityRefusalError, SourceBundleCode
+
+    bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
+    store = SourceBundleStore(tmp_path)
+    stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
+    before = stored.path.stat().st_ino
+    original = Path.read_bytes
+
+    def read(path):
+        if path == stored.path:
+            if fault == "permission":
+                raise PermissionError(errno.EACCES, "NAS denied")
+            raise OSError(errno.EIO, "NAS unavailable")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    for action in (
+        lambda: store.get(bundle.sha256),
+        lambda: store.put(bundle.sha256, io.BytesIO(bundle.archive)),
+    ):
+        with pytest.raises(SourceBundleError) as caught:
+            action()
+        if fault == "permission":
+            assert isinstance(caught.value, SecurityRefusalError)
+            assert caught.value.code == "permission_denied"
+        else:
+            assert caught.value.code == SourceBundleCode.STORAGE_UNAVAILABLE
+        assert stored.path.stat().st_ino == before
+    monkeypatch.setattr(Path, "read_bytes", original)
+    assert store.get(bundle.sha256).archive == bundle.archive
+
+
+def test_catalog_source_upload_unknown_recovers_exact_digest(tmp_path, monkeypatch):
+    import errno
+    from datetime import UTC, datetime
+
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import sessionmaker
+    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_control.auth import TokenCodec
+    from vonk_control.catalog_service import CatalogService
+    from vonk_control.models import Base, RecipeSourceBundle
+
+    bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
+    store = SourceBundleStore(tmp_path / "bundles")
+    stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
+    inode = stored.path.stat().st_ino
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    catalog = CatalogService(
+        sessions,
+        clock=lambda: datetime(2026, 10, 6, tzinfo=UTC),
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        source_bundles=store,
+    )
+    original = Path.read_bytes
+    fault = [True]
+
+    def read(path):
+        if path == stored.path and fault[0]:
+            raise OSError(errno.EIO, "NAS read unavailable")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    with pytest.raises(UnknownOutcomeError) as caught:
+        catalog.store_source_bundle(
+            bundle.sha256, io.BytesIO(bundle.archive), "operator"
+        )
+    assert isinstance(caught.value, SourceBundleError)
+    assert caught.value.code == "bundle.storage_unavailable"
+    assert stored.path.stat().st_ino == inode
+    fault[0] = False
+    restored = catalog.store_source_bundle(
+        bundle.sha256, io.BytesIO(bundle.archive), "operator"
+    )
+    assert restored.sha256 == bundle.sha256
+    assert stored.path.stat().st_ino == inode
+    with sessions() as session:
+        assert len(tuple(session.scalars(select(RecipeSourceBundle)))) == 1
