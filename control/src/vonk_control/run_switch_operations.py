@@ -10459,20 +10459,11 @@ def _validate_artifact_execution(
             )
         return
     if phase.kind == "verify":
-        verification: RunSwitchVerifyResult | None = None
-        verification_cause: Exception | None = None
         try:
-            parsed_receipt = _phase_result(result, phase=phase)
+            verification = RunSwitchVerifyResult.model_validate(
+                _phase_result(result, phase=phase), strict=True
+            )
         except (TypeError, ValidationError, RunSwitchRetryLater) as error:
-            verification_cause = error
-        else:
-            if isinstance(parsed_receipt, RunSwitchVerifyResult):
-                verification = parsed_receipt
-            else:
-                verification_cause = TypeError(
-                    "artifact verification receipt has an unexpected phase"
-                )
-        if verification is None:
             if (
                 plan.recipe_build_id is not None
                 and isinstance(raw_result, Mapping)
@@ -10481,11 +10472,11 @@ def _validate_artifact_execution(
                 raise RunSwitchRetryLater(
                     RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
                     reason=WaitReason.SCOPE_CHANGED,
-                ) from verification_cause
+                ) from error
             raise RunSwitchRetryLater(
                 RunSwitchCode.ARTIFACT_VERIFICATION_RESULT_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from verification_cause
+            ) from error
         if verification.verified is not True:
             raise RunSwitchRefused(
                 SecurityRefusalReason.RUN_SWITCH_ARTIFACT_DIGEST_VERIFICATION_FAILED.value
