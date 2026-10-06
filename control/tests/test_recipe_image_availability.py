@@ -3583,6 +3583,57 @@ def test_archive_integrity_failure_builds_the_image_again(tmp_path: Path) -> Non
     assert storage.read_receipt(ARCHIVE_SHA).oci_archive_sha256 == ARCHIVE_SHA
 
 
+def test_a_succeeded_preparation_the_plan_still_misses_is_asked_again(
+    tmp_path: Path,
+) -> None:
+    """A load asks only for what its plan lacks, so an earlier success is stale.
+
+    Replaying the first success (the image was removed afterwards) would park
+    the load for ever; the next ask starts a fresh preparation, paced.
+    """
+
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_head(session, _add_revision(session, "revision-evicted", recipe))
+    now = [datetime(2026, 9, 6, 12, tzinfo=UTC)]
+    service = _service(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        transport=Transport(),
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        clock=lambda: now[0],
+    )
+
+    def preparations() -> list[Job]:
+        with sessions() as session:
+            return list(
+                session.scalars(
+                    select(Job).where(Job.kind == "recipe.image.availability.v2")
+                )
+            )
+
+    service.ensure_preparation("revision-evicted", actor="operator")
+    for _ in range(5):
+        if service.run_pending() == 0:
+            break
+        now[0] += timedelta(seconds=1)
+    assert [job.state for job in preparations()] == ["succeeded"]
+
+    # Just finished: say so, do not spin another one.
+    blockers = service.ensure_preparation("revision-evicted", actor="operator")
+    assert [item.severity for item in blockers] == ["info"]
+    assert len(preparations()) == 1
+
+    # Still missing after the pause: a new preparation is requested.
+    now[0] += timedelta(minutes=3)
+    blockers = service.ensure_preparation("revision-evicted", actor="operator")
+    assert not any(item.severity == "error" for item in blockers)
+    assert len(preparations()) == 2
+
+
 def test_newer_revision_is_prepared_at_once_after_the_older_build_failed(
     tmp_path: Path,
 ) -> None:

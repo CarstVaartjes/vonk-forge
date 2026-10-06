@@ -11,25 +11,25 @@ only place the Controller still interprets an untyped body:
 * ``cancelled`` is the definite ``operation_cancelled`` failure;
 * ``failed`` is a definite failure (a one-shot job's process receipt keeps its
   receipt);
-* ``waiting-for-operator`` is the old agents' word for "I could not confirm the
-  effect": an ``unknown`` outcome whatever body it carries.
+* ``observing`` means "I could not confirm the effect": an ``unknown``
+  outcome whatever body it carries. Retired wait spellings are adopted on read.
 
 The legacy half is for one release, so agents already on the Sparks keep
 working; delete it (and the legacy wait spelling) once no deployable agent
-package predates the typed outcome.  Nothing stored changes: the outcome
-projects back to the same stored body and state word every reader already
-understands (:func:`stored_report`).
+package predates the typed outcome. The outcome projects back to the canonical
+stored body and state word (:func:`stored_report`); unknown receipts are stored
+as observations.
 """
 
 from __future__ import annotations
 
 from pydantic import ValidationError
 from vonk_agent_protocol import (
-    LEGACY_WAIT_STATE,
     AgentFailureResult,
     AgentOperation,
     AgentProtocolError,
     AgentResult,
+    AgentResultState,
     FailureCode,
     OperationOutcome,
     OutcomeDone,
@@ -43,6 +43,7 @@ from vonk_agent_protocol import (
     outcome_state,
     validate_result_for_operation,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import RETIRED_RESULT_STATE_SPELLINGS
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from .agent_upgrade_status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
@@ -92,6 +93,7 @@ def agent_outcome(
     mapping.  An invalid body raises :class:`AgentProtocolError`.
     """
 
+    state = RETIRED_RESULT_STATE_SPELLINGS.get(state, state)
     if isinstance(result, (OutcomeDone, OutcomeFailed, OutcomeUnknown)):
         if outcome_state(result) != state:
             raise AgentProtocolError("agent outcome does not match its state")
@@ -116,7 +118,7 @@ def _legacy_outcome(
             or _LEGACY_REASON
         )
         retry_after = body.retry_after_seconds if body is not None else None
-        if state == LEGACY_WAIT_STATE:
+        if state == AgentResultState.OBSERVING:
             return OutcomeUnknown.model_validate(
                 {
                     "kind": OutcomeKind.UNKNOWN.value,

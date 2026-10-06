@@ -2107,7 +2107,7 @@ class RecipeOperationService:
                 elif job.state == "running":
                     state = LifecycleState.RUNNING.value
                 elif job.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
-                    state = LifecycleState.NEEDS_OPERATOR.value
+                    state = LifecycleState.OBSERVING.value
                 else:
                     continue
                 recovery_owners.append(

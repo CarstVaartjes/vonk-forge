@@ -32,6 +32,7 @@ from vonk_agent_protocol import (
     ObservedAssignmentState,
     OperationFailureCode,
     ProfileReasonCode,
+    RecipeImageCode,
     ReservationState,
     RouteState,
     RunState,
@@ -382,7 +383,7 @@ class PreparationStarter(Protocol):
     """
 
     def __call__(
-        self, recipe_revision_id: str, *, actor: str
+        self, recipe_revision_id: str, *, actor: str, application_id: str | None = None
     ) -> Sequence[OperationBlocker]: ...
 
 
@@ -412,7 +413,12 @@ class PreparationCanceller(Protocol):
     """
 
     def __call__(
-        self, recipe_revision_id: str, *, actor: str, reason: str
+        self,
+        recipe_revision_id: str,
+        *,
+        actor: str,
+        reason: str,
+        application_id: str | None = None,
     ) -> Sequence[str]: ...
 
 
@@ -4898,7 +4904,7 @@ class FleetProfileService:
                             reasons.append(
                                 FleetProfileReason(
                                     code=ProfileReasonCode.PREPARATION_UNAVAILABLE,
-                                    detail="Prepare the exact model and runtime image in the Controller cache before loading this assignment.",
+                                    detail="The exact model and runtime image are not in the Controller cache yet; the Controller prepares them and continues the load when they are ready.",
                                     severity="error",
                                 )
                             )
@@ -5769,6 +5775,8 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             if not _owns_pending_admission(row, progress):
                 return self._application_view(row)
+            if self._end_exhausted_preparation(row, blockers or (), session):
+                return self._application_view(row)
             if storage is not None:
                 since = _aware(progress.storage_wait_since or now)
                 final = next(
@@ -6112,7 +6120,7 @@ class FleetProfileService:
                     select_profile=True,
                 )
                 blockers = _preview_blockers(preview) + self._request_preparations(
-                    preview, actor=actor
+                    preview, actor=actor, application_id=pending.id
                 )
                 return self._defer_pending_application(
                     pending.id,
@@ -7169,6 +7177,7 @@ class FleetProfileService:
                         revision_id,
                         actor=actor,
                         reason=f"Profile application {application_id} was cancelled",
+                        application_id=application_id,
                     )
                 )
             except Exception:  # the cancel already succeeded
@@ -7188,7 +7197,11 @@ class FleetProfileService:
                     )[:512]
 
     def _request_preparations(
-        self, preview: FleetProfilePreview, *, actor: str
+        self,
+        preview: FleetProfilePreview,
+        *,
+        actor: str,
+        application_id: str | None = None,
     ) -> list[OperationBlocker]:
         """Enqueue the model and image preparation a blocked load is missing.
 
@@ -7209,7 +7222,13 @@ class FleetProfileService:
             preview.assessments,
         ):
             try:
-                blockers.extend(starter(assignment.recipe_revision_id, actor=actor))
+                blockers.extend(
+                    starter(
+                        assignment.recipe_revision_id,
+                        actor=actor,
+                        application_id=application_id,
+                    )
+                )
             except Exception as error:  # noqa: BLE001 - a load never fails on this
                 blockers.append(
                     make_blocker(
@@ -7260,6 +7279,62 @@ class FleetProfileService:
             _LOGGER.warning("storage relief failed", exc_info=True)
             return None
 
+    def _request_recovery_preparations(
+        self, application_id: str
+    ) -> list[OperationBlocker]:
+        """Re-plan accepted intent and request assets outside the parent transaction."""
+        with self._sessions() as session:
+            row = session.get(FleetProfileApplication, application_id)
+            if row is None:
+                return []
+            intended = self._intended_profile(row, session=session)
+            plan = _persisted_profile_plan(row)
+            actor = row.actor
+        if isinstance(intended, Residue) or isinstance(plan, Residue):
+            return []
+        preview = self.preview(
+            plan.profile_id,
+            execution_assignments=tuple(intended.assignments),
+            profile_name=plan.profile_name,
+            profile_digest=intended.profile_digest,
+            accepted_intent=intended,
+            accepted_profile_revision=plan.profile_revision,
+            accepted_profile_definition=plan.profile_definition,
+            profile_application_id=application_id,
+        )
+        return self._request_preparations(
+            preview, actor=actor, application_id=application_id
+        )
+
+    def _end_exhausted_preparation(
+        self,
+        row: FleetProfileApplication,
+        blockers: Sequence[OperationBlocker],
+        session: Session,
+    ) -> bool:
+        exhausted = next(
+            (
+                item
+                for item in blockers
+                if item.code == RecipeImageCode.PREPARATION_EXHAUSTED
+            ),
+            None,
+        )
+        if exhausted is None:
+            return False
+        progress = _persisted_profile_progress(row)
+        row.progress = _progress_with_blockers(
+            progress,
+            [exhausted, *(item for item in blockers if item is not exhausted)],
+            admission_pending=False,
+            admission_retry_at=None,
+            retry_due_at=None,
+        )
+        self._lifecycle.fail(
+            row, exhausted.detail, _aware(self._clock()), session=session
+        )
+        return True
+
     def _park_for_retry(
         self,
         row: FleetProfileApplication,
@@ -7283,6 +7358,10 @@ class FleetProfileService:
             f"{type(because).__name__} is not retryable by waiting and must "
             "not park an application"
         )
+        session = object_session(row)
+        assert session is not None
+        if self._end_exhausted_preparation(row, blockers, session):
+            return
         now = _aware(self._clock())
         due = FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
         blockers = bound_blockers(blockers)
@@ -7498,7 +7577,7 @@ class FleetProfileService:
                     reason=InvalidRequestReason.NOT_READY,
                 )
             blockers = _preview_blockers(preview) + self._request_preparations(
-                preview, actor=actor
+                preview, actor=actor, application_id=application_id
             )
             return self._decline_retry_application(
                 application_id,
@@ -8249,6 +8328,9 @@ class FleetProfileService:
             # Keep the prior generation selected. The next normal worker tick
             # rechecks the same roster change after cache, capacity or roster
             # blockers clear; no failed application can poison reconciliation.
+            # Missing assets are asked for now, so the recheck finds them.
+            if _profile_preview_is_waitable(preview):
+                self._request_preparations(preview, actor=selected.actor)
             return False
         pending: FleetProfileApplicationView | None = None
         try:
@@ -8337,6 +8419,9 @@ class FleetProfileService:
                     automatic_cache_recovery=True,
                 )
             except _FleetProfileRecoveryBindingConflict as error:
+                preparation_blockers = self._request_recovery_preparations(
+                    application_id
+                )
                 with self._sessions.begin() as session:
                     row = session.get(
                         FleetProfileApplication, application_id, with_for_update=True
@@ -8348,7 +8433,8 @@ class FleetProfileService:
                             [
                                 make_blocker(
                                     ProfileReasonCode.RECOVERY_CACHE_PENDING, str(error)
-                                )
+                                ),
+                                *preparation_blockers,
                             ],
                             because=error,
                         )
@@ -8356,6 +8442,12 @@ class FleetProfileService:
                 # No replacement intent or unknown-output build was admitted.
                 # The existing backoff revisits this receipt after cache repair.
             except (FleetProfileConflict, FleetProfilePermissionDenied) as error:
+                preparation_blockers = (
+                    self._request_recovery_preparations(application_id)
+                    if retry_disposition_of(error) == RETRY_WAIT
+                    and not is_security_failure(error_code(error))
+                    else []
+                )
                 with self._sessions.begin() as session:
                     row = session.get(
                         FleetProfileApplication, application_id, with_for_update=True
@@ -8394,7 +8486,8 @@ class FleetProfileService:
                                     error_code(error)
                                     or ProfileReasonCode.RETRY_CONFLICT,
                                     str(error) or "The profile could not be retried",
-                                )
+                                ),
+                                *preparation_blockers,
                             ],
                             because=error,
                         )
@@ -8834,7 +8927,7 @@ class FleetProfileService:
                 )
                 return None
             blockers = _preview_blockers(fresh) + self._request_preparations(
-                fresh, actor=actor
+                fresh, actor=actor, application_id=application_id
             )
             self._defer_pending_application(
                 application_id,
@@ -8962,7 +9055,7 @@ class FleetProfileService:
         blockers: list[OperationBlocker] = []
         if not fresh.allowed and _profile_preview_is_waitable(fresh):
             blockers = _preview_blockers(fresh) + self._request_preparations(
-                fresh, actor=actor
+                fresh, actor=actor, application_id=application_id
             )
         reason = (
             f"Recipe updated to {', '.join(versions)}; re-planned."
@@ -9540,6 +9633,10 @@ class FleetProfileService:
         adapter = self._switch_adapter
         if (
             adapter is None
+            or any(
+                item.code == RecipeImageCode.PREPARATION_EXHAUSTED
+                for item in progress.blockers
+            )
             or progress.intended_profile is None
             or adapter.recovery_refused(row.id, session=session)
         ):
@@ -10080,12 +10177,12 @@ class FleetProfileService:
                 ModelCacheBlockerCode.RECIPE_NOT_CACHED in cache.blockers
             ):
                 # The selected exact revision is bound into the profile, so the
-                # operator has to prepare this cache entry rather than accept a
+                # load prepares this cache entry rather than accept a
                 # silently different older revision.
                 warnings.append(
                     f"Recipe {recipe.publisher}/{recipe.slug} revision "
                     f"{revision.revision_number} is not in the local cache; "
-                    "prepare the exact cache entry before applying"
+                    "the Controller prepares the exact cache entry when the profile loads"
                 )
             model_state = (
                 "Cached"

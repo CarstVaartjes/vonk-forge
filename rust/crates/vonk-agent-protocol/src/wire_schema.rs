@@ -183,7 +183,47 @@ fn materialize(schema: &Value, value: &mut Value) {
     }
 }
 
+// Adopt only explicitly retired enum spellings declared by the Pydantic source.
+// This never supplies defaults or changes external passthrough content.
+fn adopt_read_aliases(schema: &Value, value: &mut Value) {
+    if let Some(reference) = schema["$ref"].as_str()
+        && let Some(definition) = SCHEMA.pointer(reference.trim_start_matches('#'))
+    {
+        adopt_read_aliases(definition, value);
+        return;
+    }
+    if let Some(old) = value.as_str()
+        && let Some(current) = schema["x-vonk-read-aliases"].get(old)
+    {
+        *value = current.clone();
+    }
+    if let (Some(properties), Some(object)) =
+        (schema["properties"].as_object(), value.as_object_mut())
+    {
+        for (name, property) in properties {
+            if let Some(child) = object.get_mut(name) {
+                adopt_read_aliases(property, child);
+            }
+        }
+    }
+    if let Some(array) = value.as_array_mut()
+        && let Some(items) = schema.get("items")
+    {
+        for child in array {
+            adopt_read_aliases(items, child);
+        }
+    }
+    for key in ["anyOf", "oneOf", "allOf"] {
+        if let Some(variants) = schema[key].as_array() {
+            for variant in variants {
+                adopt_read_aliases(variant, value);
+            }
+        }
+    }
+}
+
 pub(crate) fn validate_and_materialize(name: &str, value: &mut Value) -> Result<(), String> {
+    adopt_read_aliases(&SCHEMA["$defs"][name], value);
     let pointer = format!("#/$defs/{name}");
     // A model declared tolerant (`extra="ignore"`) drops keys it does not know
     // before validation, so a record written by another release stays readable.

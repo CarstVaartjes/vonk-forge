@@ -55,7 +55,7 @@
       "control/src/vonk_control/runtime_image_preparation.py"
     ]
   },
-  "max_debt": 9,
+  "max_debt": 0,
   "debt_ceiling": {
     "total": 74,
     "unaudited": 308,
@@ -393,182 +393,17 @@
   ],
   "operator_waits": [
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.run_status",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "recipe.start",
-        "recipe.stop"
-      ],
-      "trigger": "recovery owner projection of a Job already in waiting-for-operator",
-      "advertised_action": "inherits the job: resume/retire when eligible",
-      "irreversible_effect": "inherits",
-      "verdict": "DERIVED",
-      "reason": "Read-side projection of an existing Job state onto a typed owner view; it creates no wait.",
-      "sites": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "ControlExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "agent.upgrade.v1"
-      ],
-      "trigger": "package installed, awaiting identity confirmation",
-      "advertised_action": "automatic: schedule_agent_upgrade_retry; agent_upgrade_next_action",
-      "irreversible_effect": "binary replaced",
-      "verdict": "SELF-HEAL",
-      "reason": "Success path reported as waiting; give it its own non-operator state.",
-      "sites": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::stop_run_exact",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "recipe.start",
-        "recipe.stop"
-      ],
-      "trigger": "workload stop or local cleanup unconfirmed",
-      "advertised_action": "automatic: the typed unknown outcome (wait reason stop-unconfirmed or cleanup-unconfirmed) is retried by the Controller after the exact-resume inspection",
-      "irreversible_effect": "workload may still hold GPU memory; Stop is idempotent",
-      "verdict": "SELF-HEAL",
-      "reason": "Stop is idempotent and restart-safe: the unknown outcome carries a typed wait reason, and the Controller retries it instead of parking it.",
-      "sites": 4
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "recipe.stop",
-        "recipe.uninstall"
-      ],
-      "trigger": "container runtime stop or stop metadata unconfirmed",
-      "advertised_action": "automatic: typed unknown outcome with evidence (wait reason stop-unconfirmed or stop-metadata-unconfirmed), retried by the Controller after observing",
-      "irreversible_effect": "container may still run; re-stop is idempotent",
-      "verdict": "SELF-HEAL",
-      "reason": "Stop and uninstall are idempotent: the Controller treats any waiting result as an uncertain effect and retries after observing.",
-      "sites": 7
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "recipe.job.run.v1"
-      ],
-      "trigger": "controller cancellation could not stop the active job / runtime state uncertain",
-      "advertised_action": "stop route (see artifact_jobs entry)",
-      "irreversible_effect": "job process may still run",
-      "verdict": "KEEP",
-      "reason": "Real uncertain irreversible effect.",
-      "sites": 7
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "RecipeExecutor::execute",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "recipe.start"
-      ],
-      "trigger": "cancelled workload model custody (installation ACL transition) unconfirmed",
-      "advertised_action": "automatic: typed unknown outcome with evidence (wait reason model-custody-unconfirmed), retried by the Controller after observing",
-      "irreversible_effect": "ACL on shared model files may stay granted",
-      "verdict": "SELF-HEAL",
-      "reason": "finish_installation_acl_transition is an idempotent local step: the agent repeats it (bounded, three retries on transient storage errors) and only a persistent failure reports unknown with evidence (stage model-custody, error category) for the Controller to observe.",
-      "sites": 7
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/state.rs",
-      "function": "StateStore::recover_interrupted",
-      "kind": "rust-result",
-      "operation_kinds": [
-        "every operation running at agent restart"
-      ],
-      "trigger": "agent restarted with an operation in progress",
-      "advertised_action": "automatic for restart-safe kinds: typed unknown outcome (wait reason agent-restart-interrupted)",
-      "irreversible_effect": "unknown",
-      "verdict": "SELF-HEAL",
-      "reason": "Already typed as an unknown outcome with a closed wait reason; recipe.job.run.v1 and recipe.build.v1 remain parked (see their entries).",
-      "sites": 1
-    },
-    {
       "path": "control/src/vonk_control/lifecycle/agent_operation.py",
       "function": "AgentOperationAdapter._stored",
       "kind": "control-state-projection",
       "operation_kinds": [
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.reconcile",
-        "artifact.distribution.v1",
-        "runtime.preflight",
-        "agent.upgrade.v1",
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1",
         "recipe.job.run.v1"
       ],
-      "trigger": "the core decided backoff (an automatic retry) or a queued retry; projected onto the stored vocabulary",
-      "advertised_action": "automatic: next_action_at schedules the claim (the Spark polls; the label waiting-for-operator is legacy)",
-      "irreversible_effect": "none: only a restart-safe or fenced order is ever scheduled (core rule 1)",
-      "verdict": "DERIVED",
-      "reason": "Projection of a core decision. The stored label is kept for compatibility; no operator is involved and the order is claimable when next_action_at is due.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
-      "function": "AgentOperationAdapter._stored",
-      "kind": "control-state-projection",
-      "operation_kinds": [
-        "recipe.job.run.v1",
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1"
-      ],
-      "trigger": "the core decided observing or needs-operator for an irreversible order (a user job or a build) whose effect cannot be observed from the Controller",
+      "trigger": "the core requires explicit authority before repeating an uncertain user job",
       "advertised_action": "resume/retire (operator_resume_candidates_in_session) while the order is eligible; otherwise the reconciler re-evaluates the wait on every pass and ends it when its job ends or is cancelled",
-      "irreversible_effect": "a user job may have run or still be running; a build may have produced output",
+      "irreversible_effect": "a user job may have modified user data",
       "verdict": "KEEP",
-      "reason": "Core rule 3: needs-operator only for an irreversible order with an advertised action. Without one the order keeps being re-evaluated and a cancel ends it with its effect recorded as unknown.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
-      "function": "AgentOperationAdapter.reopen",
-      "kind": "control-state-assignment",
-      "operation_kinds": [
-        "agent.upgrade.v1"
-      ],
-      "trigger": "an agent-upgrade helper acknowledgement (or failure) the owner finds is not proof of the target build",
-      "advertised_action": "automatic: the core schedules the fenced retry in the same call (schedule_agent_upgrade_retry)",
-      "irreversible_effect": "none: the claim refuses to install over any binary but the exact rollback source",
-      "verdict": "SELF-HEAL",
-      "reason": "The order is reopened and immediately decided by the core, which retries it behind the dpkg safety fence; it never stays waiting.",
-      "sites": 1
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
-      "function": "aggregate_parent_state",
-      "kind": "control-state-projection",
-      "operation_kinds": [
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.reconcile",
-        "artifact.distribution.v1",
-        "runtime.preflight",
-        "agent.upgrade.v1",
-        "recipe.build.v1",
-        "recipe.build.cleanup.v1",
-        "recipe.job.run.v1"
-      ],
-      "trigger": "every order of a parent job has finished and at least one waits",
-      "advertised_action": "inherits the waiting child: automatic retry, or resume/retire when eligible",
-      "irreversible_effect": "inherits",
-      "verdict": "DERIVED",
-      "reason": "Pure projection of the children onto the parent job; allowed exactly while a child wait is allowed.",
+      "reason": "Security edge: an uncertain user job may have destructive effects on user data; rerunning it requires explicit authority. Stop is advertised and accepted.",
       "sites": 1
     },
     {
@@ -582,7 +417,21 @@
       "advertised_action": "stop: ArtifactJobAdapter.actions; the cancel endpoint takes it (a waiting parent accepts it) and the job's supported_actions advertises it",
       "irreversible_effect": "the job process may still be running and holding GPU/memory",
       "verdict": "KEEP",
-      "reason": "Irreversible and uncertain (audit C8, now FIX-ACTION done: Stop is advertised and accepted). The row is a projection of the order's core decision (rule 3). The job never waits on its own: a requested cancel is shown as cancelling and ends cancelled with the effect unknown and a residue record (rule 4), and the API contract refuses waiting-for-operator without supported_actions=[stop].",
+      "reason": "Security edge: an uncertain user job may have destructive effects on user data; rerunning it requires explicit authority. Stop is advertised and accepted.",
+      "sites": 1
+    },
+    {
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "function": "aggregate_parent_state",
+      "kind": "control-state-projection",
+      "operation_kinds": [
+        "recipe.job.run.v1"
+      ],
+      "trigger": "an irreversible user-job child needs explicit authority",
+      "advertised_action": "stop via the artifact job",
+      "irreversible_effect": "inherits the user job",
+      "verdict": "KEEP",
+      "reason": "Security edge: a parent mirrors only a child whose uncertain user-data effects require authority before repeat. Automatic observations and retries are live, never operator waits.",
       "sites": 1
     }
   ],

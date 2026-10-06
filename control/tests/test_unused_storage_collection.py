@@ -1383,6 +1383,38 @@ def test_receipt_a_profile_points_to_is_kept_and_a_merely_offered_one_is_not(
     assert result.images == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("progress", [None, {"admission_pending": True}])
+def test_receipt_a_waiting_load_resolved_is_kept_without_a_saved_profile(
+    world: Catalog, tmp_path: Path, progress: dict[str, object] | None
+) -> None:
+    """A queued or admission-waiting application needs the image its plan named.
+
+    The saved profile may name other recipes by now (a sweep rewrites it), and a
+    load waiting for storage must still keep its own assets.
+    """
+
+    head = world.revision("glm", 1, head="active")
+    world.build(head, archive=AN_IMAGE)
+    path = _receipt(tmp_path, AN_IMAGE)
+    plan: dict[str, object] = {"resolved_assignments": [{"recipe_revision_id": head}]}
+    _application(world, plan, state="queued", progress=progress)
+
+    result = _collector(world, image_cache_root=tmp_path).collect()
+
+    assert path.exists()
+    assert _kept(result, "profile application unreadable") == 1
+
+    with world.sessions.begin() as session:
+        for application in session.scalars(select(FleetProfileApplication)):
+            session.delete(application)
+        session.flush()
+        for profile in session.scalars(select(FleetProfile)):
+            session.delete(profile)
+    result = _collector(world, image_cache_root=tmp_path).collect()
+    assert not path.exists(), result.kept  # a fresh operation is not held back by it
+
+
 def test_receipt_of_a_superseded_revision_goes_but_a_shared_one_stays(
     world: Catalog, tmp_path: Path
 ) -> None:
@@ -2094,3 +2126,26 @@ def test_a_review_counts_every_unused_installation_and_names_what_stays(
         f"evicting {70 * GIB} bytes from saved profile Coding"
     )
     assert lifecycle.removed == []
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("plan", [{}, {"resolved_assignments": "damaged"}])
+def test_unreadable_pending_application_retains_unmentioned_image(
+    world: Catalog, tmp_path: Path, plan: dict[str, object]
+) -> None:
+    """A failed reference read cannot prove an unrelated cached image unused."""
+    head = world.revision("glm", 1, head="active")
+    world.build(head, archive=AN_IMAGE)
+    path = _receipt(tmp_path, AN_IMAGE)
+    _application(world, plan, state="queued")
+    result = _collector(world, image_cache_root=tmp_path).collect()
+    assert path.exists()
+    assert _kept(result, "profile application unreadable") == 1
+    with world.sessions.begin() as session:
+        for application in session.scalars(select(FleetProfileApplication)):
+            session.delete(application)
+        session.flush()
+        for profile in session.scalars(select(FleetProfile)):
+            session.delete(profile)
+    result = _collector(world, image_cache_root=tmp_path).collect()
+    assert not path.exists(), result.kept

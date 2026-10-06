@@ -2812,13 +2812,48 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
         assert jobs.record_late_result(_restart_interrupted_result(claim_a, kind))
         refuse()
 
-    assert job_state(sessions, job.id).state == "failed"
-    with sessions() as session:
-        parked = session.get(AgentOperation, first.id)
-        assert parked.state == "cancelled"
-        assert parked.next_action_at is None and parked.next_action_at is None
-        assert "abandoned" in parked.status_reason
-        assert session.get(AgentOperation, second.id).state == "failed"
+    from .non_blocking import assert_ended_without_blocking
+
+    def released() -> None:
+        with sessions() as session:
+            parked = session.get(AgentOperation, first.id)
+            assert parked.state == "cancelled"
+            assert parked.next_action_at is None
+            assert "abandoned" in parked.status_reason
+            assert session.get(AgentOperation, second.id).state == "failed"
+
+    def fresh():
+        new_job = parent(sessions, clock)
+        operation = jobs.enqueue(
+            new_job.id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+        )
+        claim = claim_agent(jobs, NODE_A, "serial-a")
+        assert claim is not None
+        assert fenced_operation(sessions, claim.fence).id == operation.id
+        return job_state(sessions, new_job.id)
+
+    def typed_reason(_ended) -> None:
+        from vonk_agent_protocol import AgentFailureResult, FailureCode
+
+        with sessions() as session:
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == second.id
+                )
+            )
+            assert attempt is not None
+            failure = AgentFailureResult.model_validate_json(json.dumps(attempt.result))
+            assert failure.error_code == FailureCode.ARTIFACT_DISTRIBUTION_FAILED
+
+    ended, _ = assert_ended_without_blocking(
+        None,
+        job_state(sessions, job.id),
+        end=lambda view: view,
+        assert_released=released,
+        assert_reason=typed_reason,
+        fresh=lambda _: fresh(),
+    )
+    assert ended.state == "failed"
 
 
 def test_distribution_parked_with_a_stale_retry_authorisation_resumes_itself(
@@ -3942,3 +3977,34 @@ def test_agent_job_refusals_carry_their_category() -> None:
     assert isinstance(StaleAgentRequest("x"), InvalidRequestError)
     for stale in (StaleAgentFence, StaleAgentLease, StaleAgentRequest):
         assert issubclass(stale, StaleAgentAttempt)
+
+
+def test_cancelled_build_waits_for_platform_cleanup_as_an_observation(service) -> None:
+    """A rebuildable child cannot turn pending cleanup into a human gate."""
+    from vonk_control.job_documents import RecipeBuildParent
+    from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    with sessions.begin() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None
+        stored.kind = ProtocolAgentOperation.RECIPE_BUILD.value
+        stored.payload = RecipeBuildParent(
+            schema_version=1,
+            owner_kind="recipe-build",
+            owner_id=str(uuid.uuid4()),
+            plan_digest=COMMIT,
+        ).model_dump(mode="json", exclude_none=True)
+        stored.payload_digest = hashlib.sha256(
+            canonical_message(stored.payload)
+        ).hexdigest()
+        stored.result = RecipeOperationCancellationResult(
+            cancel_requested=True,
+            cancel_requested_at=clock.now,
+            cancel_request_id=str(uuid.uuid4()),
+            cancel_actor="operator",
+            reason="stop this build",
+        ).model_dump(mode="json", exclude_none=True)
+        jobs._aggregate_parent_state(session, job.id)
+    assert job_state(sessions, job.id).state == "observing"

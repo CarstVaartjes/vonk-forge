@@ -473,12 +473,12 @@
         "type": "object"
       },
       "AgentResultState": {
-        "description": "The state words of an agent result on the wire.\n\nThe wire keeps four words, shared with agents already deployed.  A typed\noutcome decides which one is truthful (``done`` is ``succeeded``, a\nconfirmed cancellation is ``cancelled``, any other definite failure is\n``failed`` and ``unknown`` is the legacy ``waiting-for-operator``); the\nController maps them onto its stored state values unchanged.",
+        "description": "The state words of an agent result on the wire.\n\nUnknown effects are observed by the Controller with bounded retries. The\nretired operator-wait spelling is adopted only when reading old receipts.",
         "enum": [
           "succeeded",
           "failed",
           "cancelled",
-          "waiting-for-operator"
+          "observing"
         ],
         "title": "AgentResultState",
         "type": "string"
@@ -21187,6 +21187,7 @@
           "recipe_image.operation_invalid",
           "recipe_image.operation_missing",
           "recipe_image.preparation_failed",
+          "recipe_image.preparation_exhausted",
           "recipe_image.preparing",
           "recipe_image.recipe_invalid",
           "recipe_image.recipe_unavailable",

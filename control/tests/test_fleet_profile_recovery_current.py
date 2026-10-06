@@ -878,7 +878,9 @@ def test_load_with_a_missing_image_requests_preparation_and_continues_when_ready
     )
     requested: list[str] = []
 
-    def prepare(recipe_revision_id: str, *, actor: str):
+    def prepare(
+        recipe_revision_id: str, *, actor: str, application_id: str | None = None
+    ):
         requested.append(recipe_revision_id)
         return [
             make_blocker(
@@ -964,7 +966,7 @@ def test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds(
         sessions, clock=lifecycle._clock, run_switch_operations=run_switch
     )
     service.bind_preparation_starter(
-        lambda recipe_revision_id, *, actor: [
+        lambda recipe_revision_id, *, actor, application_id=None: [
             make_blocker(
                 "recipe_image.preparing",
                 "Preparing the model and runtime image (prepare).",
@@ -975,7 +977,11 @@ def test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds(
     cancelled_preparations: list[str] = []
 
     def cancel_preparation(
-        recipe_revision_id: str, *, actor: str, reason: str
+        recipe_revision_id: str,
+        *,
+        actor: str,
+        reason: str,
+        application_id: str | None = None,
     ) -> tuple[str, ...]:
         cancelled_preparations.append(recipe_revision_id)
         return ("prep-1",)
@@ -1082,7 +1088,9 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
     )
     requested: list[str] = []
 
-    def prepare(recipe_revision_id: str, *, actor: str):
+    def prepare(
+        recipe_revision_id: str, *, actor: str, application_id: str | None = None
+    ):
         requested.append(recipe_revision_id)
         return [
             make_blocker(
