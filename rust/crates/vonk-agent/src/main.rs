@@ -174,8 +174,8 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     }
     let mut failures = 0_u32;
     let state = loop {
-        let opened = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)
-            .and_then(|mut state| state.recover_interrupted().map(|()| state));
+        let opened =
+            StateStore::open_recovered(&config.data_dir.join("state.sqlite"), &config.node_id);
         match opened {
             Ok(state) => break state,
             Err(error) => {

@@ -74,10 +74,6 @@ class LibraryProjectionError(RuntimeError):
     """The active catalog contains a document outside the public authority."""
 
 
-class LibraryAssessmentUnavailable(RuntimeError):
-    """A requested readiness filter could hide candidates with unknown evidence."""
-
-
 class LibrarySelectorAmbiguous(ValueError):
     """A short selector names more than one canonical catalog identity."""
 
@@ -1472,23 +1468,16 @@ class LibraryProjection:
         )
         if filtering_assessment:
             filtered = self._assessed(filtered, deadline=deadline)
-            for item in filtered:
-                for name, expected in readiness_filters.items():
-                    if expected is None:
-                        continue
-                    if (
-                        item.assessment is None
-                        or getattr(item.assessment, name).state == "unavailable"
-                    ):
-                        raise LibraryAssessmentUnavailable(
-                            "Readiness filtering is unavailable for some candidates; narrow the library filters or remove the readiness filter to inspect their reasons."
-                        )
+            # Unknown evidence is not a negative filter match. Keep the
+            # candidate visible with its typed unavailable assessment so a
+            # stale node cannot hide the rest of the library or claim absence.
             filtered = [
                 item
                 for item in filtered
-                if item.assessment is not None
-                and all(
+                if all(
                     expected is None
+                    or item.assessment is None
+                    or getattr(item.assessment, name).state == "unavailable"
                     or (getattr(item.assessment, name).state == "ready") == expected
                     for name, expected in readiness_filters.items()
                 )

@@ -4,10 +4,11 @@ import json
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, event, select, text, update
+from sqlalchemy import Table, create_engine, event, literal, select, text, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
@@ -419,6 +420,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 "ip_address": "192.168.1.211",
                 "lifecycle": "managed",
                 "labels": {"rack": "left"},
+                "projection_issues": None,
                 "connection": {
                     "agent_state": "active",
                     "certificate_state": "valid",
@@ -488,6 +490,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 "ip_address": None,
                 "lifecycle": "managed",
                 "labels": {"rack": "right"},
+                "projection_issues": None,
                 "connection": {
                     "agent_state": "active",
                     "certificate_state": "valid",
@@ -1443,8 +1446,21 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
     ) == ([0], [NODE_A], False, "degraded", "external-member")
 
 
-@pytest.mark.parametrize("damage", ("document", "digest", "candidate"))
-def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize(
+    "damage",
+    (
+        "document",
+        "digest",
+        "candidate",
+        "mapping",
+        "mapping_rank",
+        "rank",
+        "state",
+        "labels",
+    ),
+)
+def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     damage: str,
 ) -> None:
     """A node whose catalog revision is unreadable must not read as empty.
@@ -1454,7 +1470,13 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
     inconsistent". An ineligible revision is different: it is simply not this
     node's business, so it disappears without an error.
     """
-    engine = create_engine("sqlite+pysqlite:///:memory:")
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     recipe_id = "00000000-0000-4000-8000-000000000401"
@@ -1589,12 +1611,120 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
                 updated_at=NOW,
             )
         )
+    # A second known group on the same node must survive the damaged row.
+    healthy_installation_id = "00000000-0000-4000-8000-000000000907"
+    healthy_run_id = "00000000-0000-4000-8000-000000000908"
+    with sessions.begin() as session:
+        session.add(_profile(NODE_A, display_name="Spark A", hostname="spark-a"))
+        for model, source_id, replacements in (
+            (
+                ClusterMapping,
+                mapping_id,
+                {
+                    "id": "00000000-0000-4000-8000-000000000905",
+                    "placement_digest": "9" * 64,
+                },
+            ),
+            (
+                ClusterMappingNode,
+                "00000000-0000-4000-8000-000000000409",
+                {
+                    "id": "00000000-0000-4000-8000-000000000909",
+                    "mapping_id": "00000000-0000-4000-8000-000000000905",
+                },
+            ),
+            (
+                RecipeInstallation,
+                installation_id,
+                {
+                    "id": healthy_installation_id,
+                    "mapping_id": "00000000-0000-4000-8000-000000000905",
+                },
+            ),
+            (
+                InstallationNode,
+                "00000000-0000-4000-8000-000000000410",
+                {
+                    "id": "00000000-0000-4000-8000-000000000910",
+                    "installation_id": healthy_installation_id,
+                },
+            ),
+            (
+                RecipeRun,
+                run_id,
+                {
+                    "id": healthy_run_id,
+                    "installation_id": healthy_installation_id,
+                    "mapping_id": "00000000-0000-4000-8000-000000000905",
+                    "alias": "healthy-run",
+                },
+            ),
+            (
+                RunNode,
+                "00000000-0000-4000-8000-000000000411",
+                {
+                    "id": "00000000-0000-4000-8000-000000000911",
+                    "run_id": healthy_run_id,
+                },
+            ),
+        ):
+            table = cast(Table, model.__table__)
+            session.execute(
+                table.insert().from_select(
+                    [column.name for column in table.columns],
+                    select(
+                        *[
+                            literal(replacements[column.name])
+                            if column.name in replacements
+                            else column
+                            for column in table.columns
+                        ]
+                    ).where(table.c.id == source_id),
+                )
+            )
     # Damage the row the way an out-of-band write would, in its own session:
     # the ORM refuses to rewrite an active revision (before_update,
     # before_delete, and a commit-time digest check), so only a restore, manual
     # surgery or drift against a newer canonical model leaves this state on disk.
     with sessions.begin() as session:
-        if damage == "candidate":
+        session.execute(text("PRAGMA ignore_check_constraints = ON"))
+        if damage == "mapping":
+            session.execute(
+                update(ClusterMapping)
+                .where(ClusterMapping.id == mapping_id)
+                .values(node_count=-1)
+            )
+        elif damage == "mapping_rank":
+            session.execute(
+                update(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == mapping_id)
+                .values(rank=-1)
+            )
+        elif damage == "rank":
+            session.execute(
+                update(InstallationNode)
+                .where(InstallationNode.installation_id == installation_id)
+                .values(rank=-1)
+            )
+            session.execute(
+                update(RunNode).where(RunNode.run_id == run_id).values(rank=-1)
+            )
+        elif damage == "state":
+            session.execute(
+                update(RecipeInstallation)
+                .where(RecipeInstallation.id == installation_id)
+                .values(state="invalid")
+            )
+            session.execute(
+                update(RecipeRun).where(RecipeRun.id == run_id).values(state="invalid")
+            )
+        elif damage == "labels":
+            session.execute(
+                update(AgentNodeProfile)
+                .where(AgentNodeProfile.node_id == NODE_A)
+                .values(labels=["invalid"])
+            )
+        elif damage == "candidate":
             session.execute(
                 update(CatalogDocumentRevision)
                 .where(CatalogDocumentRevision.id == revision_id)
@@ -1610,16 +1740,101 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
                 ),
                 {"value": value, "id": revision_id},
             )
+        session.execute(text("PRAGMA ignore_check_constraints = OFF"))
 
     projection = FleetProjection(sessions, clock=lambda: NOW)
     if damage == "candidate":
         snapshot = projection.read()
         assert (snapshot.nodes[0].installed, snapshot.nodes[0].loaded) == ([], [])
         return
-    # The revision refuses to be read as canonical, and no snapshot is produced
-    # at all: an empty installation list is never substituted for the failure.
-    with pytest.raises(ValueError, match="immutable"):
-        projection.read()
+    from .test_operation_api import _client
+
+    client, operator, *_ = _client(fleet_projection=projection)
+    snapshot = projection.read()
+    observed = client.get("/api/fleet", headers=operator)
+    assert observed.status_code == 200
+    if damage != "labels":
+        assert observed.json()["nodes"][0]["installed"][0]["complete"] is None
+        assert observed.json()["nodes"][0]["loaded"][0]["healthy"] is None
+    snapshot = projection.read()
+    if damage == "labels":
+        assert observed.json()["nodes"][0]["labels"] is None
+        assert "unknown" in observed.json()["nodes"][0]["projection_issues"][0]
+        assert all(value.complete is True for value in snapshot.nodes[0].installed)
+        with sessions.begin() as session:
+            session.execute(
+                update(AgentNodeProfile)
+                .where(AgentNodeProfile.node_id == NODE_A)
+                .values(labels={"role": "inference"})
+            )
+        recovered = client.get("/api/fleet", headers=operator)
+        assert recovered.json()["nodes"][0]["labels"] == {"role": "inference"}
+        assert not recovered.json()["nodes"][0].get("projection_issues")
+        return
+    if damage in {"mapping", "mapping_rank", "rank", "state"}:
+        assert (
+            next(
+                value
+                for value in snapshot.nodes[0].installed
+                if value.installation_id == healthy_installation_id
+            ).complete
+            is True
+        )
+        assert (
+            next(
+                value
+                for value in snapshot.nodes[0].loaded
+                if value.run_id == healthy_run_id
+            ).healthy
+            is True
+        )
+    assert snapshot.nodes[0].installed[0].installation_id == installation_id
+    assert snapshot.nodes[0].loaded[0].run_id == run_id
+    assert snapshot.nodes[0].installed[0].complete is None
+    assert snapshot.nodes[0].loaded[0].healthy is None
+    installation_issue = snapshot.nodes[0].installed[0].projection_issue
+    run_issue = snapshot.nodes[0].loaded[0].projection_issue
+    assert installation_issue is not None and "unknown" in installation_issue
+    assert run_issue is not None and "unknown" in run_issue
+    with sessions.begin() as session:
+        session.execute(
+            update(ClusterMapping)
+            .where(ClusterMapping.id == mapping_id)
+            .values(node_count=1)
+        )
+        session.execute(
+            update(ClusterMappingNode)
+            .where(ClusterMappingNode.mapping_id == mapping_id)
+            .values(rank=0)
+        )
+        session.execute(
+            update(InstallationNode)
+            .where(InstallationNode.installation_id == installation_id)
+            .values(rank=0)
+        )
+        session.execute(update(RunNode).where(RunNode.run_id == run_id).values(rank=0))
+        session.execute(
+            update(RecipeInstallation)
+            .where(RecipeInstallation.id == installation_id)
+            .values(state="installed")
+        )
+        session.execute(
+            update(RecipeRun).where(RecipeRun.id == run_id).values(state="running")
+        )
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision_id)
+            .values(
+                document=revisions[0].document,
+                content_digest=revisions[0].content_digest,
+            )
+        )
+    recovered = client.get("/api/fleet", headers=operator)
+    assert recovered.status_code == 200
+    assert recovered.json()["nodes"][0]["loaded"][0]["healthy"] is True
+    restored = projection.read()
+    assert restored.nodes[0].installed[0].complete is True
+    assert restored.nodes[0].loaded[0].healthy is True
 
 
 def test_non_rfc_non_nil_boot_id_flows_through_snapshot() -> None:
@@ -1763,9 +1978,7 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
     assert "install-000" not in installation_ids
 
 
-def test_projection_rejects_more_than_500_registered_nodes_before_state_queries() -> (
-    None
-):
+def test_projection_keeps_every_registered_node_visible_beyond_500() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1779,21 +1992,11 @@ def test_projection_rejects_more_than_500_registered_nodes_before_state_queries(
                 for index in range(1, 502)
             ]
         )
-    statements: list[str] = []
-
-    def record_statement(_connection, _cursor, statement, _parameters, _context, _many):
-        statements.append(" ".join(statement.split()).lower())
-
-    event.listen(engine, "before_cursor_execute", record_statement)
-    with pytest.raises(ValueError, match="more than 500 registered nodes"):
-        FleetProjection(sessions, clock=lambda: NOW).read()
-    event.remove(engine, "before_cursor_execute", record_statement)
-
-    selects = [value for value in statements if value.startswith("select")]
-    assert len(selects) == 2
-    assert "from fleet_event_cursor" in selects[0]
-    assert "from agent_nodes" in selects[1]
-    assert "agent_node_profiles" not in " ".join(selects)
+    snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
+    assert len(snapshot.nodes) == 501
+    assert {item.id for item in snapshot.nodes} == {
+        f"spk_{index:032x}" for index in range(1, 502)
+    }
 
 
 def _stored_installation_plan(
@@ -1978,11 +2181,13 @@ def _installed_byte_group(
 
 def _installed_presence(sessions, installation_id: str) -> RecipePresence:
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
-    return next(
+    presence = next(
         value
         for value in snapshot.nodes[0].installed
         if value.installation_id == installation_id
     )
+    assert isinstance(presence, RecipePresence)
+    return presence
 
 
 @pytest.mark.parametrize(
@@ -2298,3 +2503,76 @@ def test_wired_unknown_or_unreported_nas_route_raises_no_warning() -> None:
     # An older agent never reports network evidence: unknown, not a warning.
     assert _route_warnings(None, None) == []
     assert _route_warnings([wired, _WIFI], None) == []
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("damaged", ["inventory", "telemetry"])
+def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) -> None:
+    from .test_operation_api import _client
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'observations.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    sample_id = "00000000-0000-4000-8000-000000000011"
+    inventory = _inventory(NODE_A, NOW, free_bytes=800)
+    sample = _telemetry(NODE_A, sample_id, NOW, sequence=1, cpu=50)
+    with sessions.begin() as session:
+        session.add_all(
+            [
+                AgentNode(node_id=NODE_A, state="active", last_seen_at=NOW),
+                AgentNode(node_id=NODE_B, state="active", last_seen_at=NOW),
+                inventory,
+                sample,
+                NodeTelemetryLatest(node_id=NODE_A, sample_id=sample_id),
+                _inventory(NODE_B, NOW, free_bytes=750),
+            ]
+        )
+    with sessions.begin() as session:
+        if damaged == "inventory":
+            session.execute(
+                update(NodeInventorySnapshot)
+                .where(NodeInventorySnapshot.id == inventory.id)
+                .values(network_interfaces=[{"unexpected": True}])
+            )
+        else:
+            # Simulate a damaged historical row despite today's writer constraint.
+            session.execute(text("PRAGMA ignore_check_constraints = ON"))
+            session.execute(
+                update(NodeTelemetrySample)
+                .where(NodeTelemetrySample.id == sample_id)
+                .values(boot_id="invalid")
+            )
+            session.execute(text("PRAGMA ignore_check_constraints = OFF"))
+    client, operator, *_ = _client(
+        fleet_projection=FleetProjection(sessions, clock=lambda: NOW)
+    )
+    response = client.get("/api/fleet", headers=operator)
+    assert response.status_code == 200
+    nodes = {node["id"]: node for node in response.json()["nodes"]}
+    assert set(nodes) == {NODE_A, NODE_B}
+    assert nodes[NODE_B]["inventory"]["disk_free_bytes"] == 750
+    assert nodes[NODE_A][damaged] is None
+    assert any(
+        "unreadable" in warning["detail"] and "unknown" in warning["detail"]
+        for warning in nodes[NODE_A]["warnings"]
+    )
+    with sessions.begin() as session:
+        if damaged == "inventory":
+            session.execute(
+                update(NodeInventorySnapshot)
+                .where(NodeInventorySnapshot.id == inventory.id)
+                .values(network_interfaces=None)
+            )
+        else:
+            session.execute(
+                update(NodeTelemetrySample)
+                .where(NodeTelemetrySample.id == sample_id)
+                .values(boot_id="00000000-0000-4000-8000-000000000001")
+            )
+    recovered = client.get("/api/fleet", headers=operator)
+    assert recovered.status_code == 200
+    restored = next(node for node in recovered.json()["nodes"] if node["id"] == NODE_A)
+    assert restored[damaged] is not None
+    assert not any(
+        "unreadable" in warning["detail"] for warning in restored["warnings"]
+    )

@@ -13,13 +13,15 @@ from typing import cast
 
 if TYPE_CHECKING:
   from ..models.capacity_reservations import CapacityReservations
-  from ..models.fleet_node_labels import FleetNodeLabels
+  from ..models.fleet_node_labels_type_0 import FleetNodeLabelsType0
   from ..models.inventory_state import InventoryState
   from ..models.node_connection import NodeConnection
   from ..models.projection_reason import ProjectionReason
   from ..models.recipe_presence import RecipePresence
   from ..models.run_presence import RunPresence
   from ..models.telemetry_state import TelemetryState
+  from ..models.unavailable_recipe_presence import UnavailableRecipePresence
+  from ..models.unavailable_run_presence import UnavailableRunPresence
 
 
 
@@ -37,30 +39,32 @@ class FleetNode:
             display_name (str):
             hostname (str):
             id (str):
-            installed (list[RecipePresence]):
+            installed (list[RecipePresence | UnavailableRecipePresence]):
             inventory (InventoryState | None):
-            labels (FleetNodeLabels):
+            labels (FleetNodeLabelsType0 | None):
             lifecycle (str):
-            loaded (list[RunPresence]):
+            loaded (list[RunPresence | UnavailableRunPresence]):
             reservations (CapacityReservations):
             telemetry (None | TelemetryState):
             warnings (list[ProjectionReason]):
             ip_address (None | str | Unset):
+            projection_issues (list[str] | None | Unset):
      """
 
     connection: NodeConnection
     display_name: str
     hostname: str
     id: str
-    installed: list[RecipePresence]
+    installed: list[RecipePresence | UnavailableRecipePresence]
     inventory: InventoryState | None
-    labels: FleetNodeLabels
+    labels: FleetNodeLabelsType0 | None
     lifecycle: str
-    loaded: list[RunPresence]
+    loaded: list[RunPresence | UnavailableRunPresence]
     reservations: CapacityReservations
     telemetry: None | TelemetryState
     warnings: list[ProjectionReason]
     ip_address: None | str | Unset = UNSET
+    projection_issues: list[str] | None | Unset = UNSET
 
 
 
@@ -68,13 +72,15 @@ class FleetNode:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.capacity_reservations import CapacityReservations # noqa: PLC0415
-        from ..models.fleet_node_labels import FleetNodeLabels # noqa: PLC0415
+        from ..models.fleet_node_labels_type_0 import FleetNodeLabelsType0 # noqa: PLC0415
         from ..models.inventory_state import InventoryState # noqa: PLC0415
         from ..models.node_connection import NodeConnection # noqa: PLC0415
         from ..models.projection_reason import ProjectionReason # noqa: PLC0415
         from ..models.recipe_presence import RecipePresence # noqa: PLC0415
         from ..models.run_presence import RunPresence # noqa: PLC0415
         from ..models.telemetry_state import TelemetryState # noqa: PLC0415
+        from ..models.unavailable_recipe_presence import UnavailableRecipePresence # noqa: PLC0415
+        from ..models.unavailable_run_presence import UnavailableRunPresence # noqa: PLC0415
         connection = self.connection.to_dict()
 
         display_name = self.display_name
@@ -85,7 +91,12 @@ class FleetNode:
 
         installed = []
         for installed_item_data in self.installed:
-            installed_item = installed_item_data.to_dict()
+            installed_item: dict[str, Any]
+            if isinstance(installed_item_data, RecipePresence):
+                installed_item = installed_item_data.to_dict()
+            else:
+                installed_item = installed_item_data.to_dict()
+
             installed.append(installed_item)
 
 
@@ -96,13 +107,22 @@ class FleetNode:
         else:
             inventory = self.inventory
 
-        labels = self.labels.to_dict()
+        labels: dict[str, Any] | None
+        if isinstance(self.labels, FleetNodeLabelsType0):
+            labels = self.labels.to_dict()
+        else:
+            labels = self.labels
 
         lifecycle = self.lifecycle
 
         loaded = []
         for loaded_item_data in self.loaded:
-            loaded_item = loaded_item_data.to_dict()
+            loaded_item: dict[str, Any]
+            if isinstance(loaded_item_data, RunPresence):
+                loaded_item = loaded_item_data.to_dict()
+            else:
+                loaded_item = loaded_item_data.to_dict()
+
             loaded.append(loaded_item)
 
 
@@ -128,6 +148,16 @@ class FleetNode:
         else:
             ip_address = self.ip_address
 
+        projection_issues: list[str] | None | Unset
+        if isinstance(self.projection_issues, Unset):
+            projection_issues = UNSET
+        elif isinstance(self.projection_issues, list):
+            projection_issues = self.projection_issues
+
+
+        else:
+            projection_issues = self.projection_issues
+
 
         field_dict: dict[str, Any] = {}
 
@@ -147,6 +177,8 @@ class FleetNode:
         })
         if ip_address is not UNSET:
             field_dict["ip_address"] = ip_address
+        if projection_issues is not UNSET:
+            field_dict["projection_issues"] = projection_issues
 
         return field_dict
 
@@ -155,13 +187,15 @@ class FleetNode:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.capacity_reservations import CapacityReservations # noqa: PLC0415
-        from ..models.fleet_node_labels import FleetNodeLabels # noqa: PLC0415
+        from ..models.fleet_node_labels_type_0 import FleetNodeLabelsType0 # noqa: PLC0415
         from ..models.inventory_state import InventoryState # noqa: PLC0415
         from ..models.node_connection import NodeConnection # noqa: PLC0415
         from ..models.projection_reason import ProjectionReason # noqa: PLC0415
         from ..models.recipe_presence import RecipePresence # noqa: PLC0415
         from ..models.run_presence import RunPresence # noqa: PLC0415
         from ..models.telemetry_state import TelemetryState # noqa: PLC0415
+        from ..models.unavailable_recipe_presence import UnavailableRecipePresence # noqa: PLC0415
+        from ..models.unavailable_run_presence import UnavailableRunPresence # noqa: PLC0415
         d = dict(src_dict)
         connection = NodeConnection.from_dict(d.pop("connection"))
 
@@ -177,9 +211,26 @@ class FleetNode:
         installed = []
         _installed = d.pop("installed")
         for installed_item_data in (_installed):
-            installed_item = RecipePresence.from_dict(installed_item_data)
+            def _parse_installed_item(data: object) -> RecipePresence | UnavailableRecipePresence:
+                try:
+                    if not isinstance(data, dict):
+                        raise TypeError()
+                    installed_item_type_0 = RecipePresence.from_dict(data)
 
 
+
+                    return installed_item_type_0
+                except (TypeError, ValueError, AttributeError, KeyError):
+                    pass
+                if not isinstance(data, dict):
+                    raise TypeError()
+                installed_item_type_1 = UnavailableRecipePresence.from_dict(data)
+
+
+
+                return installed_item_type_1
+
+            installed_item = _parse_installed_item(installed_item_data)
 
             installed.append(installed_item)
 
@@ -202,9 +253,22 @@ class FleetNode:
         inventory = _parse_inventory(d.pop("inventory"))
 
 
-        labels = FleetNodeLabels.from_dict(d.pop("labels"))
+        def _parse_labels(data: object) -> FleetNodeLabelsType0 | None:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                labels_type_0 = FleetNodeLabelsType0.from_dict(data)
 
 
+
+                return labels_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(FleetNodeLabelsType0 | None, data)
+
+        labels = _parse_labels(d.pop("labels"))
 
 
         lifecycle = d.pop("lifecycle")
@@ -212,9 +276,26 @@ class FleetNode:
         loaded = []
         _loaded = d.pop("loaded")
         for loaded_item_data in (_loaded):
-            loaded_item = RunPresence.from_dict(loaded_item_data)
+            def _parse_loaded_item(data: object) -> RunPresence | UnavailableRunPresence:
+                try:
+                    if not isinstance(data, dict):
+                        raise TypeError()
+                    loaded_item_type_0 = RunPresence.from_dict(data)
 
 
+
+                    return loaded_item_type_0
+                except (TypeError, ValueError, AttributeError, KeyError):
+                    pass
+                if not isinstance(data, dict):
+                    raise TypeError()
+                loaded_item_type_1 = UnavailableRunPresence.from_dict(data)
+
+
+
+                return loaded_item_type_1
+
+            loaded_item = _parse_loaded_item(loaded_item_data)
 
             loaded.append(loaded_item)
 
@@ -262,6 +343,24 @@ class FleetNode:
         ip_address = _parse_ip_address(d.pop("ip_address", UNSET))
 
 
+        def _parse_projection_issues(data: object) -> list[str] | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, list):
+                    raise TypeError()
+                projection_issues_type_0 = cast(list[str], data)
+
+                return projection_issues_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(list[str] | None | Unset, data)
+
+        projection_issues = _parse_projection_issues(d.pop("projection_issues", UNSET))
+
+
         fleet_node = cls(
             connection=connection,
             display_name=display_name,
@@ -276,6 +375,7 @@ class FleetNode:
             telemetry=telemetry,
             warnings=warnings,
             ip_address=ip_address,
+            projection_issues=projection_issues,
         )
 
         return fleet_node

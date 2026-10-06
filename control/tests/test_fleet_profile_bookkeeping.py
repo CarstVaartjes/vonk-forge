@@ -18,6 +18,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
     FleetProfileReason,
+    UnavailableFleetProfileView,
 )
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
@@ -233,7 +234,7 @@ def test_a_damaged_order_is_retired_and_the_worker_continues() -> None:
     assert service.application(second.id).state in {"running", "succeeded"}
 
 
-def test_damaged_choices_and_assignment_snapshots_retire_the_element() -> None:
+def test_damaged_choices_remain_unknown_and_assignment_snapshots_rebuild() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = _service(sessions)
@@ -247,7 +248,21 @@ def test_damaged_choices_and_assignment_snapshots_retire_the_element() -> None:
             .where(FleetProfile.id == profile.id)
             .values(assignments=[{"recipe_selector": "broken"}, good])
         )
-    # The broken choice is skipped; the readable one survives.
+    # A damaged choice cannot be dropped without deleting saved authoring intent.
+    observed = service.read_number(profile.number)
+    assert isinstance(observed, UnavailableFleetProfileView)
+    assert observed.id == profile.id and observed.revision == profile.revision
+    with sessions() as session:
+        row = session.get(FleetProfile, profile.id)
+        assert row is not None
+        assert row.assignments == [{"recipe_selector": "broken"}, good]
+    # Restore the exact saved choice; normal reads and applies converge again.
+    with sessions.begin() as session:
+        session.execute(
+            update(FleetProfile)
+            .where(FleetProfile.id == profile.id)
+            .values(assignments=[good])
+        )
     assert len(service.get(profile.id).assignments) == 1
 
     # An assignment snapshot that is missing is rebuilt from the accepted intent.

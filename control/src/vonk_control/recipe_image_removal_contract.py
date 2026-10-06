@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
+from vonk_agent_protocol import RecipeImageCode
 
 from .model_cache_contract import DIGEST_PATTERN, UUID_PATTERN
 from .operation_contract import AvailabilityOperationFailure
@@ -155,3 +156,26 @@ __all__ = [
     "RecipeCacheRemovalPlan",
     "RecipeCacheRemovalResult",
 ]
+
+
+class RecipeRemovalProjectionIssue(StrictJSONModel):
+    code: Literal[RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE] = (
+        RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE
+    )
+    detail: Annotated[str, Field(min_length=1, max_length=512)]
+    next_action: Annotated[str, Field(min_length=1, max_length=512)]
+
+
+class RecipeRemovalUnavailableView(StrictJSONModel):
+    """Known Job identity with no claim about unreadable removal effects."""
+
+    kind: RecipeCacheRemovalKind = RECIPE_CACHE_REMOVE_KIND
+    action: Literal["remove"] = "remove"
+    operation_id: Identifier
+    request_key: Identifier | None
+    recipe_revision_id: Identifier | None
+    state: Literal["unknown"] = "unknown"
+    progress: None = None
+    failure: None = None
+    projection_issue: RecipeRemovalProjectionIssue
+    observed_at: str

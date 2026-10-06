@@ -259,8 +259,16 @@ class FleetProfileEndpointsView(StrictModel):
 
     @model_validator(mode="after")
     def application_identity_is_consistent(self) -> FleetProfileEndpointsView:
-        if (self.application_id is None) != (self.application_state is None):
+        if self.application_state is not None and self.application_id is None:
             raise ValueError("profile endpoint application identity is incomplete")
+        if (
+            self.application_id is not None
+            and self.application_state is None
+            and self.projection_issue is None
+        ):
+            raise ValueError(
+                "profile endpoint application state is unknown without a reason"
+            )
         if self.application_id is not None and self.profile_id is None:
             raise ValueError("profile endpoint application has no profile identity")
         if (self.assignments is None) != (self.projection_issue is not None):
@@ -472,14 +480,29 @@ class FleetProfileInput(FleetProfileDefinition):
     expected_revision: int = Field(default=0, ge=0)
 
 
+class SavedProfileProjectionIssue(StrictModel):
+    """An observation problem; it never authorizes changing saved intent."""
+
+    code: Literal[ProfileReasonCode.DEFINITION_UNAVAILABLE] = (
+        ProfileReasonCode.DEFINITION_UNAVAILABLE
+    )
+    detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    next_action: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+
+
 class FleetProfileDefinitionView(StrictModel):
     id: UuidId | None
     number: int = Field(ge=1)
     revision: int = Field(ge=0)
-    definition: FleetProfileDefinition
+    definition: FleetProfileDefinition | None
+    projection_issue: SavedProfileProjectionIssue | None = None
 
     @model_validator(mode="after")
     def validate_identity(self) -> FleetProfileDefinitionView:
+        if (self.definition is None) != (self.projection_issue is not None):
+            raise ValueError("unavailable saved definition requires its cause")
+        if self.definition is None and self.id is None:
+            raise ValueError("an uncreated profile always has a readable definition")
         if (self.id is None) != (self.revision == 0):
             raise ValueError(
                 "only an uncreated profile has revision zero and no identity"
@@ -512,9 +535,23 @@ class FleetProfileView(StrictModel):
     updated_at: datetime
 
 
+class UnavailableFleetProfileView(StrictModel):
+    """Keep an authorized saved identity visible without inventing its contents."""
+
+    id: UuidId
+    number: int = Field(ge=1)
+    revision: int = Field(ge=1)
+    status: Literal["unavailable"] = "unavailable"
+    definition: None = None
+    projection_issue: SavedProfileProjectionIssue
+
+
+FleetProfileReadView = FleetProfileView | UnavailableFleetProfileView
+
+
 class FleetProfileList(StrictModel):
     generated_at: datetime
-    profiles: list[FleetProfileView] = Field(max_length=128)
+    profiles: list[FleetProfileReadView] = Field(max_length=128)
 
 
 class FleetProfileReason(StrictModel):
