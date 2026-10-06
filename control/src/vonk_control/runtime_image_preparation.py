@@ -1191,36 +1191,64 @@ def _prepare_from_build(
 ) -> RuntimeImageReceipt:
     value = _object_mapping(raw)
     if value.get("state") != "succeeded":
-        raise RuntimeImagePreparationInvalid(
+        # Not damage and not a recipe fault: the build has not finished (or its
+        # row was read mid-update). The owner observes the build again.
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.BUILD_INCOMPLETE,
             "source-build receipt is not succeeded",
-            reason=InvalidRequestReason.INCOMPLETE,
+            retryable=True,
+            recovery_actions=("retry",),
+            reason=WaitReason.RECEIPT_MISSING,
         )
-    image_digest = _string(value.get("image_digest"), RuntimeImageCode.BUILD_DIGEST)
-    build_id = _string(value.get("build_id"), RuntimeImageCode.BUILD_ID)
-    archive_sha = _string(
-        value.get("oci_layout_sha256"), RuntimeImageCode.BUILD_ARCHIVE_DIGEST
-    )
+    archive_sha = value.get("oci_layout_sha256")
+    if not isinstance(archive_sha, str) or _SHA256.fullmatch(archive_sha) is None:
+        # Without the archive identity nothing can be located or re-derived.
+        raise RuntimeImagePreparationUnknown(
+            RuntimeImageCode.RECEIPT_INVALID,
+            "source-build receipt names no valid image archive",
+            retryable=True,
+            recovery_actions=("retry",),
+            reason=WaitReason.RECEIPT_MISSING,
+        )
+    try:
+        cached = storage.read_receipt(archive_sha)
+    except RuntimeImagePreparationError:
+        # Rebuild absent or invalid metadata from the verified archive and
+        # current build evidence. No alternate receipt shape is accepted.
+        cached = None
+    # The build row's image evidence can be damaged in part (a lost or invalid
+    # field). The receipt the image cache already holds for this exact archive
+    # is evidence of the same image; each damaged field is re-derived from it,
+    # and only a field that no evidence supplies leaves the receipt unconfirmed
+    # (the build is then observed and, if need be, run again).
+    image_digest = value.get("image_digest")
     if (
-        _IMAGE_DIGEST.fullmatch(image_digest) is None
-        or _SHA256.fullmatch(archive_sha) is None
+        not isinstance(image_digest, str)
+        or _IMAGE_DIGEST.fullmatch(image_digest) is None
     ):
-        raise RuntimeImagePreparationInvalid(
-            RuntimeImageCode.RECEIPT_INVALID, "source-build image evidence is invalid"
-        )
+        image_digest = None if cached is None else cached.image_digest
+    build_id = value.get("build_id")
+    if not isinstance(build_id, str) or not build_id:
+        build_id = None if cached is None else cached.build_id
     image_bytes = value.get("image_bytes")
     if type(image_bytes) is not int or image_bytes < 1:
-        raise RuntimeImagePreparationInvalid(
-            RuntimeImageCode.RECEIPT_INVALID, "source-build image bytes are invalid"
+        image_bytes = None if cached is None else cached.image_bytes
+    if image_digest is None or build_id is None or image_bytes is None:
+        raise RuntimeImagePreparationUnknown(
+            RuntimeImageCode.RECEIPT_INVALID,
+            "source-build image evidence is damaged and cannot be re-derived",
+            retryable=True,
+            recovery_actions=("retry",),
+            reason=WaitReason.RECEIPT_MISSING,
         )
     raw_build_input = value.get("build_input_sha256")
     if raw_build_input is not None and (
         not isinstance(raw_build_input, str)
         or _SHA256.fullmatch(raw_build_input) is None
     ):
-        raise RuntimeImagePreparationInvalid(
-            RuntimeImageCode.RECEIPT_INVALID, "source-build input identity is invalid"
-        )
+        # Reuse provenance only: the cached receipt's own identity (below) or
+        # none, never a reason to refuse an image whose archive verifies.
+        raw_build_input = None
     existing = storage.existing_archive(archive_sha, image_bytes)
     expected_interface_label = _runtime_interface_label(expected_interface)
     observed = ImageContent(
@@ -1231,12 +1259,6 @@ def _prepare_from_build(
         runtime_interface=expected_interface,
         runtime_interface_label=expected_interface_label,
     )
-    try:
-        cached = storage.read_receipt(archive_sha)
-    except RuntimeImagePreparationError:
-        # Rebuild absent or invalid metadata from the verified archive and
-        # current build evidence. No alternate receipt shape is accepted.
-        cached = None
     if cached is not None and same_image(cached, observed):
         answer = _with_provenance(
             cached,

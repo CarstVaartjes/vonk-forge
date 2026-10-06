@@ -139,9 +139,10 @@
       "path": "control/src/vonk_control/recipe_image_availability.py",
       "function": "RecipeImageAvailabilityService._run",
       "catches": [
-        "_AvailabilityClaimLost"
+        "_AvailabilityClaimLost",
+        "UnknownOutcomeError"
       ],
-      "reason": "A claim lost to a newer attempt or a cancel returns without writing; the new claim owner or the cancel reconcile carries the operation on."
+      "reason": "A claim lost to a newer attempt or a cancel returns without writing; the new claim owner or the cancel reconcile carries the operation on. An unknown outcome (a build receipt still unconfirmed, evidence not yet derivable) is recorded and the lifecycle core schedules the next attempt on its bounded clock."
     },
     {
       "path": "control/src/vonk_control/model_cache.py",
@@ -995,7 +996,6 @@
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "CatalogService.import_recipe_library", "recipe_library.source_invalid", 1],
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "CatalogService.recipe_catalog_local_revisions", "catalog.identities", 1],
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "CatalogService.resolve_recipe_revision", "catalog.document_invalid", 1],
-        ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "CatalogService.store_source_bundle", "bundle.metadata_mismatch", 1],
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "CatalogService.store_source_bundle", "message", 2],
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "_actor", "catalog.actor", 1],
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "_package_handle_metadata", "recipe_library.package_handle_invalid", 4],
@@ -1869,8 +1869,6 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.persist_plan_in_session", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.reserve_in_session", "message", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildResolution.build_input_for_builder", "build.plan_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.capability_missing", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_disk", 1],
@@ -1885,17 +1883,18 @@
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.node_unknown", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.plan_invalid", 5],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.runtime_changed", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "message", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.check_source", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.check_source", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.node_unknown", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.plan_invalid", 4],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.runtime_changed", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.persist_plan_in_session", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "build.contract_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "build.node_unknown", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.reserve_in_session", "message", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.resolve", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.resolve", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_canonical_recipe_document", "build.contract_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_read_recipe_projection", "build.contract_invalid", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_source_bundle_handle", "build.source_unavailable", 1],
@@ -2291,14 +2290,14 @@
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "OciLayoutImageTransport.inspect_archive", "runtime_image.inspect_invalid", 2],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_atomic_json_replace", "runtime_image.receipt_write_failed", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_config_digest", "runtime_image.config_missing", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "message", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_load_receipt_document", "runtime_image.receipt_unavailable", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "runtime_image.receipt_unavailable", 3],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_unavailable", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_run_json_text", "runtime_image.inspect_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "prepare_runtime_image", "runtime_image.receipt_persistence_failed", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "message", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "runtime_image.receipt_unavailable", 3]
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1]
       ]
     },
     {
@@ -2379,12 +2378,10 @@
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.manifest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.storage_collision", 2],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.put", "bundle.digest_mismatch", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.put", "bundle.storage_collision", 2],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.digest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.storage_collision", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.put", "bundle.digest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.put", "bundle.digest_mismatch", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.put", "bundle.storage_collision", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.duplicate_path", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.entry_forbidden", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.expanded_too_large", 1],
@@ -2758,8 +2755,6 @@
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.remove_published", "runtime_image.identity_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_canonical_recipe", "runtime_image.recipe_invalid", 2],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_object_mapping", "runtime_image.receipt_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_prepare_from_build", "runtime_image.build_incomplete", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_prepare_from_build", "runtime_image.receipt_invalid", 3],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_recipe_digest", "runtime_image.recipe_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_string", "runtime_image.identity_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_validate_evidence", "runtime_image.evidence_invalid", 3],
@@ -3552,6 +3547,15 @@
       "sites": [
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_in_progress", 2],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1]
+      ]
+    },
+    {
+      "family": "runtime_image_preparation.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.build_incomplete", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.receipt_invalid", 2]
       ]
     }
   ]
