@@ -11,9 +11,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 from vonk_agent_protocol import (
+    LifecycleState,
+    LifecycleSubject,
     OperationProgress,
+    state_adopter,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
@@ -96,15 +105,21 @@ RunSwitchSubphase = Literal[
     "runtime-install",
 ]
 RunSwitchMemberState = Literal["pending", "running", "succeeded", "failed", "unknown"]
-RunSwitchProgressState = Literal[
-    "queued",
-    "running",
-    "waiting",
-    "waiting-for-operator",
-    "succeeded",
-    "failed",
-    "cancelled",
-    "unknown",
+RunSwitchProgressState = Annotated[
+    Literal[
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.OBSERVING,
+        LifecycleState.NEEDS_OPERATOR,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+        "unknown",
+    ],
+    # A document written before the rename may still say ``waiting`` or
+    # ``waiting-for-operator``.
+    BeforeValidator(state_adopter(LifecycleSubject.JOB)),
 ]
 RunSwitchOperationKind = Literal[
     "recipe.run-switch.v2",

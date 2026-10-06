@@ -22,6 +22,7 @@ from typing import Any, cast
 
 import pytest
 from sqlalchemy import select, update
+from vonk_agent_protocol import LifecycleState
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -633,10 +634,11 @@ def test_waiting_load_resumes_after_a_worker_restart(tmp_path: Path) -> None:
     _drive_until(
         switch,
         lambda view: (
-            view.result.phase_retry_generation == 1 and view.state == "waiting"
+            view.result.phase_retry_generation == 1
+            and view.state == LifecycleState.OBSERVING
         ),
     )
-    assert switch.view().state == "waiting"
+    assert switch.view().state == LifecycleState.OBSERVING
     switch.restart()
     try:
         _drive_until(switch, _past_image)

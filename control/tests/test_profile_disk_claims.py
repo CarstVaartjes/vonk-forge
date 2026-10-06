@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.models import (
     ClusterMapping,
     FleetProfileApplication,
@@ -98,7 +99,7 @@ def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
     with sessions() as session:
         application = session.get(FleetProfileApplication, application_id)
         claim = session.get(ResourceReservation, claim_id)
-        assert application is not None and application.state == "cancelled"
+        assert application is not None and application.state == LifecycleState.CANCELLED
         assert claim is not None and claim.state == "active"
         assert claim.owner_id == child.owner_id
 
@@ -144,7 +145,7 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
                 and operation.result.retry_reason == "install.capacity_busy"
             ):
                 break
-        assert operation.state == "running"
+        assert operation.state == LifecycleState.RUNNING
         assert operation.result is not None
         assert operation.result.retry_reason == "install.capacity_busy"
         assert operation.result.observation_due_at is not None
@@ -221,7 +222,7 @@ def test_supersession_and_failed_dispatch_release_only_unassigned_claims(
     assert profiles.tick()
     with sessions() as session:
         current = session.get(FleetProfileApplication, second)
-        assert current is not None and current.state == "failed"
+        assert current is not None and current.state == LifecycleState.FAILED
         assert not tuple(
             session.scalars(
                 select(ResourceReservation).where(

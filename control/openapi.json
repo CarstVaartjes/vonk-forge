@@ -18756,8 +18756,9 @@
             "enum": [
               "queued",
               "running",
-              "waiting",
-              "waiting-for-operator",
+              "backoff",
+              "observing",
+              "needs-operator",
               "succeeded",
               "failed",
               "cancelled",
@@ -19864,8 +19865,9 @@
             "enum": [
               "queued",
               "running",
-              "waiting",
-              "waiting-for-operator",
+              "backoff",
+              "observing",
+              "needs-operator",
               "succeeded",
               "failed",
               "cancelled",

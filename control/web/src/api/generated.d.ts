@@ -6944,7 +6944,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
+            state: "queued" | "running" | "backoff" | "observing" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
             /** Status Reason */
             status_reason?: string | null;
         };
@@ -7208,7 +7208,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
+            state: "queued" | "running" | "backoff" | "observing" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Total Bytes */

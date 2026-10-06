@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.inventory_repository import (
@@ -345,7 +345,7 @@ def test_restart_adopts_committed_start_before_reassessing_its_owned_ports(
         assert application is not None
         # This fixture has no gateway publisher. Completed starts must reconnect
         # and advance to final verification, which still waits for publication.
-        assert application.state == "running"
+        assert application.state == LifecycleState.RUNNING
         parent_id = session.scalar(
             select(Job.id).where(Job.kind == "recipe.run-switch.v2")
         )
@@ -448,7 +448,7 @@ def test_busy_runtime_handoff_retries_the_original_claim_after_releasing_sql(
                 and operation.result.retry_reason == "run.capacity_busy"
             ):
                 break
-        assert operation.state == "running"
+        assert operation.state == LifecycleState.RUNNING
         assert (
             operation.result is not None
             and operation.result.retry_reason == "run.capacity_busy"

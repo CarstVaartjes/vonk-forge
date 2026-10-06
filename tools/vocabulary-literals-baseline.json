@@ -4,8 +4,6 @@
   "distinctive": {
     "control/src/vonk_control/fleet_profile_contract.py": 2,
     "control/src/vonk_control/fleet_profiles.py": 3,
-    "control/src/vonk_control/run_switch_contract.py": 1,
-    "control/src/vonk_control/run_switch_operations.py": 3,
     "src/cluster_profiles/cli.py": 3
   },
   "stored_state": {
@@ -51,7 +49,7 @@
     "control/src/vonk_control/lifecycle/model_cache.py": 21,
     "control/src/vonk_control/lifecycle/recipe_operation.py": 12,
     "control/src/vonk_control/lifecycle/recipe_update_batch.py": 21,
-    "control/src/vonk_control/lifecycle/run_switch.py": 15,
+    "control/src/vonk_control/lifecycle/run_switch.py": 12,
     "control/src/vonk_control/lifecycle_preflight.py": 4,
     "control/src/vonk_control/metrics.py": 4,
     "control/src/vonk_control/model_cache.py": 36,
@@ -80,7 +78,7 @@
     "control/src/vonk_control/recipe_update_contract.py": 10,
     "control/src/vonk_control/reservation_owners.py": 2,
     "control/src/vonk_control/revision_images.py": 1,
-    "control/src/vonk_control/run_switch_contract.py": 14,
+    "control/src/vonk_control/run_switch_contract.py": 9,
     "control/src/vonk_control/run_switch_operations.py": 53,
     "control/src/vonk_control/runtime_image_preparation.py": 1,
     "control/src/vonk_control/runtime_preflight.py": 2,
@@ -102,15 +100,13 @@
     "control/src/vonk_control/lifecycle/fleet_profile.py": 2,
     "control/src/vonk_control/lifecycle/image_availability.py": 2,
     "control/src/vonk_control/lifecycle/recipe_update_batch.py": 4,
-    "control/src/vonk_control/lifecycle/run_switch.py": 3,
     "control/src/vonk_control/model_cache.py": 1,
     "control/src/vonk_control/model_cache_contract.py": 6,
     "control/src/vonk_control/recipe_image_availability.py": 2,
     "control/src/vonk_control/recipe_image_availability_api.py": 3,
     "control/src/vonk_control/recipe_operations.py": 7,
     "control/src/vonk_control/recipe_update_contract.py": 4,
-    "control/src/vonk_control/run_switch_contract.py": 1,
-    "control/src/vonk_control/run_switch_operations.py": 6,
+    "control/src/vonk_control/run_switch_operations.py": 2,
     "src/cluster_profiles/cli_outcome.py": 2,
     "src/cluster_profiles/control_client.py": 1,
     "src/cluster_profiles/controller_cli.py": 3

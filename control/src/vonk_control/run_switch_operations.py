@@ -84,7 +84,6 @@ from .lifecycle.run_switch import (
     LIVE_STATES as _LIVE_STATES,
 )
 from .lifecycle.run_switch import (
-    WAITING,
     RunSwitchAdapter,
     set_member_state,
 )
@@ -277,6 +276,7 @@ _CONTAINER_BUILD_STATE_ADAPTER = TypeAdapter(RunSwitchContainerBuildState)
 _BUILD_EVIDENCE_STATE_ADAPTER = TypeAdapter(RunSwitchBuildEvidenceState)
 _OPERATION_KIND_ADAPTER = TypeAdapter(RunSwitchOperationKind)
 _MEMBER_STATE_ADAPTER = TypeAdapter(RunSwitchMemberState)
+_OBSERVING = LifecycleState.OBSERVING.value
 _PROGRESS_STATE_ADAPTER = TypeAdapter(RunSwitchProgressState)
 _SUBPHASE_ADAPTER = TypeAdapter(RunSwitchSubphase)
 _REASON_SEVERITY_ADAPTER = TypeAdapter(RunSwitchReasonSeverity)
@@ -3378,7 +3378,9 @@ class RunSwitchOperationService:
             if stop_run_id is None:
                 progress["cancellation"] = cancellation.model_dump(mode="json")
                 progress.pop("retry_attempt", None)
-                if job.state in {"waiting", WAITING}:
+                if job.state in job_states.words(
+                    LifecycleState.OBSERVING, LifecycleState.NEEDS_OPERATOR
+                ):
                     progress["observation_due_at"] = (
                         cancellation.requested_at.isoformat()
                     )
@@ -6724,7 +6726,7 @@ class RunSwitchOperationService:
                     progress,
                     blocked,
                     now,
-                    visible="waiting",
+                    visible=_OBSERVING,
                     record_reason=False,
                     describe=lambda due: (
                         f"{blocked}; next re-plan at {due.isoformat()}"
@@ -6941,7 +6943,7 @@ class RunSwitchOperationService:
                     progress,
                     reasons,
                     now,
-                    visible="waiting",
+                    visible=_OBSERVING,
                     record_reason=False,
                     describe=lambda due: (
                         f"{reasons}; next re-plan at {due.isoformat()}"
@@ -7025,7 +7027,7 @@ class RunSwitchOperationService:
                     progress,
                     "run-switch.target-not-active",
                     now,
-                    visible="waiting",
+                    visible=_OBSERVING,
                     record_reason=False,
                     describe=lambda due: (
                         "Waiting for a target Spark to return to active state; "
@@ -7371,7 +7373,7 @@ class RunSwitchOperationService:
                             progress,
                             child_reason,
                             now,
-                            visible="waiting",
+                            visible=_OBSERVING,
                             record_reason=False,
                             describe=lambda due: (
                                 f"{child_reason}; next exact observation at "
@@ -7978,7 +7980,7 @@ class RunSwitchOperationService:
                             now,
                             state=_LifecycleState.OBSERVING,
                             due=due,
-                            visible="waiting",
+                            visible=_OBSERVING,
                         )
                         if not (
                             isinstance(previous_status_reason, str)
@@ -8026,7 +8028,7 @@ class RunSwitchOperationService:
                         now,
                         state=_LifecycleState.OBSERVING,
                         due=due,
-                        visible="waiting",
+                        visible=_OBSERVING,
                     )
             elif execution.operation_id is not None:
                 progress["child_operation_id"] = execution.operation_id
@@ -8203,7 +8205,7 @@ class RunSwitchOperationService:
                     progress,
                     "run-switch.start-observation-expired",
                     now,
-                    visible="waiting",
+                    visible=_OBSERVING,
                     record_reason=False,
                     describe=lambda due: (
                         "run-switch.start-observation-expired: exact effect remains "
@@ -8653,13 +8655,13 @@ class RunSwitchOperationService:
         )
         projected_state = _progress_operation_state(job.state)
         if (
-            projected_state == "waiting-for-operator"
+            projected_state == LifecycleState.NEEDS_OPERATOR
             and persisted_result is not None
             and persisted_result.observation_due_at is not None
         ):
             # Existing accepted rows parked by the prior automatic-observation
             # state are still auto-observed; present their actual behavior.
-            projected_state = "waiting"
+            projected_state = LifecycleState.OBSERVING
         blockers = (
             list(persisted_result.blockers)
             if persisted_result is not None
@@ -9493,7 +9495,9 @@ def _established_start_effect(
     permanently bad model or runtime.
     """
 
-    if phase.kind != "start" or getattr(child, "state", None) != "waiting-for-operator":
+    if phase.kind != "start" or getattr(child, "state", None) not in job_states.words(
+        LifecycleState.NEEDS_OPERATOR
+    ):
         return None
     run_id = getattr(child, "owner_id", None)
     if not isinstance(run_id, str) or not run_id:
@@ -9515,7 +9519,9 @@ def _start_still_progressing(
     phase: RunSwitchPhase,
     child: object,
 ) -> bool:
-    if phase.kind != "start" or getattr(child, "state", None) != "waiting-for-operator":
+    if phase.kind != "start" or getattr(child, "state", None) not in job_states.words(
+        LifecycleState.NEEDS_OPERATOR
+    ):
         return False
     run_id = getattr(child, "owner_id", None)
     getter = getattr(lifecycle, "run_status", None)
