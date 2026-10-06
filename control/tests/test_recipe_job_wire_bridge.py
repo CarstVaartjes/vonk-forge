@@ -9,6 +9,8 @@ import pytest
 from vonk_agent_protocol import (
     AgentResult,
     RecipeJobFile,
+    RecipeJobInputFile,
+    RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
     canonical_message,
@@ -62,7 +64,15 @@ def test_controller_artifact_job_result_crosses_rust_and_python(
         "actor": "operator",
         "request_id": "00000000-0000-4000-8000-000000000152",
     }
-    job = service.create(**request)
+    job = service.create(
+        **{
+            **request,
+            "inputs": [RecipeJobInputFile.model_validate(i) for i in request["inputs"]],
+            "output_limits": RecipeJobOutputLimits.model_validate(
+                request["output_limits"]
+            ),
+        }
+    )
     service.put_input(
         job.id,
         name="input.png",

@@ -8467,6 +8467,11 @@ export interface components {
              * @default null
              */
             recovery_error: string | null;
+            /**
+             * Recovery Route Published
+             * @default null
+             */
+            recovery_route_published: true | null;
             /** Successful Nodes */
             successful_nodes: string[];
         };

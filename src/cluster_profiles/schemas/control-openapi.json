@@ -22928,6 +22928,19 @@
             "default": null,
             "title": "Recovery Error"
           },
+          "recovery_route_published": {
+            "anyOf": [
+              {
+                "const": true,
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recovery Route Published"
+          },
           "successful_nodes": {
             "items": {
               "pattern": "^spk_[0-9a-f]{32}$",
