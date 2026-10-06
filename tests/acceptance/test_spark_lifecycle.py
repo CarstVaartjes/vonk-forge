@@ -2574,6 +2574,13 @@ class SparkLifecycle:
                 carried = carry()
                 if carried is not None:
                     installation_id, run_id = carried
+            self._exercise_corrupt_agent_journal(
+                node_id=node_id,
+                run_id=run_id,
+                fixture=fixture,
+                inference=inference,
+                response_digest=response_digest,
+            )
             cleanup_payload = {
                 "name": "Acceptance synthetic canary",
                 "description": "Disposable whole-fleet lifecycle canary cleanup",
@@ -2668,6 +2675,160 @@ class SparkLifecycle:
             "completed_states": completed,
             "deterministic_response_sha256": response_digest,
         }
+
+    def _exercise_corrupt_agent_journal(
+        self,
+        *,
+        node_id: str,
+        run_id: str,
+        fixture: CanonicalCanaryFixture,
+        inference: Client,
+        response_digest: str,
+    ) -> None:
+        """Fault the disposable runner while its exact canary keeps serving.
+
+        __enter__ has refused every pre-existing Spark installation. This is
+        only the isolated ARM64 systemd acceptance host, never a fleet action.
+        The running container and retained exact runtime files remain intact;
+        recovery must reconnect, adopt them and complete subsequent cleanup.
+        """
+        assert self.agent_installed and self.temporary_root is not None
+        if UUID.fullmatch(run_id) is None or NODE_ID.fullmatch(node_id) is None:
+            raise LifecycleError("journal recovery canary identity is invalid")
+        name = f"vonk-{run_id}"
+
+        def container_identity() -> str:
+            observed = self._run_command(
+                ["docker", "inspect", "--format", "{{.Id}} {{.State.Running}}", name],
+                cwd=self.temporary_root,
+                timeout=30,
+            ).stdout.strip()
+            if re.fullmatch(r"[0-9a-f]{64} true", observed) is None:
+                raise LifecycleError("journal recovery canary container is not running")
+            return observed
+
+        def running_managed_containers() -> list[str]:
+            lines = self._run_command(
+                ["docker", "ps", "--no-trunc", "--format", "{{.ID}} {{.Names}}"],
+                cwd=self.temporary_root,
+                timeout=30,
+            ).stdout.splitlines()
+            return sorted(
+                line
+                for line in lines
+                if re.fullmatch(
+                    r"[0-9a-f]{64} vonk-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}",
+                    line,
+                )
+            )
+
+        before_container = container_identity()
+        before_containers = running_managed_containers()
+        before_fleet = self._fleet_snapshot()
+        before_nodes = before_fleet.get("nodes")
+        if not isinstance(before_nodes, list):
+            raise LifecycleError("journal recovery Fleet nodes are unavailable")
+        before_node = next(
+            (
+                node
+                for node in before_nodes
+                if isinstance(node, dict) and node.get("id") == node_id
+            ),
+            None,
+        )
+        if not isinstance(before_node, dict):
+            raise LifecycleError("journal recovery canary Spark is unavailable")
+        before_seen = require_object(before_node["connection"], "Spark connection").get(
+            "last_seen_at"
+        )
+        self._run_command(
+            ["sudo", "/usr/bin/systemctl", "stop", "vonk-forge-agent.service"],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        # The service is stopped: no live SQLite writer is being overwritten.
+        # Only the derived journal is faulted; credentials and runtime evidence
+        # are preserved so the recovered agent must adopt the exact effect.
+        self._run_command(
+            [
+                "sudo",
+                "/usr/bin/python3",
+                "-c",
+                (
+                    "from pathlib import Path; import sys; "
+                    "Path(sys.argv[1]).write_bytes(b'acceptance-corrupt-agent-journal')"
+                ),
+                os.fspath(AGENT_DATA / "state.sqlite"),
+            ],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        self._run_command(
+            ["sudo", "/usr/bin/systemctl", "start", "vonk-forge-agent.service"],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        deadline = time.monotonic() + _CANARY_ROUTE_SECONDS
+        while True:
+            snapshot = self._fleet_snapshot()
+            nodes = snapshot.get("nodes")
+            node = (
+                next(
+                    (
+                        node
+                        for node in nodes
+                        if isinstance(node, dict) and node.get("id") == node_id
+                    ),
+                    None,
+                )
+                if isinstance(nodes, list)
+                else None
+            )
+            connection = None if not isinstance(node, dict) else node.get("connection")
+            if (
+                isinstance(connection, dict)
+                and connection.get("online_state") == "online"
+                and connection.get("last_seen_at") is not None
+                and connection["last_seen_at"] != before_seen
+            ):
+                break
+            if time.monotonic() >= deadline:
+                raise LifecycleError(
+                    "agent did not reconnect after corrupt journal recovery"
+                )
+            time.sleep(1)
+        if (
+            container_identity() != before_container
+            or running_managed_containers() != before_containers
+        ):
+            raise LifecycleError(
+                "journal recovery replaced or duplicated a running container"
+            )
+        self._await_canary_endpoint(fixture.slug, published=True)
+        if (
+            self._run_canonical_inference(
+                inference, fixture.serving_check, fixture.slug
+            )
+            != response_digest
+        ):
+            raise LifecycleError("canary response changed after journal recovery")
+        evidence = self._run_command(
+            [
+                "sudo",
+                "/usr/bin/python3",
+                "-c",
+                (
+                    "from pathlib import Path; import sys; "
+                    "print(any(p.name.startswith('state.sqlite.corrupt-') "
+                    "for p in Path(sys.argv[1]).iterdir()))"
+                ),
+                os.fspath(AGENT_DATA),
+            ],
+            cwd=self.temporary_root,
+            timeout=30,
+        ).stdout.strip()
+        if evidence != "True":
+            raise LifecycleError("agent did not retain corrupt journal evidence")
 
     def _load_canary_profile(
         self, preview: dict[str, object], *, request_key: str

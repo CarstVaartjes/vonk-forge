@@ -259,8 +259,16 @@ class FleetProfileEndpointsView(StrictModel):
 
     @model_validator(mode="after")
     def application_identity_is_consistent(self) -> FleetProfileEndpointsView:
-        if (self.application_id is None) != (self.application_state is None):
+        if self.application_state is not None and self.application_id is None:
             raise ValueError("profile endpoint application identity is incomplete")
+        if (
+            self.application_id is not None
+            and self.application_state is None
+            and self.projection_issue is None
+        ):
+            raise ValueError(
+                "profile endpoint application state is unknown without a reason"
+            )
         if self.application_id is not None and self.profile_id is None:
             raise ValueError("profile endpoint application has no profile identity")
         if (self.assignments is None) != (self.projection_issue is not None):

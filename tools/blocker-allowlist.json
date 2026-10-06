@@ -1423,7 +1423,7 @@
         ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.load", "not-found", 1],
         ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.operation_provider.get_operation", "not-found", 1],
         ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.preview", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.progress_number", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.progress_number", "not-found", 2],
         ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.retry", "not-found", 1],
         ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.update", "not-found", 1],
         ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.update_number", "not-found", 1],

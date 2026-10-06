@@ -4420,11 +4420,18 @@ class FleetProfileService:
         )
 
     def progress_number(self, number: int) -> FleetProfileApplicationView:
-        profile = self.get_number(number)
+        # Operation observation needs the stable profile identity, not today's
+        # mutable saved choices. Damaged draft metadata must not hide readable
+        # immutable application progress.
         with self._sessions() as session:
+            profile_id = session.scalar(
+                select(FleetProfile.id).where(FleetProfile.number == number)
+            )
+            if profile_id is None:
+                raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
             row = session.scalar(
                 select(FleetProfileApplication)
-                .where(FleetProfileApplication.profile_id == profile.id)
+                .where(FleetProfileApplication.profile_id == profile_id)
                 .order_by(
                     FleetProfileApplication.created_at.desc(),
                     FleetProfileApplication.id.desc(),
@@ -4481,7 +4488,7 @@ class FleetProfileService:
             return FleetProfileEndpointIntent(
                 number=number,
                 profile_id=profile.id,
-                application_id=None,
+                application_id=selection.application_id,
                 application_state=None,
                 assignments=None,
                 projection_issue=FleetProfileEndpointProjectionIssue(
@@ -4490,9 +4497,22 @@ class FleetProfileService:
                 ),
             )
 
-        application_state = _OPERATION_STATE_ADAPTER.validate_python(
-            application.state, strict=True
-        )
+        try:
+            application_state = _OPERATION_STATE_ADAPTER.validate_python(
+                application.state, strict=True
+            )
+        except ValueError:
+            return FleetProfileEndpointIntent(
+                number=number,
+                profile_id=profile.id,
+                application_id=application.id,
+                application_state=None,
+                assignments=None,
+                projection_issue=FleetProfileEndpointProjectionIssue(
+                    code=ProfileReasonCode.APPLICATION_INTENT_INVALID,
+                    detail="The selected application state is unreadable.",
+                ),
+            )
         issue_detail: str | None = None
         try:
             intended = self._intended_profile(application, session=session)
