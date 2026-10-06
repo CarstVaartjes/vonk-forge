@@ -146,6 +146,7 @@ from .model_cache_contract import (
     ModelCacheCounters,
     ModelCacheDownloadPayload,
     ModelCacheDownloadResult,
+    ModelCacheMissingSourceObservation,
     ModelCacheObjectReceipt,
     ModelCacheOperationPayload,
     ModelCacheOperationPhase,
@@ -209,6 +210,11 @@ _DEFAULT_MAX_PARALLEL_DOWNLOADS = 16
 _MAX_PARALLEL_DOWNLOADS = 32
 _DEFAULT_MAX_DOWNLOAD_STREAMS = 16
 _RETRY_BASE_SECONDS = 5
+# A 404/410 from the provider is retried a bounded number of times (a CDN or
+# mirror can answer it transiently); past that the file is gone upstream and the
+# download ends with a typed reason instead of waiting forever.
+_SOURCE_GONE_STATUSES = frozenset({404, 410})
+_SOURCE_GONE_ATTEMPTS = 5
 #: The actor of a download the cache queues by itself to re-verify a set.
 _REVERIFY_ACTOR = "system:model-cache-reverify"
 _MAX_RETRY_HINT_SECONDS = 365 * 24 * 60 * 60
@@ -237,8 +243,13 @@ class ModelCacheError(RuntimeError):
         *,
         retry_after_seconds: int | None = None,
         recovery: str | None = None,
+        source_status: int | None = None,
     ) -> None:
         self.code = code
+        #: The provider's HTTP status when the failure is an answer from it.
+        self.source_status = source_status
+        #: The manifest entry whose transfer raised this, set by its transfer.
+        self.failed_artifact_key: str | None = None
         # Coerce before bounding: a caller that passes a sequence would
         # otherwise leave a non-string in place, and the ``str(error)``
         # fallback every failure path uses would then read ``[]``.
@@ -335,6 +346,7 @@ class _CacheUnknown(UnknownOutcomeError, ModelCacheError):
         reason: WaitReason | None = None,
         retry_after_seconds: int | None = None,
         recovery: str | None = None,
+        source_status: int | None = None,
     ) -> None:
         ModelCacheError.__init__(
             self,
@@ -342,6 +354,7 @@ class _CacheUnknown(UnknownOutcomeError, ModelCacheError):
             detail,
             retry_after_seconds=retry_after_seconds,
             recovery=recovery,
+            source_status=source_status,
         )
         self.typed_reason = reason if reason is not None else self.default_reason
 
@@ -444,6 +457,7 @@ _CREDENTIAL_FAILURE_PUBLIC_CODES = frozenset(
 _TERMINAL_FAILURE_CODES = _CREDENTIAL_FAILURE_CODES | frozenset(
     {
         SecurityRefusalReason.MODEL_CACHE_SOURCE_ACCESS_DENIED.value,
+        ModelCacheCode.SOURCE_GONE,
         ModelCacheCode.SOURCE_INVALID,
         ModelCacheCode.SOURCE_UNSUPPORTED,
         ModelCacheCode.SOURCE_UNTRUSTED,
@@ -5494,7 +5508,13 @@ class ModelCacheService:
                 operation_id, set_digest, manifest, str(error) or "download interrupted"
             )
         except (ModelCacheError, OSError, httpx2.HTTPError, ValueError) as error:
-            self._finish_failed(operation_id, set_digest, manifest, error)
+            self._finish_failed(
+                operation_id,
+                set_digest,
+                manifest,
+                error,
+                failed_artifact_key=getattr(error, "failed_artifact_key", None),
+            )
 
     def _download_one_unique(
         self,
@@ -5532,6 +5552,10 @@ class ModelCacheService:
                     force=force,
                     interrupt_after_bytes=interrupt_after_bytes,
                 )
+        except ModelCacheError as error:
+            if error.failed_artifact_key is None:
+                error.failed_artifact_key = spec.key
+            raise
         finally:
             with self._lock:
                 self._active_digests.discard(spec.sha256)
@@ -6598,6 +6622,7 @@ class ModelCacheService:
             ModelCacheCode.SOURCE_UNAVAILABLE,
             f"GitHub release request failed with status {status}",
             recovery="resume",
+            source_status=status,
         )
 
     @staticmethod
@@ -6817,6 +6842,7 @@ class ModelCacheService:
                     ModelCacheCode.SOURCE_UNAVAILABLE,
                     f"cache source request failed with status {status_code}",
                     retry_after_seconds=retry_after,
+                    source_status=status_code,
                 )
             return response
         raise ModelCacheStorageRefused(
@@ -7384,6 +7410,52 @@ class ModelCacheService:
             if operation is not None:
                 retryable = _retryable_failure(error)
                 payload_before = self._payload_or_none(operation)
+                retained_retry = (
+                    payload_before.retry if payload_before is not None else None
+                )
+                gone_recovery: str | None = None
+                source_status = getattr(error, "source_status", None)
+                missing_source: ModelCacheMissingSourceObservation | None = None
+                artifact_key = failed_artifact_key or operation.current_artifact_key
+                if (
+                    retryable
+                    and source_status in _SOURCE_GONE_STATUSES
+                    and artifact_key
+                ):
+                    previous_observation = (
+                        retained_retry.missing_source
+                        if retained_retry is not None
+                        else None
+                    )
+                    observations = (
+                        previous_observation.observations + 1
+                        if previous_observation is not None
+                        and previous_observation.artifact_key == artifact_key
+                        and previous_observation.status == source_status
+                        else 1
+                    )
+                    missing_source = ModelCacheMissingSourceObservation(
+                        artifact_key=artifact_key,
+                        status=404 if source_status == 404 else 410,
+                        observations=observations,
+                    )
+                    if observations >= _SOURCE_GONE_ATTEMPTS:
+                        # Observed gone, not a blocker: end the download with a
+                        # typed reason naming the file. A new download request
+                        # resolves the model's newest catalog revision.
+                        retryable = False
+                        failure_code = ModelCacheCode.SOURCE_GONE
+                        gone_recovery = "download_again"
+                        detail = self._source_gone_detail(
+                            session,
+                            manifest,
+                            failed_artifact_key or operation.current_artifact_key,
+                            int(source_status),
+                            observations,
+                        )
+                        if row is not None:
+                            row.last_error = detail
+
                 operator_retries = (
                     0
                     if payload_before is None
@@ -7429,7 +7501,10 @@ class ModelCacheService:
                     None
                     if payload_after is None
                     else payload_after.retry.model_copy(
-                        update={"operator_retries": operator_retries}
+                        update={
+                            "operator_retries": operator_retries,
+                            "missing_source": missing_source,
+                        }
                     )
                 )
                 if retry is not None and failure_code in _CREDENTIAL_FAILURE_CODES:
@@ -7455,7 +7530,8 @@ class ModelCacheService:
                     failure_code,
                     detail,
                     retryable=retryable,
-                    recovery=getattr(error, "recovery", None)
+                    recovery=gone_recovery
+                    or getattr(error, "recovery", None)
                     or ("capacity" if failure_code == ModelCacheCode.CAPACITY else None)
                     or ("resume" if bounded_retry else "retry"),
                     retry_time=_iso(next_retry) if bounded_retry else None,
@@ -7482,6 +7558,42 @@ class ModelCacheService:
                 )
         if cancellation_pending:
             self._try_settle_cancellation(operation_id)
+
+    @staticmethod
+    def _source_gone_detail(
+        session: Session,
+        manifest: ArtifactSetManifest,
+        artifact_key: str | None,
+        status: int,
+        attempts: int,
+    ) -> str:
+        """Name the missing file, and say whether the catalog already has a successor."""
+
+        spec = next(
+            (
+                item
+                for item in manifest.artifacts
+                if artifact_key in {item.key, item.artifact_id}
+            ),
+            None,
+        )
+        where = "a file"
+        if spec is not None:
+            repository = (spec.repository or "").removeprefix("https://huggingface.co/")
+            revision = (spec.revision or "")[:12]
+            where = f"file {spec.path}" + (
+                f" ({repository}@{revision})" if repository or revision else ""
+            )
+        successor = ModelCacheService._model_update_candidate(session, manifest)
+        action = (
+            "a newer catalog revision of this model exists; download it again to use it"
+            if successor is not None
+            else "the model needs a catalog refresh before it can be downloaded again"
+        )
+        return (
+            f"source gone: {where} answered HTTP {status} on {attempts} attempts; "
+            f"{action}"
+        )[:512]
 
     def retry(
         self,
@@ -8199,7 +8311,13 @@ class ModelCacheService:
     def get_operator_operation(
         self, operation_id: str
     ) -> tuple[CacheOperationView, ModelCacheOperatorAction, str]:
-        """Return one operator mutation with its stable action and selector."""
+        """Return one model operation with its action and a selector.
+
+        A read never refuses for a missing optional fact: an operation the
+        platform started itself (a recipe preparation, a repair) carries no
+        operator selector, so the model's catalog name, its content digest, or
+        at last the operation id stands in. All of them name the operation.
+        """
 
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
@@ -8207,22 +8325,50 @@ class ModelCacheService:
                 raise ModelCacheNotFoundInvalid(
                     ModelCacheCode.OPERATION_MISSING, "cache operation was not found"
                 )
-            if operation.kind not in {"download", "remove"}:
-                raise ModelCacheResolutionInvalid(
-                    ModelCacheCode.OPERATION_NOT_OBSERVABLE,
-                    "operation is not a current model operator mutation",
-                )
             payload = self._payload_or_none(operation)
             selector = None if payload is None else payload.selector
             if not isinstance(selector, str) or not selector:
-                raise ModelCacheResolutionInvalid(
-                    ModelCacheCode.OPERATION_NOT_OBSERVABLE,
-                    "operator operation has no stable model selector",
+                model_digest = (
+                    None if payload is None else payload.get("model_content_sha256")
+                )
+                selector = self._observed_selector(
+                    session,
+                    operation,
+                    model_digest if isinstance(model_digest, str) else None,
                 )
             action: ModelCacheOperatorAction = (
                 "remove" if operation.kind == "remove" else "download"
             )
             return self._operation_view(operation), action, selector
+
+    @staticmethod
+    def _observed_selector(
+        session: Session,
+        operation: ModelCacheOperation,
+        model_content_sha256: str | None,
+    ) -> str:
+        """Name a selector-less operation by its model, else its id."""
+
+        digest = model_content_sha256
+        if not isinstance(digest, str) or not digest:
+            digest = session.scalar(
+                select(ModelCacheSet.model_content_sha256).where(
+                    ModelCacheSet.artifact_set_sha256 == operation.artifact_set_sha256
+                )
+            )
+        if isinstance(digest, str) and digest:
+            row = session.scalar(
+                select(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.content_digest == digest,
+                )
+                .limit(1)
+            )
+            if row is not None and row.publisher and row.slug:
+                return f"{row.publisher}/{row.slug}"[:256]
+            return digest
+        return operation.id
 
     def get_operator_request(
         self, request_key: str, *, actor: str
@@ -8237,11 +8383,7 @@ class ModelCacheService:
                     ModelCacheOperation.actor == actor,
                 )
             )
-            if (
-                operation is None
-                or operation.kind not in {"download", "remove"}
-                or getattr(self._payload_of(operation), "selector", None) is None
-            ):
+            if operation is None:
                 raise ModelCacheNotFoundInvalid(
                     ModelCacheCode.OPERATION_MISSING, "cache operation was not found"
                 )
