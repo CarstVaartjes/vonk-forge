@@ -376,6 +376,8 @@ from .model_cache_claim import ModelCacheClaim
 from .model_cache_code import ModelCacheCode
 from .model_cache_download_payload import ModelCacheDownloadPayload
 from .model_cache_download_result import ModelCacheDownloadResult
+from .model_cache_missing_source_observation import ModelCacheMissingSourceObservation
+from .model_cache_missing_source_observation_status import ModelCacheMissingSourceObservationStatus
 from .model_cache_operation_progress import ModelCacheOperationProgress
 from .model_cache_operation_progress_phase import ModelCacheOperationProgressPhase
 from .model_cache_operator_request import ModelCacheOperatorRequest
@@ -1206,6 +1208,8 @@ __all__ = (
     "ModelCacheCode",
     "ModelCacheDownloadPayload",
     "ModelCacheDownloadResult",
+    "ModelCacheMissingSourceObservation",
+    "ModelCacheMissingSourceObservationStatus",
     "ModelCacheOperationProgress",
     "ModelCacheOperationProgressPhase",
     "ModelCacheOperatorRequest",
