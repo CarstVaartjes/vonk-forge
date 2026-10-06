@@ -131,7 +131,7 @@ finish() {
     fi
     [[ "$status" -ne 0 ]] || status=1
   fi
-  rm -rf -- "$scratch"
+  rm -rf -- "${scratch:?}"
   exit "$status"
 }
 

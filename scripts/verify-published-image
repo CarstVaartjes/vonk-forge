@@ -34,7 +34,7 @@ fi
 
 scratch=$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP must be set}/${identity}.verification.XXXXXX")
 cleanup() {
-  rm -rf -- "$scratch"
+  rm -rf -- "${scratch:?}"
 }
 trap cleanup EXIT
 trap 'exit 130' INT

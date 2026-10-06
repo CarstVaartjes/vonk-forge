@@ -43,7 +43,7 @@ if [ -f "${PGDATA:-/var/lib/postgresql/data}/PG_VERSION" ]; then
   existing_cluster=1
 else
   existing_cluster=0
-  export VONK_POSTGRES_INIT_SENTINEL=$sentinel
+  export VONK_POSTGRES_INIT_SENTINEL="$sentinel"
 fi
 
 /usr/local/bin/docker-entrypoint.sh "$@" &
@@ -103,7 +103,7 @@ backup_loop() (
   restore_verify() (
     set -e
     restore_directory=$(mktemp -d /tmp/vonk-backup-restore.XXXXXX)
-    trap 'gosu postgres pg_ctl -D "$restore_directory/data" -m immediate stop >/dev/null 2>&1 || true; rm -rf "$restore_directory"' EXIT
+    trap 'gosu postgres pg_ctl -D "$restore_directory/data" -m immediate stop >/dev/null 2>&1 || true; rm -rf -- "${restore_directory:?}"' EXIT
     chown postgres:postgres "$restore_directory"
     install -d -m 0700 -o postgres -g postgres "$restore_directory/socket"
     gosu postgres initdb -D "$restore_directory/data" \
@@ -119,7 +119,7 @@ backup_loop() (
       -tAc "SELECT count(*) FROM pg_database WHERE datname IN ('control', 'litellm')" \
       | grep -qx 2
     gosu postgres pg_ctl -D "$restore_directory/data" -m fast -w stop >/dev/null
-    rm -rf "$restore_directory"
+    rm -rf -- "${restore_directory:?}"
   )
   while :; do
     if [ ! -d /backups ]; then

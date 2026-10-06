@@ -116,7 +116,7 @@ test "$("$dpkg_deb" --field "$current_package" Version)" = "$current_version"
 test "$("$dpkg_deb" --field "$next_package" Version)" = "$next_version"
 
 temporary=$(mktemp -d)
-trap 'rm -rf -- "$temporary"' EXIT
+trap 'rm -rf -- "${temporary:?}"' EXIT
 downgrade_log=${VONK_AGENT_LIFECYCLE_DOWNGRADE_LOG:-$temporary/downgrade.log}
 
 env SYSTEMD_OFFLINE=1 "$dpkg" -i "$current_package"

@@ -41,7 +41,7 @@ cleanup() {
   if [[ "$scan_root" != "$RUNNER_TEMP"/dev-image-"$role".* ]]; then
     echo "refusing unsafe development image cleanup" >&2
     cleanup_status=1
-  elif ! rm -rf -- "$scan_root"; then
+  elif ! rm -rf -- "${scan_root:?}"; then
     echo "development image cleanup failed" >&2
     cleanup_status=1
   fi

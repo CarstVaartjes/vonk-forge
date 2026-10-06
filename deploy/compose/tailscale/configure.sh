@@ -65,7 +65,7 @@ printf '%s\n' '{"version":"0.0.1","services":{}}' >"${empty_service_map}"
 cleanup() {
     case "${runtime_dir:-}" in
         "${scratch_root%/}"/vonk-tailscale.*)
-            rm -rf "${runtime_dir}"
+            rm -rf -- "${runtime_dir:?}"
             ;;
     esac
 }
@@ -375,6 +375,7 @@ service_has_primary_routes() {
     service_has_mapped_addresses "${service_name}" || return 1
     previous_ifs=$IFS
     IFS=,
+    # shellcheck disable=SC2086 # the address list is split into words on purpose
     set -- ${addresses}
     IFS=${previous_ifs}
     [ "$#" -gt 0 ] || return 1

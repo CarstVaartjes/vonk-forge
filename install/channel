@@ -54,7 +54,7 @@ done
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/vonk-${kind}-channel.XXXXXX") ||
     fail "cannot create a temporary directory"
 cleanup() {
-    rm -rf -- "$temporary"
+    rm -rf -- "${temporary:?}"
 }
 trap cleanup EXIT HUP INT TERM
 

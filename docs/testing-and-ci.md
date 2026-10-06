@@ -445,6 +445,14 @@ Those commands require the candidate, compose, Controller, and acceptance
 environment described by the acceptance workflow. Never substitute synthetic
 success for missing environment inputs.
 
+### Cleaning up in the VM and other shared machines
+
+Remove only what you created, and only through a path from `mktemp -d`: assign
+it once, check it is non-empty (`"${dir:?}"`), and never build a path under
+`$HOME` from a variable that may be empty. `tests/test_shell_destructive_guard.py`
+rejects an unguarded `rm -rf` in repository scripts and runs `shellcheck` with
+SC2115 and SC2086 as errors; CI installs `shellcheck` for it.
+
 ### Supply-chain verification
 
 Run `scripts/verify-supply-chain --json` to validate authored lockfiles, the

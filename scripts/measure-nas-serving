@@ -236,7 +236,7 @@ sample() {
     [[ -n $dev ]] || { echo "no default route interface" >&2; exit 1; }
     work=$(mktemp -d)
     containers_file=$work/containers
-    trap 'rm -rf "$work"' EXIT INT TERM HUP
+    trap 'rm -rf -- "${work:?}"' EXIT INT TERM HUP
     container_names >"$containers_file"
     local hz
     hz=$(getconf CLK_TCK)

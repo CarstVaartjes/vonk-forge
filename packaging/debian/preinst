@@ -488,7 +488,7 @@ helper_namespace_has_package_paths() {
 validate_candidate_payload() {
     candidate=$1
     verify_root=$(/usr/bin/mktemp -d "$state_dir/.verify.XXXXXX")
-    trap '/usr/bin/rm -rf -- "$verify_root"' EXIT HUP INT TERM
+    trap '/usr/bin/rm -rf -- "${verify_root:?}"' EXIT HUP INT TERM
     /usr/bin/dpkg-deb --extract "$candidate" "$verify_root"
     extracted_agent=$verify_root/usr/lib/vonk-forge/vonk-agent
     extracted_helper=$verify_root/usr/lib/vonk-forge/vonk-agent-helper
@@ -498,7 +498,7 @@ validate_candidate_payload() {
             = "$target_agent_sha256" ] \
         && [ "$(/usr/bin/sha256sum "$extracted_helper" | /usr/bin/cut -d' ' -f1)" \
             = "$target_helper_sha256" ]
-    /usr/bin/rm -rf -- "$verify_root"
+    /usr/bin/rm -rf -- "${verify_root:?}"
     trap - EXIT HUP INT TERM
 }
 
