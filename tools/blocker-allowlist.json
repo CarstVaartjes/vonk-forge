@@ -53,7 +53,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 203,
-    "unaudited": 451,
+    "unaudited": 402,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -131,20 +131,20 @@
       "reason": "A damaged receipt that cannot be evicted now is logged as deferred and the next collection sweep tries again."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._run",
-      "catches": [
-        "_AvailabilityClaimLost"
-      ],
-      "reason": "A claim lost to a newer attempt or a cancel returns without writing; the new claim owner or the cancel reconcile carries the operation on."
-    },
-    {
       "path": "control/src/vonk_control/model_cache.py",
       "function": "ModelCacheService._advance_model_removal_step",
       "catches": [
         "_ArtifactWriterBusy"
       ],
       "reason": "A busy artifact writer defers the model removal with a retry delay and the removal pass advances it again."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._run",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The availability claim runner records any unknown outcome through _fail, which asks the lifecycle core for the next attempt on its bounded jittered backoff (plan_failure) and releases the claim; the next claim re-reads the evidence. Only an explicit retryable=False owner decision or a security failure ends the operation."
     }
   ],
   "operator_waits": [
@@ -1778,10 +1778,6 @@
         ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-workload-scope-is-invalid", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-workload-scope-is-missing", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "current_build_consumers", "build.consumer_invalid", 2],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_availability_build_dependency", "build.consumer_invalid", 2],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.cancellation_pending", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_busy", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_invalid", 2],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_profile_build_dependencies", "build.consumer_invalid", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "read_build_intent", "build.producer_invalid", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateTypeDamaged", "_availability_consumer", "availability-recipe-is-invalid", 1]
@@ -1863,29 +1859,12 @@
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._checkpoint_recipe_image_removal", "artifact.reference_changed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._current_model_child", "recipe_image.model_cache_invalid", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._ensure_model_child", "recipe_image.model_cache_invalid", 3],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._finish_recipe_removal", "artifact.reference_changed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._lock_build_consumer", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_input_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._read_removal_owner", "recipe_image.operation_invalid", 4],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._read_removal_result", "recipe_image.operation_invalid", 5],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._refresh_authority", "recipe_image.metadata_refresh_failed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.model_cache_failed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.runtime_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_model_repair", "recipe_image.model_cache_invalid", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_model_repair", "recipe_image.model_cache_unavailable", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_request", "recipe_image.build_input_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_request", "recipe_image.runtime_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_cancelled", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_missing", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.cancel", "recipe_image.cancel_busy", 2],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.remove_selector", "recipe_image.operation_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RuntimeImagePreparationUnknown", "RecipeImageAvailabilityService._advance_recipe_image_removal", "runtime_image.archive_mismatch", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._ensure_model_child", "exact-model-artifact-preparation-could-not-be-queued", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._resume_model_child", "model-artifact-operation-could-not-be-resumed", 1]
+        ["control/src/vonk_control/recipe_image_availability.py", "RuntimeImagePreparationUnknown", "RecipeImageAvailabilityService._advance_recipe_image_removal", "runtime_image.archive_mismatch", 1]
       ]
     },
     {
@@ -2205,24 +2184,7 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage._stored_image", "runtime_image.archive_unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.commit", "runtime_image.receipt_contract_newer", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.existing_archive", "runtime_image.cache_missing", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.lock_unavailable", 3],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.publication_contended", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.read_receipt", "message", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.remove_published", "runtime_image.removal_storage_failed", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "OciLayoutImageTransport.inspect_archive", "runtime_image.inspect_invalid", 2],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_atomic_json_replace", "runtime_image.receipt_write_failed", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_config_digest", "runtime_image.config_missing", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_load_receipt_document", "runtime_image.receipt_unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_run_json_text", "runtime_image.inspect_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "prepare_runtime_image", "runtime_image.receipt_persistence_failed", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "message", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "runtime_image.receipt_unavailable", 3]
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.remove_published", "runtime_image.removal_storage_failed", 1]
       ]
     },
     {
@@ -3574,6 +3536,65 @@
         ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-phase-was-cancelled-or-superseded", 1],
         ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-progress-no-longer-owns-image-publication", 2],
         ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-spark-scope-or-workload-claim-changed", 1]
+      ]
+    },
+    {
+      "family": "recipe_build_cancellation.already-retried",
+      "category": "already-retried",
+      "reason": "An unknown outcome raised on a path that a registered retry or observe loop (retry_loops, AST-proven by blocker_retries) catches and re-runs on its bounded backoff; the raise is the handoff to that loop, not a dead end.",
+      "sites": [
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_availability_build_dependency", "build.consumer_invalid", 2],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.cancellation_pending", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_busy", 1],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_invalid", 2]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.already-retried",
+      "category": "already-retried",
+      "reason": "An unknown outcome raised on a path that a registered retry or observe loop (retry_loops, AST-proven by blocker_retries) catches and re-runs on its bounded backoff; the raise is the handoff to that loop, not a dead end.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._current_model_child", "recipe_image.model_cache_invalid", 2],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._ensure_model_child", "recipe_image.model_cache_invalid", 3],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._lock_build_consumer", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_input_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._refresh_authority", "recipe_image.metadata_refresh_failed", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.model_cache_failed", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.runtime_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_model_repair", "recipe_image.model_cache_invalid", 2],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_model_repair", "recipe_image.model_cache_unavailable", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_request", "recipe_image.build_input_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_request", "recipe_image.runtime_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_cancelled", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._ensure_model_child", "exact-model-artifact-preparation-could-not-be-queued", 1],
+        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._resume_model_child", "model-artifact-operation-could-not-be-resumed", 1]
+      ]
+    },
+    {
+      "family": "runtime_image_preparation.already-retried",
+      "category": "already-retried",
+      "reason": "An unknown outcome raised on a path that a registered retry or observe loop (retry_loops, AST-proven by blocker_retries) catches and re-runs on its bounded backoff; the raise is the handoff to that loop, not a dead end.",
+      "sites": [
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage._stored_image", "runtime_image.archive_unavailable", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.commit", "runtime_image.receipt_contract_newer", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.existing_archive", "runtime_image.cache_missing", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.lock_unavailable", 3],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.publication_contended", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.read_receipt", "message", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "OciLayoutImageTransport.inspect_archive", "runtime_image.inspect_invalid", 2],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_atomic_json_replace", "runtime_image.receipt_write_failed", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_config_digest", "runtime_image.config_missing", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_load_receipt_document", "runtime_image.receipt_unavailable", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_unavailable", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_run_json_text", "runtime_image.inspect_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "prepare_runtime_image", "runtime_image.receipt_persistence_failed", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "message", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "runtime_image.receipt_unavailable", 3]
       ]
     }
   ]

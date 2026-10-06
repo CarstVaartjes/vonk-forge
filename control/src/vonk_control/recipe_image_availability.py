@@ -687,9 +687,18 @@ def _retryable(error: BaseException) -> bool:
     """Classify by typed code; unknown failures retry with capped backoff."""
 
     code = getattr(error, "code", None)
-    if isinstance(code, str) and (
-        code in _TERMINAL_FAILURE_CODES or is_security_failure(code)
+    if isinstance(code, str) and is_security_failure(code):
+        return False
+    if (
+        isinstance(error, UnknownOutcomeError)
+        and not isinstance(error, ModelCacheError)
+        and getattr(error, "retryable", None) is not False
     ):
+        # An unknown outcome is not terminal on its own word: the next attempt
+        # reads the evidence again, on the core's bounded clock.  Only an
+        # explicit owner decision (``retryable=False``) ends it.
+        return True
+    if isinstance(code, str) and code in _TERMINAL_FAILURE_CODES:
         return False
     if isinstance(error, ModelCacheError):
         return not model_cache_failure_is_terminal(code)
@@ -4922,6 +4931,10 @@ class RecipeImageAvailabilityService:
                 )
         except _AvailabilityClaimLost:
             return
+        except UnknownOutcomeError as error:
+            # An unknown outcome is never a refusal: the failure is recorded and
+            # the lifecycle core schedules the next attempt on its bounded clock.
+            self._fail(claim, error)
         except Exception as error:  # noqa: BLE001 - persist failures at the background job boundary
             self._fail(claim, error)
         finally:
