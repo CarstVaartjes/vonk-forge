@@ -38,11 +38,6 @@ class Hold:
     owner_state: str | None
 
 
-class Operation(Protocol):
-    @property
-    def state(self) -> str: ...
-
-
 class MemoryWorld(Protocol):
     holds: Iterable[Hold]
 
@@ -145,7 +140,13 @@ def assert_no_orphaned_holds(session_or_world: Session | MemoryWorld | object) -
             _assert_session(session)
 
 
-def assert_ended_without_blocking[World, Receipt: Operation](
+def _receipt_state(receipt: object) -> str:
+    state = getattr(receipt, "state", None)
+    assert isinstance(state, str), "operation must carry a string state"
+    return state
+
+
+def assert_ended_without_blocking[World, Receipt](
     world: World,
     operation: Receipt,
     *,
@@ -159,11 +160,12 @@ def assert_ended_without_blocking[World, Receipt: Operation](
     )
     assert original_key, "operation must carry a request key"
     ended = end(operation)
-    assert ended.state not in OPERATOR_WAIT_STATES, "ending requires operator action"
-    assert ended.state in NON_BLOCKING_ENDS, f"operation did not end: {ended.state}"
-    if ended.state == "failed" and assert_reason is not None:
+    ended_state = _receipt_state(ended)
+    assert ended_state not in OPERATOR_WAIT_STATES, "ending requires operator action"
+    assert ended_state in NON_BLOCKING_ENDS, f"operation did not end: {ended_state}"
+    if ended_state == "failed" and assert_reason is not None:
         assert_reason(ended)
-    elif ended.state == "failed":
+    elif ended_state == "failed":
         codes = [getattr(ended, "reason_code", None)]
         codes.extend(
             getattr(blocker, "code", None) for blocker in getattr(ended, "blockers", [])
@@ -182,8 +184,9 @@ def assert_ended_without_blocking[World, Receipt: Operation](
     assert fresh_key and fresh_key != original_key, (
         "fresh operation must have a new request key"
     )
-    assert admitted.state in ADMITTED_STATES, (
-        f"fresh operation refused: {admitted.state}"
+    admitted_state = _receipt_state(admitted)
+    assert admitted_state in ADMITTED_STATES, (
+        f"fresh operation refused: {admitted_state}"
     )
     refusal = getattr(admitted, "refusal", None)
     assert not refusal, f"fresh operation refused: {refusal}"
