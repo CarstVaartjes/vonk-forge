@@ -5329,8 +5329,6 @@ pub enum ModelCacheCode {
     ModelCacheOperationFailed,
     #[serde(rename = "model_cache.operation_missing")]
     ModelCacheOperationMissing,
-    #[serde(rename = "model_cache.operation_not_observable")]
-    ModelCacheOperationNotObservable,
     #[serde(rename = "model_cache.operation_not_retryable")]
     ModelCacheOperationNotRetryable,
     #[serde(rename = "model_cache.operation_unreadable")]
@@ -5413,6 +5411,8 @@ pub enum ModelCacheCode {
     ModelCacheSelectorInvalid,
     #[serde(rename = "model_cache.selector_missing")]
     ModelCacheSelectorMissing,
+    #[serde(rename = "model_cache.source_gone")]
+    ModelCacheSourceGone,
     #[serde(rename = "model_cache.source_invalid")]
     ModelCacheSourceInvalid,
     #[serde(rename = "model_cache.source_size_mismatch")]
@@ -5492,9 +5492,6 @@ impl ::std::fmt::Display for ModelCacheCode {
             Self::ModelCacheObjectBusy => f.write_str("model_cache.object_busy"),
             Self::ModelCacheOperationFailed => f.write_str("model_cache.operation_failed"),
             Self::ModelCacheOperationMissing => f.write_str("model_cache.operation_missing"),
-            Self::ModelCacheOperationNotObservable => {
-                f.write_str("model_cache.operation_not_observable")
-            }
             Self::ModelCacheOperationNotRetryable => {
                 f.write_str("model_cache.operation_not_retryable")
             }
@@ -5556,6 +5553,7 @@ impl ::std::fmt::Display for ModelCacheCode {
             Self::ModelCacheSelectorAmbiguous => f.write_str("model_cache.selector_ambiguous"),
             Self::ModelCacheSelectorInvalid => f.write_str("model_cache.selector_invalid"),
             Self::ModelCacheSelectorMissing => f.write_str("model_cache.selector_missing"),
+            Self::ModelCacheSourceGone => f.write_str("model_cache.source_gone"),
             Self::ModelCacheSourceInvalid => f.write_str("model_cache.source_invalid"),
             Self::ModelCacheSourceSizeMismatch => f.write_str("model_cache.source_size_mismatch"),
             Self::ModelCacheSourceTruncated => f.write_str("model_cache.source_truncated"),
@@ -5621,7 +5619,6 @@ impl ::std::str::FromStr for ModelCacheCode {
             "model_cache.object_busy" => Ok(Self::ModelCacheObjectBusy),
             "model_cache.operation_failed" => Ok(Self::ModelCacheOperationFailed),
             "model_cache.operation_missing" => Ok(Self::ModelCacheOperationMissing),
-            "model_cache.operation_not_observable" => Ok(Self::ModelCacheOperationNotObservable),
             "model_cache.operation_not_retryable" => Ok(Self::ModelCacheOperationNotRetryable),
             "model_cache.operation_unreadable" => Ok(Self::ModelCacheOperationUnreadable),
             "model_cache.payload_invalid" => Ok(Self::ModelCachePayloadInvalid),
@@ -5665,6 +5662,7 @@ impl ::std::str::FromStr for ModelCacheCode {
             "model_cache.selector_ambiguous" => Ok(Self::ModelCacheSelectorAmbiguous),
             "model_cache.selector_invalid" => Ok(Self::ModelCacheSelectorInvalid),
             "model_cache.selector_missing" => Ok(Self::ModelCacheSelectorMissing),
+            "model_cache.source_gone" => Ok(Self::ModelCacheSourceGone),
             "model_cache.source_invalid" => Ok(Self::ModelCacheSourceInvalid),
             "model_cache.source_size_mismatch" => Ok(Self::ModelCacheSourceSizeMismatch),
             "model_cache.source_truncated" => Ok(Self::ModelCacheSourceTruncated),
@@ -20315,7 +20313,6 @@ impl ModelCacheCode {
             Self::ModelCacheObjectBusy => "model_cache.object_busy",
             Self::ModelCacheOperationFailed => "model_cache.operation_failed",
             Self::ModelCacheOperationMissing => "model_cache.operation_missing",
-            Self::ModelCacheOperationNotObservable => "model_cache.operation_not_observable",
             Self::ModelCacheOperationNotRetryable => "model_cache.operation_not_retryable",
             Self::ModelCacheOperationUnreadable => "model_cache.operation_unreadable",
             Self::ModelCachePayloadInvalid => "model_cache.payload_invalid",
@@ -20359,6 +20356,7 @@ impl ModelCacheCode {
             Self::ModelCacheSelectorAmbiguous => "model_cache.selector_ambiguous",
             Self::ModelCacheSelectorInvalid => "model_cache.selector_invalid",
             Self::ModelCacheSelectorMissing => "model_cache.selector_missing",
+            Self::ModelCacheSourceGone => "model_cache.source_gone",
             Self::ModelCacheSourceInvalid => "model_cache.source_invalid",
             Self::ModelCacheSourceSizeMismatch => "model_cache.source_size_mismatch",
             Self::ModelCacheSourceTruncated => "model_cache.source_truncated",
@@ -20484,8 +20482,6 @@ impl<'de> ::serde::Deserialize<'de> for ModelCacheCode {
             ModelCacheOperationFailed,
             #[serde(rename = "model_cache.operation_missing")]
             ModelCacheOperationMissing,
-            #[serde(rename = "model_cache.operation_not_observable")]
-            ModelCacheOperationNotObservable,
             #[serde(rename = "model_cache.operation_not_retryable")]
             ModelCacheOperationNotRetryable,
             #[serde(rename = "model_cache.operation_unreadable")]
@@ -20568,6 +20564,8 @@ impl<'de> ::serde::Deserialize<'de> for ModelCacheCode {
             ModelCacheSelectorInvalid,
             #[serde(rename = "model_cache.selector_missing")]
             ModelCacheSelectorMissing,
+            #[serde(rename = "model_cache.source_gone")]
+            ModelCacheSourceGone,
             #[serde(rename = "model_cache.source_invalid")]
             ModelCacheSourceInvalid,
             #[serde(rename = "model_cache.source_size_mismatch")]
@@ -20631,7 +20629,6 @@ impl<'de> ::serde::Deserialize<'de> for ModelCacheCode {
             Raw::ModelCacheObjectBusy => Self::ModelCacheObjectBusy,
             Raw::ModelCacheOperationFailed => Self::ModelCacheOperationFailed,
             Raw::ModelCacheOperationMissing => Self::ModelCacheOperationMissing,
-            Raw::ModelCacheOperationNotObservable => Self::ModelCacheOperationNotObservable,
             Raw::ModelCacheOperationNotRetryable => Self::ModelCacheOperationNotRetryable,
             Raw::ModelCacheOperationUnreadable => Self::ModelCacheOperationUnreadable,
             Raw::ModelCachePayloadInvalid => Self::ModelCachePayloadInvalid,
@@ -20675,6 +20672,7 @@ impl<'de> ::serde::Deserialize<'de> for ModelCacheCode {
             Raw::ModelCacheSelectorAmbiguous => Self::ModelCacheSelectorAmbiguous,
             Raw::ModelCacheSelectorInvalid => Self::ModelCacheSelectorInvalid,
             Raw::ModelCacheSelectorMissing => Self::ModelCacheSelectorMissing,
+            Raw::ModelCacheSourceGone => Self::ModelCacheSourceGone,
             Raw::ModelCacheSourceInvalid => Self::ModelCacheSourceInvalid,
             Raw::ModelCacheSourceSizeMismatch => Self::ModelCacheSourceSizeMismatch,
             Raw::ModelCacheSourceTruncated => Self::ModelCacheSourceTruncated,
