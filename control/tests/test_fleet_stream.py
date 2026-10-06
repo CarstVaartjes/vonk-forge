@@ -18,6 +18,17 @@ from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.db import session_factory
+from vonk_control.fleet_event_contract import (
+    AgentOperationPayload,
+    FleetEventPayload,
+    InstallationNodePayload,
+    JobPayload,
+    NodeProfilePayload,
+    NodeTelemetryPayload,
+    RecipeInstallationPayload,
+    RecipeRunPayload,
+    RunNodePayload,
+)
 from vonk_control.fleet_events import (
     FleetEvent,
     FleetEventDraft,
@@ -189,14 +200,33 @@ def _operation_draft(identifier: int) -> FleetEventDraft:
         node_id=None,
         entity_kind="job",
         entity_id=entity_id,
-        payload={
-            "entity_kind": "job",
-            "entity_id": entity_id,
-            "kind": "deploy",
-            "state": "running",
-            "target_count": 1,
-        },
+        payload=JobPayload(
+            entity_kind="job",
+            entity_id=entity_id,
+            kind="deploy",
+            state="running",
+            target_count=1,
+        ),
     )
+
+
+_PAYLOADS = {
+    "recipe-installation": RecipeInstallationPayload,
+    "installation-node": InstallationNodePayload,
+    "recipe-run": RecipeRunPayload,
+    "run-node": RunNodePayload,
+    "job": JobPayload,
+    "agent-operation": AgentOperationPayload,
+}
+
+
+def _typed(payload: dict[str, object]) -> FleetEventPayload:
+    kind = payload.get("entity_kind")
+    if isinstance(kind, str):
+        return _PAYLOADS[kind].model_validate(payload)
+    if "sample_id" in payload:
+        return NodeTelemetryPayload.model_validate(payload)
+    return NodeProfilePayload.model_validate(payload)
 
 
 def _event(
@@ -214,7 +244,7 @@ def _event(
         node_id=node_id,
         entity_kind=entity_kind,
         entity_id=entity_id or f"entity-{identifier}",
-        payload=payload,
+        payload=_typed(payload),
         occurred_at=NOW + timedelta(seconds=identifier),
         expires_at=NOW + timedelta(hours=24),
     )
@@ -768,10 +798,7 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
                     node_id=NODE_ID,
                     entity_kind="node-telemetry-latest",
                     entity_id=NODE_ID,
-                    payload={
-                        "node_id": NODE_ID,
-                        "sample_id": sample_id,
-                    },
+                    payload=NodeTelemetryPayload(node_id=NODE_ID, sample_id=sample_id),
                 ),
             )
 

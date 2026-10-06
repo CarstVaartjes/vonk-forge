@@ -6,9 +6,11 @@ samples, so reconnects cannot make agent wall-clock jumps look like throughput.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from math import exp
+from typing import Any
 
 from vonk_agent_protocol import (
     TRANSFER_PHASES,
@@ -18,9 +20,12 @@ from vonk_agent_protocol import (
     OperationProgress,
     ProgressPhase,
     adopt_progress_phase,
+    canonical_message,
 )
 
 from . import job_states
+from .lifecycle.evidence import Residue
+from .stored_json import read_row_column
 from .strict_json import read_stored_model
 
 #: Lifecycle words a stored phase can also be while the work waits for something
@@ -51,6 +56,23 @@ STALL_AFTER_SECONDS = 120.0
 PROGRESS_INTERVAL_SECONDS = 1.0
 
 
+def progress_document(progress: OperationProgress) -> Any:
+    """The JSON document a progress column stores for ``progress``."""
+
+    return json.loads(canonical_message(progress))
+
+
+def stored_progress(row: object) -> OperationProgress | None:
+    """The progress a row's ``progress`` column holds; a damaged one reads as none.
+
+    Progress is a derived measurement, never evidence: a document that cannot be
+    read restarts from the next sample instead of stopping the work.
+    """
+
+    value = read_row_column(row, "progress")
+    return None if value is None or isinstance(value, Residue) else value
+
+
 def _timestamp(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
@@ -62,30 +84,14 @@ def _timestamp(value: object) -> datetime | None:
 
 
 def progress_write_due(
-    previous: Mapping[str, object] | None, current: Mapping[str, object], now: datetime
+    previous: OperationProgress | None, current: OperationProgress, now: datetime
 ) -> bool:
     """One byte write/second; phase changes have a ten-write/second ceiling."""
-    if not previous:
+    if previous is None:
         return True
-    observed = _timestamp(previous.get("observed_at"))
-    interval = (
-        0.1
-        if previous.get("phase") != current.get("phase")
-        else PROGRESS_INTERVAL_SECONDS
-    )
+    observed = _timestamp(previous.observed_at)
+    interval = 0.1 if previous.phase != current.phase else PROGRESS_INTERVAL_SECONDS
     return observed is None or (now - observed).total_seconds() >= interval
-
-
-def observe_progress(
-    previous: Mapping[str, object] | None, current: Mapping[str, object], now: datetime
-) -> dict[str, object]:
-    """:func:`sample_progress` for decoded documents (the agent and run-switch edge)."""
-    sampled = sample_progress(
-        read_stored_model(OperationProgress, previous) if previous else None,
-        read_stored_model(OperationProgress, current),
-        now,
-    )
-    return sampled.model_dump(mode="json", exclude_none=True)
 
 
 def sample_progress(
@@ -178,12 +184,16 @@ def project_progress(
         )
     ):
         activity = "possibly_stalled"
-    changes: dict[str, object] = {"activity": activity}
+    projected = value.model_copy(update={"activity": activity})
     if stale or not is_transfer_phase(value.phase):
-        changes.update(
-            bytes_per_second=None, smoothed_bytes_per_second=None, eta_seconds=None
+        projected = projected.model_copy(
+            update={
+                "bytes_per_second": None,
+                "smoothed_bytes_per_second": None,
+                "eta_seconds": None,
+            }
         )
-    return value.model_copy(update=changes)
+    return projected
 
 
 def aggregate_progress(members: Sequence[OperationMemberProgress]) -> OperationProgress:

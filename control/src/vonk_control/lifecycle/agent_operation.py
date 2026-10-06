@@ -50,6 +50,7 @@ fence cannot repeat a visible effect.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -61,7 +62,10 @@ from vonk_agent_protocol import (
     AgentOperation,
     InvalidRequestReason,
     LifecycleState,
+    OperationProgress,
+    canonical_message,
 )
+from vonk_agent_protocol.contracts import AgentFailureResult, AgentResultPayload
 
 from .. import agent_operation_states as aos
 from .. import job_states
@@ -80,6 +84,7 @@ from ..agent_operation_facts import (
 from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
+from ..operation_progress import progress_document
 from .adapter import Dispatch
 from .core import OBSERVE_BUDGET, transition
 from .reconciler import settle
@@ -626,7 +631,7 @@ class AgentOperationAdapter:
         deadline: datetime,
         now: datetime,
         *,
-        progress: dict[str, object] | None,
+        progress: OperationProgress | None,
     ) -> AgentOperationAttempt | None:
         """Record a claim: the next attempt, its fence and lease, a running order.
 
@@ -660,7 +665,7 @@ class AgentOperationAdapter:
             lease_deadline=deadline,
             agent_certificate_serial=certificate_serial,
             state="running",
-            progress=progress,
+            progress=None if progress is None else progress_document(progress),
         )
         session = self._session
         assert session is not None
@@ -682,7 +687,7 @@ class AgentOperationAdapter:
         fence: str,
         now: datetime,
         *,
-        result: dict[str, object],
+        result: AgentFailureResult,
     ) -> AgentOperationAttempt:
         """Record a claim refused before it ran: a failed attempt, a failed order."""
 
@@ -700,7 +705,7 @@ class AgentOperationAdapter:
             lease_deadline=now,
             agent_certificate_serial=certificate_serial,
             state="failed",
-            result=result,
+            result=json.loads(canonical_message(result)),
         )
         session = self._session
         assert session is not None
@@ -778,11 +783,11 @@ class AgentOperationAdapter:
     def record_report(
         attempt: AgentOperationAttempt,
         state: str,
-        result: dict[str, object],
+        result: AgentResultPayload,
     ) -> None:
         """Keep the executor's own report on its attempt (a fact, not a decision)."""
 
-        attempt.result = result
+        attempt.result = json.loads(canonical_message(result))
         aos.record_wire_state(attempt, state)
 
 

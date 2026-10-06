@@ -217,7 +217,7 @@
     },
     {
       "path": "control/src/vonk_control/agent_jobs.py",
-      "count": 21
+      "count": 4
     },
     {
       "path": "control/src/vonk_control/agent_upgrade_status.py",
@@ -225,11 +225,11 @@
     },
     {
       "path": "control/src/vonk_control/agent_upgrades.py",
-      "count": 26
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/api.py",
-      "count": 4
+      "count": 3
     },
     {
       "path": "control/src/vonk_control/artifact_jobs.py",
@@ -265,7 +265,7 @@
     },
     {
       "path": "control/src/vonk_control/cluster_mappings.py",
-      "count": 12
+      "count": 3
     },
     {
       "path": "control/src/vonk_control/compiled_artifact_contract.py",
@@ -304,20 +304,8 @@
       "count": 6
     },
     {
-      "path": "control/src/vonk_control/failure_evidence.py",
-      "count": 8
-    },
-    {
-      "path": "control/src/vonk_control/fleet_event_contract.py",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/fleet_events.py",
-      "count": 3
-    },
-    {
       "path": "control/src/vonk_control/fleet_profiles.py",
-      "count": 30
+      "count": 26
     },
     {
       "path": "control/src/vonk_control/harnesses/canonical.py",
@@ -344,16 +332,8 @@
       "count": 13
     },
     {
-      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
-      "count": 3
-    },
-    {
       "path": "control/src/vonk_control/lifecycle/fleet_profile.py",
       "count": 4
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/image_availability.py",
-      "count": 10
     },
     {
       "path": "control/src/vonk_control/lifecycle/job.py",
@@ -372,16 +352,12 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/litellm.py",
-      "count": 2
-    },
-    {
       "path": "control/src/vonk_control/model_cache.py",
       "count": 38
     },
     {
       "path": "control/src/vonk_control/model_cache_api.py",
-      "count": 4
+      "count": 2
     },
     {
       "path": "control/src/vonk_control/model_cache_progress.py",
@@ -393,7 +369,7 @@
     },
     {
       "path": "control/src/vonk_control/operation_api.py",
-      "count": 38
+      "count": 8
     },
     {
       "path": "control/src/vonk_control/operation_blockers.py",
@@ -401,15 +377,11 @@
     },
     {
       "path": "control/src/vonk_control/operation_contract.py",
-      "count": 6
+      "count": 3
     },
     {
-      "path": "control/src/vonk_control/operation_progress.py",
-      "count": 6
-    },
-    {
-      "path": "control/src/vonk_control/operator_projection_api.py",
-      "count": 6
+      "path": "control/src/vonk_control/operation_item_contract.py",
+      "count": 2
     },
     {
       "path": "control/src/vonk_control/prebuilt_images.py",
@@ -418,10 +390,6 @@
     {
       "path": "control/src/vonk_control/profile_stop_authority.py",
       "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/recipe_action_plans.py",
-      "count": 3
     },
     {
       "path": "control/src/vonk_control/recipe_build_cancellation.py",
@@ -434,10 +402,6 @@
     {
       "path": "control/src/vonk_control/recipe_execution_contract.py",
       "count": 6
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "count": 53
     },
     {
       "path": "control/src/vonk_control/recipe_image_availability_api.py",
@@ -464,10 +428,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/recipe_routes.py",
-      "count": 4
-    },
-    {
       "path": "control/src/vonk_control/recipe_runtime_specs.py",
       "count": 2
     },
@@ -480,10 +440,6 @@
       "count": 3
     },
     {
-      "path": "control/src/vonk_control/recipe_update_batches.py",
-      "count": 2
-    },
-    {
       "path": "control/src/vonk_control/recipe_update_notice.py",
       "count": 1
     },
@@ -494,10 +450,6 @@
     {
       "path": "control/src/vonk_control/resource_planning.py",
       "count": 13
-    },
-    {
-      "path": "control/src/vonk_control/route_runtime.py",
-      "count": 3
     },
     {
       "path": "control/src/vonk_control/run_admission.py",

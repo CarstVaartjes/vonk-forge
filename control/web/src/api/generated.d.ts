@@ -1330,10 +1330,7 @@ export interface components {
         AgentUpgradeRequestIntent: {
             /** All */
             all: boolean;
-            /**
-             * Selectors
-             * @default null
-             */
+            /** Selectors */
             selectors: string[] | null;
         };
         /**

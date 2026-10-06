@@ -16,6 +16,7 @@ from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.failure_evidence import (
+    FailedAttempt,
     FailureEvidenceBundle,
     FailureEvidenceService,
     collect_failure,
@@ -32,6 +33,7 @@ from vonk_control.models import (
     Base,
     Job,
 )
+from vonk_control.operation_item_contract import operation_item
 
 from .agent_fences import fenced_attempt
 from .runtime_identity_support import claim_agent
@@ -76,7 +78,9 @@ def store_failed_job(service, value: dict[str, object]) -> None:
 
 
 def rendered(value) -> str:
-    return collect_failure(value, now=NOW).model_dump_json()
+    return collect_failure(
+        FailedAttempt.model_validate(value), now=NOW
+    ).model_dump_json()
 
 
 def item(kind="recipe.build.v1", attempt=1):
@@ -111,7 +115,7 @@ def item(kind="recipe.build.v1", attempt=1):
 def test_every_operation_collector_keeps_phase_and_code(kind):
     value = item(kind)
     before = copy.deepcopy(value)
-    bundle = collect_failure(value, now=NOW)
+    bundle = collect_failure(FailedAttempt.model_validate(value), now=NOW)
     assert bundle.diagnostics.phase == "prepare"
     assert bundle.diagnostics.category == "platform-policy"
     assert bundle.error_code == "operation_failed"
@@ -135,13 +139,18 @@ def test_every_operation_collector_keeps_phase_and_code(kind):
 def test_failure_classification_uses_codes(code, expected):
     value = item()
     value["result"]["diagnostic"] = code
-    assert collect_failure(value, now=NOW).diagnostics.category == expected
+    assert (
+        collect_failure(
+            FailedAttempt.model_validate(value), now=NOW
+        ).diagnostics.category
+        == expected
+    )
 
 
 def test_large_fleet_keeps_bounded_evidence():
     value = item()
     value["node_ids"] = [f"spk_{index:032x}" for index in range(1024)]
-    bundle = collect_failure(value, now=NOW)
+    bundle = collect_failure(FailedAttempt.model_validate(value), now=NOW)
     assert bundle.context.node_ids == value["node_ids"][:128]
 
 
@@ -318,7 +327,9 @@ def test_offline_node_uses_durable_evidence_without_probe(service):
 
 def test_typed_agent_diagnostics_retained_and_resanitized():
     value = item()
-    diagnostics = collect_failure(value, now=NOW).diagnostics.model_dump(mode="json")
+    diagnostics = collect_failure(
+        FailedAttempt.model_validate(value), now=NOW
+    ).diagnostics.model_dump(mode="json")
     diagnostics["sandbox"] = [{"name": "NoNewPrivileges", "value": "yes"}]
     diagnostics["storage"] = [{"name": "free-bytes", "value": "1024"}]
     diagnostics["versions"] = [{"name": "kernel", "value": "6.12"}]
@@ -326,7 +337,7 @@ def test_typed_agent_diagnostics_retained_and_resanitized():
     value["result"]["diagnostics"] = FailureDiagnostics.model_validate(
         diagnostics
     ).model_dump(mode="json")
-    bundle = collect_failure(value, now=NOW)
+    bundle = collect_failure(FailedAttempt.model_validate(value), now=NOW)
     assert "should-never-persist" not in bundle.model_dump_json()
     assert bundle.diagnostics.sandbox[0].value == "yes"
     assert bundle.diagnostics.storage[0].value == "1024"
@@ -390,7 +401,9 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
         "created_at": NOW.isoformat(),
     }
     # The composed API consumes the same nested diagnostics as AgentResult.
-    diagnostics = collect_failure(value, now=NOW).diagnostics
+    diagnostics = collect_failure(
+        FailedAttempt.model_validate(value), now=NOW
+    ).diagnostics
     result = value["result"]
     assert isinstance(result, dict)
     result.pop("stderr")
@@ -667,10 +680,14 @@ def test_a_parked_lease_lapse_is_retained_from_the_controllers_own_reason(tmp_pa
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_download_is_named_only_for_a_stored_failed_attempt(service):
     value = {**item(), "state": "failed"}
-    assert "evidence_download" not in service.decorate(value)
+
+    def decorated(document):
+        return service.decorate(operation_item(document)).evidence_download
+
+    assert decorated(value) is None
     store_failed_job(service, value)
-    assert service.decorate(value)["evidence_download"] == {
-        "href": f"/api/operations/{value['id']}/evidence?attempt=1"
-    }
-    assert "evidence_download" not in service.decorate({**value, "attempt": 2})
-    assert "evidence_download" not in service.decorate({**value, "state": "running"})
+    download = decorated(value)
+    assert download is not None
+    assert download.href == f"/api/operations/{value['id']}/evidence?attempt=1"
+    assert decorated({**value, "attempt": 2}) is None
+    assert decorated({**value, "state": "running"}) is None

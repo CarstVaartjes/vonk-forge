@@ -38,7 +38,12 @@ from .recipe_image_availability import (
     SOURCE_POLICY_REFUSED_CODE,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
+    RecipeImageAvailabilityUnknown,
     RecipeImageAvailabilityView,
+)
+from .recipe_image_availability_contract import (
+    RecipeImageAvailabilityArtifact,
+    RecipeImageAvailabilityState,
 )
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
@@ -47,19 +52,6 @@ from .strict_json import StrictJSONModel, read_stored_model
 # One named type per closed set, shared by the contract field and every
 # helper that produces the value, so the vocabulary cannot drift apart.
 RecipeImageAvailabilityKind = Literal["recipe.image.availability.v2"]
-RecipeImageAvailabilityState = Annotated[
-    Literal[
-        LifecycleState.QUEUED,
-        LifecycleState.RUNNING,
-        LifecycleState.BACKOFF,
-        LifecycleState.OBSERVING,
-        LifecycleState.SUCCEEDED,
-        LifecycleState.FAILED,
-        LifecycleState.CANCELLED,
-    ],
-    # A row written before the rename may still say ``partial`` or ``cancelling``.
-    BeforeValidator(state_adopter(LifecycleSubject.JOB)),
-]
 RecipeImageAvailabilityChildKind = Literal["model-cache", "runtime-image"]
 RecipeOperatorState = Annotated[
     Literal[
@@ -74,22 +66,6 @@ RecipeOperatorState = Annotated[
     BeforeValidator(state_adopter(LifecycleSubject.JOB)),
 ]
 RecipeOperatorAction = Literal["remove"]
-
-
-class RecipeImageAvailabilityArtifact(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    key: str = Field(min_length=1, max_length=256)
-    id: str = Field(min_length=1, max_length=256)
-    path: str = Field(min_length=1, max_length=1024)
-    kind: str = Field(min_length=1, max_length=64)
-    repository: str | None = None
-    source: str = Field(min_length=1, max_length=1024)
-    revision: str | None = Field(default=None, max_length=256)
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    download_bytes: int = Field(ge=0)
-    roles: list[str]
-    model_content_sha256: str | None = None
 
 
 class RecipeImageAvailabilityChild(StrictJSONModel):
@@ -280,6 +256,14 @@ def _child(
 def _view_document(
     view: RecipeImageAvailabilityView,
 ) -> RecipeImageAvailabilityResponse:
+    if view.residue is not None:
+        raise _recipe_error(
+            RecipeImageAvailabilityUnknown(
+                RecipeImageCode.METADATA_REFRESH_UNAVAILABLE,
+                "availability bookkeeping is unknown",
+                retryable=True,
+            )
+        )
     document = view.document()
     result = document.get("result")
     result_model = None

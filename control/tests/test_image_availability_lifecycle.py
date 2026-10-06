@@ -20,11 +20,17 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, OperationProgress
 from vonk_control import job_states
+from vonk_control.job_documents import (
+    AvailabilityJobPayload,
+    AvailabilityRetry,
+    AvailabilityRuntime,
+)
 from vonk_control.lifecycle import (
     STOP_BUDGET,
     CancelRequested,
+    Effect,
     Lifecycle,
     Outcome,
     Reported,
@@ -40,9 +46,12 @@ from vonk_control.lifecycle.image_availability import (
     PrebuiltImageAdapter,
 )
 from vonk_control.models import Base, Job, User
+from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
+from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
 from vonk_control.recipe_update_contract import UPDATE_KIND
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.strict_json import serialize_json_value
 
 from .test_recipe_image_availability import (
     Transport,
@@ -70,6 +79,21 @@ def _job(kind: str = OPERATION_KIND, state: str = "queued", **payload) -> Job:
         current_attempt=int(payload.pop("attempt", 0)) if "attempt" in payload else 0,
         created_at=NOW,
         updated_at=NOW,
+    )
+
+
+def _payload() -> AvailabilityJobPayload:
+    return AvailabilityJobPayload(
+        schema_version=2,
+        kind=OPERATION_KIND,
+        request=RecipeRevisionIntent(recipe_revision_id="revision"),
+        recipe_revision_id="revision",
+        recipe_content_sha256="d" * 64,
+        recipe=_recipe("recipe-source-build.json"),
+        runtime=AvailabilityRuntime.model_validate(_runtime()),
+        force_rebuild=False,
+        progress=OperationProgress(phase="prepare"),
+        retry=AvailabilityRetry(automatic_attempts=0, operator_retries=0),
     )
 
 
@@ -169,19 +193,20 @@ def test_a_retryable_failure_is_retried_at_the_cores_clock_with_the_floor() -> N
         claim_until=(NOW + timedelta(minutes=1)).isoformat(),
     )
     floor = NOW + timedelta(seconds=45)
-    payload = dict(job.payload)
-    after = adapter.fail(
+    payload = _payload()
+    after = adapter.plan_failure(
         job,
         NOW,
         retryable=True,
-        reason="boom",
         retry_after=floor,
-        payload=payload,
         count=0,
     )
+    updated = adapter.commit(job, after, NOW, reason="boom", payload=payload)
+    assert updated is not None and payload.retry_after_at is None
     assert after.state is State.BACKOFF and job.state == "queued"
     assert job.status_reason == "boom"
-    due = datetime.fromisoformat(str(payload["retry_after_at"]))
+    due = updated.retry_after_at
+    assert due is not None
     assert due >= floor and due <= floor + timedelta(seconds=90)
 
 
@@ -206,10 +231,11 @@ def test_a_dependency_wait_is_partial_and_does_not_count_as_a_failure() -> None:
         attempt=1,
         claim_until=(NOW + timedelta(minutes=1)).isoformat(),
     )
-    payload = dict(job.payload)
-    after = adapter.defer(job, NOW, NOW + timedelta(seconds=1), payload=payload)
-    assert job.state == LifecycleState.BACKOFF and after.state is State.BACKOFF
-    assert "retry_after_at" in payload
+    payload = _payload()
+    updated = adapter.defer(job, NOW, NOW + timedelta(seconds=1), payload=payload)
+    assert job.state == LifecycleState.BACKOFF
+    assert adapter.lifecycle(job, NOW).state is State.BACKOFF
+    assert payload.retry_after_at is None and updated.retry_after_at is not None
 
 
 def test_claim_takes_a_lapsed_running_and_a_legacy_parked_row() -> None:
@@ -288,6 +314,21 @@ def test_a_spent_cancel_ends_with_the_effect_unknown_and_fences_the_claim() -> N
         claim_owner="gone",
         claim_until=(NOW + timedelta(hours=1)).isoformat(),
         cancellation=requested,
+    )
+    job.payload = serialize_json_value(
+        _payload().model_copy(
+            update={
+                "claim_owner": "gone",
+                "claim_until": NOW + timedelta(hours=1),
+                "cancellation": RecipeOperationCancellationResult(
+                    cancel_requested=True,
+                    cancel_requested_at=NOW,
+                    cancel_request_id="00000000-0000-4000-8000-000000000702",
+                    cancel_actor="operator",
+                    reason="stop",
+                ),
+            }
+        )
     )
     ended = adapter.settle_cancel(job, NOW + CANCEL_BUDGET, outstanding=True)
     assert ended.state is State.CANCELLED and ended.effect.value == "unknown"
@@ -405,3 +446,32 @@ def test_the_prebuilt_import_ends_definitely_either_way() -> None:
     bad = _job(state="running", attempt=1)
     assert adapter.finish(bad, ok=False, now=NOW).state is State.FAILED
     assert bad.state == "failed"
+
+
+def test_damaged_clock_fields_keep_independent_live_lease_and_cancel_budget() -> None:
+    """Damage to retry bookkeeping must not lapse a live executor or reset cancel."""
+    adapter = _adapter()
+    live = NOW + timedelta(minutes=1)
+    job = _job(
+        state="running",
+        attempt=1,
+        claim_owner="owner",
+        claim_until=live.isoformat(),
+        retry={"automatic_attempts": True},
+        retry_after_at="tomorrow-ish",
+    )
+    row = adapter.adopt(job)
+    assert row.state is State.RUNNING and row.lease_deadline == live
+    assert row.retry_count == 0
+    job.state = "cancelling"
+    job.payload = dict(job.payload) | {
+        "cancellation": {
+            "cancel_requested_at": (NOW - CANCEL_BUDGET).isoformat(),
+            "cancel_request_id": "cancel",
+        }
+    }
+    ended = adapter.settle_cancel(job, NOW, outstanding=True)
+    assert ended.state is State.CANCELLED and ended.effect is Effect.UNKNOWN
+    # A damaged envelope cannot be rewritten as a valid execution document;
+    # its former executor is fenced by the terminal state instead.
+    assert job.state == "cancelled"

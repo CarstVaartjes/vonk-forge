@@ -60,6 +60,7 @@ from vonk_control.models import (
     ModelCacheSetArtifact,
     RecipeBuild,
 )
+from vonk_control.operation_item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.worker import Worker
@@ -1785,7 +1786,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     assert isinstance(first_page, operation_api.OperationListPage)
     assert first_page.total == 2
     assert len(first_page.items) == 1
-    first = first_page.items[0]
+    first = operation_item(first_page.items[0]).model_dump(mode="json")
     assert first["node_ids"] == []
     assert first["attempt"] == 1
     assert first["supported_actions"] == []
@@ -1812,7 +1813,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     )
     assert second_page.total == 2
     assert len(second_page.items) == 1
-    assert second_page.items[0]["id"] != first["id"]
+    assert operation_item(second_page.items[0]).id != first["id"]
     assert second_page.next_cursor is None
 
     queued_page = provider.list_operations(
@@ -1821,7 +1822,7 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         )
     )
     assert queued_page.total == 2
-    assert {item["id"] for item in queued_page.items} == set(operation_ids)
+    assert {operation_item(item).id for item in queued_page.items} == set(operation_ids)
 
     node_page = provider.list_operations(
         operation_api.OperationQuery(
@@ -1833,7 +1834,9 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     )
     assert list(node_page.items) == []
     assert node_page.total == 0
-    detail = provider.get_operation(str(first["id"]))
+    detail = operation_item(provider.get_operation(str(first["id"]))).model_dump(
+        mode="json"
+    )
     assert detail["id"] == first["id"]
     assert detail["node_ids"] == []
     assert detail["attempt"] == 1
@@ -1845,7 +1848,9 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         )
     )
     assert succeeded_page.total == 2
-    assert all(item["state"] == "succeeded" for item in succeeded_page.items)
+    assert all(
+        operation_item(item).state == "succeeded" for item in succeeded_page.items
+    )
 
 
 def test_malformed_pagination_boundary_fails_instead_of_ending_the_page(cache) -> None:

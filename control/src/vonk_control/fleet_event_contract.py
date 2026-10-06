@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
@@ -105,14 +104,24 @@ type _FleetEntityPayload = (
 type FleetEventPayload = NodeProfilePayload | NodeTelemetryPayload | _FleetEntityPayload
 
 
+def _as_model[T: _FleetEventModel](model: type[T], payload: object) -> T:
+    if isinstance(payload, model):
+        return payload
+    return model.model_validate(payload)
+
+
 def validate_fleet_event_payload(
     event_type: str,
     entity_kind: str,
     entity_id: str,
     node_id: str | None,
-    payload: Mapping[str, object],
+    payload: object,
 ) -> FleetEventPayload:
-    """Validate one outbox payload against its producer/source identity."""
+    """Validate one outbox payload against its producer/source identity.
+
+    ``payload`` is the typed payload a producer built or the stored document a
+    reader decoded; either way the value returned is the contract model.
+    """
 
     allowed_kinds: dict[str, frozenset[str]] = {
         "node-profile": frozenset({"node-profile"}),
@@ -130,12 +139,12 @@ def validate_fleet_event_payload(
     if entity_kind not in allowed_kinds.get(event_type, frozenset()):
         raise ValueError("Fleet event source kind does not match event type")
     if event_type == "node-profile":
-        value = NodeProfilePayload.model_validate(payload)
+        value = _as_model(NodeProfilePayload, payload)
         if value.node_id != entity_id or value.node_id != node_id:
             raise ValueError("node profile event identity is inconsistent")
         return value
     if event_type == "node-telemetry":
-        value = NodeTelemetryPayload.model_validate(payload)
+        value = _as_model(NodeTelemetryPayload, payload)
         if value.node_id != entity_id or value.node_id != node_id:
             raise ValueError("node telemetry event identity is inconsistent")
         return value
@@ -150,7 +159,7 @@ def validate_fleet_event_payload(
     model = classes.get(entity_kind)
     if model is None:
         raise ValueError("Fleet event source kind is invalid")
-    value = model.model_validate(payload)
+    value = _as_model(model, payload)
     if value.entity_kind != entity_kind or value.entity_id != entity_id:
         raise ValueError("Fleet event entity identity is inconsistent")
     if getattr(value, "node_id", None) != node_id and entity_kind in {

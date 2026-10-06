@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import canonical_message
 from vonk_control import availability_production
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
@@ -14,6 +15,7 @@ from vonk_control.recipe_image_availability import (
     BuildUnsettled,
     RecipeImageAvailabilityError,
 )
+from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 
 from .recipe_removal_review_support import remove_after_review
 from .test_build_cancellation_recovery import _active_claims, _evidence, _services
@@ -103,8 +105,16 @@ def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
     )
     result = observe(production())
     assert not isinstance(result, BuildUnsettled)
-    assert result["build_id"] == plan.build_id
-    assert result["build_input_sha256"] == plan.build_input_sha256
+    assert (
+        AvailabilityBuildReceipt.model_validate_json(canonical_message(result)).build_id
+        == plan.build_id
+    )
+    assert (
+        AvailabilityBuildReceipt.model_validate_json(
+            canonical_message(result)
+        ).build_input_sha256
+        == plan.build_input_sha256
+    )
     with sessions() as session:
         assert tuple(
             session.scalars(select(Job.id).where(Job.kind == "recipe.build.v1"))

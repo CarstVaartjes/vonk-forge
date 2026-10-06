@@ -50,6 +50,7 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.operation_api import merge_operation_providers
+from vonk_control.operation_item_contract import operation_item
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
     RunSwitchPhase,
@@ -1514,7 +1515,11 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         node_id=None,
         cursors=cursors,
     )
-    merged_run = next(item for item in merged.items if item["id"] == run_id)
+    merged_run = next(
+        operation_item(item).model_dump(mode="json")
+        for item in merged.items
+        if operation_item(item).id == run_id
+    )
     merged_progress = _operation_progress(merged_run)
     assert merged_progress["completed_bytes"] == 90
     assert {

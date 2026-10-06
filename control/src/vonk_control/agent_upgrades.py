@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import httpx2
+from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -26,7 +27,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
+from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.package_source import AgentPackageSource
+from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
 
 from . import agent_operation_states, job_states
 from .agent_jobs import (
@@ -36,7 +39,13 @@ from .agent_jobs import (
     schedule_agent_upgrade_retry,
 )
 from .agent_package_source import load_package_source
-from .bounded_json import require_integer
+from .agent_upgrade_contract import (
+    AgentUpgradePackage,
+    AgentUpgradeRepairManifest,
+    AgentUpgradeRequestIntent,
+    AgentUpgradeRolloutPayload,
+    AgentUpgradeRolloutResult,
+)
 from .bounded_retry import bounded_attempts
 from .categorized_errors import (
     InvalidType,
@@ -50,10 +59,7 @@ from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 from .strict_json import read_stored_model
 
-_PACKAGE_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_BUILD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_SIGNATURE = re.compile(r"[0-9a-f]{128}\Z")
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _ONLINE_WINDOW = timedelta(seconds=150)
 # An ambiguous install result can leave durable apt/dpkg recovery in progress.
@@ -110,42 +116,118 @@ def _aware(value: datetime) -> datetime:
 def _request_intent(
     value: object,
     node_ids: Sequence[str] | None,
-) -> dict[str, object]:
-    if value is None:
-        return {
+) -> AgentUpgradeRequestIntent:
+    """The requested scope as its contract: the typed value, a stored document,
+    or (absent) the scope the caller's explicit Sparks imply."""
+
+    if isinstance(value, AgentUpgradeRequestIntent):
+        return value
+    document = (
+        {
             "all": node_ids is None,
             "selectors": None if node_ids is None else list(node_ids),
         }
-    if not isinstance(value, Mapping):
+        if value is None
+        else value
+    )
+    try:
+        return read_stored_model(AgentUpgradeRequestIntent, document)
+    except (TypeError, ValueError):
         raise AgentUpgradeInvalid(
             "agent upgrade request intent is invalid",
             reason=InvalidRequestReason.MALFORMED,
-        )
-    if set(value) != {"all", "selectors"} or type(value.get("all")) is not bool:
-        raise AgentUpgradeInvalid(
-            "agent upgrade request intent is invalid",
-            reason=InvalidRequestReason.MALFORMED,
-        )
-    all_nodes = value["all"]
-    selectors = value["selectors"]
-    if all_nodes:
-        if selectors is not None:
-            raise AgentUpgradeInvalid(
-                "agent upgrade request intent is invalid",
-                reason=InvalidRequestReason.MALFORMED,
-            )
-        return {"all": True, "selectors": None}
-    if (
-        not isinstance(selectors, list)
-        or not selectors
-        or len(selectors) > 64
-        or not all(isinstance(selector, str) and selector for selector in selectors)
-    ):
-        raise AgentUpgradeInvalid(
-            "agent upgrade request intent is invalid",
-            reason=InvalidRequestReason.MALFORMED,
-        )
-    return {"all": False, "selectors": list(selectors)}
+        ) from None
+
+
+def _rollout_document(payload: AgentUpgradeRolloutPayload) -> dict[str, object]:
+    """The stored rollout payload; a rollout without a repair carries no key."""
+
+    document = payload.model_dump(mode="json")
+    if payload.repair_manifest is None:
+        del document["repair_manifest"]
+    return document
+
+
+def _plan_digest(
+    *,
+    sources: Mapping[str, AgentPackageSource],
+    authority_revision: str,
+    node_ids: Sequence[str],
+    package: AgentUpgradePackage,
+    request_intent: AgentUpgradeRequestIntent,
+    repair_manifest: AgentUpgradeRepairManifest | None,
+) -> str:
+    """The digest that binds a rollout plan; the same bytes at plan and resume."""
+
+    document = {
+        "sources": {
+            node_id: source.model_dump(mode="json")
+            for node_id, source in sources.items()
+        },
+        "authority_revision": authority_revision,
+        "node_ids": list(node_ids),
+        "package": package.model_dump(mode="json"),
+        "request_intent": request_intent.model_dump(mode="json"),
+        **(
+            {"repair_manifest": repair_manifest.model_dump(mode="json")}
+            if repair_manifest is not None
+            else {}
+        ),
+    }
+    return hashlib.sha256(canonical_message(document)).hexdigest()
+
+
+def _stored_field[T: BaseModel](
+    model: type[T], parent: Job, field: str, key: str | None = None
+) -> T | None:
+    """One document of a stored rollout payload, read on its own.
+
+    A rollout whose payload is damaged in one place (one Spark's rollback
+    source) stays usable everywhere else, so each document is read separately
+    and a damaged one reads as absent.
+    """
+
+    document = (
+        parent.payload.get(field) if isinstance(parent.payload, Mapping) else None
+    )
+    if key is not None:
+        document = document.get(key) if isinstance(document, Mapping) else None
+    if document is None:
+        return None
+    try:
+        return read_stored_model(model, document)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stored_package(parent: Job) -> AgentUpgradePackage | None:
+    return _stored_field(AgentUpgradePackage, parent, "package")
+
+
+def _stored_source(parent: Job, node_id: str) -> AgentPackageSource | None:
+    return _stored_field(AgentPackageSource, parent, "sources", node_id)
+
+
+def _stored_node_order(parent: Job) -> list[str] | None:
+    order = (
+        parent.payload.get("node_order")
+        if isinstance(parent.payload, Mapping)
+        else None
+    )
+    if not isinstance(order, list) or not all(isinstance(node, str) for node in order):
+        return None
+    return list(order)
+
+
+def _stored_result(parent: Job) -> AgentUpgradeRolloutResult:
+    """What the rollout recorded so far; an unreadable record reads as empty."""
+
+    if parent.result is None:
+        return AgentUpgradeRolloutResult()
+    try:
+        return read_stored_model(AgentUpgradeRolloutResult, parent.result)
+    except (TypeError, ValueError):
+        return AgentUpgradeRolloutResult()
 
 
 def _conflict_detail(detail: str, spark_id: str | None) -> str:
@@ -240,11 +322,11 @@ class AgentUpgradeRetryLater(UnknownOutcomeError, AgentUpgradeConflict):
 class AgentUpgradePlan:
     authority_revision: str
     node_ids: tuple[str, ...]
-    package: dict[str, object]
+    package: AgentUpgradePackage
     plan_digest: str
-    repair_manifest: dict[str, object] | None
-    request_intent: dict[str, object]
-    sources: dict[str, dict[str, object]]
+    repair_manifest: AgentUpgradeRepairManifest | None
+    request_intent: AgentUpgradeRequestIntent
+    sources: dict[str, AgentPackageSource]
     #: Selected Sparks this rollout will not touch, with the reason.  A Spark
     #: that already runs the target is a no-op, not a conflict; one that can
     #: never take this package is reported instead of refusing the fleet.
@@ -286,7 +368,7 @@ class AgentUpgradeService:
     def close(self) -> None:
         self._http.close()
 
-    def current_package(self) -> dict[str, object]:
+    def current_package(self) -> AgentUpgradePackage:
         """The signed current release; a channel that is mid-publication is asked
         again a few times before the requester is told to retry."""
 
@@ -299,7 +381,7 @@ class AgentUpgradeService:
         assert refused is not None
         raise refused
 
-    def _current_package_once(self) -> dict[str, object]:
+    def _current_package_once(self) -> AgentUpgradePackage:
         prefix = f"/artifacts/{self._channel}"
         try:
             manifest_response = self._http.get(f"{prefix}/current.manifest")
@@ -383,12 +465,12 @@ class AgentUpgradeService:
     def preview(
         self,
         node_ids: Sequence[str] | None,
-        package: Mapping[str, object],
+        package: AgentUpgradePackage,
         *,
-        repair_manifest: Mapping[str, object] | None = None,
-        request_intent: Mapping[str, object] | None = None,
+        repair_manifest: AgentUpgradeRepairManifest | None = None,
+        request_intent: AgentUpgradeRequestIntent | None = None,
     ) -> AgentUpgradePlan:
-        payload = self._package(package)
+        payload = package
         intent = _request_intent(request_intent, node_ids)
         repair = (
             None
@@ -396,7 +478,7 @@ class AgentUpgradeService:
             else self._repair_manifest(repair_manifest, payload)
         )
         if repair is not None and (
-            node_ids is None or tuple(node_ids) != (repair["node_id"],)
+            node_ids is None or tuple(node_ids) != (repair.node_id,)
         ):
             raise AgentUpgradeInvalid(
                 "agent repair requires exactly its explicit Spark",
@@ -404,7 +486,7 @@ class AgentUpgradeService:
             )
         # The agent wire requires a 64-hex authority revision on every
         # upgrade operation; the signed package digest names what it installs.
-        authority_revision = str(payload["package_sha256"])
+        authority_revision = payload.package_sha256
         requested = None if node_ids is None else tuple(node_ids)
         if requested is not None and (
             not requested
@@ -442,7 +524,7 @@ class AgentUpgradeService:
                     installed.append(
                         (node_id, node.build_digest or "", node.binary_digest or "")
                     )
-        sources: dict[str, dict[str, object]] = {}
+        sources: dict[str, AgentPackageSource] = {}
         for node_id, build_digest, binary_digest in installed:
             try:
                 source = load_package_source(
@@ -451,21 +533,20 @@ class AgentUpgradeService:
             except (httpx2.HTTPError, ValueError):
                 skipped[node_id] = "has no published signed rollback package"
                 continue
-            sources[node_id] = source.model_dump(mode="json")
+            sources[node_id] = source
         targets = tuple(node_id for node_id, _, _ in installed if node_id in sources)
-        document = {
-            "sources": sources,
-            "authority_revision": authority_revision,
-            "node_ids": list(targets),
-            "package": payload,
-            "request_intent": intent,
-            **({"repair_manifest": repair} if repair is not None else {}),
-        }
         return AgentUpgradePlan(
             authority_revision=authority_revision,
             node_ids=targets,
             package=payload,
-            plan_digest=hashlib.sha256(canonical_message(document)).hexdigest(),
+            plan_digest=_plan_digest(
+                sources=sources,
+                authority_revision=authority_revision,
+                node_ids=list(targets),
+                package=payload,
+                request_intent=intent,
+                repair_manifest=repair,
+            ),
             repair_manifest=repair,
             request_intent=intent,
             sources=sources,
@@ -477,7 +558,7 @@ class AgentUpgradeService:
         request_id: str,
         *,
         actor: str,
-        request_intent: Mapping[str, object],
+        request_intent: AgentUpgradeRequestIntent,
     ) -> Job | None:
         """Return the exact durable job for a repeated fleet-upgrade request."""
 
@@ -492,7 +573,7 @@ class AgentUpgradeService:
 
     @staticmethod
     def _check_replayed_request(
-        job: Job, actor: str, request_intent: Mapping[str, object]
+        job: Job, actor: str, request_intent: AgentUpgradeRequestIntent
     ) -> None:
         if (
             job.kind != "agent-upgrade"
@@ -520,13 +601,13 @@ class AgentUpgradeService:
     def apply(
         self,
         node_ids: Sequence[str] | None,
-        package: Mapping[str, object],
+        package: AgentUpgradePackage,
         *,
         plan_digest: str,
         actor: str,
         request_id: str,
-        repair_manifest: Mapping[str, object] | None = None,
-        request_intent: Mapping[str, object] | None = None,
+        repair_manifest: AgentUpgradeRepairManifest | None = None,
+        request_intent: AgentUpgradeRequestIntent | None = None,
     ) -> Job:
         intent = _request_intent(request_intent, node_ids)
         existing = self.get_request(request_id, actor=actor, request_intent=intent)
@@ -547,22 +628,26 @@ class AgentUpgradeService:
             request_id=request_id,
             kind="agent-upgrade",
             status_reason=None if plan.node_ids else _summary(plan.skipped),
-            result={"skipped": dict(plan.skipped)} if plan.skipped else None,
+            result=(
+                AgentUpgradeRolloutResult(skipped=dict(plan.skipped)).model_dump(
+                    mode="json", exclude_none=True
+                )
+                if plan.skipped
+                else None
+            ),
             actor=actor,
             authority_revision=plan.authority_revision,
             targets=list(plan.node_ids),
             payload_digest=plan.plan_digest,
-            payload={
-                "sources": plan.sources,
-                "node_order": list(plan.node_ids),
-                "package": plan.package,
-                "request_intent": plan.request_intent,
-                **(
-                    {"repair_manifest": plan.repair_manifest}
-                    if plan.repair_manifest is not None
-                    else {}
-                ),
-            },
+            payload=_rollout_document(
+                AgentUpgradeRolloutPayload(
+                    node_order=list(plan.node_ids),
+                    package=plan.package,
+                    request_intent=plan.request_intent,
+                    sources=plan.sources,
+                    repair_manifest=plan.repair_manifest,
+                )
+            ),
             current_attempt=0,
             created_at=now,
             updated_at=now,
@@ -688,83 +773,41 @@ class AgentUpgradeService:
                         "agent upgrade worker dispatch is not stale",
                         reason=InvalidRequestReason.NOT_READY,
                     )
-            package = parent.payload.get("package")
-            order = parent.payload.get("node_order")
-            repair = parent.payload.get("repair_manifest")
-            request_intent = parent.payload.get("request_intent")
-            expected_payload_keys = {
-                "node_order",
-                "package",
-                "request_intent",
-                "sources",
-            }
-            if repair is not None:
-                expected_payload_keys.add("repair_manifest")
-            if (
-                set(parent.payload) != expected_payload_keys
-                or not isinstance(package, dict)
-                or not isinstance(order, list)
-                or not order
-                or not all(isinstance(node_id, str) for node_id in order)
-                or len(order) != len(set(order))
-                or order != parent.targets
-                or (repair is not None and not isinstance(repair, Mapping))
-            ):
-                self._retire_rollout(
-                    parent, now, "stored agent upgrade plan is invalid"
-                )
+            invalid_plan = "stored agent upgrade plan is invalid"
+            try:
+                stored = AgentUpgradeRolloutPayload.model_validate(parent.payload)
+            except (TypeError, ValueError):
+                self._retire_rollout(parent, now, invalid_plan)
+                return
+            order = stored.node_order
+            package = stored.package
+            if len(order) != len(set(order)) or order != parent.targets:
+                self._retire_rollout(parent, now, invalid_plan)
                 return
             try:
-                normalized_intent = _request_intent(request_intent, None)
-            except AgentUpgradeConflict:
-                self._retire_rollout(
-                    parent, now, "stored agent upgrade plan is invalid"
-                )
-                return
-            try:
-                normalized_package = self._package(package)
+                normalized_intent = _request_intent(stored.request_intent, None)
                 normalized_repair = (
                     None
-                    if repair is None
-                    else self._repair_manifest(repair, normalized_package)
+                    if stored.repair_manifest is None
+                    else self._repair_manifest(stored.repair_manifest, package)
                 )
             except AgentUpgradeConflict:
-                self._retire_rollout(
-                    parent, now, "stored agent upgrade plan is invalid"
-                )
+                self._retire_rollout(parent, now, invalid_plan)
                 return
-            if normalized_repair is not None and order != [
-                normalized_repair["node_id"]
-            ]:
-                self._retire_rollout(
-                    parent, now, "stored agent upgrade plan is invalid"
-                )
+            if normalized_repair is not None and order != [normalized_repair.node_id]:
+                self._retire_rollout(parent, now, invalid_plan)
                 return
-            plan_digest = hashlib.sha256(
-                canonical_message(
-                    {
-                        "sources": parent.payload["sources"],
-                        "authority_revision": parent.authority_revision,
-                        "node_ids": order,
-                        "package": normalized_package,
-                        "request_intent": normalized_intent,
-                        **(
-                            {"repair_manifest": normalized_repair}
-                            if normalized_repair is not None
-                            else {}
-                        ),
-                    }
-                )
-            ).hexdigest()
-            if parent.payload_digest != plan_digest:
-                self._retire_rollout(
-                    parent, now, "stored agent upgrade plan is invalid"
-                )
+            if parent.payload_digest != _plan_digest(
+                sources=stored.sources,
+                authority_revision=parent.authority_revision,
+                node_ids=order,
+                package=package,
+                request_intent=normalized_intent,
+                repair_manifest=normalized_repair,
+            ):
+                self._retire_rollout(parent, now, invalid_plan)
                 return
-            from vonk_agent_protocol.contracts import AgentUpgradePayload
-
-            sources = parent.payload["sources"]
-            if not isinstance(sources, dict) or set(sources) != set(order):
+            if set(stored.sources) != set(order):
                 self._retire_rollout(parent, now, "stored rollback sources are invalid")
                 return
             stored_operations = list(
@@ -794,11 +837,10 @@ class AgentUpgradeService:
                 return
             for operation in stored_operations:
                 payload = read_stored_model(AgentUpgradePayload, operation.payload)
-                source = read_stored_model(
-                    AgentPackageSource, sources[operation.node_id]
-                )
+                source = stored.sources.get(operation.node_id)
                 if (
-                    operation.kind != "agent.upgrade.v1"
+                    source is None
+                    or operation.kind != "agent.upgrade.v1"
                     or operation.node_id not in order
                     or operation.authority_revision != parent.authority_revision
                     or {
@@ -811,7 +853,7 @@ class AgentUpgradeService:
                             "source_package_url",
                         }
                     }
-                    != package
+                    != package.model_dump(mode="json")
                     or payload.rollback.source != source.package
                     or payload.source_package_bytes != source.package_bytes
                     or payload.source_package_url != source.package_url
@@ -893,8 +935,8 @@ class AgentUpgradeService:
         )
         if parent is None or parent.kind != "agent-upgrade":
             return
-        package = parent.payload.get("package")
-        if not isinstance(package, dict):
+        package = _stored_package(parent)
+        if package is None:
             return
         node = session.scalar(
             select(AgentNode)
@@ -1050,8 +1092,8 @@ class AgentUpgradeService:
         rollback receipt, or an operator.
         """
 
-        package = parent.payload.get("package")
-        if not isinstance(package, dict):
+        package = _stored_package(parent)
+        if package is None:
             return
         node = session.get(AgentNode, node_id)
         if node is None or not self._at_target(node, package):
@@ -1130,9 +1172,11 @@ class AgentUpgradeService:
             )
             .with_for_update(of=Job)
         ):
-            result = dict(older.result) if isinstance(older.result, Mapping) else {}
-            result["superseded_by"] = job.id
-            older.result = result
+            older.result = (
+                _stored_result(older)
+                .model_copy(update={"superseded_by": job.id})
+                .model_dump(mode="json", exclude_none=True)
+            )
             for operation in session.scalars(
                 select(AgentOperation)
                 .where(
@@ -1180,29 +1224,22 @@ class AgentUpgradeService:
                 # are moving by themselves.
                 self._rollouts.project(parent, now)
             return
-        result = dict(parent.result) if isinstance(parent.result, Mapping) else {}
-        superseded = result.get("superseded_by")
-        if superseded is not None:
+        result = _stored_result(parent)
+        if result.superseded_by is not None:
             self._rollouts.cancelled(
-                parent, now, f"superseded by agent upgrade {superseded}"
+                parent, now, f"superseded by agent upgrade {result.superseded_by}"
             )
             return
-        stored_skipped = result.get("skipped")
-        skipped: dict[str, str] = {
-            str(node_id): str(reason)
-            for node_id, reason in (
-                stored_skipped.items() if isinstance(stored_skipped, Mapping) else ()
-            )
-        }
+        skipped: dict[str, str] = dict(result.skipped or {})
         deferred: list[str] = []
         materialized = {operation.node_id for operation in operations}
-        order = parent.payload.get("node_order")
-        package = parent.payload.get("package")
-        if not isinstance(order, list) or not isinstance(package, dict):
+        package = _stored_package(parent)
+        order = _stored_node_order(parent)
+        if package is None or order is None:
             self._rollouts.fail(parent, now, "stored agent upgrade plan is invalid")
             return
         for node_id in order:
-            if not isinstance(node_id, str) or node_id in materialized:
+            if node_id in materialized:
                 continue
             if node_id in skipped:
                 continue
@@ -1265,17 +1302,19 @@ class AgentUpgradeService:
 
     @staticmethod
     def _record(
-        parent: Job, result: dict[str, object], skipped: dict[str, str]
+        parent: Job, result: AgentUpgradeRolloutResult, skipped: dict[str, str]
     ) -> None:
-        if skipped != (result.get("skipped") or {}):
-            parent.result = {**result, "skipped": skipped}
+        if skipped != (result.skipped or {}):
+            parent.result = result.model_copy(update={"skipped": skipped}).model_dump(
+                mode="json", exclude_none=True
+            )
 
     @classmethod
     def _contact_proves_target(
         cls,
         node: AgentNode,
         operation: AgentOperation,
-        package: Mapping[str, object],
+        package: AgentUpgradePackage,
         message: AgentResult,
     ) -> bool:
         last_seen = node.last_seen_at
@@ -1310,16 +1349,16 @@ class AgentUpgradeService:
             and node.state == "active"
             and node.revoked_at is None
             and node.protocol_version == AGENT_PROTOCOL_VERSION
-            and node.architecture == package.get("architecture")
+            and node.architecture == package.architecture
             # Signed package and binary/build digests are the compatibility
             # identity.  Version strings remain audit metadata and may differ
             # across packaging schemes without invalidating an exact upgrade.
-            and node.build_digest == package.get("target_build_digest")
-            and node.binary_digest == package.get("target_binary_digest")
-            and evidence.get("architecture") == package.get("architecture")
-            and evidence.get("build_digest") == package.get("target_build_digest")
-            and evidence.get("binary_digest") == package.get("target_binary_digest")
-            and evidence.get("package_sha256") == package.get("package_sha256")
+            and node.build_digest == package.target_build_digest
+            and node.binary_digest == package.target_binary_digest
+            and evidence.get("architecture") == package.architecture
+            and evidence.get("build_digest") == package.target_build_digest
+            and evidence.get("binary_digest") == package.target_binary_digest
+            and evidence.get("package_sha256") == package.package_sha256
             and evidence.get("status") == "upgraded"
         )
 
@@ -1332,18 +1371,11 @@ class AgentUpgradeService:
         records the reason and goes on to the next Spark; nothing is raised.
         """
 
-        package = parent.payload.get("package")
-        if not isinstance(package, dict):
+        package = _stored_package(parent)
+        if package is None:
             return "stored agent upgrade package is invalid"
-        stored_sources = parent.payload.get("sources")
-        stored_source = (
-            stored_sources.get(node_id) if isinstance(stored_sources, Mapping) else None
-        )
-        if stored_source is None:
-            return "stored rollback sources are invalid"
-        try:
-            source = read_stored_model(AgentPackageSource, stored_source)
-        except (TypeError, ValueError):
+        source = _stored_source(parent, node_id)
+        if source is None:
             return "stored rollback sources are invalid"
         node = session.get(AgentNode, node_id)
         if (
@@ -1352,16 +1384,16 @@ class AgentUpgradeService:
             or node.build_digest != source.build_digest
         ):
             return "rollback source no longer matches installed agent"
-        payload = {
-            **package,
-            "source_package_bytes": source.package_bytes,
-            "source_package_url": source.package_url,
-            "rollback": {
-                "source": source.package.model_dump(mode="json"),
-                "attempt_nonce": secrets.token_hex(32),
-                "activation_deadline": int(self._clock().timestamp()) + 900,
-            },
-        }
+        payload = AgentUpgradePayload(
+            **package.model_dump(mode="json"),
+            source_package_bytes=source.package_bytes,
+            source_package_url=source.package_url,
+            rollback=PackageRollbackAuthority(
+                source=source.package,
+                attempt_nonce=secrets.token_hex(32),
+                activation_deadline=int(self._clock().timestamp()) + 900,
+            ),
+        ).model_dump(mode="json")
         self._operations.enqueue_in_session(
             session,
             parent.id,
@@ -1374,106 +1406,49 @@ class AgentUpgradeService:
         return None
 
     @staticmethod
-    def _package(value: Mapping[str, object]) -> dict[str, object]:
-        document = dict(value)
-        required = {
-            "architecture",
-            "package_bytes",
-            "package_sha256",
-            "package_signature",
-            "package_url",
-            "package_version",
-            "schema_version",
-            "target_binary_digest",
-            "target_build_digest",
-        }
-        url = document.get("package_url")
-        if (
-            set(document) != required
-            or document.get("schema_version") != 1
-            or document.get("architecture") != "linux-arm64"
-            or not isinstance(document.get("package_bytes"), int)
-            or isinstance(document.get("package_bytes"), bool)
-            or not 1
-            <= require_integer(document["package_bytes"], "package bytes")
-            <= 1024**3
-            or not isinstance(document.get("package_sha256"), str)
-            or _SHA256.fullmatch(str(document["package_sha256"])) is None
-            or not isinstance(document.get("package_signature"), str)
-            or _SIGNATURE.fullmatch(str(document["package_signature"])) is None
-            or not isinstance(document.get("package_version"), str)
-            or _PACKAGE_VERSION.fullmatch(str(document["package_version"])) is None
-            or not isinstance(document.get("target_binary_digest"), str)
-            or _SHA256.fullmatch(str(document["target_binary_digest"])) is None
-            or not isinstance(document.get("target_build_digest"), str)
-            or _BUILD_DIGEST.fullmatch(str(document["target_build_digest"])) is None
-            or not isinstance(url, str)
-            or not url.startswith("https://install.vonkforge.ai/")
-            or not url.endswith("/vonk-forge-agent.deb")
-            or any(marker in url for marker in ("?", "#", "@"))
-        ):
+    def _package(value: object) -> AgentUpgradePackage:
+        """The one ingress of a package descriptor (the release channel)."""
+
+        try:
+            return read_stored_model(AgentUpgradePackage, value)
+        except (TypeError, ValueError):
             raise AgentUpgradeInvalid(
                 "agent upgrade package is invalid",
                 reason=InvalidRequestReason.MALFORMED,
-            )
-        return document
+            ) from None
 
     @classmethod
     def _repair_manifest(
         cls,
-        value: Mapping[str, object],
-        package: Mapping[str, object],
-    ) -> dict[str, object]:
-        document = dict(value)
-        manifest_package_value = document.get("package")
-        if (
-            set(document)
-            != {
-                "authority_sha256",
-                "kind",
-                "node_id",
-                "package",
-                "schema_version",
-            }
-            or document.get("schema_version") != 2
-            or document.get("kind") != "agent-upgrade-repair"
-            or not isinstance(document.get("node_id"), str)
-            or _NODE_ID.fullmatch(str(document["node_id"])) is None
-            or not isinstance(document.get("authority_sha256"), str)
-            or _SHA256.fullmatch(str(document["authority_sha256"])) is None
-            or not isinstance(manifest_package_value, Mapping)
-        ):
-            raise AgentUpgradeInvalid(
-                "agent repair manifest is invalid",
-                reason=InvalidRequestReason.MALFORMED,
-            )
-        manifest_package = cls._package(manifest_package_value)
+        manifest: AgentUpgradeRepairManifest,
+        package: AgentUpgradePackage,
+    ) -> AgentUpgradeRepairManifest:
         expected_url = (
             "https://install.vonkforge.ai/repair-capsules/"
-            f"{document['node_id']}/{document['authority_sha256']}/"
-            f"{manifest_package['package_sha256']}/vonk-forge-agent.deb"
+            f"{manifest.node_id}/{manifest.authority_sha256}/"
+            f"{manifest.package.package_sha256}/vonk-forge-agent.deb"
         )
-        if manifest_package["package_url"] != expected_url:
+        if manifest.package.package_url != expected_url:
             raise AgentUpgradeInvalid(
                 "agent repair package URL is not canonical",
                 reason=InvalidRequestReason.MALFORMED,
             )
-        if dict(package) != manifest_package:
+        if package != manifest.package:
             raise AgentUpgradeInvalid(
                 "agent repair manifest does not match its package descriptor",
                 reason=InvalidRequestReason.CONFLICT,
             )
-        return {**document, "package": manifest_package}
+        return manifest
 
     @staticmethod
     def _permanent_ineligible_reason(
-        node: AgentNode, package: Mapping[str, object]
+        node: AgentNode, package: AgentUpgradePackage
     ) -> str | None:
         """A reason this package can never be dispatched to ``node``."""
 
         if node.state != "active" or node.revoked_at is not None:
             return "is not active"
-        if node.architecture != package["architecture"]:
+        if node.architecture != package.architecture:
             return "has an incompatible architecture"
         return None
 
@@ -1481,7 +1456,7 @@ class AgentUpgradeService:
     def _ineligible_reason(
         cls,
         node: AgentNode,
-        package: Mapping[str, object],
+        package: AgentUpgradePackage,
         now: datetime,
     ) -> str | None:
         reason = cls._permanent_ineligible_reason(node, package)
@@ -1499,8 +1474,8 @@ class AgentUpgradeService:
         return None
 
     @staticmethod
-    def _at_target(node: AgentNode, package: Mapping[str, object]) -> bool:
+    def _at_target(node: AgentNode, package: AgentUpgradePackage) -> bool:
         return bool(
-            node.build_digest == package["target_build_digest"]
-            and node.binary_digest == package["target_binary_digest"]
+            node.build_digest == package.target_build_digest
+            and node.binary_digest == package.target_binary_digest
         )

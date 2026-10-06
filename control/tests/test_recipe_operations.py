@@ -3841,7 +3841,9 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
         revision = session.get(CatalogDocumentRevision, stored.recipe_revision_id)
         assert revision is not None
         assert first.installation_authority_digest == revision.content_digest
-        assert first.recipe_content == revision.document
+        assert first.recipe_content == RecipeDefinition.model_validate(
+            revision.document
+        )
 
 
 @pytest.mark.parametrize("corruption", [None, "schema", "path", "permissions"])

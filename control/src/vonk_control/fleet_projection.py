@@ -31,6 +31,7 @@ from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .auth import CursorError
 from .cluster_mappings import mapping_option_choices
+from .fleet_event_contract import NodeProfilePayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .machine_states import (
     CertificateStateField,
@@ -571,10 +572,9 @@ class FleetProjection:
                         node_id=node_id,
                         entity_kind="node-profile",
                         entity_id=node_id,
-                        payload={
-                            "node_id": node_id,
-                            "display_name_changed": True,
-                        },
+                        payload=NodeProfilePayload(
+                            node_id=node_id, display_name_changed=True
+                        ),
                     ),
                 )
             return FleetNodeIdentity(

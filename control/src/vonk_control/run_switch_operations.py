@@ -155,7 +155,7 @@ from .operation_blockers import (
     make_blocker,
     read_blockers,
 )
-from .operation_progress import observe_progress, project_progress
+from .operation_progress import progress_document, project_progress, sample_progress
 from .prebuilt_images import policy_prebuilt_reference
 from .preparation_contract import (
     ControllerAssetState,
@@ -7848,7 +7848,7 @@ class RunSwitchOperationService:
                         self._schedule_checkpoint_retry(job, current, blocked, now)
                         return True
                     if checkpoint.pending_job_id:
-                        current["operation"] = observe_progress(
+                        current["operation"] = _observe_progress(
                             _progress_mapping(current.get("operation")),
                             {
                                 "phase": "runtime-preflight",
@@ -8590,7 +8590,7 @@ class RunSwitchOperationService:
             )
             progress["retry_reason"] = _INSTALL_PREFLIGHT_REFRESH_REASON
             progress["operation_phase_index"] = phase_index
-            progress["operation"] = observe_progress(
+            progress["operation"] = _observe_progress(
                 _progress_mapping(progress.get("operation")),
                 {
                     "phase": "install-preflight-refresh",
@@ -9422,6 +9422,17 @@ def _progress_subphase(value: object) -> RunSwitchSubphase | None:
         return None
 
 
+def _observe_progress(previous: object, current: object, now: datetime) -> Any:
+    """Sample the typed operation meter from the documents the run keeps."""
+
+    sampled = sample_progress(
+        read_stored_model(OperationProgress, previous) if previous else None,
+        read_stored_model(OperationProgress, current),
+        now,
+    )
+    return progress_document(sampled)
+
+
 def _progress_phase(value: object) -> RunSwitchPhaseKind | None:
     return value if value in _PHASES else None
 
@@ -10075,7 +10086,7 @@ def _merge_progress_evidence(
                 require_integer(prior.get("completed_bytes", 0), "completed bytes"),
                 reported_completed,
             )
-        progress["operation"] = observe_progress(prior, current, now)
+        progress["operation"] = _observe_progress(prior, current, now)
         progress["operation_phase_index"] = phase.index
     reported_total = next(
         (

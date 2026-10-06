@@ -1675,7 +1675,8 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
     withdrawn = verify_active_route_bundle(root)
     assert withdrawn.marker.state == "maintenance"
     assert withdrawn.marker.generation > renewed.marker.generation
-    assert withdrawn.routes["routes"] == {}
+    assert withdrawn.routes is not None
+    assert withdrawn.routes.routes == {}
     assert _supervisor(monkeypatch, root)._active_request() is not None
 
 
