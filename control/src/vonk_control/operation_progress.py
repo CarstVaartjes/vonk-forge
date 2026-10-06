@@ -21,7 +21,6 @@ from vonk_agent_protocol import (
 )
 
 from . import job_states
-from .bounded_json import BoundedJSONError, integer
 from .strict_json import read_stored_model
 
 #: Lifecycle words a stored phase can also be while the work waits for something
@@ -52,19 +51,6 @@ STALL_AFTER_SECONDS = 120.0
 PROGRESS_INTERVAL_SECONDS = 1.0
 
 
-def _counter(value: object) -> int:
-    """One durable progress counter; an absent key is the declared zero."""
-    count = integer(value, default=0)
-    return 0 if count is None else count
-
-
-def _measurement(value: object, detail: str) -> float:
-    """Read a numeric measurement; a wrong JSON type is malformed state."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise BoundedJSONError(detail)
-    return float(value)
-
-
 def _timestamp(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
@@ -93,52 +79,49 @@ def progress_write_due(
 def observe_progress(
     previous: Mapping[str, object] | None, current: Mapping[str, object], now: datetime
 ) -> dict[str, object]:
-    """Attach receipt timing to an already validated monotonic update."""
-    old = previous or {}
-    result = dict(current)
-    prior_time = _timestamp(old.get("observed_at"))
-    delta_time = max(0.0, (now - prior_time).total_seconds()) if prior_time else 0.0
-    prior_elapsed = old.get("elapsed_seconds")
-    elapsed = (
-        0.0
-        if not prior_elapsed
-        else _measurement(
-            prior_elapsed, "operation progress elapsed_seconds is invalid"
-        )
-    ) + delta_time
-    advanced = any(
-        _counter(result.get(key)) > _counter(old.get(key))
-        for key in ("completed_bytes", "completed_items")
-    ) or result["phase"] != old.get("phase")
-    result.update(
-        observed_at=now.isoformat(),
-        elapsed_seconds=elapsed,
-        last_progress_at=now.isoformat()
-        if advanced
-        else old.get("last_progress_at", now.isoformat()),
+    """:func:`sample_progress` for decoded documents (the agent and run-switch edge)."""
+    sampled = sample_progress(
+        read_stored_model(OperationProgress, previous) if previous else None,
+        read_stored_model(OperationProgress, current),
+        now,
     )
-    # Never carry a transfer estimate into hashing, extraction, or startup.
-    for key in ("bytes_per_second", "smoothed_bytes_per_second", "eta_seconds"):
-        result.pop(key, None)
+    return sampled.model_dump(mode="json", exclude_none=True)
+
+
+def sample_progress(
+    previous: OperationProgress | None, current: OperationProgress, now: datetime
+) -> OperationProgress:
+    """Attach receipt timing to an already validated monotonic update."""
+    prior_time = _timestamp(previous.observed_at) if previous else None
+    delta_time = max(0.0, (now - prior_time).total_seconds()) if prior_time else 0.0
+    elapsed = (previous.elapsed_seconds or 0.0 if previous else 0.0) + delta_time
+    advanced = (
+        previous is None
+        or current.completed_bytes > previous.completed_bytes
+        or (current.completed_items or 0) > (previous.completed_items or 0)
+        or current.phase != previous.phase
+    )
+    stamp = now.isoformat()
+    changes = {
+        "observed_at": stamp,
+        "elapsed_seconds": elapsed,
+        "last_progress_at": stamp
+        if advanced
+        else (previous.last_progress_at if previous else None) or stamp,
+        # Never carry a transfer estimate into hashing, extraction, or startup.
+        "bytes_per_second": None,
+        "smoothed_bytes_per_second": None,
+        "eta_seconds": None,
+    }
     if (
-        delta_time > 0
-        and is_transfer_phase(str(result["phase"]))
-        and result["phase"] == old.get("phase")
+        previous is not None
+        and delta_time > 0
+        and is_transfer_phase(current.phase)
+        and current.phase == previous.phase
     ):
-        delta = max(
-            0,
-            _counter(result.get("completed_bytes"))
-            - _counter(old.get("completed_bytes")),
-        )
+        delta = max(0, current.completed_bytes - previous.completed_bytes)
         rate = min(10**15, delta / delta_time)
-        prior_rate_value = old.get("smoothed_bytes_per_second")
-        prior_rate = (
-            None
-            if prior_rate_value is None
-            else _measurement(
-                prior_rate_value, "operation progress smoothed rate is invalid"
-            )
-        )
+        prior_rate = previous.smoothed_bytes_per_second
         # Time-aware exponential smoothing, with a ten-second time constant.
         alpha = 1.0 - exp(-delta_time / 10.0)
         smoothed = (
@@ -146,20 +129,18 @@ def observe_progress(
             if prior_rate is None
             else float(prior_rate) + alpha * (rate - float(prior_rate))
         )
-        result.update(bytes_per_second=rate, smoothed_bytes_per_second=smoothed)
-        total = result.get("total_bytes")
-        if delta > 0 and total is not None and smoothed > 0:
-            result["eta_seconds"] = min(
+        changes.update(bytes_per_second=rate, smoothed_bytes_per_second=smoothed)
+        if delta > 0 and current.total_bytes is not None and smoothed > 0:
+            changes["eta_seconds"] = min(
                 10**9,
-                max(
-                    0.0,
-                    (_counter(total) - _counter(result.get("completed_bytes")))
-                    / smoothed,
-                ),
+                max(0.0, (current.total_bytes - current.completed_bytes) / smoothed),
             )
     return project_progress(
-        read_stored_model(OperationProgress, result), now
-    ).model_dump(mode="json", exclude_none=True)
+        read_stored_model(
+            OperationProgress, {**current.model_dump(mode="json"), **changes}
+        ),
+        now,
+    )
 
 
 def project_progress(

@@ -45,6 +45,7 @@ from vonk_control.model_cache_api import (
     model_cache_operation_provider,
 )
 from vonk_control.model_cache_contract import (
+    ModelCacheCounters,
     ModelCacheDownloadResult,
     ModelCacheRemovalResult,
 )
@@ -2429,18 +2430,20 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
 
 
 def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
-    from vonk_control.model_cache_progress import cache_progress
+    from vonk_control.model_cache_progress import cache_progress, progress_document
 
-    value = cache_progress(
-        {
-            "phase": "downloading",
-            "completed_artifacts": 0,
-            "total_artifacts": 1,
-            "downloaded_bytes": 12,
-            "expected_bytes": None,
-        },
-        previous=None,
-        now=NOW,
+    value = progress_document(
+        cache_progress(
+            ModelCacheCounters(
+                phase="downloading",
+                completed_artifacts=0,
+                total_artifacts=1,
+                downloaded_bytes=12,
+                expected_bytes=None,
+            ),
+            previous=None,
+            now=NOW,
+        )
     )
     progress = ModelCacheOperationProvider._progress(value)
     assert progress["phase"] == ProgressPhase.DOWNLOADING
@@ -2763,35 +2766,32 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
 def test_cache_measurements_handle_unknown_total_and_observation_gap():
     from vonk_control.model_cache_progress import cache_progress, project_cache_progress
 
-    def snapshot(count: int, total: int | None = 100) -> dict[str, object]:
-        return {
-            "phase": "downloading",
-            "completed_artifacts": 0,
-            "total_artifacts": 1,
-            "downloaded_bytes": count,
-            "expected_bytes": total,
-        }
+    def snapshot(count: int, total: int | None = 100) -> ModelCacheCounters:
+        return ModelCacheCounters(
+            phase="downloading",
+            completed_artifacts=0,
+            total_artifacts=1,
+            downloaded_bytes=count,
+            expected_bytes=total,
+        )
 
     first = cache_progress(snapshot(0), previous=None, now=NOW)
     second = cache_progress(
         snapshot(10), previous=first, now=NOW + timedelta(seconds=1)
     )
-    second_measurement = require_mapping(second["measurement"], "cache measurement")
-    assert second_measurement["eta_seconds"] == 9
+    assert second.measurement.eta_seconds == 9
     restarted = cache_progress(
         snapshot(20), previous=second, now=NOW + timedelta(seconds=60)
     )
-    restarted_measurement = require_mapping(
-        restarted["measurement"], "cache measurement"
-    )
-    assert "bytes_per_second" not in restarted_measurement
+    assert restarted.measurement.bytes_per_second is None
     unknown = cache_progress(
         snapshot(30, None), previous=restarted, now=NOW + timedelta(seconds=61)
     )
-    unknown_measurement = require_mapping(unknown["measurement"], "cache measurement")
-    assert unknown_measurement["bytes_per_second"] == 10
-    assert "eta_seconds" not in unknown_measurement
-    stale = project_cache_progress(unknown, NOW + timedelta(seconds=200))
+    assert unknown.measurement.bytes_per_second == 10
+    assert unknown.measurement.eta_seconds is None
+    stale = project_cache_progress(
+        unknown.model_dump(mode="json"), NOW + timedelta(seconds=200)
+    )
     assert stale["activity"] == "possibly_stalled"
     assert "bytes_per_second" not in stale
 
@@ -2815,9 +2815,9 @@ def test_large_model_keeps_exact_aggregate_without_truncated_member_list(
         }
     }
     progress = service._progress(large, phase="downloading", transfer=transfer)
-    assert progress["measurement"]["total_items"] == 1025
-    assert progress["measurement"]["total_bytes"] == 1025
-    assert progress["measurement"]["members"] == []
+    assert progress.measurement.total_items == 1025
+    assert progress.measurement.total_bytes == 1025
+    assert progress.measurement.members == []
 
 
 class _FragmentedByteStream(httpx2.SyncByteStream):

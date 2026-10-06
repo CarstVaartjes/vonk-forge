@@ -138,6 +138,7 @@ from .model_cache_contract import (
     CacheResolution,
     ModelCacheCancellation,
     ModelCacheCancellationRequest,
+    ModelCacheCounters,
     ModelCacheDownloadPayload,
     ModelCacheObjectReceipt,
     ModelCacheOperationPhase,
@@ -153,7 +154,12 @@ from .model_cache_contract import (
     parse_model_cache_payload,
     parse_model_cache_result,
 )
-from .model_cache_progress import PHASES, cache_phase, cache_progress
+from .model_cache_progress import (
+    PHASES,
+    cache_phase,
+    cache_progress,
+    progress_document,
+)
 from .model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
 from .model_cache_streams import StreamGovernor
 from .models import (
@@ -998,20 +1004,16 @@ def _operation_cancellation(
 
 
 def _fresh_progress(now: datetime) -> ModelCacheOperationProgress:
-    document = cache_progress(
-        {
-            "schema_version": SCHEMA_VERSION,
-            "phase": State.QUEUED.value,
-            "completed_artifacts": 0,
-            "total_artifacts": 0,
-            "downloaded_bytes": 0,
-            "expected_bytes": None,
-            "current_artifact_key": None,
-        },
+    return cache_progress(
+        ModelCacheCounters(
+            phase="queued",
+            completed_artifacts=0,
+            total_artifacts=0,
+            downloaded_bytes=0,
+        ),
         previous=None,
         now=now,
     )
-    return read_stored_model(ModelCacheOperationProgress, document)
 
 
 def _read_operation_progress(
@@ -2122,10 +2124,8 @@ class ModelCacheService:
         set_digest = operation.artifact_set_sha256
         now = self._clock()
         payload = _operation_payload(operation)
-        operation.progress = cache_phase(
-            _operation_progress(operation).model_dump(mode="json"),
-            "completed",
-            now,
+        operation.progress = progress_document(
+            cache_phase(_operation_progress(operation), "completed", now)
         )
         operation.current_artifact_key = None
         if isinstance(payload, Residue):
@@ -3677,7 +3677,7 @@ class ModelCacheService:
                 request_key=request_key,
             ),
             payload=stored_plan,
-            progress=progress,
+            progress=progress_document(progress),
             actor=actor,
             created_at=now,
             updated_at=now,
@@ -3696,19 +3696,17 @@ class ModelCacheService:
         completed_items: int,
         reclaimed_bytes: int,
         current_key: str | None,
-        previous: Mapping[str, object] | None,
+        previous: ModelCacheOperationProgress | None,
         now: datetime,
-    ) -> dict[str, object]:
+    ) -> ModelCacheOperationProgress:
         return cache_progress(
-            {
-                "schema_version": SCHEMA_VERSION,
-                "phase": phase,
-                "completed_artifacts": completed_items,
-                "total_artifacts": total_items,
-                "downloaded_bytes": reclaimed_bytes,
-                "expected_bytes": None,
-                "current_artifact_key": current_key,
-            },
+            ModelCacheCounters(
+                phase=phase,
+                completed_artifacts=completed_items,
+                total_artifacts=total_items,
+                downloaded_bytes=reclaimed_bytes,
+                current_artifact_key=current_key,
+            ),
             previous=previous,
             now=now,
         )
@@ -3953,7 +3951,7 @@ class ModelCacheService:
 
             payload["retry"] = {"automatic_attempts": 1, "operator_retries": 0}
             payload.pop("failure", None)
-            previous = _operation_progress(operation).model_dump(mode="json")
+            previous = _operation_progress(operation)
             checkpoint = _removal_checkpoint(payload)
             if isinstance(checkpoint, Residue):
                 return False  # the step's entry retires the unreadable row
@@ -3966,14 +3964,16 @@ class ModelCacheService:
                 current_key = f"object:{checkpoint.delete_objects[object_index]}"
             elif set_index < len(checkpoint.selected):
                 current_key = f"set:{checkpoint.selected[set_index]}"
-            operation.progress = self._model_removal_progress(
-                phase="reclaiming",
-                total_items=total_items,
-                completed_items=completed_items,
-                reclaimed_bytes=checkpoint.reclaimed_bytes,
-                current_key=current_key,
-                previous=previous,
-                now=now,
+            operation.progress = progress_document(
+                self._model_removal_progress(
+                    phase="reclaiming",
+                    total_items=total_items,
+                    completed_items=completed_items,
+                    reclaimed_bytes=checkpoint.reclaimed_bytes,
+                    current_key=current_key,
+                    previous=previous,
+                    now=now,
+                )
             )
             _store_operation_payload(operation, "remove", payload)
             self._lifecycle.renew(
@@ -4038,8 +4038,11 @@ class ModelCacheService:
                 retry_after_seconds=delay,
                 artifact_key=artifact_key,
             )
-            previous = _operation_progress(operation).model_dump(mode="json")
-            operation.progress = cache_phase(previous, "reclaiming", now, waiting=True)
+            operation.progress = progress_document(
+                cache_phase(
+                    _operation_progress(operation), "reclaiming", now, waiting=True
+                )
+            )
             operation.last_error = redact_text(detail)[:512]
             _store_operation_payload(operation, "remove", payload)
 
@@ -4410,8 +4413,9 @@ class ModelCacheService:
         )
         payload["result"] = result.model_dump(mode="json")
         payload.pop("failure", None)
-        previous = _operation_progress(operation).model_dump(mode="json")
-        operation.progress = cache_phase(previous, "completed", now)
+        operation.progress = progress_document(
+            cache_phase(_operation_progress(operation), "completed", now)
+        )
         _store_operation_payload(operation, "remove", payload)
         operation.last_error = None
         self._lifecycle.complete(operation, Reported(Outcome.DONE), now)
@@ -4849,12 +4853,14 @@ class ModelCacheService:
                         artifact_set_sha256=set_digest,
                         plan_digest=requested_plan,
                         payload=payload,
-                        progress=self._progress(
-                            manifest,
-                            phase="queued",
-                            expected_bytes=require_integer(
-                                transfer["total_bytes"], "transfer total bytes"
-                            ),
+                        progress=progress_document(
+                            self._progress(
+                                manifest,
+                                phase="queued",
+                                expected_bytes=require_integer(
+                                    transfer["total_bytes"], "transfer total bytes"
+                                ),
+                            )
                         ),
                         actor=actor,
                         created_at=now,
@@ -5299,21 +5305,22 @@ class ModelCacheService:
         expected_bytes: int | None | object = _USE_MANIFEST_BYTES,
         current_artifact_key: str | None = None,
         transfer: Mapping[str, object] | None = None,
-        previous: Mapping[str, object] | None = None,
-    ) -> dict[str, object]:
-        document: dict[str, object] = {
-            "schema_version": SCHEMA_VERSION,
-            "phase": phase,
-            "completed_artifacts": completed_artifacts,
-            "total_artifacts": len(manifest.artifacts),
-            "downloaded_bytes": downloaded_bytes,
-            "expected_bytes": (
-                manifest.expected_bytes
-                if expected_bytes is _USE_MANIFEST_BYTES
-                else expected_bytes
-            ),
-            "current_artifact_key": current_artifact_key,
-        }
+        previous: ModelCacheOperationProgress | None = None,
+    ) -> ModelCacheOperationProgress:
+        resolved_bytes = (
+            manifest.expected_bytes
+            if expected_bytes is _USE_MANIFEST_BYTES
+            else expected_bytes
+        )
+        assert resolved_bytes is None or isinstance(resolved_bytes, int)
+        counters = ModelCacheCounters(
+            phase=phase,
+            completed_artifacts=completed_artifacts,
+            total_artifacts=len(manifest.artifacts),
+            downloaded_bytes=downloaded_bytes,
+            expected_bytes=resolved_bytes,
+            current_artifact_key=current_artifact_key,
+        )
         members = []
         raw_artifacts = transfer.get("artifacts") if transfer is not None else None
         unique = _unique_artifacts(manifest.artifacts)
@@ -5336,7 +5343,7 @@ class ModelCacheService:
                     )
                 )
         return cache_progress(
-            document, previous=previous, now=self._clock(), members=members
+            counters, previous=previous, now=self._clock(), members=members
         )
 
     def _run_download(
@@ -6817,10 +6824,8 @@ class ModelCacheService:
                 self._lifecycle.reopen(operation, now)
                 self._lifecycle.settle(operation, Tick(), now)
                 operation.attempt = int(operation.attempt) + 1
-                operation.progress = cache_phase(
-                    _operation_progress(operation).model_dump(mode="json"),
-                    "queued",
-                    now,
+                operation.progress = progress_document(
+                    cache_phase(_operation_progress(operation), "queued", now)
                 )
                 resumed += 1
         self._observed_credential_fingerprint = current
@@ -7025,17 +7030,19 @@ class ModelCacheService:
                         now,
                         take=False,
                     )
-                    operation.progress = self._progress(
-                        manifest,
-                        previous=old_progress.model_dump(mode="json"),
-                        phase="downloading"
-                        if state == ModelFileState.PARTIAL
-                        else "verifying",
-                        completed_artifacts=max(old_completed, completed_artifacts),
-                        downloaded_bytes=max(old_downloaded, received),
-                        expected_bytes=total,
-                        current_artifact_key=spec.key,
-                        transfer=transfer,
+                    operation.progress = progress_document(
+                        self._progress(
+                            manifest,
+                            previous=old_progress,
+                            phase="downloading"
+                            if state == ModelFileState.PARTIAL
+                            else "verifying",
+                            completed_artifacts=max(old_completed, completed_artifacts),
+                            downloaded_bytes=max(old_downloaded, received),
+                            expected_bytes=total,
+                            current_artifact_key=spec.key,
+                            transfer=transfer,
+                        )
                     )
                     operation.current_artifact_key = spec.key
                     operation.updated_at = now
@@ -7163,18 +7170,25 @@ class ModelCacheService:
                         _store_operation_payload(operation, operation.kind, payload)
                         _total, received = self._transfer_totals(payload)
                         previous_progress = _operation_progress(operation)
-                        operation.progress = self._progress(
-                            manifest,
-                            previous=previous_progress.model_dump(mode="json"),
-                            phase="downloading",
-                            completed_artifacts=previous_progress.completed_artifacts,
-                            downloaded_bytes=received,
-                            expected_bytes=_total,
-                            current_artifact_key=operation.current_artifact_key,
-                            transfer=mapping(payload.get("transfer")),
+                        operation.progress = progress_document(
+                            self._progress(
+                                manifest,
+                                previous=previous_progress,
+                                phase="downloading",
+                                completed_artifacts=previous_progress.completed_artifacts,
+                                downloaded_bytes=received,
+                                expected_bytes=_total,
+                                current_artifact_key=operation.current_artifact_key,
+                                transfer=mapping(payload.get("transfer")),
+                            )
                         )
-                        operation.progress = cache_phase(
-                            operation.progress, "downloading", now, waiting=True
+                        operation.progress = progress_document(
+                            cache_phase(
+                                _operation_progress(operation),
+                                "downloading",
+                                now,
+                                waiting=True,
+                            )
                         )
                     operation.updated_at = now
         if cancellation_pending:
@@ -7239,11 +7253,8 @@ class ModelCacheService:
                 ),
             )
             operation.last_error = error.detail
-            operation.progress = cache_phase(
-                _operation_progress(operation).model_dump(mode="json"),
-                "queued",
-                now,
-                waiting=True,
+            operation.progress = progress_document(
+                cache_phase(_operation_progress(operation), "queued", now, waiting=True)
             )
 
     def _finish_failed(
@@ -7400,10 +7411,12 @@ class ModelCacheService:
                     _store_operation_payload(
                         operation, operation.kind, operation_payload
                     )
-                operation.progress = cache_phase(
-                    _operation_progress(operation).model_dump(mode="json"),
-                    "queued" if bounded_retry else "failed",
-                    now,
+                operation.progress = progress_document(
+                    cache_phase(
+                        _operation_progress(operation),
+                        "queued" if bounded_retry else "failed",
+                        now,
+                    )
                 )
         if cancellation_pending:
             self._try_settle_cancellation(operation_id)
@@ -7484,8 +7497,8 @@ class ModelCacheService:
                 artifact_set_sha256=previous_set,
                 plan_digest=previous.plan_digest,
                 payload=_write_operation_payload(previous.kind, payload),
-                progress=cache_phase(
-                    previous_progress.model_dump(mode="json"), "queued", now
+                progress=progress_document(
+                    cache_phase(previous_progress, "queued", now)
                 ),
                 actor=actor,
                 current_artifact_key=previous.current_artifact_key,
@@ -7704,7 +7717,7 @@ class ModelCacheService:
                 artifact_set_sha256=requested_set,
                 plan_digest=previous.plan_digest,
                 payload=_write_operation_payload(previous.kind, payload),
-                progress=progress,
+                progress=progress_document(progress),
                 actor=actor,
                 current_artifact_key=previous.current_artifact_key,
                 created_at=now,
@@ -7806,10 +7819,8 @@ class ModelCacheService:
                 payload["result"] = parsed_result.model_dump(mode="json")
                 payload.pop("failure", None)
                 _store_operation_payload(operation, operation.kind, payload)
-            operation.progress = cache_phase(
-                _operation_progress(operation).model_dump(mode="json"),
-                "completed",
-                now,
+            operation.progress = progress_document(
+                cache_phase(_operation_progress(operation), "completed", now)
             )
             self._lifecycle.complete(
                 operation, Reported(Outcome.DONE, fence=self._claim_owner), now
@@ -7843,19 +7854,21 @@ class ModelCacheService:
             old_progress = _operation_progress(operation)
             old_downloaded = old_progress.downloaded_bytes
             old_completed = old_progress.completed_artifacts
-            operation.progress = self._progress(
-                manifest,
-                previous=old_progress.model_dump(mode="json"),
-                phase=phase,
-                completed_artifacts=max(old_completed, completed_artifacts),
-                downloaded_bytes=max(old_downloaded, downloaded_bytes),
-                expected_bytes=expected_bytes,
-                current_artifact_key=current_artifact_key,
-                transfer=(
-                    transfer
-                    if transfer is not None
-                    else mapping(payload.get("transfer"))
-                ),
+            operation.progress = progress_document(
+                self._progress(
+                    manifest,
+                    previous=old_progress,
+                    phase=phase,
+                    completed_artifacts=max(old_completed, completed_artifacts),
+                    downloaded_bytes=max(old_downloaded, downloaded_bytes),
+                    expected_bytes=expected_bytes,
+                    current_artifact_key=current_artifact_key,
+                    transfer=(
+                        transfer
+                        if transfer is not None
+                        else mapping(payload.get("transfer"))
+                    ),
+                )
             )
             operation.current_artifact_key = current_artifact_key
             self._lifecycle.renew(
@@ -8043,11 +8056,8 @@ class ModelCacheService:
         payload.pop("result", None)
         _store_operation_payload(operation, operation.kind, payload)
         now = self._clock()
-        operation.progress = cache_phase(
-            _operation_progress(operation).model_dump(mode="json"),
-            "cancelling",
-            now,
-            waiting=True,
+        operation.progress = progress_document(
+            cache_phase(_operation_progress(operation), "cancelling", now, waiting=True)
         )
         operation.completed_at = None
         operation.updated_at = now
@@ -8980,12 +8990,14 @@ class ModelCacheService:
                     artifact_set_sha256=digest,
                     plan_digest=requested_plan,
                     payload=payload,
-                    progress=self._progress(
-                        manifest,
-                        phase="queued",
-                        expected_bytes=require_integer(
-                            transfer["total_bytes"], "transfer total bytes"
-                        ),
+                    progress=progress_document(
+                        self._progress(
+                            manifest,
+                            phase="queued",
+                            expected_bytes=require_integer(
+                                transfer["total_bytes"], "transfer total bytes"
+                            ),
+                        )
                     ),
                     actor=actor,
                     created_at=now,

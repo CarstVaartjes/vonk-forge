@@ -377,7 +377,7 @@
     },
     {
       "path": "control/src/vonk_control/model_cache.py",
-      "count": 86
+      "count": 81
     },
     {
       "path": "control/src/vonk_control/model_cache_api.py",
@@ -385,7 +385,7 @@
     },
     {
       "path": "control/src/vonk_control/model_cache_progress.py",
-      "count": 10
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/models.py",
