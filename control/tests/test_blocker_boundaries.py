@@ -49,6 +49,9 @@ from .blocker_boundaries import (
 PATH = "control/src/vonk_control/sample.py"
 AUDITED_PATH = "control/src/vonk_control/audited_sample.py"
 
+# The retry proof walks the repository call graph; build it once per session.
+pytestmark = pytest.mark.usefixtures("retry_proof_graph")
+
 
 @pytest.fixture(scope="module", autouse=True)
 def _parsed_control_sources() -> None:
