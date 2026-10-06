@@ -401,7 +401,7 @@
     },
     {
       "path": "control/src/vonk_control/operator_projection_api.py",
-      "count": 11
+      "count": 6
     },
     {
       "path": "control/src/vonk_control/platform_ports.py",
