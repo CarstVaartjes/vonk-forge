@@ -49,6 +49,7 @@ from .oci_image_store import (
     OciImageStore,
     OciImageStoreError,
     StoredImage,
+    StoreUnknown,
 )
 from .runtime_adapters import (
     RuntimeAdapter,
@@ -726,10 +727,14 @@ class FilesystemRuntimeImageStorage:
             raise RuntimeImagePreparationInvalid(
                 RuntimeImageCode.ARCHIVE_INVALID, "runtime image address is invalid"
             )
+        stored: StoredImage | StoreUnknown | None = None
+        unreadable: str | None = None
         try:
-            return self.layout.read(f"sha256:{archive_sha256}")
+            stored = self.layout.read(f"sha256:{archive_sha256}")
         except OciImageStoreError as error:
-            if error.code in DAMAGED_MANIFEST_CODES:
+            if error.code not in DAMAGED_MANIFEST_CODES:
+                unreadable = error.detail
+            else:
                 # A manifest whose content is damaged is cache loss, like a
                 # missing one: the next preparation stores the image again
                 # (which rewrites the manifest and reuses intact layers).
@@ -742,12 +747,17 @@ class FilesystemRuntimeImageStorage:
                         error.detail,
                     )
                 return None
+        if isinstance(stored, StoreUnknown):
+            unreadable = stored.detail
+            stored = None
+        if unreadable is not None:
             raise RuntimeImagePreparationUnknown(
                 RuntimeImageCode.ARCHIVE_UNAVAILABLE,
-                error.detail,
+                unreadable,
                 retryable=True,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
+            )
+        return stored
 
     def published_archive_bytes(self, archive_sha256: str) -> int:
         """The stored size of one image (shared layers included), or 0."""

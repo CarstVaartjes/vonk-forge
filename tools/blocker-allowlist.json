@@ -8,6 +8,7 @@
       "rust/crates/vonk-agent/src"
     ],
     "audited_paths": [
+      "control/src/vonk_control/admission_locking.py",
       "control/src/vonk_control/agent_jobs.py",
       "control/src/vonk_control/agent_upgrades.py",
       "control/src/vonk_control/artifact_blob_store.py",
@@ -15,7 +16,11 @@
       "control/src/vonk_control/artifact_lifecycle.py",
       "control/src/vonk_control/artifact_reference_scan.py",
       "control/src/vonk_control/fleet_profiles.py",
+      "control/src/vonk_control/gateway_keys.py",
+      "control/src/vonk_control/image_store_collection.py",
+      "control/src/vonk_control/library_projection.py",
       "control/src/vonk_control/model_cache.py",
+      "control/src/vonk_control/recipe_operation_phases.py",
       "control/src/vonk_control/recipe_operations.py",
       "control/src/vonk_control/run_switch_operations.py"
     ],
@@ -52,8 +57,8 @@
   },
   "max_debt": 9,
   "debt_ceiling": {
-    "total": 64,
-    "unaudited": 451,
+    "total": 71,
+    "unaudited": 366,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -642,6 +647,8 @@
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: Malformed/replayed/stale user request.",
       "sites": [
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._build_once", "recipe-build-cancellation-is-awaiting-cleanup", 2],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._build_once", "recipe-build-preview-is-stale", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_current_build_locked", "build.shared_consumers", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_current_build_locked", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_prebuilt_build", "build.shared_consumers", 1],
@@ -652,13 +659,13 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._one_shot_stop_prerequisite", "artifact-job-cancellation-authority-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._one_shot_stop_prerequisite", "artifact-job-has-no-cancellation-authority", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "message", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._reconcile_installation_once", "reconciliation-authority-changed-after-preview", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._reconcile_installation_once", "request-key-was-already-used-differently", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "logical-recipe-run-changed-while-stopping", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "profile-jobrun-stop-authority-is-stale", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "profile-jobrun-stop-request-changed-its-owner", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "request-key-was-already-used-differently", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.abandon_never_installed", "installation-is-not-a-never-installed-plan-it-cannot-be-aba", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._build_once", "recipe-build-cancellation-is-awaiting-cleanup", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._build_once", "recipe-build-preview-is-stale", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.cancel", "cancellation-request-identity-is-invalid", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.cancel", "cancellation-request-key-was-already-used-differently", 3],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.cancel", "recipe-operation-is-not-cancellable", 2],
@@ -667,8 +674,6 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.consume_agent_result", "run-cancellation-scope-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.enqueue_one_shot_job_in_session", "recipe-run-is-not-accepting-jobs", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.prepare_installation", "install-plan-is-blocked", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._reconcile_installation_once", "reconciliation-authority-changed-after-preview", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._reconcile_installation_once", "request-key-was-already-used-differently", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.stop", "stop-plan-is-stale-or-blocked", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.stop", "the-run-s-route-withdrawal-was-superseded-retry-the-stop", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.uninstall", "request-key-was-already-used-differently", 1],
@@ -953,15 +958,9 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._apply", "catalog.sync_revision_changed", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._finish", "catalog.sync_state_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._initialize", "catalog.sync_state_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._progress", "catalog.sync_state_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_actor_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_commit_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_trigger_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_in_progress", 2],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_repository_changed", 1]
       ]
     },
@@ -1518,14 +1517,6 @@
       ]
     },
     {
-      "family": "image_store_collection.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record.",
-      "sites": [
-        ["control/src/vonk_control/image_store_collection.py", "OciImageStoreError", "ImageStoreCollector._receipt_addresses", "image-receipts-cannot-be-listed-so-nothing-was-removed", 1]
-      ]
-    },
-    {
       "family": "install_admission.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class InstallPlanConflict validates a contract or request.",
@@ -1558,21 +1549,6 @@
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class StaleAttempt guards a security boundary.",
       "sites": [
         ["control/src/vonk_control/jobs.py", "StaleAttempt", "JobService._active", "job-attempt-lease-or-fence-is-stale", 1]
-      ]
-    },
-    {
-      "family": "library_projection.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
-      "sites": [
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._cache_progress", "persisted-cache-operation-state-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._cache_progress", "persisted-cache-progress-bytes-are-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._cache_progress", "persisted-cache-progress-total-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._database_local_state", "persisted-cache-digest-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._database_local_state", "persisted-recipe-run-model-digest-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._database_local_state", "persisted-recipe-run-state-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection.authoring_recipe_detail", "active-recipe-references-a-missing-active-model-document", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection.recipe_detail", "active-recipe-references-a-missing-active-model-document", 1]
       ]
     },
     {
@@ -1661,13 +1637,7 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore._copy", "image_store.copy_failed", 3],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore._copy", "image_store.import_incomplete", 1],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore._lock", "another-image-is-being-stored", 1],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore._referenced_blobs", "manifest", 2],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.import_reference", "image_store.import_incomplete", 1],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.import_reference", "image_store.reference_unpinned", 1],
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.read", "image_store.manifest_unreadable", 1]
+        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.import_reference", "image_store.reference_unpinned", 1]
       ]
     },
     {
@@ -1836,22 +1806,13 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_availability_consumer", "availability-build-consumer-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_availability_consumer", "availability-receipt-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_profile_consumer", "profile-build-consumer-child-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_profile_consumer", "profile-build-consumer-identity-is-invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_profile_consumer", "profile-build-consumer-scope-is-missing", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-workload-scope-is-invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-workload-scope-is-missing", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "current_build_consumers", "build.consumer_invalid", 2],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_availability_build_dependency", "build.consumer_invalid", 2],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.cancellation_pending", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_busy", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_invalid", 2],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_profile_build_dependencies", "build.consumer_invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "read_build_intent", "build.producer_invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateTypeDamaged", "_availability_consumer", "availability-recipe-is-invalid", 1]
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "read_build_intent", "build.producer_invalid", 1]
       ]
     },
     {
@@ -1937,7 +1898,6 @@
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_input_missing", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_invalid", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._read_removal_owner", "recipe_image.operation_invalid", 4],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._read_removal_result", "recipe_image.operation_invalid", 5],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._refresh_authority", "recipe_image.metadata_refresh_failed", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "message", 1],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "recipe_image.model_cache_failed", 1],
@@ -2535,8 +2495,15 @@
       "category": "input-validation",
       "reason": "Refused at submit time, before anything is persisted, and the caller can change the request: the entity or argument the request names does not exist or is in a state it cannot act on, the reviewed plan or workload intent is stale or superseded, or a document this very call composes violates its contract. Raised only from the request path; damaged stored state is rebuilt from evidence or retired as unknown (lifecycle.evidence), never raised as this class.",
       "sites": [
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "artifact-job-recipes-currently-require-a-single-node-topolog", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "artifact-workload-target-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "message", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "recipe-is-not-an-artifact-job-recipe", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "stored-run-plan-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._admit_workload_intent", "workload-intent-target-disappeared", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._admit_workload_intent", "workload-intent-was-superseded", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "compiled-execution-plan-is-missing-for-one-or-more-mapped-no", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "message", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "compiled-execution-plan-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "operation-context-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "operation-group-has-no-target-nodes", 1],
@@ -2544,10 +2511,17 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "operation-phases-do-not-match-target-nodes", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "recipe-operation-job-payload-is-too-large", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "workload-intent-ordinal-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._reconcile_installation_once", "reconciliation-has-no-pending-targets-but-is-not-complete", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._retry_build_in_session", "cancelled-recipe-build-intent-is-not-retryable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._retry_build_in_session", "recipe-build-is-not-retryable", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._retry_install_in_session", "recipe-installation-is-not-retryable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._retry_install_in_session", "recipe-operation-is-not-retryable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "message", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "operation-topology-order-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "recipe-direct-fabric-rendezvous-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "recipe-run-has-no-endpoint-owner", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "recipe-topology-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once.start_payload", "recipe-start-payload-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "artifact-workload-target-disappeared", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "partial-one-shot-stop-requires-current-profile-ownership", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "profile-jobrun-stop-request-identity-changed", 1],
@@ -2558,31 +2532,17 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_plan_in_session", "recipe-run-does-not-exist", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._uninstall_plan_in_session", "recipe-installation-does-not-exist", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.abandon_never_installed", "recipe-installation-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "artifact-job-recipes-currently-require-a-single-node-topolog", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "artifact-workload-target-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "recipe-is-not-an-artifact-job-recipe", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "stored-run-plan-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.assess_superseded_issued", "workload-intent-ordinal-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.assess_superseded_issued", "workload-intent-was-superseded", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.create_mapping", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.enqueue_one_shot_job_in_session", "recipe-job-target-is-not-running", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "compiled-execution-plan-is-missing-for-one-or-more-mapped-no", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "message", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.prepare_installation", "compiled-execution-plan-was-not-persisted", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.prepare_installation", "message", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._reconcile_installation_once", "reconciliation-has-no-pending-targets-but-is-not-complete", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.reconcile_superseded_unissued", "workload-intent-ordinal-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.reconcile_superseded_unissued", "workload-intent-was-superseded", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.record_node_result", "node-is-not-part-of-operation-group", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.retry", "recipe-operation-is-not-retryable", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.retry", "request-key-was-already-used", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "operation-topology-order-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "recipe-direct-fabric-rendezvous-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "recipe-run-has-no-endpoint-owner", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "recipe-topology-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once.start_payload", "recipe-start-payload-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.start_installation", "recipe-installation-is-not-launchable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.start_installation", "recipe-installation-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.start_installation", "recipe-revision-is-unavailable", 1],
@@ -2613,17 +2573,6 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "profile-jobrun-stop-parent-contract-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "_bound_workload_intent", "workload-operation-lacks-its-admitted-intent", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "_run_start_intent", "recipe-run-lacks-its-original-workload-authority", 1]
-      ]
-    },
-    {
-      "family": "distributed_recovery.input-validation",
-      "category": "input-validation",
-      "reason": "The injected clock must be timezone-aware: a naive instant is a caller contract violation at the boundary that owns the clock, not stored bookkeeping (a stored timestamp without a zone is retired as residue before it reaches this check).",
-      "sites": [
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_aware", "distributed-recovery-clock-is-invalid", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-authority-is-invalid", 4],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-deadline-elapsed", 1],
-        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "recovery_start_plan", "distributed-recovery-authority-is-invalid", 1]
       ]
     },
     {
@@ -3179,22 +3128,6 @@
       ]
     },
     {
-      "family": "recipe_operations.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
-      "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService.__init__", "recipe-run-health-age-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService._profile_jobrun_stop_in_session", "accepted-profile-has-no-unique-stop-for-this-run", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService.cancel", "noncanonical-cancellation-request-key", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "prepare_exact_recipe_run_observation_nodes", "recipe-run-observation-is-not-assigned", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._reconciliation_authority_in_session", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.get", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.record_node_result", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.run_status", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._start_once.start_payload", "recipe-start-endpoint-address-is-unavailable", 1]
-      ]
-    },
-    {
       "family": "recipe_update_batches.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
@@ -3275,6 +3208,10 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class DistributedRecoveryInvalid is of the input-validation error type.",
       "sites": [
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "_aware", "distributed-recovery-clock-is-invalid", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-authority-is-invalid", 4],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "enforce_recovery_deadline", "distributed-recovery-deadline-elapsed", 1],
+        ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "recovery_start_plan", "distributed-recovery-authority-is-invalid", 1],
         ["control/src/vonk_control/distributed_recovery.py", "DistributedRecoveryInvalid", "recovery_start_plan", "distributed-recovery-phases-are-invalid", 1]
       ]
     },
@@ -3288,12 +3225,12 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "stored-recipe-build-plan-is-unreadable-it-is-recorded-and-t", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_install_in_session", "stored-compiled-execution-plan-is-unreadable-for-install-ret", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_build_in_session", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._stop_logical_job_run", "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.check_build_source", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.preview_build", "recipe-build-service-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "compiled-execution-plan-is-unavailable-for-the-installed-rec", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-installation-is-not-runnable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-node-endpoint-evidence-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._stop_logical_job_run", "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.check_build_source", "recipe-build-service-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.preview_build", "recipe-build-service-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "prior-installation-intent-requires-exact-observation-before", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "recipe-installation-is-being-reconciled", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "stored-installation-plan-is-unreadable-it-is-recorded-and-t", 1],
@@ -3305,7 +3242,16 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class DistributedRecoveryInvalid is of the input-validation error type.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "DistributedRecoveryInvalid", "RecipeOperationService.queue_recovery_stop_in_session", "singleton-recovery-was-superseded-by-a-newer-workload-intent", 1]
+        ["control/src/vonk_control/recipe_operations.py", "DistributedRecoveryInvalid", "RecipeOperationService.queue_recovery_stop_in_session", "singleton-recovery-was-superseded-by-a-newer-workload-intent", 1],
+        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService.__init__", "recipe-run-health-age-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService._profile_jobrun_stop_in_session", "accepted-profile-has-no-unique-stop-for-this-run", 1],
+        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService.cancel", "noncanonical-cancellation-request-key", 1],
+        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "prepare_exact_recipe_run_observation_nodes", "recipe-run-observation-is-not-assigned", 1],
+        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._reconciliation_authority_in_session", "message", 1],
+        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._start_once.start_payload", "recipe-start-endpoint-address-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.get", "message", 1],
+        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.record_node_result", "message", 1],
+        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.run_status", "message", 1]
       ]
     },
     {
@@ -3367,28 +3313,9 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_build_dependency", "recipe_image.build_invalid", 1],
         ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_cached_build_receipt", "recipe_image.build_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "recipe_image.build_cancelled", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "recipe_image.build_invalid", 5],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "recipe_image.build_wait", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_observe_build", "report-uncertain", 1],
         ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.authority", "observation-unavailable", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "observation-unavailable", 2],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_capacity_wait", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_input_missing", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_invalid", 2],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.build_unavailable", 2],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.identity_conflict", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "recipe_image.operation_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder", "scope-changed", 2],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder.admission_guard", "recipe_image.build_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.recover_build", "recipe_image.build_invalid", 5],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.recover_build", "recipe_image.identity_conflict", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.recover_build", "recipe_image.operation_invalid", 1],
-        ["control/src/vonk_control/availability_production.py", "_BuildDependencyFailure", "build_recipe_image_availability.recover_build", "message", 1],
-        ["control/src/vonk_control/availability_production.py", "_BuildPlanningFailure", "build_recipe_image_availability.builder", "message", 2],
-        ["control/src/vonk_control/availability_production.py", "_CapacityWait", "build_recipe_image_availability.builder", "message", 2]
+        ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.builder.admission_guard", "recipe_image.build_invalid", 1]
       ]
     },
     {
@@ -3457,29 +3384,12 @@
       ]
     },
     {
-      "family": "agent_operation.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/lifecycle/agent_operation.py", "UnsettledOutcome", "AgentOperationAdapter._stored", "unmapped-lifecycle-state", 1]
-      ]
-    },
-    {
       "family": "model_cache.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
         ["control/src/vonk_control/model_cache.py", "ModelCacheConflictUnknown", "ModelCacheService._require_managed_cache_coverage", "model_cache.coverage_incomplete", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheConflictUnknown", "ModelCacheService.cached_artifact_file", "model_cache.artifact_unverified", 1]
-      ]
-    },
-    {
-      "family": "recipe_operation_phases.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/recipe_operation_phases.py", "BookkeepingUnknown", "decode_stored_phases", "stored-operation-phases-are-invalid", 4],
-        ["control/src/vonk_control/recipe_operation_phases.py", "StoredStateTypeDamaged", "decode_stored_phases", "stored-operation-phases-are-invalid", 1]
       ]
     },
     {
@@ -3584,6 +3494,15 @@
         ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._run_download", "model-download-was-removed-before-publication", 1],
         ["control/src/vonk_control/model_cache.py", "OperationInterrupted", "ModelCacheService._sample_transfer.observe", "model-download-stopped-partial-files-preserved", 1],
         ["control/src/vonk_control/model_cache.py", "_ArtifactWriterBusy", "ModelCacheService._download_one_unique", "message", 2]
+      ]
+    },
+    {
+      "family": "catalog_sync.already-retried",
+      "category": "already-retried",
+      "reason": "An unknown outcome raised on a path that a registered retry or observe loop (retry_loops, AST-proven by blocker_retries) catches and re-runs on its bounded backoff; the raise is the handoff to that loop, not a dead end.",
+      "sites": [
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_in_progress", 2],
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1]
       ]
     }
   ]

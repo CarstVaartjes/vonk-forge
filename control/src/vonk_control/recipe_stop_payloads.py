@@ -264,13 +264,13 @@ def durable_run_stop_payloads(
             != parent.payload_digest
         ):
             raise StopPayloadRefused("recipe Start parent is inconsistent")
-        try:
-            phases: StoredPhases = decode_stored_phases(parent.payload)
-        except (TypeError, ValueError) as error:
+        decoded = decode_stored_phases(parent.payload)
+        if decoded is None:
             raise StopPayloadUnknown(
                 "recipe Start phases are invalid",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
+            )
+        phases: StoredPhases = decoded
         if not phases:
             raise StopPayloadUnknown(
                 "recipe Start phases are missing",

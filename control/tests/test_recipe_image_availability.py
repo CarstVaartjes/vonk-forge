@@ -1774,7 +1774,7 @@ def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
     assert refused.value.code == "recipe_image.operation_invalid"
 
 
-def test_recipe_removal_replay_rejects_integer_stored_model_choice(
+def test_recipe_removal_replay_rebuilds_a_damaged_stored_result_from_its_checkpoint(
     tmp_path: Path,
 ) -> None:
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
@@ -1798,16 +1798,19 @@ def test_recipe_removal_replay_rejects_integer_stored_model_choice(
         stored_choice = operation.result["with_model"]
         assert isinstance(stored_choice, int) and not isinstance(stored_choice, bool)
 
-    with pytest.raises(RecipeImageAvailabilityError) as refused:
-        remove_after_review(
-            service,
-            selector,
-            actor="operator",
-            request_id=request_id,
-            with_model=False,
-        )
+    # The stored result is only a copy of what the owner's checkpoint says: a
+    # damaged copy is projected again from that evidence, not a refused replay.
+    replayed = remove_after_review(
+        service,
+        selector,
+        actor="operator",
+        request_id=request_id,
+        with_model=False,
+    )
 
-    assert refused.value.code == "recipe_image.operation_invalid"
+    assert replayed["state"] == "succeeded"
+    assert replayed["with_model"] is False
+    assert replayed["operation_id"] == operation.id
 
 
 @pytest.mark.parametrize(

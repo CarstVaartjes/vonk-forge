@@ -21,8 +21,7 @@ from vonk_forge_contracts import read_recipe
 
 from . import job_states
 from .agent_jobs import _JsonFlagIsTrue
-from .categorized_errors import BookkeepingUnknown, InvalidValue
-from .categorized_faults import StoredStateTypeDamaged
+from .categorized_errors import InvalidValue
 from .fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileAssignment,
@@ -309,11 +308,15 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
                 if parent.kind == "recipe.run-switch.v2"
                 else _availability_consumer(parent, build)
             )
-        except (KeyError, TypeError, ValueError) as error:
+        except (KeyError, TypeError, ValueError):
+            current = None
+        if current is None:
+            # Unknown ownership never authorizes releasing an issued build: the
+            # caller keeps it and the owner of the cancellation asks again.
             raise BuildConsumerError(
                 RecipeBuildCode.CONSUMER_INVALID,
                 "accepted build consumer evidence is invalid",
-            ) from error
+            )
         if current:
             consumers.append(parent.id)
     # Quoted identity containment is only a portable candidate filter. The
@@ -337,19 +340,25 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
     )
     for application in profiles:
         try:
-            if _profile_consumer(session, application, build):
-                consumers.append(application.id)
-        except (KeyError, TypeError, ValueError) as error:
+            current = _profile_consumer(session, application, build)
+        except (KeyError, TypeError, ValueError):
+            current = None
+        if current is None:
             raise BuildConsumerError(
                 RecipeBuildCode.CONSUMER_INVALID,
                 "accepted profile build evidence is invalid",
-            ) from error
+            )
+        if current:
+            consumers.append(application.id)
     return tuple(sorted(consumers))
 
 
 def _profile_consumer(
     session: Session, application: FleetProfileApplication, build: RecipeBuild
-) -> bool:
+) -> bool | None:
+    """Whether the profile application still needs ``build``; ``None`` when its
+    stored evidence does not agree (unknown ownership, to be observed again)."""
+
     review = read_stored_model(
         FleetProfilePreview, canonical_message(application.plan), from_json=True
     )
@@ -364,13 +373,13 @@ def _profile_consumer(
         or review.plan_digest != application.plan_digest
         or progress.workload_intent_ordinal is None
     ):
-        raise BookkeepingUnknown("profile build consumer identity is invalid")
+        return None
     scope = {node_id for step in review.steps for node_id in step.node_ids}
     nodes = tuple(
         session.scalars(select(AgentNode).where(AgentNode.node_id.in_(scope)))
     )
     if len(nodes) != len(scope):
-        raise BookkeepingUnknown("profile build consumer scope is missing")
+        return None
     if any(
         node.workload_intent_ordinal != progress.workload_intent_ordinal
         for node in nodes
@@ -415,16 +424,18 @@ def _profile_consumer(
                 != {node.node_id for node in assignment.nodes}
                 or child_plan.build.build_id != build.id
             ):
-                raise BookkeepingUnknown(
-                    "profile build consumer child identity changed"
-                )
+                return None
             # The exact committed child now owns this dependency. Its current
             # phase/cancellation is evaluated by _run_switch_consumer, including
             # a child committed before the profile checkpoint was written.
     return False
 
 
-def _run_switch_consumer(session: Session, parent: Job, build: RecipeBuild) -> bool:
+def _run_switch_consumer(
+    session: Session, parent: Job, build: RecipeBuild
+) -> bool | None:
+    """Whether the Run/Switch still needs ``build``; ``None`` when unknown."""
+
     plan = read_stored_model(
         RunSwitchPlan, canonical_message(parent.payload["plan"]), from_json=True
     )
@@ -441,12 +452,12 @@ def _run_switch_consumer(session: Session, parent: Job, build: RecipeBuild) -> b
         or progress.workload_intent_ordinal != ordinal
         or set(targets) != set(parent.targets)
     ):
-        raise BookkeepingUnknown("build consumer workload scope is invalid")
+        return None
     nodes = tuple(
         session.scalars(select(AgentNode).where(AgentNode.node_id.in_(targets)))
     )
     if len(nodes) != len(targets):
-        raise BookkeepingUnknown("build consumer workload scope is missing")
+        return None
     if any(node.workload_intent_ordinal != ordinal for node in nodes):
         return False
     if (
@@ -455,32 +466,34 @@ def _run_switch_consumer(session: Session, parent: Job, build: RecipeBuild) -> b
         or plan.build.build_input_sha256 != build.build_input_sha256
         or plan.build.builder_node_id != build.builder_node_id
     ):
-        raise BookkeepingUnknown("build consumer identity changed")
+        return None
     return needs_container_build(plan, progress.phase_index)
 
 
-def _availability_consumer(parent: Job, build: RecipeBuild) -> bool:
+def _availability_consumer(parent: Job, build: RecipeBuild) -> bool | None:
+    """Whether the availability operation still needs ``build``; ``None`` when unknown."""
+
     payload = parent.payload
     if payload.get("removed") is True or payload.get("removal_fence") is not None:
         return False
     read_availability_intent(payload["request"])
     recipe = payload["recipe"]
     if not isinstance(recipe, Mapping):
-        raise StoredStateTypeDamaged("availability recipe is invalid")
+        return None
     read_recipe(recipe)
     runtime = payload["runtime"]
     if (
         not isinstance(runtime, Mapping)
         or runtime.get("build_input_sha256") != build.build_input_sha256
     ):
-        raise BookkeepingUnknown("availability build consumer identity changed")
+        return None
     image = payload.get("image_result")
     if image is not None:
         receipt = read_stored_model(
             RuntimeImageReceipt, canonical_message(image), from_json=True
         )
         if receipt.build_input_sha256 != build.build_input_sha256:
-            raise BookkeepingUnknown("availability receipt identity changed")
+            return None
         return False
     return True
 

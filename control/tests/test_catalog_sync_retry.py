@@ -43,3 +43,43 @@ def test_failed_sync_log_names_the_reason_bounded_and_printable() -> None:
     assert catalog_sync_failure_reason(RuntimeError("secret")) == (
         "RuntimeError (unclassified)"
     )
+
+
+def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt() -> None:
+    import asyncio
+
+    from vonk_control.catalog_sync import CatalogSyncUnsettled, run_automatic_sync
+
+    stop = asyncio.Event()
+
+    class _Service:
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        def automatic(self) -> None:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise CatalogSyncUnsettled(
+                    "catalog.sync_in_progress", "another sync is running"
+                )
+            if self.attempts == 2:
+                raise OSError("library unreachable")
+            if self.attempts == 3:
+                raise ValueError("unclassified")
+            stop.set()
+
+    service = _Service()
+
+    async def run() -> None:
+        await asyncio.wait_for(
+            run_automatic_sync(
+                service,  # type: ignore[arg-type]
+                stop,
+                interval_seconds=0,
+                settle_seconds=0.0,
+            ),
+            timeout=5,
+        )
+
+    asyncio.run(run())
+    assert service.attempts == 4

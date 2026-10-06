@@ -48,7 +48,7 @@ from vonk_control.models import (
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
 from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityError,
+    BuildUnsettled,
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_image_removal_contract import RecipeCacheRemovalOwner
@@ -1861,16 +1861,16 @@ def test_forced_image_build_resumes_after_worker_restart(
     assert first.service._builder is not None
     claim = first.service.claim_pending(limit=1)[0]
     recipe = RecipeDefinition.model_validate_json(json.dumps(revision.document))
-    with pytest.raises(RecipeImageAvailabilityError) as waiting:
-        first.service._builder(
-            recipe,
-            runtime,
-            claim=claim,
-            build_input_sha256=plan.build_input_sha256,
-            force=True,
-            progress=lambda _: None,
-        )
-    assert waiting.value.code == "recipe_image.build_wait"
+    waiting = first.service._builder(
+        recipe,
+        runtime,
+        claim=claim,
+        build_input_sha256=plan.build_input_sha256,
+        force=True,
+        progress=lambda _: None,
+    )
+    assert isinstance(waiting, BuildUnsettled)
+    assert waiting.code == "recipe_image.build_wait"
     first.close()
     if completed_before_restart:
         complete_build()
@@ -1885,16 +1885,16 @@ def test_forced_image_build_resumes_after_worker_restart(
         }
     claim = restarted.service.claim_pending(limit=1)[0]
     if not completed_before_restart:
-        with pytest.raises(RecipeImageAvailabilityError) as waiting:
-            restarted.service._builder(
-                recipe,
-                runtime,
-                claim=claim,
-                build_input_sha256=plan.build_input_sha256,
-                force=True,
-                progress=lambda _: None,
-            )
-        assert waiting.value.code == "recipe_image.build_wait"
+        waiting = restarted.service._builder(
+            recipe,
+            runtime,
+            claim=claim,
+            build_input_sha256=plan.build_input_sha256,
+            force=True,
+            progress=lambda _: None,
+        )
+        assert isinstance(waiting, BuildUnsettled)
+        assert waiting.code == "recipe_image.build_wait"
         complete_build()
     result = restarted.service._builder(
         recipe,
@@ -1904,6 +1904,7 @@ def test_forced_image_build_resumes_after_worker_restart(
         force=True,
         progress=lambda _: None,
     )
+    assert not isinstance(result, BuildUnsettled)
     assert result["state"] == "succeeded"
     with sessions() as session:
         jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
@@ -1919,16 +1920,16 @@ def test_forced_image_build_resumes_after_worker_restart(
     new_parent_id = "00000000-0000-4000-8000-000000000732"
     add_parent(new_parent_id)
     new_claim = restarted.service.claim_pending(limit=1)[0]
-    with pytest.raises(RecipeImageAvailabilityError) as waiting:
-        restarted.service._builder(
-            recipe,
-            runtime,
-            claim=new_claim,
-            build_input_sha256=plan.build_input_sha256,
-            force=True,
-            progress=lambda _: None,
-        )
-    assert waiting.value.code == "recipe_image.build_wait"
+    waiting = restarted.service._builder(
+        recipe,
+        runtime,
+        claim=new_claim,
+        build_input_sha256=plan.build_input_sha256,
+        force=True,
+        progress=lambda _: None,
+    )
+    assert isinstance(waiting, BuildUnsettled)
+    assert waiting.code == "recipe_image.build_wait"
     complete_build()
     restarted.service._builder(
         recipe,

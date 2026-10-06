@@ -76,6 +76,20 @@ class OciImageStoreError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class StoreUnknown:
+    """The store could not settle the answer (busy, unreadable, copy unfinished).
+
+    Not a refusal and not an error to unwind: nothing was removed and nothing
+    half-stored is trusted, so the owner observes again on its next pass.
+    ``address`` names the manifest involved when one is.
+    """
+
+    code: str
+    detail: str
+    address: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class StoredImage:
     """One complete image in the layout.
 
@@ -122,8 +136,9 @@ class OciImageStore:
             raise OciImageStoreError(ImageStoreCode.DIGEST_INVALID, "digest is invalid")
         return self.root / "blobs" / "sha256" / digest.removeprefix("sha256:")
 
-    def read(self, manifest_digest: str) -> StoredImage | None:
-        """The stored image, or ``None`` when any of its blobs is missing."""
+    def read(self, manifest_digest: str) -> StoredImage | StoreUnknown | None:
+        """The stored image, ``None`` when any of its blobs is missing, or
+        :class:`StoreUnknown` when the manifest cannot be read right now."""
 
         try:
             payload = self.blob_path(manifest_digest).read_bytes()
@@ -136,10 +151,10 @@ class OciImageStore:
                 f"stored manifest is damaged: {error}",
             ) from error
         except OSError as error:
-            raise OciImageStoreError(
+            return StoreUnknown(
                 ImageStoreCode.MANIFEST_UNREADABLE,
-                f"stored manifest is unreadable: {error}",
-            ) from error
+                f"stored manifest is unreadable: {error}"[:512],
+            )
         image = _stored_image(manifest_digest, manifest)
         sizes = {
             image.config_digest: _descriptor_size(manifest["config"]),
@@ -156,8 +171,12 @@ class OciImageStore:
                 return None
         return image
 
-    def import_reference(self, reference: str) -> StoredImage:
-        """Copy a digest-pinned registry image into the layout."""
+    def import_reference(self, reference: str) -> StoredImage | StoreUnknown:
+        """Copy a digest-pinned registry image into the layout.
+
+        :class:`StoreUnknown` when the copy could not be settled; a reference
+        that is not digest-pinned is refused as a malformed request.
+        """
 
         _, _, digest = reference.rpartition("@")
         if _DIGEST.fullmatch(digest) is None:
@@ -165,7 +184,7 @@ class OciImageStore:
                 ImageStoreCode.REFERENCE_UNPINNED,
                 "image reference is not digest-pinned",
             )
-        self._copy(
+        copied = self._copy(
             [
                 "--preserve-digests",
                 "--override-os",
@@ -175,22 +194,28 @@ class OciImageStore:
                 f"docker://{reference}",
             ]
         )
+        if isinstance(copied, StoreUnknown):
+            return copied
         image = self.read(digest)
+        if isinstance(image, StoreUnknown):
+            return image
         if image is None:
-            raise OciImageStoreError(
+            return StoreUnknown(
                 ImageStoreCode.IMPORT_INCOMPLETE, "copied image is incomplete"
             )
         return image
 
-    def import_archive(self, archive: Path) -> StoredImage:
+    def import_archive(self, archive: Path) -> StoredImage | StoreUnknown:
         """Convert a Docker archive (a Spark build) into the layout."""
 
         return self._copy([f"docker-archive:{archive}"])
 
-    def _copy(self, source: list[str]) -> StoredImage:
+    def _copy(self, source: list[str]) -> StoredImage | StoreUnknown:
         self.root.mkdir(mode=0o755, parents=True, exist_ok=True)
         digest_file = self.root / ".import.digest"
-        with self._lock():
+        with self._lock() as held:
+            if not held:
+                return StoreUnknown(STORE_BUSY, "another image is being stored")
             digest_file.unlink(missing_ok=True)
             command = [
                 self._skopeo,
@@ -212,27 +237,30 @@ class OciImageStore:
                     env=os.environ | {"TMPDIR": str(self.root.parent)},
                 )
             except (OSError, subprocess.TimeoutExpired) as error:
-                raise OciImageStoreError(
-                    ImageStoreCode.COPY_FAILED, f"skopeo copy did not finish: {error}"
-                ) from error
+                return StoreUnknown(
+                    ImageStoreCode.COPY_FAILED,
+                    f"skopeo copy did not finish: {error}"[:512],
+                )
             if result.returncode != 0:
                 detail = (
                     result.stderr or result.stdout or "skopeo copy failed"
                 ).strip()
-                raise OciImageStoreError(
-                    ImageStoreCode.COPY_FAILED, detail.splitlines()[-1]
+                return StoreUnknown(
+                    ImageStoreCode.COPY_FAILED, detail.splitlines()[-1][:512]
                 )
             try:
                 manifest_digest = digest_file.read_text(encoding="utf-8").strip()
-            except OSError as error:
-                raise OciImageStoreError(
+            except OSError:
+                return StoreUnknown(
                     ImageStoreCode.COPY_FAILED, "skopeo reported no manifest digest"
-                ) from error
+                )
             finally:
                 digest_file.unlink(missing_ok=True)
             image = self.read(manifest_digest)
+            if isinstance(image, StoreUnknown):
+                return image
             if image is None:
-                raise OciImageStoreError(
+                return StoreUnknown(
                     ImageStoreCode.IMPORT_INCOMPLETE, "copied image is incomplete"
                 )
             # A copy that found every blob already present writes nothing;
@@ -243,9 +271,12 @@ class OciImageStore:
         return image
 
     def collect(
-        self, referenced: Callable[[], Iterable[str]], *, grace_seconds: float
-    ) -> Collection | None:
-        """Remove blobs no referenced image needs; ``None`` when busy.
+        self,
+        referenced: Callable[[], Iterable[str] | StoreUnknown],
+        *,
+        grace_seconds: float,
+    ) -> Collection | StoreUnknown:
+        """Remove blobs no referenced image needs.
 
         ``referenced`` returns the manifests (hex addresses) the Controller
         still needs; it is asked while the writer lock is held, so no copy
@@ -253,27 +284,36 @@ class OciImageStore:
         when none of them refers to it and it is older than the grace
         period. A missing referenced manifest refers to nothing, which is
         ordinary cache loss. A manifest that exists but cannot be read or
-        understood proves nothing: ``REFERENCE_SCAN_FAILED`` is raised before
-        anything is removed, because a failed scan never proves a blob unused.
+        understood proves nothing, and neither does a reference list that could
+        not be read: the pass answers :class:`StoreUnknown` before anything is
+        removed (``REFERENCE_SCAN_FAILED`` / ``REFERENCED_MANIFEST_DAMAGED``),
+        because a failed scan never proves a blob unused. A busy store answers
+        ``STORE_BUSY`` the same way.
         """
 
         blobs = self.root / "blobs" / "sha256"
         if not blobs.is_dir():
             return Collection(0, 0)
-        try:
-            with self._lock():
-                return self._sweep(blobs, referenced, time.time() - grace_seconds)
-        except OciImageStoreError as error:
-            if error.code == STORE_BUSY:
-                return None
-            raise
+        with self._lock() as held:
+            if not held:
+                return StoreUnknown(STORE_BUSY, "another image is being stored")
+            return self._sweep(blobs, referenced, time.time() - grace_seconds)
 
     def _sweep(
-        self, blobs: Path, referenced: Callable[[], Iterable[str]], cutoff: float
-    ) -> Collection:
+        self,
+        blobs: Path,
+        referenced: Callable[[], Iterable[str] | StoreUnknown],
+        cutoff: float,
+    ) -> Collection | StoreUnknown:
+        named = referenced()
+        if isinstance(named, StoreUnknown):
+            return named
         keep: set[str] = set()
-        for address in referenced():
-            keep.update(self._referenced_blobs(address))
+        for address in named:
+            kept = self._referenced_blobs(address)
+            if isinstance(kept, StoreUnknown):
+                return kept
+            keep.update(kept)
         removed = reclaimed = 0
         for blob in blobs.iterdir():
             if blob.name in keep:
@@ -289,7 +329,7 @@ class OciImageStore:
             reclaimed += status.st_size
         return Collection(removed, reclaimed)
 
-    def _referenced_blobs(self, address: str) -> set[str]:
+    def _referenced_blobs(self, address: str) -> set[str] | StoreUnknown:
         digest = f"sha256:{address}"
         if _DIGEST.fullmatch(digest) is None:
             # No stored manifest can have this name: a definite answer.
@@ -299,41 +339,36 @@ class OciImageStore:
             image = _stored_image(digest, manifest)
         except FileNotFoundError:
             return set()
-        except (ValueError, OciImageStoreError) as error:
+        except (ValueError, OciImageStoreError, OSError) as error:
             damaged = (
-                isinstance(error, ValueError) or error.code in DAMAGED_MANIFEST_CODES
+                isinstance(error, ValueError)
+                or isinstance(error, OciImageStoreError)
+                and error.code in DAMAGED_MANIFEST_CODES
             )
-            raise OciImageStoreError(
+            return StoreUnknown(
                 REFERENCED_MANIFEST_DAMAGED if damaged else REFERENCE_SCAN_FAILED,
                 f"manifest {address} is referenced but cannot be read, "
-                f"so nothing was removed: {type(error).__name__}: {error}",
+                f"so nothing was removed: {type(error).__name__}: {error}"[:512],
                 address=address,
-            ) from error
-        except OSError as error:
-            raise OciImageStoreError(
-                REFERENCE_SCAN_FAILED,
-                f"manifest {address} is referenced but cannot be read, "
-                f"so nothing was removed: {type(error).__name__}: {error}",
-                address=address,
-            ) from error
+            )
         return {item.removeprefix("sha256:") for item in image.blob_digests}
 
     @contextmanager
-    def _lock(self) -> Iterator[None]:
+    def _lock(self) -> Iterator[bool]:
         """One writer at a time: skopeo rewrites the layout's index.
 
-        Never waits: a busy store is reported, and the caller retries later.
+        Never waits: it yields ``False`` for a busy store, and the caller
+        answers :class:`StoreUnknown` so its owner retries later.
         """
 
         descriptor = os.open(self.root / ".lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as error:
-                raise OciImageStoreError(
-                    STORE_BUSY, "another image is being stored"
-                ) from error
-            yield
+            except BlockingIOError:
+                yield False
+                return
+            yield True
         finally:
             os.close(descriptor)
 
@@ -392,5 +427,6 @@ __all__ = [
     "Collection",
     "OciImageStore",
     "OciImageStoreError",
+    "StoreUnknown",
     "StoredImage",
 ]
