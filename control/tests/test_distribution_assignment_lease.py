@@ -151,8 +151,10 @@ def _transfer(agent_system):  # noqa: F811
         return _plan(
             preparation=None,
             storage=SimpleNamespace(artifact_digests=["a" * 64]),
-            image_digest=None,
-            build=SimpleNamespace(oci_layout_sha256="c" * 64, image_bytes=11),
+            image_digest=IMAGE.image_digest,
+            build=SimpleNamespace(
+                oci_layout_sha256="c" * 64, image_bytes=11, build_input_sha256=None
+            ),
             recipe_build_id=None,
             recipe_revision_id=None,
             generated_at=generated_at,

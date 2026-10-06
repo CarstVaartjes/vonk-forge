@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import DistributionObject
+from vonk_agent_protocol import DistributionObject, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.distribution import (
     DistributionService,
@@ -138,11 +138,13 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress=RunSwitchOperationResult.model_validate(
-            {
-                "workload_intent_ordinal": 1,
-                "phase_results": [runtime_result, runtime_plan_result],
-            }
+        progress=RunSwitchOperationResult.model_validate_json(
+            canonical_message(
+                {
+                    "workload_intent_ordinal": 1,
+                    "phase_results": [runtime_result, runtime_plan_result],
+                }
+            )
         ),
     )
     assert first.operation_id == "child-direct"
@@ -162,24 +164,26 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
         item_index=0,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress=RunSwitchOperationResult.model_validate(
-            {
-                "phase_results": [
-                    runtime_result,
-                    runtime_plan_result,
-                    {
-                        "phase": "transfer",
-                        "subphase": "target-copy",
-                        "assignments": {nodes[0]: assignment},
-                    },
-                    {
-                        "phase": "transfer",
-                        "subphase": "target-copy",
-                        "node_id": nodes[0],
-                        "downloaded_bytes": model.bytes,
-                    },
-                ],
-            }
+        progress=RunSwitchOperationResult.model_validate_json(
+            canonical_message(
+                {
+                    "phase_results": [
+                        runtime_result,
+                        runtime_plan_result,
+                        {
+                            "phase": "transfer",
+                            "subphase": "target-copy",
+                            "assignments": {nodes[0]: assignment},
+                        },
+                        {
+                            "phase": "transfer",
+                            "subphase": "target-copy",
+                            "node_id": nodes[0],
+                            "downloaded_bytes": model.bytes,
+                        },
+                    ],
+                }
+            )
         ),
     )
     assert verify.result is not None

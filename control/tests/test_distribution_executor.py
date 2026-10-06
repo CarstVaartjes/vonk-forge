@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import DistributionObject, LifecycleState
+from vonk_agent_protocol import DistributionObject, LifecycleState, canonical_message
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_control.agent_jobs import AgentJobService
@@ -156,7 +156,8 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
         runtime_image=SimpleNamespace(
             image_digest="sha256:" + "d" * 64,
             oci_layout_sha256="e" * 64,
-            image_bytes=0,
+            image_bytes=11,
+            build_id=None,
             targets=[_target(node, image=True) for node in nodes],
         ),
     )
@@ -295,7 +296,9 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         item_index=0,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress=RunSwitchOperationResult.model_validate(build_progress),
+        progress=RunSwitchOperationResult.model_validate_json(
+            canonical_message(build_progress)
+        ),
     )
     assert first.operation_id is not None
     assert isinstance(first.result, RunSwitchTargetTransferResult)
@@ -375,7 +378,9 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         item_index=0,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000001",
-        progress=RunSwitchOperationResult.model_validate(build_progress),
+        progress=RunSwitchOperationResult.model_validate_json(
+            canonical_message(build_progress)
+        ),
     )
     assert replay.operation_id == first.operation_id
     with pytest.raises(RuntimeError, match="distribution child request key was reused"):
@@ -385,8 +390,8 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             item_index=0,
             actor="test",
             request_key="00000000-0000-4000-8000-000000000001",
-            progress=RunSwitchOperationResult.model_validate(
-                {**build_progress, "workload_intent_ordinal": 8}
+            progress=RunSwitchOperationResult.model_validate_json(
+                canonical_message({**build_progress, "workload_intent_ordinal": 8})
             ),
         )
     verify = executor.execute(
@@ -436,7 +441,9 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             item_index=0,
             actor="test",
             request_key="00000000-0000-4000-8000-000000000001",
-            progress=RunSwitchOperationResult.model_validate(build_progress),
+            progress=RunSwitchOperationResult.model_validate_json(
+                canonical_message(build_progress)
+            ),
         )
 
 
@@ -504,22 +511,24 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
         recipe_build_id=build_id,
         plan_digest="d" * 64,
     )
-    progress = RunSwitchOperationResult.model_validate(
-        {
-            "phase_results": [
-                {
-                    "phase": "transfer",
-                    "subphase": "target-copy",
-                    "assignments": {node_id: assignment.to_mapping()},
-                },
-                {
-                    "phase": "transfer",
-                    "subphase": "target-copy",
-                    "node_id": node_id,
-                    "downloaded_bytes": 7,
-                },
-            ]
-        }
+    progress = RunSwitchOperationResult.model_validate_json(
+        canonical_message(
+            {
+                "phase_results": [
+                    {
+                        "phase": "transfer",
+                        "subphase": "target-copy",
+                        "assignments": {node_id: assignment.to_mapping()},
+                    },
+                    {
+                        "phase": "transfer",
+                        "subphase": "target-copy",
+                        "node_id": node_id,
+                        "downloaded_bytes": 7,
+                    },
+                ]
+            }
+        )
     )
     executor = CompositeDistributionPhaseExecutor(
         None,
@@ -1319,8 +1328,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress=RunSwitchOperationResult.model_validate(
-            {"workload_intent_ordinal": 1}
+        progress=RunSwitchOperationResult.model_validate_json(
+            canonical_message({"workload_intent_ordinal": 1})
         ),
     )
     assert copy_child.operation_id
@@ -1405,8 +1414,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress=RunSwitchOperationResult.model_validate(
-            {"workload_intent_ordinal": 1}
+        progress=RunSwitchOperationResult.model_validate_json(
+            canonical_message({"workload_intent_ordinal": 1})
         ),
     )
     assert replay.operation_id == copy_child.operation_id
