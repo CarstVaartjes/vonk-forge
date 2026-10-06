@@ -296,6 +296,21 @@ class RecipeReconciliationBlocked(UnknownOutcomeError, RecipeOperationConflict):
         super().__init__(f"{code}: {detail}")
 
 
+class RecipeInstallBusy(InstallAdmissionBusy, UnknownOutcomeError):
+    """A capacity writer owns the install row: the request is observed and
+    retried once it is released, never refused.  The category base sits after the
+    admission class so the leaf is the same unknown outcome whether or not the
+    admission class names it itself."""
+
+    def __init__(self, *args: object, reason: WaitReason | None = None) -> None:
+        InstallAdmissionBusy.__init__(self, *args)
+        self.typed_reason = reason
+
+
+class RecipeRecoverySuperseded(InvalidRequestError, DistributedLifecycleError):
+    """A singleton recovery that a newer workload intent superseded."""
+
+
 @dataclass(frozen=True, slots=True)
 class InstallationReconciliationTarget:
     """One installed rank and whether its cleanup already succeeded."""
@@ -2125,7 +2140,9 @@ class RecipeOperationService:
                     holder="recipe-operation",
                 )
             except AdmissionLockBusy as error:
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise RecipeInstallBusy(
+                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                ) from error
             replay = self._idempotent_in_session(
                 session,
                 request_id,
@@ -3220,8 +3237,9 @@ class RecipeOperationService:
             )
         except RecipeOperationConflict as error:
             if str(error) == "workload intent was superseded":
-                raise DistributedLifecycleError(
-                    "singleton recovery was superseded by a newer workload intent"
+                raise RecipeRecoverySuperseded(
+                    "singleton recovery was superseded by a newer workload intent",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 ) from error
             raise
 
@@ -3553,7 +3571,9 @@ class RecipeOperationService:
         try:
             locked = lock_admission_rows(session, requests)
         except AdmissionLockBusy as error:
-            raise InstallAdmissionBusy("reconcile.capacity_busy") from error
+            raise RecipeInstallBusy(
+                "reconcile.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+            ) from error
         locked_nodes = locked["reconcile-installation-nodes"]
         locked_mapping_nodes = locked["reconcile-mapping-nodes"]
         if tuple(
@@ -3567,7 +3587,10 @@ class RecipeOperationService:
         ) != tuple(
             sorted((node.node_id, node.rank, node.role) for node in mapping_nodes)
         ):
-            raise InstallAdmissionBusy("reconcile.membership_changed")
+            raise RecipeInstallBusy(
+                "reconcile.membership_changed",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
 
     def _reconciliation_authority_in_session(
         self,
@@ -4046,7 +4069,10 @@ class RecipeOperationService:
                         holder="recipe-operation",
                     )
                 except AdmissionLockBusy as error:
-                    raise InstallAdmissionBusy("reconcile.capacity_busy") from error
+                    raise RecipeInstallBusy(
+                        "reconcile.capacity_busy",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from error
                 authority = self._reconciliation_authority_in_session(
                     session, installation_id, lock=True
                 )
@@ -4101,7 +4127,9 @@ class RecipeOperationService:
                     },
                 )
         except AdmissionLockBusy as error:
-            raise InstallAdmissionBusy("reconcile.capacity_busy") from error
+            raise RecipeInstallBusy(
+                "reconcile.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+            ) from error
         except IntegrityError as error:
             raced = self._idempotent(
                 request_id,
@@ -8111,7 +8139,9 @@ class RecipeOperationService:
             )
         except AdmissionLockBusy as error:
             if kind == "recipe.install":
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise RecipeInstallBusy(
+                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         if tuple(node.node_id for node in target_nodes) != tuple(targets):
             raise RecipeRequestInvalid("workload intent target disappeared")
@@ -8134,7 +8164,10 @@ class RecipeOperationService:
                 )
             except AdmissionLockBusy as error:
                 if kind == "recipe.install":
-                    raise InstallAdmissionBusy("install.capacity_busy") from error
+                    raise RecipeInstallBusy(
+                        "install.capacity_busy",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from error
                 raise RunAdmissionBusy("run capacity writer is busy") from error
             return next_ordinal
         if (
@@ -8215,7 +8248,9 @@ class RecipeOperationService:
             )
         except AdmissionLockBusy as error:
             if kind == "recipe.install":
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise RecipeInstallBusy(
+                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         existing = self._idempotent_job_in_session(
             session,
@@ -8312,13 +8347,17 @@ class RecipeOperationService:
                 )
         except AdmissionLockBusy as error:
             if kind == "recipe.install":
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise RecipeInstallBusy(
+                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         except OperationalError as error:
             if not is_admission_contention(error):
                 raise
             if kind == "recipe.install":
-                raise InstallAdmissionBusy("install.capacity_busy") from error
+                raise RecipeInstallBusy(
+                    "install.capacity_busy", reason=WaitReason.OBSERVATION_UNAVAILABLE
+                ) from error
             raise RunAdmissionBusy("run capacity writer is busy") from error
         return job
 

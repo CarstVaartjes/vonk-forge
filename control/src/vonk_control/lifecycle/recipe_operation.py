@@ -34,8 +34,11 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+from vonk_agent_protocol import InvalidRequestReason
+
 from .. import job_states
 from ..agent_operation_facts import aware
+from ..categorized_errors import InvalidValue
 from ..models import Job
 from .adapter import Dispatch
 from .core import transition
@@ -160,7 +163,10 @@ class RecipeOperationAdapter:
 
         state = fields.get("state", "queued")
         if state not in _BORN:
-            raise ValueError(f"a recipe operation cannot be created {state}")
+            raise InvalidValue(
+                f"a recipe operation cannot be created {state}",
+                reason=InvalidRequestReason.UNSUPPORTED,
+            )
         return Job(**fields)
 
     @staticmethod

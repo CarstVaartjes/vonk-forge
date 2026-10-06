@@ -58,7 +58,7 @@
   },
   "categorized_raises": {
     "note": "Raises in a lifecycle or operation path that predate the rule that they use SecurityRefusalError, InvalidRequestError or UnknownOutcomeError. A module's count and the ceiling only fall: convert a raise to a categorized type, then lower the count.",
-    "ceiling": 602,
+    "ceiling": 590,
     "grandfathered": {
       "control/src/vonk_control/agent_jobs.py": 68,
       "control/src/vonk_control/agent_upgrades.py": 30,
@@ -74,9 +74,7 @@
       "control/src/vonk_control/install_admission.py": 30,
       "control/src/vonk_control/jobs.py": 16,
       "control/src/vonk_control/lifecycle/agent_operation.py": 2,
-      "control/src/vonk_control/lifecycle/artifact_job.py": 1,
-      "control/src/vonk_control/lifecycle/recipe_operation.py": 1,
-      "control/src/vonk_control/recipe_operations.py": 11
+      "control/src/vonk_control/lifecycle/artifact_job.py": 1
     }
   },
   "operator_waits": [
@@ -712,7 +710,7 @@
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: Malformed/replayed/stale user request.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "DistributedLifecycleError", "RecipeOperationService.queue_recovery_stop_in_session", "singleton-recovery-was-superseded-by-a-newer-workload-intent", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRecoverySuperseded", "RecipeOperationService.queue_recovery_stop_in_session", "singleton-recovery-was-superseded-by-a-newer-workload-intent", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_current_build", "build.shared_consumers", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_current_build", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_prebuilt_build", "build.shared_consumers", 1],
@@ -752,14 +750,14 @@
       "category": "already-retried",
       "reason": "Admission or capacity busy and provider-transient errors that carry a retry; the owner retries them. Audit notes: Admission busy: retried by the owning worker (Run/Switch hold, profile admission retry).",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._admit_workload_intent", "install.capacity_busy", 2],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.capacity_busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.membership_changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._queue_in_session", "install.capacity_busy", 3],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService.install", "install.capacity_busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService.reconcile_installation", "reconcile.capacity_busy", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._queue_prebuilt_build_in_session", "message", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService.build", "message", 2],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeInstallBusy", "RecipeOperationService._admit_workload_intent", "install.capacity_busy", 2],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeInstallBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.capacity_busy", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeInstallBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.membership_changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeInstallBusy", "RecipeOperationService._queue_in_session", "install.capacity_busy", 3],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeInstallBusy", "RecipeOperationService.install", "install.capacity_busy", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeInstallBusy", "RecipeOperationService.reconcile_installation", "reconcile.capacity_busy", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._cancel_build", "build.consumer_busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._cancel_current_build", "build.consumer_busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._admit_workload_intent", "run-capacity-writer-is-busy", 2],
@@ -3338,6 +3336,14 @@
         ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityMismatch", "_persist_run_switch_runtime_image_reference", "runtime-image-differs-from-the-approved", 1],
         ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityMismatch", "_persist_run_switch_runtime_image_reference", "runtime-image-is-not-the-approved-build-result", 1],
         ["control/src/vonk_control/run_switch_operations.py", "_RuntimeImageIdentityMismatch", "_persist_run_switch_runtime_image_reference", "runtime-image-receipt-differs-from-the-approved-build", 1]
+      ]
+    },
+    {
+      "family": "recipe_operation.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
+      "sites": [
+        ["control/src/vonk_control/lifecycle/recipe_operation.py", "InvalidValue", "RecipeOperationAdapter.new_job", "a-recipe-operation-cannot-be-created", 1]
       ]
     }
   ]
