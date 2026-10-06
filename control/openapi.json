@@ -14356,7 +14356,6 @@
           "model_cache.object_busy",
           "model_cache.operation_failed",
           "model_cache.operation_missing",
-          "model_cache.operation_not_observable",
           "model_cache.operation_not_retryable",
           "model_cache.operation_unreadable",
           "model_cache.payload_invalid",
@@ -14398,6 +14397,7 @@
           "model_cache.selector_ambiguous",
           "model_cache.selector_invalid",
           "model_cache.selector_missing",
+          "model_cache.source_gone",
           "model_cache.source_invalid",
           "model_cache.source_size_mismatch",
           "model_cache.source_truncated",
@@ -14629,6 +14629,36 @@
           "coverage"
         ],
         "title": "ModelCacheDownloadResult",
+        "type": "object"
+      },
+      "ModelCacheMissingSourceObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_key": {
+            "minLength": 1,
+            "title": "Artifact Key",
+            "type": "string"
+          },
+          "observations": {
+            "minimum": 1,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              404,
+              410
+            ],
+            "title": "Status",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_key",
+          "status",
+          "observations"
+        ],
+        "title": "ModelCacheMissingSourceObservation",
         "type": "object"
       },
       "ModelCacheOperationProgress": {
@@ -15469,6 +15499,17 @@
             ],
             "default": null,
             "title": "Credential Fingerprint"
+          },
+          "missing_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelCacheMissingSourceObservation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "next_retry_at": {
             "anyOf": [
