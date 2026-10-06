@@ -31,6 +31,7 @@ from .admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     acquire_admission_keys,
+    admission_attempts,
     is_admission_contention,
     lock_admission_rows,
     node_admission_key,
@@ -798,8 +799,17 @@ class RunAdmissionService:
         )
 
     def accept_run(self, plan: RunPlan, *, actor: str, now: datetime) -> str:
-        with self._sessions.begin() as session:
-            return self.accept_run_in_session(session, plan, actor=actor, now=now)
+        refused: UnknownOutcomeError | None = None
+        for _attempt in admission_attempts():
+            try:
+                with self._sessions.begin() as session:
+                    return self.accept_run_in_session(
+                        session, plan, actor=actor, now=now
+                    )
+            except UnknownOutcomeError as error:
+                refused = error
+        assert refused is not None
+        raise refused
 
     def accept_run_in_session(
         self,
