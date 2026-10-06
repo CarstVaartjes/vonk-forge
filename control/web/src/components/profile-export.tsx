@@ -8,6 +8,9 @@ export function ProfileExport({api, number}: {api: Pick<ControlApi, "profileDefi
   async function download() {
     try {
       const value = await api.profileDefinition(number);
+      if (value.definition === null) {
+        throw new Error(`${value.projection_issue?.detail} ${value.projection_issue?.next_action}`);
+      }
       const url = URL.createObjectURL(new Blob([JSON.stringify(value.definition, null, 2) + "\n"], {type: "application/json"}));
       const link = document.createElement("a");
       link.href = url; link.download = `profile-${number}.json`; link.click();

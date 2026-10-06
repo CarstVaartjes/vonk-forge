@@ -27,7 +27,7 @@ from vonk_agent_protocol import (
     RunState,
 )
 from vonk_agent_protocol.inventory import NetworkInterface
-from vonk_forge_contracts import RecipeDefinition, read_recipe
+from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .auth import CursorError
 from .cluster_mappings import mapping_option_choices
@@ -68,7 +68,7 @@ from .recipe_update_notice import (
     newest_active_revisions,
     recipe_update_notice,
 )
-from .strict_json import StrictModel
+from .strict_json import StrictModel, warn_unreadable_once
 from .telemetry import (
     CPU_LOW_CLOCK_MIN_SECONDS,
     TelemetryRepository,
@@ -101,6 +101,8 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
     ):
         return None
     try:
+        if document_sha256(revision.document) != revision.content_digest:
+            return None
         return read_recipe(revision.document)
     except (TypeError, ValueError):
         return None
@@ -143,6 +145,7 @@ Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 Text200 = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 Text256 = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 Rank = Annotated[int, Field(ge=0, le=_MAX_FLEET_NODES - 1)]
+_MEMBER_COORDINATES = TypeAdapter(tuple[Rank, Text64])
 
 AgentState = Literal["unregistered", "pending", "active", "retired", "revoked"]
 # Database rows and decoded JSON carry these closed values as plain strings, so
@@ -175,7 +178,7 @@ _INSTALL_REASON_WORDS: dict[str, str] = {
 
 
 def _install_partial_warnings(
-    installed: Sequence[RecipePresence],
+    installed: Sequence[InstallationPresence],
 ) -> list[ProjectionReason]:
     """One warning per incomplete installation group on the Spark.
 
@@ -189,6 +192,20 @@ def _install_partial_warnings(
     named = incomplete[:_INSTALL_PARTIAL_MAX_NAMED]
     warnings: list[ProjectionReason] = []
     for value in named:
+        if (
+            isinstance(value, UnavailableRecipePresence)
+            or value.projection_issue is not None
+        ):
+            warnings.append(
+                ProjectionReason(
+                    code=ProjectionCode.INSTALL_PARTIAL,
+                    detail=f"{value.title or value.installation_id}: {value.projection_issue}"[
+                        :256
+                    ],
+                    severity="warning",
+                )
+            )
+            continue
         reason = value.degraded_reason
         if reason is None:
             reason = InstallDegradedReason.INSTALLATION_NOT_INSTALLED
@@ -387,7 +404,8 @@ class RecipePresence(StrictModel):
     role: Text64
     group_state: InstallationStateField
     rank_state: InstallationStateField
-    complete: bool
+    complete: bool | None
+    projection_issue: str | None = Field(default=None, max_length=256)
     degraded_reason: InstallDegradedReason | None = None
     affected_ranks: list[Rank] = Field(
         default_factory=list, max_length=_MAX_FLEET_NODES
@@ -413,8 +431,9 @@ class RunPresence(StrictModel):
     rank_state: RunStateField
     rank_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     rank_fresh: bool
-    group_state: Literal["healthy", "degraded"]
-    healthy: bool
+    group_state: Literal["healthy", "degraded", "unavailable"]
+    healthy: bool | None
+    projection_issue: str | None = Field(default=None, max_length=256)
     degraded_reason: RunDegradedReason | None = None
     # Why the route is not published, when the Controller withdrew it.
     route_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
@@ -423,6 +442,82 @@ class RunPresence(StrictModel):
     option_choices: dict[Text64, Text64] = Field(default_factory=dict, max_length=16)
     # Set when a newer revision of this recipe exists; informational only.
     recipe_update: RecipeUpdateNotice | None = None
+
+
+class UnavailableRecipePresence(StrictModel):
+    """Known membership whose stored group evidence cannot be projected."""
+
+    installation_id: Text128
+    projection_issue: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    recipe_id: Text128 | None = None
+    recipe_revision_id: Text128 | None = None
+    title: Text200 | None = None
+    topology_name: Text64 | None = None
+    expected_rank_count: Annotated[int, Field(ge=1, le=_MAX_FLEET_NODES)] | None = None
+    present_ranks: Annotated[list[Rank], Field(max_length=_MAX_FLEET_NODES)] | None = (
+        None
+    )
+    member_node_ids: (
+        Annotated[list[NodeId], Field(max_length=_MAX_FLEET_NODES)] | None
+    ) = None
+    rank: Rank | None = None
+    role: Text64 | None = None
+    group_state: InstallationStateField | None = None
+    rank_state: InstallationStateField | None = None
+    complete: None
+    degraded_reason: None = None
+    affected_ranks: None = None
+    installed_bytes: Annotated[int, Field(ge=0, le=_MAX_SIGNED_BIGINT)] | None = None
+    required_bytes: None = None
+
+
+class UnavailableRunPresence(StrictModel):
+    run_id: Text128
+    projection_issue: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    installation_id: Text128 | None = None
+    recipe_id: Text128 | None = None
+    recipe_revision_id: Text128 | None = None
+    title: Text200 | None = None
+    alias: Text128 | None = None
+    expected_rank_count: Annotated[int, Field(ge=1, le=_MAX_FLEET_NODES)] | None = None
+    present_ranks: Annotated[list[Rank], Field(max_length=_MAX_FLEET_NODES)] | None = (
+        None
+    )
+    member_node_ids: (
+        Annotated[list[NodeId], Field(max_length=_MAX_FLEET_NODES)] | None
+    ) = None
+    rank: Rank | None = None
+    role: Text64 | None = None
+    run_state: RunStateField | None = None
+    route_state: RouteStateField | None = None
+    rank_state: RunStateField | None = None
+    rank_age_seconds: None = None
+    rank_fresh: None = None
+    group_state: Literal["unavailable"] = "unavailable"
+    healthy: None
+    degraded_reason: None = None
+    route_reason: None = None
+    option_choices: None = None
+    recipe_update: None = None
+
+
+InstallationPresence = RecipePresence | UnavailableRecipePresence
+LoadedPresence = RunPresence | UnavailableRunPresence
+
+
+def _unavailable_presence[M: StrictModel](
+    identity: M, observed: Sequence[tuple[str, object]]
+) -> M:
+    """Retain each independently validating field, never repair or invent it."""
+    model = type(identity)
+    document = identity.model_dump()
+    for name, value in observed:
+        try:
+            model.model_validate({**document, name: value}, strict=True)
+        except (TypeError, ValueError):
+            continue
+        document[name] = value
+    return model.model_validate(document, strict=True)
 
 
 class CapacityReservations(StrictModel):
@@ -439,12 +534,13 @@ class FleetNode(StrictModel):
     hostname: Annotated[str, StringConstraints(max_length=255)]
     ip_address: Annotated[str, StringConstraints(max_length=45)] | None = None
     lifecycle: Text64
-    labels: dict[Text64, Text256] = Field(max_length=64)
+    labels: dict[Text64, Text256] | None = Field(max_length=64)
+    projection_issues: list[Text256] | None = Field(default=None, max_length=16)
     connection: NodeConnection
     inventory: InventoryState | None
     telemetry: TelemetryState | None
-    installed: list[RecipePresence] = Field(max_length=512)
-    loaded: list[RunPresence] = Field(max_length=512)
+    installed: list[InstallationPresence] = Field(max_length=512)
+    loaded: list[LoadedPresence] = Field(max_length=512)
     reservations: CapacityReservations
     warnings: list[ProjectionReason] = Field(max_length=128)
 
@@ -453,7 +549,7 @@ class FleetSnapshot(StrictModel):
     event_cursor: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     generated_at: datetime
     authority_revision: AuthorityRevision
-    nodes: list[FleetNode] = Field(max_length=_MAX_FLEET_NODES)
+    nodes: list[FleetNode]
 
 
 class FleetNodeIdentity(StrictModel):
@@ -591,14 +687,17 @@ class FleetProjection:
         ):
             raise CursorError("Fleet event cursor is invalid")
         current = _utc(self._clock())
-        with self._sessions.begin() as session:
+        with self._sessions() as session:
             agents = self._registered_agents(session)
             node_ids = tuple(agents)
             profiles = self._node_profiles(session, node_ids)
             presences = self._node_presences(session, node_ids)
             certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
-            telemetry = self._telemetry.latest_in_session(session, node_ids)
+            unreadable_telemetry: set[str] = set()
+            telemetry = self._telemetry.latest_in_session(
+                session, node_ids, unreadable_node_ids=unreadable_telemetry
+            )
             recent_telemetry = self._telemetry.recent_in_session(
                 session,
                 node_ids,
@@ -641,6 +740,7 @@ class FleetProjection:
                     certificate=certificates.get(node_id),
                     inventory=inventories.get(node_id),
                     telemetry=telemetry.get(node_id),
+                    telemetry_unreadable=node_id in unreadable_telemetry,
                     recent_telemetry=recent_telemetry.get(node_id, ()),
                     installed=installed.get(node_id, ()),
                     loaded=loaded.get(node_id, ()),
@@ -661,11 +761,8 @@ class FleetProjection:
                     AgentNode.revoked_at.is_(None),
                 )
                 .order_by(AgentNode.node_id)
-                .limit(_MAX_FLEET_NODES + 1)
             )
         )
-        if len(rows) > _MAX_FLEET_NODES:
-            raise ValueError("Fleet contains more than 500 registered nodes")
         return {row.node_id: row for row in rows}
 
     @staticmethod
@@ -817,10 +914,7 @@ class FleetProjection:
         grouped: dict[str, list[ClusterMappingNode]] = {}
         for row in rows:
             grouped.setdefault(row.mapping_id, []).append(row)
-        return {
-            mapping_id: tuple(sorted(values, key=lambda value: value.rank))
-            for mapping_id, values in grouped.items()
-        }
+        return {mapping_id: tuple(values) for mapping_id, values in grouped.items()}
 
     @staticmethod
     def _exact_group_reason(
@@ -830,6 +924,10 @@ class FleetProjection:
         actual: Sequence[InstallationNode | RunNode],
         fleet_node_ids: frozenset[str],
     ) -> str | None:
+        # Invalid persisted coordinates are unknown evidence, not a proven
+        # missing rank. The owning group catches validation and retains members.
+        for value in (*expected, *actual):
+            _MEMBER_COORDINATES.validate_python((value.rank, value.role), strict=True)
         if any(value.node_id not in fleet_node_ids for value in (*expected, *actual)):
             return InstallDegradedReason.EXTERNAL_MEMBER
         expected_ranks = [value.rank for value in expected]
@@ -857,84 +955,132 @@ class FleetProjection:
         rows: Sequence[InstallationPresenceRow],
         mapping_rows: Sequence[ClusterMappingNode],
         fleet_node_ids: frozenset[str],
-    ) -> dict[str, tuple[RecipePresence, ...]]:
+    ) -> dict[str, tuple[InstallationPresence, ...]]:
         mappings = self._mapping_members(mapping_rows)
         grouped: dict[str, list[InstallationPresenceRow]] = {}
         for row in rows:
             node = row[0]
             grouped.setdefault(node.installation_id, []).append(row)
-        by_node: dict[str, list[RecipePresence]] = {}
+        by_node: dict[str, list[InstallationPresence]] = {}
         for installation_id in sorted(grouped):
-            group = sorted(grouped[installation_id], key=lambda value: value[0].rank)
-            nodes = [value[0] for value in group]
-            installation = group[0][1]
-            mapping = group[0][2]
-            revision = group[0][3]
-            recipe = group[0][4]
-            if _canonical_recipe(revision) is None:
-                # An ineligible revision is simply not this projection's
-                # business. A damaged active one cannot pass unnoticed: the ORM
-                # refuses to commit a stored document that no longer hashes to
-                # its recorded digest, so the read fails instead of returning a
-                # node with nothing installed.
-                continue
-            visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
-            reason = _install_degraded_reason(
-                self._exact_group_reason(
-                    expected_count=mapping.node_count,
-                    expected=mappings.get(mapping.id, ()),
-                    actual=nodes,
-                    fleet_node_ids=fleet_node_ids,
+            projected_group: dict[str, list[InstallationPresence]] = {}
+            try:
+                group = sorted(
+                    grouped[installation_id], key=lambda value: value[0].rank
                 )
-            )
-            affected: list[int] = []
-            expectations = _installation_payload_expectations(installation.plan)
-            if reason is None and installation.state != InstallationState.INSTALLED:
-                reason = InstallDegradedReason.INSTALLATION_NOT_INSTALLED
-            if reason is None:
-                affected = [
-                    node.rank
-                    for node in nodes
-                    if node.state != InstallationNodeState.INSTALLED
+                nodes = [value[0] for value in group]
+                installation = group[0][1]
+                mapping = group[0][2]
+                revision = group[0][3]
+                recipe = group[0][4]
+                projection_issue = (
+                    "Stored recipe revision is unreadable; installation completeness is unknown."
+                    if _canonical_recipe(revision) is None
+                    else None
+                )
+                visible_nodes = [
+                    node for node in nodes if node.node_id in fleet_node_ids
                 ]
-                if affected:
-                    reason = InstallDegradedReason.RANK_NOT_INSTALLED
-            if reason is None:
-                affected = [
-                    node.rank
-                    for node in nodes
-                    if node.node_id in expectations
-                    and node.installed_bytes < expectations[node.node_id]
-                ]
-                if affected:
-                    reason = InstallDegradedReason.RANK_INCOMPLETE_BYTES
-            present_ranks = [node.rank for node in visible_nodes]
-            member_node_ids = sorted(node.node_id for node in visible_nodes)
-            for node in visible_nodes:
-                by_node.setdefault(node.node_id, []).append(
-                    RecipePresence(
-                        installation_id=installation.id,
-                        recipe_id=recipe.id,
-                        recipe_revision_id=revision.id,
-                        title=recipe.title,
-                        topology_name=mapping.topology_name,
-                        expected_rank_count=mapping.node_count,
-                        present_ranks=present_ranks,
-                        member_node_ids=member_node_ids,
-                        rank=node.rank,
-                        role=node.role,
-                        group_state=read_state(InstallationState, installation.state),
-                        rank_state=read_state(InstallationState, node.state),
-                        complete=reason is None,
-                        degraded_reason=reason,
-                        affected_ranks=affected,
-                        installed_bytes=node.installed_bytes,
-                        required_bytes=expectations.get(node.node_id),
+                reason = _install_degraded_reason(
+                    self._exact_group_reason(
+                        expected_count=mapping.node_count,
+                        expected=tuple(
+                            sorted(
+                                mappings.get(mapping.id, ()),
+                                key=lambda member: member.rank,
+                            )
+                        ),
+                        actual=nodes,
+                        fleet_node_ids=fleet_node_ids,
                     )
                 )
+                affected: list[int] = []
+                expectations = _installation_payload_expectations(installation.plan)
+                if reason is None and installation.state != InstallationState.INSTALLED:
+                    reason = InstallDegradedReason.INSTALLATION_NOT_INSTALLED
+                if reason is None:
+                    affected = [
+                        node.rank
+                        for node in nodes
+                        if node.state != InstallationNodeState.INSTALLED
+                    ]
+                    if affected:
+                        reason = InstallDegradedReason.RANK_NOT_INSTALLED
+                if reason is None:
+                    affected = [
+                        node.rank
+                        for node in nodes
+                        if node.node_id in expectations
+                        and node.installed_bytes < expectations[node.node_id]
+                    ]
+                    if affected:
+                        reason = InstallDegradedReason.RANK_INCOMPLETE_BYTES
+                present_ranks = [node.rank for node in visible_nodes]
+                member_node_ids = sorted(node.node_id for node in visible_nodes)
+                for node in visible_nodes:
+                    projected_group.setdefault(node.node_id, []).append(
+                        RecipePresence(
+                            installation_id=installation.id,
+                            recipe_id=recipe.id,
+                            recipe_revision_id=revision.id,
+                            title=recipe.title,
+                            topology_name=mapping.topology_name,
+                            expected_rank_count=mapping.node_count,
+                            present_ranks=present_ranks,
+                            member_node_ids=member_node_ids,
+                            rank=node.rank,
+                            role=node.role,
+                            group_state=read_state(
+                                InstallationState, installation.state
+                            ),
+                            rank_state=read_state(InstallationState, node.state),
+                            complete=None
+                            if projection_issue is not None
+                            else reason is None,
+                            projection_issue=projection_issue,
+                            degraded_reason=reason,
+                            affected_ranks=affected,
+                            installed_bytes=node.installed_bytes,
+                            required_bytes=expectations.get(node.node_id),
+                        )
+                    )
+            except (AttributeError, TypeError, ValueError):
+                warn_unreadable_once("Fleet installation_id", installation_id)
+                projected_group = {}
+                for row in grouped[installation_id]:
+                    if row[0].node_id not in fleet_node_ids:
+                        continue
+                    unavailable = _unavailable_presence(
+                        UnavailableRecipePresence(
+                            installation_id=installation_id,
+                            complete=None,
+                            projection_issue="Stored group evidence is unreadable; membership details and health are unknown.",
+                        ),
+                        (
+                            ("recipe_id", row[4].id),
+                            ("recipe_revision_id", row[3].id),
+                            ("title", row[4].title),
+                            ("topology_name", row[2].topology_name),
+                            ("expected_rank_count", row[2].node_count),
+                            ("rank", row[0].rank),
+                            ("role", row[0].role),
+                            ("group_state", row[1].state),
+                            ("rank_state", row[0].state),
+                            ("installed_bytes", row[0].installed_bytes),
+                        ),
+                    )
+                    projected_group.setdefault(row[0].node_id, []).append(unavailable)
+            for node_id, values in projected_group.items():
+                by_node.setdefault(node_id, []).extend(values)
         return {
             node_id: tuple(
-                sorted(values, key=lambda value: (value.installation_id, value.rank))
+                sorted(
+                    values,
+                    key=lambda value: (
+                        value.installation_id,
+                        -1 if value.rank is None else value.rank,
+                    ),
+                )
             )
             for node_id, values in by_node.items()
         }
@@ -946,92 +1092,150 @@ class FleetProjection:
         fleet_node_ids: frozenset[str],
         current: datetime,
         newest: Mapping[str, CatalogDocumentRevision] | None = None,
-    ) -> dict[str, tuple[RunPresence, ...]]:
+    ) -> dict[str, tuple[LoadedPresence, ...]]:
         mappings = self._mapping_members(mapping_rows)
         grouped: dict[str, list[RunPresenceRow]] = {}
         for row in rows:
             node = row[0]
             grouped.setdefault(node.run_id, []).append(row)
-        by_node: dict[str, list[RunPresence]] = {}
+        by_node: dict[str, list[LoadedPresence]] = {}
         for run_id in sorted(grouped):
-            group = sorted(grouped[run_id], key=lambda value: value[0].rank)
-            nodes = [value[0] for value in group]
-            run = group[0][1]
-            if run.state in {RunState.STOPPED, RunState.FAILED, RunState.LOST}:
-                continue
-            mapping = group[0][2]
-            revision = group[0][4]
-            recipe = group[0][5]
-            # As above: a damaged active revision fails the read at commit, so
-            # this only ever skips a run that is genuinely ineligible.
-            if _canonical_recipe(revision) is None:
-                continue
-            visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
-            reason = _run_degraded_reason(
-                self._exact_group_reason(
-                    expected_count=mapping.node_count,
-                    expected=mappings.get(mapping.id, ()),
-                    actual=nodes,
-                    fleet_node_ids=fleet_node_ids,
+            projected_group: dict[str, list[LoadedPresence]] = {}
+            try:
+                group = sorted(grouped[run_id], key=lambda value: value[0].rank)
+                nodes = [value[0] for value in group]
+                run = group[0][1]
+                if run.state in {RunState.STOPPED, RunState.FAILED, RunState.LOST}:
+                    continue
+                mapping = group[0][2]
+                revision = group[0][4]
+                recipe = group[0][5]
+                projection_issue = (
+                    "Stored recipe revision is unreadable; run health is unknown."
+                    if _canonical_recipe(revision) is None
+                    else None
                 )
-            )
-            freshness: dict[str, tuple[float, bool]] = {}
-            for node in nodes:
-                age_delta = current - _utc(node.updated_at)
-                age = max(0.0, age_delta.total_seconds())
-                freshness[node.id] = (
-                    age,
-                    timedelta(0)
-                    <= age_delta
-                    < timedelta(seconds=self._run_rank_fresh_seconds),
-                )
-            if reason is None and run.state != RunState.RUNNING:
-                reason = RunDegradedReason.RUN_NOT_RUNNING
-            if reason is None and any(node.state != RunState.RUNNING for node in nodes):
-                reason = RunDegradedReason.RANK_NOT_RUNNING
-            if reason is None and any(not freshness[node.id][1] for node in nodes):
-                reason = RunDegradedReason.RANK_STALE
-            if reason is None and run.route_state != RouteState.PUBLISHED:
-                reason = RunDegradedReason.ROUTE_NOT_PUBLISHED
-            present_ranks = [node.rank for node in visible_nodes]
-            member_node_ids = sorted(node.node_id for node in visible_nodes)
-            update = recipe_update_notice(
-                recipe.title, revision, (newest or {}).get(recipe.id)
-            )
-            for node in visible_nodes:
-                rank_age, rank_fresh = freshness[node.id]
-                by_node.setdefault(node.node_id, []).append(
-                    RunPresence(
-                        run_id=run.id,
-                        installation_id=run.installation_id,
-                        recipe_id=recipe.id,
-                        recipe_revision_id=revision.id,
-                        title=recipe.title,
-                        alias=run.alias,
-                        expected_rank_count=mapping.node_count,
-                        present_ranks=present_ranks,
-                        member_node_ids=member_node_ids,
-                        rank=node.rank,
-                        role=node.role,
-                        run_state=read_state(RunState, run.state),
-                        route_state=read_state(RouteState, run.route_state),
-                        rank_state=read_state(RunState, node.state),
-                        rank_age_seconds=rank_age,
-                        rank_fresh=rank_fresh,
-                        group_state="healthy" if reason is None else "degraded",
-                        healthy=reason is None,
-                        degraded_reason=reason,
-                        route_reason=(
-                            run.route_error
-                            if run.route_state != RouteState.PUBLISHED
-                            else None
+                visible_nodes = [
+                    node for node in nodes if node.node_id in fleet_node_ids
+                ]
+                reason = _run_degraded_reason(
+                    self._exact_group_reason(
+                        expected_count=mapping.node_count,
+                        expected=tuple(
+                            sorted(
+                                mappings.get(mapping.id, ()),
+                                key=lambda member: member.rank,
+                            )
                         ),
-                        option_choices=mapping_option_choices(mapping.parameters),
-                        recipe_update=update,
+                        actual=nodes,
+                        fleet_node_ids=fleet_node_ids,
                     )
                 )
+                freshness: dict[str, tuple[float, bool]] = {}
+                for node in nodes:
+                    age_delta = current - _utc(node.updated_at)
+                    age = max(0.0, age_delta.total_seconds())
+                    freshness[node.id] = (
+                        age,
+                        timedelta(0)
+                        <= age_delta
+                        < timedelta(seconds=self._run_rank_fresh_seconds),
+                    )
+                if reason is None and run.state != RunState.RUNNING:
+                    reason = RunDegradedReason.RUN_NOT_RUNNING
+                if reason is None and any(
+                    node.state != RunState.RUNNING for node in nodes
+                ):
+                    reason = RunDegradedReason.RANK_NOT_RUNNING
+                if reason is None and any(not freshness[node.id][1] for node in nodes):
+                    reason = RunDegradedReason.RANK_STALE
+                if reason is None and run.route_state != RouteState.PUBLISHED:
+                    reason = RunDegradedReason.ROUTE_NOT_PUBLISHED
+                present_ranks = [node.rank for node in visible_nodes]
+                member_node_ids = sorted(node.node_id for node in visible_nodes)
+                update = recipe_update_notice(
+                    recipe.title, revision, (newest or {}).get(recipe.id)
+                )
+                for node in visible_nodes:
+                    rank_age, rank_fresh = freshness[node.id]
+                    projected_group.setdefault(node.node_id, []).append(
+                        RunPresence(
+                            run_id=run.id,
+                            installation_id=run.installation_id,
+                            recipe_id=recipe.id,
+                            recipe_revision_id=revision.id,
+                            title=recipe.title,
+                            alias=run.alias,
+                            expected_rank_count=mapping.node_count,
+                            present_ranks=present_ranks,
+                            member_node_ids=member_node_ids,
+                            rank=node.rank,
+                            role=node.role,
+                            run_state=read_state(RunState, run.state),
+                            route_state=read_state(RouteState, run.route_state),
+                            rank_state=read_state(RunState, node.state),
+                            rank_age_seconds=rank_age,
+                            rank_fresh=rank_fresh,
+                            group_state=(
+                                "unavailable"
+                                if projection_issue is not None
+                                else "healthy"
+                                if reason is None
+                                else "degraded"
+                            ),
+                            healthy=None
+                            if projection_issue is not None
+                            else reason is None,
+                            projection_issue=projection_issue,
+                            degraded_reason=reason,
+                            route_reason=(
+                                run.route_error
+                                if run.route_state != RouteState.PUBLISHED
+                                else None
+                            ),
+                            option_choices=mapping_option_choices(mapping.parameters),
+                            recipe_update=update,
+                        )
+                    )
+            except (AttributeError, TypeError, ValueError):
+                warn_unreadable_once("Fleet run_id", run_id)
+                projected_group = {}
+                for row in grouped[run_id]:
+                    if row[0].node_id not in fleet_node_ids:
+                        continue
+                    unavailable = _unavailable_presence(
+                        UnavailableRunPresence(
+                            run_id=run_id,
+                            healthy=None,
+                            projection_issue="Stored group evidence is unreadable; membership details and health are unknown.",
+                        ),
+                        (
+                            ("installation_id", row[1].installation_id),
+                            ("recipe_id", row[5].id),
+                            ("recipe_revision_id", row[4].id),
+                            ("title", row[5].title),
+                            ("alias", row[1].alias),
+                            ("expected_rank_count", row[2].node_count),
+                            ("rank", row[0].rank),
+                            ("role", row[0].role),
+                            ("run_state", row[1].state),
+                            ("route_state", row[1].route_state),
+                            ("rank_state", row[0].state),
+                        ),
+                    )
+                    projected_group.setdefault(row[0].node_id, []).append(unavailable)
+            for node_id, values in projected_group.items():
+                by_node.setdefault(node_id, []).extend(values)
         return {
-            node_id: tuple(sorted(values, key=lambda value: (value.run_id, value.rank)))
+            node_id: tuple(
+                sorted(
+                    values,
+                    key=lambda value: (
+                        value.run_id,
+                        -1 if value.rank is None else value.rank,
+                    ),
+                )
+            )
             for node_id, values in by_node.items()
         }
 
@@ -1162,15 +1366,25 @@ class FleetProjection:
         inventory: NodeInventorySnapshot | None,
         telemetry: TelemetrySampleView | None,
         recent_telemetry: Sequence[TelemetrySampleView],
-        installed: Sequence[RecipePresence],
-        loaded: Sequence[RunPresence],
+        installed: Sequence[InstallationPresence],
+        loaded: Sequence[LoadedPresence],
         reservations: Mapping[str, tuple[int, int]],
         stalls: Sequence[str] = (),
+        telemetry_unreadable: bool = False,
     ) -> FleetNode:
         warnings: list[ProjectionReason] = []
         connection = self._connection(agent, certificate, current)
-        inventory_state = self._inventory(inventory, current)
-        telemetry_state = self._telemetry_state(telemetry, current)
+        inventory_unreadable = False
+        try:
+            inventory_state = self._inventory(inventory, current)
+        except (AttributeError, TypeError, ValueError):
+            inventory_state = None
+            inventory_unreadable = True
+        try:
+            telemetry_state = self._telemetry_state(telemetry, current)
+        except (AttributeError, TypeError, ValueError):
+            telemetry_state = None
+            telemetry_unreadable = True
         if connection.online_state != "online":
             warnings.append(
                 ProjectionReason(
@@ -1183,7 +1397,11 @@ class FleetProjection:
             warnings.append(
                 ProjectionReason(
                     code=ProjectionCode.INVENTORY_MISSING,
-                    detail="No admission inventory snapshot is available.",
+                    detail=(
+                        "Stored admission inventory is unreadable; capacity is unknown."
+                        if inventory_unreadable
+                        else "No admission inventory snapshot is available."
+                    ),
                     severity="warning",
                 )
             )
@@ -1215,7 +1433,11 @@ class FleetProjection:
             warnings.append(
                 ProjectionReason(
                     code=ProjectionCode.TELEMETRY_MISSING,
-                    detail="No telemetry sample is available.",
+                    detail=(
+                        "Stored telemetry is unreadable; measurements are unknown."
+                        if telemetry_unreadable
+                        else "No telemetry sample is available."
+                    ),
                     severity="warning",
                 )
             )
@@ -1254,7 +1476,18 @@ class FleetProjection:
                     severity="warning",
                 )
             )
-        if any(not value.healthy for value in loaded):
+        for value in loaded:
+            if value.projection_issue is not None:
+                warnings.append(
+                    ProjectionReason(
+                        code=ProjectionCode.RUN_DEGRADED,
+                        detail=f"{value.title or value.installation_id}: {value.projection_issue}"[
+                            :256
+                        ],
+                        severity="warning",
+                    )
+                )
+        if any(value.healthy is False for value in loaded):
             warnings.append(
                 ProjectionReason(
                     code=ProjectionCode.RUN_DEGRADED,
@@ -1272,15 +1505,25 @@ class FleetProjection:
                     )
                 )
         labels = {} if profile is None else profile.labels
-        if not isinstance(labels, Mapping):
-            raise TypeError("Fleet node profile labels are invalid")
+        projection_issues: list[str] = []
+        try:
+            labels = TypeAdapter(
+                Annotated[dict[Text64, Text256], Field(max_length=64)]
+            ).validate_python(labels, strict=True)
+        except (TypeError, ValueError):
+            labels = None
+            projection_issues.append(
+                "Stored node labels are unreadable; labels are unknown."
+            )
+            warn_unreadable_once("Fleet node labels", node_id)
         return FleetNode(
             id=node_id,
             display_name=node_id if profile is None else profile.display_name,
             hostname="" if profile is None else profile.hostname,
             ip_address=(None if presence is None else presence.management_address),
             lifecycle="managed" if profile is None else profile.lifecycle,
-            labels=dict(labels),
+            labels=labels,
+            projection_issues=projection_issues or None,
             connection=connection,
             inventory=inventory_state,
             telemetry=telemetry_state,

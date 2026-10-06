@@ -28,7 +28,7 @@ T = TypeVar("T", bound="RecipePresence")
 class RecipePresence:
     """
         Attributes:
-            complete (bool):
+            complete (bool | None):
             expected_rank_count (int):
             group_state (InstallationState): The condition of a recipe installation across its Sparks.
             installation_id (str):
@@ -44,10 +44,11 @@ class RecipePresence:
             affected_ranks (list[int] | Unset):
             degraded_reason (InstallDegradedReason | None | Unset):
             installed_bytes (int | None | Unset):
+            projection_issue (None | str | Unset):
             required_bytes (int | None | Unset):
      """
 
-    complete: bool
+    complete: bool | None
     expected_rank_count: int
     group_state: InstallationState
     installation_id: str
@@ -63,6 +64,7 @@ class RecipePresence:
     affected_ranks: list[int] | Unset = UNSET
     degraded_reason: InstallDegradedReason | None | Unset = UNSET
     installed_bytes: int | None | Unset = UNSET
+    projection_issue: None | str | Unset = UNSET
     required_bytes: int | None | Unset = UNSET
 
 
@@ -70,6 +72,7 @@ class RecipePresence:
 
 
     def to_dict(self) -> dict[str, Any]:
+        complete: bool | None
         complete = self.complete
 
         expected_rank_count = self.expected_rank_count
@@ -120,6 +123,12 @@ class RecipePresence:
         else:
             installed_bytes = self.installed_bytes
 
+        projection_issue: None | str | Unset
+        if isinstance(self.projection_issue, Unset):
+            projection_issue = UNSET
+        else:
+            projection_issue = self.projection_issue
+
         required_bytes: int | None | Unset
         if isinstance(self.required_bytes, Unset):
             required_bytes = UNSET
@@ -150,6 +159,8 @@ class RecipePresence:
             field_dict["degraded_reason"] = degraded_reason
         if installed_bytes is not UNSET:
             field_dict["installed_bytes"] = installed_bytes
+        if projection_issue is not UNSET:
+            field_dict["projection_issue"] = projection_issue
         if required_bytes is not UNSET:
             field_dict["required_bytes"] = required_bytes
 
@@ -160,7 +171,13 @@ class RecipePresence:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        complete = d.pop("complete")
+        def _parse_complete(data: object) -> bool | None:
+            if data is None:
+                return data
+            return cast(bool | None, data)
+
+        complete = _parse_complete(d.pop("complete"))
+
 
         expected_rank_count = d.pop("expected_rank_count")
 
@@ -227,6 +244,16 @@ class RecipePresence:
         installed_bytes = _parse_installed_bytes(d.pop("installed_bytes", UNSET))
 
 
+        def _parse_projection_issue(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        projection_issue = _parse_projection_issue(d.pop("projection_issue", UNSET))
+
+
         def _parse_required_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -254,6 +281,7 @@ class RecipePresence:
             affected_ranks=affected_ranks,
             degraded_reason=degraded_reason,
             installed_bytes=installed_bytes,
+            projection_issue=projection_issue,
             required_bytes=required_bytes,
         )
 

@@ -14,12 +14,12 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="FleetNodeLabels")
+T = TypeVar("T", bound="FleetNodeLabelsType0")
 
 
 
 @_attrs_define
-class FleetNodeLabels:
+class FleetNodeLabelsType0:
 
 
     additional_properties: dict[str, str] = _attrs_field(init=False, factory=dict)
@@ -40,12 +40,12 @@ class FleetNodeLabels:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        fleet_node_labels = cls(
+        fleet_node_labels_type_0 = cls(
         )
 
 
-        fleet_node_labels.additional_properties = d
-        return fleet_node_labels
+        fleet_node_labels_type_0.additional_properties = d
+        return fleet_node_labels_type_0
 
     @property
     def additional_keys(self) -> list[str]:

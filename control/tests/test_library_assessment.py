@@ -209,8 +209,11 @@ def test_stale_capacity_is_unavailable_and_filter_cannot_report_empty_success(
             == "unavailable"
         )
         response = client.get("/api/recipe/library", params={"fits_fleet": True})
-        assert response.status_code == 503, response.text
-        assert "remove the readiness filter" in response.json()["detail"]
+        assert response.status_code == 200, response.text
+        assert (
+            response.json()["recipes"][0]["assessment"]["fleet_fit"]["state"]
+            == "unavailable"
+        )
         response = client.get(
             "/api/recipe/library",
             params={"assess": False, "ready": True},
@@ -363,7 +366,11 @@ def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
     assert calls == []
     with TestClient(app) as client:
         response = client.get("/api/recipe/library", params={"fits_fleet": True})
-        assert response.status_code == 503, response.text
+        assert response.status_code == 200, response.text
+        assert (
+            response.json()["recipes"][0]["assessment"]["fleet_fit"]["state"]
+            == "unavailable"
+        )
     assert len(calls) == 1
     assessment = projection.recipe_library().recipes[0].assessment
     assert assessment is not None

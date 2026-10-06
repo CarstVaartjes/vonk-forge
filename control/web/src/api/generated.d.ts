@@ -3416,18 +3416,20 @@ export interface components {
             /** Id */
             id: string;
             /** Installed */
-            installed: components["schemas"]["RecipePresence"][];
+            installed: (components["schemas"]["RecipePresence"] | components["schemas"]["UnavailableRecipePresence"])[];
             inventory: components["schemas"]["InventoryState"] | null;
             /** Ip Address */
             ip_address?: string | null;
             /** Labels */
             labels: {
                 [key: string]: string;
-            };
+            } | null;
             /** Lifecycle */
             lifecycle: string;
             /** Loaded */
-            loaded: components["schemas"]["RunPresence"][];
+            loaded: (components["schemas"]["RunPresence"] | components["schemas"]["UnavailableRunPresence"])[];
+            /** Projection Issues */
+            projection_issues?: string[] | null;
             reservations: components["schemas"]["CapacityReservations"];
             telemetry: components["schemas"]["TelemetryState"] | null;
             /** Warnings */
@@ -3935,11 +3937,12 @@ export interface components {
         };
         /** FleetProfileDefinitionView */
         FleetProfileDefinitionView: {
-            definition: components["schemas"]["FleetProfileDefinition"];
+            definition: components["schemas"]["FleetProfileDefinition"] | null;
             /** Id */
             id: string | null;
             /** Number */
             number: number;
+            projection_issue?: components["schemas"]["SavedProfileProjectionIssue"] | null;
             /** Revision */
             revision: number;
         };
@@ -4076,7 +4079,7 @@ export interface components {
              */
             generated_at: string;
             /** Profiles */
-            profiles: components["schemas"]["FleetProfileView"][];
+            profiles: (components["schemas"]["FleetProfileView"] | components["schemas"]["UnavailableFleetProfileView"])[];
         };
         /** FleetProfileLoadRequest */
         FleetProfileLoadRequest: {
@@ -4967,10 +4970,12 @@ export interface components {
             /** Operation Next Cursor */
             operation_next_cursor?: string | null;
             /** Operation Total */
-            operation_total: number;
+            operation_total: number | null;
             /** Operations */
-            operations: components["schemas"]["JobOperationResponse"][];
-            progress: components["schemas"]["JobProgress"];
+            operations: components["schemas"]["JobOperationResponse"][] | null;
+            progress: components["schemas"]["JobProgress"] | null;
+            /** Projection Issue */
+            projection_issue?: string | null;
             recovery?: components["schemas"]["OperationRecovery"] | null;
             /** State */
             state: string;
@@ -6718,9 +6723,11 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
             /** Operations */
-            operations: components["schemas"]["OperationDetailResponse"][];
+            operations: components["schemas"]["OperationDetailResponse"][] | null;
+            /** Projection Issue */
+            projection_issue?: string | null;
             /** Total */
-            total: number;
+            total: number | null;
         };
         /**
          * OperatorActionName
@@ -7090,7 +7097,7 @@ export interface components {
          * @description Reasons a fleet profile cannot be applied or is waiting.
          * @enum {string}
          */
-        ProfileReasonCode: "profile.admission_busy" | "profile.admission_effect_busy" | "profile.application_intent.invalid" | "profile.choices_unreadable" | "profile.cleanup_delegated" | "profile.distributed_cross_scope" | "profile.failure_repeated" | "profile.incomplete_multi_spark_model" | "profile.interruption_expected" | "profile.pending_cross_scope" | "profile.preparation_not_started" | "profile.preparation_scope_mismatch" | "profile.preparation_unavailable" | "profile.recipe_unavailable" | "profile.recovery_assignments_changed" | "profile.recovery_cache_pending" | "profile.recovery_scope_changed" | "profile.recovery_waiting" | "profile.resource_recheck_unavailable" | "profile.retry_conflict" | "profile.retry_executor_unavailable" | "profile.retry_intent_unavailable" | "profile.retry_review_unavailable" | "profile.review_stale" | "profile.runtime_image_rebuild_pending" | "profile.shared_installation_scope" | "profile.spark_removed" | "profile.spark_unavailable" | "profile.stale_plan" | "profile.switch_authority_unavailable" | "profile.switch_scope_unresolved" | "profile.topology_incomplete" | "profile.recovery_artifact_changed" | "profile.runtime-image-changed" | "profile.selection_lost" | "profile.asset_reservation_unavailable";
+        ProfileReasonCode: "profile.admission_busy" | "profile.admission_effect_busy" | "profile.application_intent.invalid" | "profile.choices_unreadable" | "profile.definition_unavailable" | "profile.cleanup_delegated" | "profile.distributed_cross_scope" | "profile.failure_repeated" | "profile.incomplete_multi_spark_model" | "profile.interruption_expected" | "profile.pending_cross_scope" | "profile.preparation_not_started" | "profile.preparation_scope_mismatch" | "profile.preparation_unavailable" | "profile.recipe_unavailable" | "profile.recovery_assignments_changed" | "profile.recovery_cache_pending" | "profile.recovery_scope_changed" | "profile.recovery_waiting" | "profile.resource_recheck_unavailable" | "profile.retry_conflict" | "profile.retry_executor_unavailable" | "profile.retry_intent_unavailable" | "profile.retry_review_unavailable" | "profile.review_stale" | "profile.runtime_image_rebuild_pending" | "profile.shared_installation_scope" | "profile.spark_removed" | "profile.spark_unavailable" | "profile.stale_plan" | "profile.switch_authority_unavailable" | "profile.switch_scope_unresolved" | "profile.topology_incomplete" | "profile.recovery_artifact_changed" | "profile.runtime-image-changed" | "profile.selection_lost" | "profile.asset_reservation_unavailable";
         /**
          * ProgressPhase
          * @description What an operation is doing, as the measured progress names it.
@@ -7977,7 +7984,7 @@ export interface components {
          * @description Runtime image availability, preparation and cache-removal problems.
          * @enum {string}
          */
-        RecipeImageCode: "recipe_image.action_invalid" | "recipe_image.build_cancelled" | "recipe_image.build_capacity_wait" | "recipe_image.build_failed" | "recipe_image.build_input_missing" | "recipe_image.build_invalid" | "recipe_image.build_unavailable" | "recipe_image.build_wait" | "recipe_image.builder_busy" | "recipe_image.builder_occupied" | "recipe_image.cancel_busy" | "recipe_image.cancel_request_key_reused" | "recipe_image.cancellation_invalid" | "recipe_image.claim_lost" | "recipe_image.database_busy" | "recipe_image.identity_conflict" | "recipe_image.identity_invalid" | "recipe_image.insufficient_disk" | "recipe_image.insufficient_memory" | "recipe_image.metadata_refresh_failed" | "recipe_image.metadata_refresh_unavailable" | "recipe_image.model_cache_failed" | "recipe_image.model_cache_invalid" | "recipe_image.model_cache_unavailable" | "recipe_image.model_child_cancelled" | "recipe_image.model_child_missing" | "recipe_image.no_builder" | "recipe_image.not_cancellable" | "recipe_image.not_retryable" | "recipe_image.operation_invalid" | "recipe_image.operation_missing" | "recipe_image.preparation_failed" | "recipe_image.preparation_exhausted" | "recipe_image.preparing" | "recipe_image.recipe_invalid" | "recipe_image.recipe_unavailable" | "recipe_image.removal_choice_invalid" | "recipe_image.removal_failed" | "recipe_image.removal_referenced" | "recipe_image.removal_scope_limited" | "recipe_image.request_key_reused" | "recipe_image.runtime_invalid" | "recipe_image.selector_ambiguous" | "recipe_image.selector_invalid" | "recipe_image.selector_missing" | "recipe_image.source_policy_refused" | "recipe_image.superseded_by_newer_revision" | "recipe_image.waiting_for_model" | "recipe_image.waiting_for_worker";
+        RecipeImageCode: "recipe_image.action_invalid" | "recipe_image.build_cancelled" | "recipe_image.build_capacity_wait" | "recipe_image.build_failed" | "recipe_image.build_input_missing" | "recipe_image.build_invalid" | "recipe_image.build_unavailable" | "recipe_image.build_wait" | "recipe_image.builder_busy" | "recipe_image.builder_occupied" | "recipe_image.cancel_busy" | "recipe_image.cancel_request_key_reused" | "recipe_image.cancellation_invalid" | "recipe_image.claim_lost" | "recipe_image.database_busy" | "recipe_image.identity_conflict" | "recipe_image.identity_invalid" | "recipe_image.insufficient_disk" | "recipe_image.insufficient_memory" | "recipe_image.metadata_refresh_failed" | "recipe_image.metadata_refresh_unavailable" | "recipe_image.model_cache_failed" | "recipe_image.model_cache_invalid" | "recipe_image.model_cache_unavailable" | "recipe_image.model_child_cancelled" | "recipe_image.model_child_missing" | "recipe_image.no_builder" | "recipe_image.not_cancellable" | "recipe_image.not_retryable" | "recipe_image.operation_invalid" | "recipe_image.removal_evidence_unavailable" | "recipe_image.operation_missing" | "recipe_image.preparation_failed" | "recipe_image.preparation_exhausted" | "recipe_image.preparing" | "recipe_image.recipe_invalid" | "recipe_image.recipe_unavailable" | "recipe_image.removal_choice_invalid" | "recipe_image.removal_failed" | "recipe_image.removal_referenced" | "recipe_image.removal_scope_limited" | "recipe_image.request_key_reused" | "recipe_image.runtime_invalid" | "recipe_image.selector_ambiguous" | "recipe_image.selector_invalid" | "recipe_image.selector_missing" | "recipe_image.source_policy_refused" | "recipe_image.superseded_by_newer_revision" | "recipe_image.waiting_for_model" | "recipe_image.waiting_for_worker";
         /** RecipeInputSlot */
         RecipeInputSlot: {
             /** Description */
@@ -8669,7 +8676,7 @@ export interface components {
             /** Affected Ranks */
             affected_ranks?: number[];
             /** Complete */
-            complete: boolean;
+            complete: boolean | null;
             degraded_reason?: components["schemas"]["InstallDegradedReason"] | null;
             /** Expected Rank Count */
             expected_rank_count: number;
@@ -8682,6 +8689,8 @@ export interface components {
             member_node_ids: string[];
             /** Present Ranks */
             present_ranks: number[];
+            /** Projection Issue */
+            projection_issue?: string | null;
             /** Rank */
             rank: number;
             rank_state: components["schemas"]["InstallationState"];
@@ -8791,6 +8800,56 @@ export interface components {
             released_at: string;
             /** Version */
             version: string;
+        };
+        /** RecipeRemovalProjectionIssue */
+        RecipeRemovalProjectionIssue: {
+            /**
+             * Code
+             * @default recipe_image.removal_evidence_unavailable
+             * @constant
+             */
+            code: "recipe_image.removal_evidence_unavailable";
+            /** Detail */
+            detail: string;
+            /** Next Action */
+            next_action: string;
+        };
+        /**
+         * RecipeRemovalUnavailableView
+         * @description Known Job identity with no claim about unreadable removal effects.
+         */
+        RecipeRemovalUnavailableView: {
+            /**
+             * Action
+             * @default remove
+             * @constant
+             */
+            action: "remove";
+            /** Failure */
+            failure?: null;
+            /**
+             * Kind
+             * @default recipe.cache.remove.v2
+             * @constant
+             */
+            kind: "recipe.cache.remove.v2";
+            /** Observed At */
+            observed_at: string;
+            /** Operation Id */
+            operation_id: string;
+            /** Progress */
+            progress?: null;
+            projection_issue: components["schemas"]["RecipeRemovalProjectionIssue"];
+            /** Recipe Revision Id */
+            recipe_revision_id: string | null;
+            /** Request Key */
+            request_key: string | null;
+            /**
+             * State
+             * @default unknown
+             * @constant
+             */
+            state: "unknown";
         };
         /** RecipeRetryIntent */
         RecipeRetryIntent: {
@@ -9705,9 +9764,9 @@ export interface components {
              * Group State
              * @enum {string}
              */
-            group_state: "healthy" | "degraded";
+            group_state: "healthy" | "degraded" | "unavailable";
             /** Healthy */
-            healthy: boolean;
+            healthy: boolean | null;
             /** Installation Id */
             installation_id: string;
             /** Member Node Ids */
@@ -9718,6 +9777,8 @@ export interface components {
             };
             /** Present Ranks */
             present_ranks: number[];
+            /** Projection Issue */
+            projection_issue?: string | null;
             /** Rank */
             rank: number;
             /** Rank Age Seconds */
@@ -11280,6 +11341,22 @@ export interface components {
             metrics_path: string | null;
         };
         /**
+         * SavedProfileProjectionIssue
+         * @description An observation problem; it never authorizes changing saved intent.
+         */
+        SavedProfileProjectionIssue: {
+            /**
+             * Code
+             * @default profile.definition_unavailable
+             * @constant
+             */
+            code: "profile.definition_unavailable";
+            /** Detail */
+            detail: string;
+            /** Next Action */
+            next_action: string;
+        };
+        /**
          * SecurityRefusal
          * @description A refused request at a security boundary; it fails closed.
          */
@@ -11802,6 +11879,117 @@ export interface components {
          * @enum {string}
          */
         TopologyCode: "topology.fabric_insufficient" | "topology.invalid" | "topology.placement_invalid" | "topology.role_mismatch" | "topology.runtime_capability_missing";
+        /**
+         * UnavailableFleetProfileView
+         * @description Keep an authorized saved identity visible without inventing its contents.
+         */
+        UnavailableFleetProfileView: {
+            /** Definition */
+            definition?: null;
+            /** Id */
+            id: string;
+            /** Number */
+            number: number;
+            projection_issue: components["schemas"]["SavedProfileProjectionIssue"];
+            /** Revision */
+            revision: number;
+            /**
+             * Status
+             * @default unavailable
+             * @constant
+             */
+            status: "unavailable";
+        };
+        /**
+         * UnavailableRecipePresence
+         * @description Known membership whose stored group evidence cannot be projected.
+         */
+        UnavailableRecipePresence: {
+            /** Affected Ranks */
+            affected_ranks?: null;
+            /** Complete */
+            complete: null;
+            /** Degraded Reason */
+            degraded_reason?: null;
+            /** Expected Rank Count */
+            expected_rank_count?: number | null;
+            group_state?: components["schemas"]["InstallationState"] | null;
+            /** Installation Id */
+            installation_id: string;
+            /** Installed Bytes */
+            installed_bytes?: number | null;
+            /** Member Node Ids */
+            member_node_ids?: string[] | null;
+            /** Present Ranks */
+            present_ranks?: number[] | null;
+            /** Projection Issue */
+            projection_issue: string;
+            /** Rank */
+            rank?: number | null;
+            rank_state?: components["schemas"]["InstallationState"] | null;
+            /** Recipe Id */
+            recipe_id?: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id?: string | null;
+            /** Required Bytes */
+            required_bytes?: null;
+            /** Role */
+            role?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Topology Name */
+            topology_name?: string | null;
+        };
+        /** UnavailableRunPresence */
+        UnavailableRunPresence: {
+            /** Alias */
+            alias?: string | null;
+            /** Degraded Reason */
+            degraded_reason?: null;
+            /** Expected Rank Count */
+            expected_rank_count?: number | null;
+            /**
+             * Group State
+             * @default unavailable
+             * @constant
+             */
+            group_state: "unavailable";
+            /** Healthy */
+            healthy: null;
+            /** Installation Id */
+            installation_id?: string | null;
+            /** Member Node Ids */
+            member_node_ids?: string[] | null;
+            /** Option Choices */
+            option_choices?: null;
+            /** Present Ranks */
+            present_ranks?: number[] | null;
+            /** Projection Issue */
+            projection_issue: string;
+            /** Rank */
+            rank?: number | null;
+            /** Rank Age Seconds */
+            rank_age_seconds?: null;
+            /** Rank Fresh */
+            rank_fresh?: null;
+            rank_state?: components["schemas"]["RunState"] | null;
+            /** Recipe Id */
+            recipe_id?: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id?: string | null;
+            /** Recipe Update */
+            recipe_update?: null;
+            /** Role */
+            role?: string | null;
+            /** Route Reason */
+            route_reason?: null;
+            route_state?: components["schemas"]["RouteState"] | null;
+            /** Run Id */
+            run_id: string;
+            run_state?: components["schemas"]["RunState"] | null;
+            /** Title */
+            title?: string | null;
+        };
         /** UninstallPhaseOperation */
         UninstallPhaseOperation: {
             /** Node Id */
@@ -14681,7 +14869,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FleetProfileView"];
+                    "application/json": components["schemas"]["FleetProfileView"] | components["schemas"]["UnavailableFleetProfileView"];
                 };
             };
             /** @description Unauthorized */
@@ -15403,7 +15591,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"] | components["schemas"]["RecipeUpdateResponse"];
+                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"] | components["schemas"]["RecipeUpdateResponse"] | components["schemas"]["RecipeRemovalUnavailableView"];
                 };
             };
             /** @description Unauthorized */
@@ -15465,7 +15653,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"] | components["schemas"]["RecipeUpdateResponse"];
+                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"] | components["schemas"]["RecipeUpdateResponse"] | components["schemas"]["RecipeRemovalUnavailableView"];
                 };
             };
             /** @description Unauthorized */
@@ -15541,7 +15729,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"] | components["schemas"]["RecipeUpdateResponse"];
+                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"] | components["schemas"]["RecipeOperatorResponse"] | components["schemas"]["RecipeUpdateResponse"] | components["schemas"]["RecipeRemovalUnavailableView"];
                 };
             };
             /** @description Unauthorized */

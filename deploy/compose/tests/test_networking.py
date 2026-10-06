@@ -142,9 +142,10 @@ def test_litellm_runs_the_docker_staged_entrypoint_through_shell() -> None:
 
     # Wait for the staged entrypoint, then run it through the shell.
     assert litellm["entrypoint"][:2] == ["/bin/sh", "-c"]
-    assert litellm["entrypoint"][2] == (
-        "until [ -f /run/vonk-runtime-assets/litellm/entrypoint.sh ]; "
-        "do sleep 1; done; "
+    command = litellm["entrypoint"][2]
+    assert "runtime-asset-timeout" in command
+    assert "exit 1" in command
+    assert command.endswith(
         "exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh"
     )
 

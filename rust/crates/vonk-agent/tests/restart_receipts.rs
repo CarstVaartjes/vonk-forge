@@ -309,3 +309,120 @@ fn older_operation_journal_is_replaced_without_touching_credentials() {
     assert!(state.pending_results().unwrap().is_empty());
     assert_eq!(std::fs::read(sentinel).unwrap(), b"credential sentinel");
 }
+
+#[test]
+fn damaged_bookkeeping_is_quarantined_without_blocking_new_claims() {
+    // Previously each of these made the startup open loop retry forever.
+    for damage in ["sqlite", "identity", "fence", "operation"] {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.sqlite");
+        if damage == "sqlite" {
+            std::fs::write(&path, b"not a sqlite database").unwrap();
+        } else {
+            let mut state = StateStore::open(&path, NODE_ID).unwrap();
+            state.begin(&claim(), Utc::now()).unwrap();
+            drop(state);
+            let connection = rusqlite::Connection::open(&path).unwrap();
+            let sql = match damage {
+                "identity" => "UPDATE metadata SET value='foreign-node' WHERE key='node_id'",
+                "fence" => "UPDATE operations SET fence='invalid-fence'",
+                _ => "UPDATE operations SET operation='invalid-operation'",
+            };
+            connection.execute(sql, []).unwrap();
+        }
+        let mut recovered = StateStore::open_recovered(&path, NODE_ID).unwrap();
+        assert_eq!(
+            recovered.begin(&claim(), Utc::now()).unwrap(),
+            BeginDecision::Execute
+        );
+        assert!(std::fs::read_dir(directory.path()).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("state.sqlite.corrupt-")
+        }));
+    }
+}
+
+#[test]
+fn unsafe_state_path_is_not_replaced_by_recovery() {
+    let directory = tempdir().unwrap();
+    let target = directory.path().join("private");
+    std::fs::write(&target, b"keep").unwrap();
+    let path = directory.path().join("state.sqlite");
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+    assert!(matches!(
+        StateStore::open_recovered(&path, NODE_ID),
+        Err(StateError::Io(_))
+    ));
+    assert_eq!(std::fs::read(target).unwrap(), b"keep");
+}
+
+#[test]
+fn interrupted_quarantine_is_completed_before_the_journal_is_reopened() {
+    for moved in [0, 1, 2, 3] {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.sqlite");
+        let mut state = StateStore::open(&path, NODE_ID).unwrap();
+        state.begin(&claim(), Utc::now()).unwrap();
+        drop(state);
+        // Stand in for process death after each durable rename. These opaque
+        // companion bytes must be retained, never read by the new database.
+        std::fs::write(directory.path().join("state.sqlite-wal"), b"old-wal").unwrap();
+        std::fs::write(directory.path().join("state.sqlite-shm"), b"old-shm").unwrap();
+        let id = Uuid::new_v4();
+        std::fs::write(
+            directory.path().join("state.sqlite.repair-pending"),
+            id.to_string(),
+        )
+        .unwrap();
+        for suffix in ["-wal", "-shm", ""].into_iter().take(moved) {
+            std::fs::rename(
+                directory.path().join(format!("state.sqlite{suffix}")),
+                directory
+                    .path()
+                    .join(format!("state.sqlite.corrupt-{id}{suffix}")),
+            )
+            .unwrap();
+        }
+        let mut reopened = StateStore::open_recovered(&path, NODE_ID).unwrap();
+        assert_eq!(
+            reopened.begin(&claim(), Utc::now()).unwrap(),
+            BeginDecision::Execute
+        );
+        assert!(
+            !directory
+                .path()
+                .join("state.sqlite.repair-pending")
+                .exists()
+        );
+        assert_eq!(
+            std::fs::read(
+                directory
+                    .path()
+                    .join(format!("state.sqlite.corrupt-{id}-wal"))
+            )
+            .unwrap(),
+            b"old-wal"
+        );
+    }
+}
+
+#[test]
+fn state_diagnostic_retention_is_bounded_without_touching_other_files() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let old = directory
+        .path()
+        .join(format!("state.sqlite.corrupt-{}", Uuid::new_v4()));
+    std::fs::File::create(&old)
+        .unwrap()
+        .set_len(vonk_agent::inventory::STATE_DATABASE_DISK_RESERVE_BYTES + 1)
+        .unwrap();
+    let unrelated = directory.path().join("state.sqlite.corrupt-not-owned");
+    std::fs::write(&unrelated, b"keep").unwrap();
+    StateStore::open_recovered(&path, NODE_ID).unwrap();
+    assert!(!old.exists());
+    assert_eq!(std::fs::read(&unrelated).unwrap(), b"keep");
+}
