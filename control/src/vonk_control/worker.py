@@ -21,6 +21,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 
+from .bounded_retry import bounded_attempts
 from .jobs import JobService
 from .logging import log_event, redact_text
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
@@ -222,12 +223,24 @@ class Worker:
         if self._closed:
             return
         self._closed = True
-        for closer in self._background_closers:
-            closer()
+        closers = list(self._background_closers)
         if self._model_cache is not None:
             close = getattr(self._model_cache, "close", None)
             if callable(close):
-                close()
+                closers.append(close)
+        for closer in closers:
+            for _attempt in bounded_attempts():
+                try:
+                    closer()
+                    break
+                except UnknownOutcomeError as error:
+                    log_event(
+                        _LOGGER,
+                        "worker.shutdown_checkpoint_deferred",
+                        service="control-worker",
+                        message=redact_text(error),
+                        resume="next shutdown attempt or Controller restart",
+                    )
 
     def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
         """Sizes of the long-lived collections the worker's services hold.
