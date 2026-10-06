@@ -471,9 +471,15 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
     assert service.tick()
     observed = service.application(retried.id)
     if remove_review_source:
-        assert observed.state == "failed"
+        # A load whose review source is gone is ended (superseded), never failed
+        # or parked: the owner's rule is to stay non-blocking, and the client
+        # loads again.
+        assert observed.state == "superseded"
         assert "review source" in (observed.status_reason or "")
         assert adapter.starts == []
+        fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
+        assert fresh.id not in {original.id, retried.id}
+        assert fresh.state in {"queued", "running"}, fresh.state
     else:
         assert observed.state == "running", observed.status_reason
         assert len(adapter.starts) == 1

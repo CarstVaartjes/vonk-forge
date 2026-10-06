@@ -8560,6 +8560,7 @@ class ModelCacheService:
             future_specs = record.get("future_specs")
             future_specs = future_specs if isinstance(future_specs, dict) else {}
             first_error = record.get("failure")
+
             for future in done:
                 if future in futures:
                     futures.remove(future)
@@ -8572,13 +8573,25 @@ class ModelCacheService:
                     # never ended: the operation keeps its durable row, settles
                     # below through the core's bounded backoff and the claim
                     # loop resumes the same transfer on a later tick.
-                    first_error = self._note_background_failure(
-                        record, futures, first_error, error, failed_artifact_key
-                    )
+                    if first_error is None:
+                        first_error = error
+                        record["failure"] = error
+                        record["failure_artifact_key"] = failed_artifact_key
+                    siblings: list[Future[object]] = [
+                        other for other in futures if isinstance(other, Future)
+                    ]
+                    for sibling in siblings:
+                        sibling.cancel()
                 except Exception as error:  # noqa: BLE001 - settle failed background transfers durably
-                    first_error = self._note_background_failure(
-                        record, futures, first_error, error, failed_artifact_key
-                    )
+                    if first_error is None:
+                        first_error = error
+                        record["failure"] = error
+                        record["failure_artifact_key"] = failed_artifact_key
+                    siblings: list[Future[object]] = [
+                        other for other in futures if isinstance(other, Future)
+                    ]
+                    for sibling in siblings:
+                        sibling.cancel()
             if isinstance(first_error, BaseException):
                 # A cancelled Future may still be running. Keep the durable
                 # claim and record until every sibling has settled, so a
@@ -8650,27 +8663,6 @@ class ModelCacheService:
                 )
                 self._fill_background_slots(operation_id, pending + min(1, capacity))
         return finished
-
-    @staticmethod
-    def _note_background_failure(
-        record: dict[str, object],
-        futures: list[object],
-        first_error: object,
-        error: BaseException,
-        failed_artifact_key: object,
-    ) -> object:
-        """Keep the first failure of a background operation and stop its siblings."""
-
-        if first_error is None:
-            first_error = error
-            record["failure"] = error
-            record["failure_artifact_key"] = failed_artifact_key
-        siblings: list[Future[object]] = [
-            other for other in futures if isinstance(other, Future)
-        ]
-        for sibling in siblings:
-            sibling.cancel()
-        return first_error
 
     def _renew_background_claims(self) -> None:
         if not self._background_operations:
