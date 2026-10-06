@@ -8444,6 +8444,15 @@ class FleetProfileService:
                     )
                 cancellation = previous
             else:
+                if self._adopted_application_scope(session, row) is not None:
+                    selected = session.get(FleetProfileSelection, 1)
+                    assert selected is not None
+                    raise FleetProfileInvalid(
+                        "This application's continuing effects now belong to selected "
+                        f"profile application {selected.application_id}; cancel that "
+                        "application to cancel the currently authorized work",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
                 # A failed application the Controller will retry by itself is
                 # shown as queued, so it must be cancellable like any queued
                 # one: cancelling stops that retry, and a child it still owns is

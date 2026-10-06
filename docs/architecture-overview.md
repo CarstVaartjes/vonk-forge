@@ -620,7 +620,9 @@ policy, and topology remain bound; changing any of them requires new work. A
 multi-Spark effect is adopted only as its entire group. The newer application
 reports its continuing dependency and completes after both its own effects and
 the adopted effects converge. Cancellation fences and observes both sets of exact
-issued effects. Repeating the entire same profile remains a fresh explicit load.
+issued effects. An older executor receipt cannot cancel effects now owned by a
+newer selection: the refusal names the currently selected application to cancel.
+Repeating the entire same profile remains a fresh explicit load.
 
 Profile authoring resolves every choice through the trusted NAS/Controller
 cache. The cache projection selects the exact active recipe revision, model
