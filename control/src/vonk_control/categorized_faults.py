@@ -21,11 +21,23 @@ from __future__ import annotations
 from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
+    SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
 )
 
 from .request_fault import RequestFault
+
+
+def security_reason(code: object) -> SecurityRefusalReason | None:
+    """The contract reason a raise names by its code, when the code is one."""
+
+    if not isinstance(code, str):
+        return None
+    try:
+        return SecurityRefusalReason(code)
+    except ValueError:
+        return None
 
 
 class StoredStateDamaged(UnknownOutcomeError, ValueError):
@@ -100,4 +112,5 @@ __all__ = [
     "StoredStateDamaged",
     "StoredStateKeyMissing",
     "StoredStateTypeDamaged",
+    "security_reason",
 ]
