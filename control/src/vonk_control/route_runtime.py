@@ -21,6 +21,7 @@ from typing import Any
 from pydantic import ValidationError
 from vonk_agent_protocol.route_activation import (
     ROUTE_ACK_TIMEOUT_SECONDS,
+    ActivationManifest,
     ActivationMarker,
     SupervisorAcknowledgement,
 )
@@ -41,10 +42,6 @@ RECIPE_ROUTE_AUTHORITY_ID = str(
 
 class RouteRuntimeError(RuntimeError):
     """A route bundle could not be safely staged, activated, or inspected."""
-
-
-def _encoded(value: Mapping[str, object]) -> bytes:
-    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
 def _sha256(content: bytes) -> str:
@@ -284,17 +281,19 @@ class AtomicRouteBundlePublisher:
             raise RouteRuntimeError("route validation rejected the staged bundle")
         if self._validate_litellm(litellm) is not True:
             raise RouteRuntimeError("LiteLLM validation rejected the staged bundle")
-        manifest_document: dict[str, object] = {
-            "schema_version": 2,
-            "generation": generation,
-            "state": state,
-            "authority_id": authority_id,
-            "plan_digest": plan_digest,
-            "evidence_set_digest": evidence_set_digest,
-            "routes_sha256": _sha256(routes),
-            "litellm_sha256": _sha256(litellm),
-        }
-        manifest = _encoded(manifest_document)
+        manifest_document = ActivationManifest.model_validate(
+            {
+                "schema_version": 2,
+                "generation": generation,
+                "state": state,
+                "authority_id": authority_id,
+                "plan_digest": plan_digest,
+                "evidence_set_digest": evidence_set_digest,
+                "routes_sha256": _sha256(routes),
+                "litellm_sha256": _sha256(litellm),
+            }
+        )
+        manifest = manifest_document.canonical_bytes()
         manifest_digest = _sha256(manifest)
         directory_name = f"{generation:08d}-{manifest_digest}"
         directory = self._generations / directory_name
@@ -308,16 +307,15 @@ class AtomicRouteBundlePublisher:
             raise RouteRuntimeError(
                 "route bundle apply failed; previous activation retained"
             ) from error
-        activation_document = {
-            **manifest_document,
-            "directory": directory_name,
-            "manifest_sha256": manifest_digest,
-        }
-        marker = ActivationMarker(**activation_document)  # type: ignore[arg-type]
+        marker = ActivationMarker(
+            **manifest_document.model_dump(),
+            directory=directory_name,
+            manifest_sha256=manifest_digest,
+        )
         try:
             self._atomic_write(
                 self._root / "activation.json",
-                _encoded(activation_document),
+                marker.canonical_bytes(),
                 mode=0o640,
             )
         except Exception as error:
@@ -463,7 +461,7 @@ def _read_active_route_bundle(
         expected_files = {
             "manifest.json": (
                 marker.manifest_sha256,
-                _encoded(manifest_document),
+                manifest_document.canonical_bytes(),
             ),
             "routes.json": (marker.routes_sha256, None),
             "litellm.json": (marker.litellm_sha256, None),

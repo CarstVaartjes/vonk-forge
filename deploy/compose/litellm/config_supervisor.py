@@ -177,7 +177,7 @@ def _active_request() -> ActiveRequest | None:
     except (OSError, KeyError, json.JSONDecodeError):
         return None
     if (
-        manifest.read_bytes() != _encoded(exact_manifest)
+        manifest.read_bytes() != exact_manifest.canonical_bytes()
         or _digest(manifest) != manifest_digest
         or _digest(routes) != marker["routes_sha256"]
         or _digest(config) != marker["litellm_sha256"]
