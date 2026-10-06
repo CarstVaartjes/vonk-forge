@@ -34,6 +34,7 @@ from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     AgentClaim,
     AgentDirective,
+    AgentEvidenceCode,
     AgentProgress,
     AgentResult,
     ContainerRuntimeAction,
@@ -58,6 +59,7 @@ from vonk_agent_protocol.host_helper import (
     ContainerRuntimeActionName,
     RecipeReconciliationIdentity,
 )
+from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
 from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from .agent_jobs import CLAIM_LEASE_SECONDS, AgentJobService, StaleAgentAttempt
@@ -136,6 +138,30 @@ _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
 # before the rank counts as failed and its route is withdrawn.
 RANK_UNREADY_GRACE = timedelta(seconds=120)
 _LOGGER = logging.getLogger(__name__)
+
+
+def _log_evidence_dropped(
+    code: AgentEvidenceCode, *, endpoint: str, node_id: str
+) -> None:
+    """Name optional agent evidence that was dropped so its core report was kept."""
+
+    log_event(
+        _LOGGER,
+        "agent.evidence_dropped",
+        service="control-api",
+        code=code.value,
+        endpoint=endpoint,
+        node_id=node_id,
+    )
+
+
+def _log_evidence_warnings(
+    body: OptionalEvidenceModel, *, endpoint: str, node_id: str
+) -> None:
+    for code in body.evidence_warnings:
+        _log_evidence_dropped(code, endpoint=endpoint, node_id=node_id)
+
+
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
@@ -901,6 +927,7 @@ def install_agent_routes(
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
         source = _validated_authenticated_source(request, required, identity)
+        _log_evidence_warnings(body, endpoint="claim", node_id=identity.node_id)
         try:
             result = required.operations.claim(
                 identity.node_id,
@@ -938,15 +965,25 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=422, detail="inventory time is outside the accepted window"
             )
-        if body.fabric_address is not None:
-            if required.fabric_policy is None:
-                raise HTTPException(
-                    status_code=422, detail="direct fabric is not configured"
-                )
+        # The fabric pair is optional evidence: an address outside the
+        # configured fabric policy (or a Controller without one) is not used,
+        # and never costs the Spark its mandatory capacity report.
+        fabric_address = body.fabric_address
+        fabric_bandwidth_mbps = body.fabric_bandwidth_mbps
+        if fabric_address is not None:
             try:
-                required.fabric_policy.validate(body.fabric_address)
-            except PresenceError as error:
-                raise HTTPException(status_code=422, detail=str(error)) from None
+                if required.fabric_policy is None:
+                    raise PresenceError("direct fabric is not configured")
+                required.fabric_policy.validate(fabric_address)
+            except PresenceError:
+                fabric_address = None
+                fabric_bandwidth_mbps = None
+                _log_evidence_dropped(
+                    AgentEvidenceCode.INVENTORY_FABRIC_DROPPED,
+                    endpoint="inventory",
+                    node_id=identity.node_id,
+                )
+        _log_evidence_warnings(body, endpoint="inventory", node_id=identity.node_id)
         try:
             InventoryRepository(required.sessions, clock=required.clock).record(
                 InventorySnapshotInput(
@@ -962,8 +999,8 @@ def install_agent_routes(
                     memory_pool=body.memory_pool,
                     artifact_store_read_only=body.artifact_store_read_only,
                     capabilities=tuple(body.capabilities),
-                    fabric_address=body.fabric_address,
-                    fabric_bandwidth_mbps=body.fabric_bandwidth_mbps,
+                    fabric_address=fabric_address,
+                    fabric_bandwidth_mbps=fabric_bandwidth_mbps,
                     nvidia_driver_version=body.nvidia_driver_version,
                     container_runtime_version=body.container_runtime_version,
                     network_interfaces=(
@@ -983,6 +1020,10 @@ def install_agent_routes(
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
+        for sample in body.samples:
+            _log_evidence_warnings(
+                sample, endpoint="telemetry", node_id=identity.node_id
+            )
         try:
             TelemetryRepository(required.sessions, clock=required.clock).record_batch(
                 identity.node_id,
@@ -1380,6 +1421,7 @@ def install_agent_routes(
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
         message = body
+        _log_evidence_warnings(body, endpoint="heartbeat", node_id=identity.node_id)
         source = _validated_authenticated_source(request, required, identity)
         try:
             response = required.operations.heartbeat(
@@ -1422,6 +1464,7 @@ def install_agent_routes(
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
         message = body
+        _log_evidence_warnings(body, endpoint="result", node_id=identity.node_id)
         source = _validated_authenticated_source(request, required, identity)
         try:
             # The failed-result identity rule (a failed status plus a stable

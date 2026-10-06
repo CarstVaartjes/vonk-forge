@@ -449,6 +449,18 @@ export const AdmissionCode = {
 } as const;
 export type AdmissionCode = (typeof AdmissionCode)[keyof typeof AdmissionCode];
 
+export const AgentEvidenceCode = {
+  CLAIM_HINT_DROPPED: "agent_evidence.claim_hint_dropped",
+  FAILURE_DIAGNOSTICS_DROPPED: "agent_evidence.failure_diagnostics_dropped",
+  INVENTORY_FABRIC_DROPPED: "agent_evidence.inventory_fabric_dropped",
+  INVENTORY_NAS_ROUTE_DROPPED: "agent_evidence.inventory_nas_route_dropped",
+  INVENTORY_NETWORK_DROPPED: "agent_evidence.inventory_network_dropped",
+  INVENTORY_NETWORK_INTERFACE_DROPPED: "agent_evidence.inventory_network_interface_dropped",
+  PROGRESS_DROPPED: "agent_evidence.progress_dropped",
+  TELEMETRY_READING_DROPPED: "agent_evidence.telemetry_reading_dropped",
+} as const;
+export type AgentEvidenceCode = (typeof AgentEvidenceCode)[keyof typeof AgentEvidenceCode];
+
 export const ArtifactLifecycleCode = {
   ASSET_AVAILABILITY_UNKNOWN: "artifact.asset_availability_unknown",
   DELETION_BUSY: "artifact.deletion_busy",

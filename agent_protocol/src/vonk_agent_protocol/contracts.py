@@ -9,7 +9,7 @@ from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
@@ -25,6 +25,12 @@ from pydantic import (
 
 from .failure_evidence import FailureDiagnostics
 from .lifecycle_vocabulary import AgentResultState, WaitReason
+from .optional_evidence import (
+    EvidenceGroup,
+    OptionalEvidenceModel,
+    fail_open_on_optional_evidence,
+)
+from .reason_codes import AgentEvidenceCode
 from .wire_model import ErrorCode, OperationProgress, WireModel
 
 # Backstop above a full 4096-object distribution assignment (~0.5 MiB); the
@@ -1040,7 +1046,14 @@ class AgentClaim(_ProtocolEnvelopeModel):
             raise AgentProtocolError(str(error)) from error
 
 
-class AgentProgress(_ProtocolEnvelopeModel):
+class AgentProgress(OptionalEvidenceModel, _ProtocolEnvelopeModel):
+    """The fence is the mandatory lease heartbeat; the progress document is
+    optional evidence, dropped when invalid so the lease is still renewed."""
+
+    EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
+        EvidenceGroup(AgentEvidenceCode.PROGRESS_DROPPED, (("progress",),)),
+    )
+
     fence: CanonicalUUID
     progress: OperationProgress | None = None
 
@@ -1077,6 +1090,8 @@ class AgentProgress(_ProtocolEnvelopeModel):
         except ValidationError as error:
             raise AgentProtocolError(str(error)) from error
 
+    drop_invalid_optional_evidence = fail_open_on_optional_evidence()
+
 
 class AgentDirective(_ProtocolEnvelopeModel):
     """Authenticated heartbeat response for deadline renewal and cancellation."""
@@ -1111,7 +1126,33 @@ class AgentDirective(_ProtocolEnvelopeModel):
             raise AgentProtocolError(str(error)) from error
 
 
-class AgentResult(_ProtocolEnvelopeModel):
+class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
+    """The fence, state and outcome (its failure identity: reason, error code,
+    summary, kind) are mandatory; the diagnostics, the failing stage and the
+    helper's own code are optional evidence, dropped when invalid so the outcome
+    is still recorded."""
+
+    EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
+        EvidenceGroup(
+            AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED,
+            tuple(
+                (*prefix, name)
+                for prefix in (
+                    ("result",),
+                    ("result", "evidence"),
+                    ("result", "receipt"),
+                )
+                for name in (
+                    "diagnostics",
+                    "diagnostic",
+                    "stage",
+                    "helper_error_code",
+                    "helper_exit_code",
+                )
+            ),
+        ),
+    )
+
     fence: CanonicalUUID
     state: AgentResultState
     result: AgentResultPayload
@@ -1175,6 +1216,8 @@ class AgentResult(_ProtocolEnvelopeModel):
             raise
         except ValidationError as error:
             raise AgentProtocolError(str(error)) from error
+
+    drop_invalid_optional_evidence = fail_open_on_optional_evidence()
 
 
 def schema_validator(schema_name: str) -> Draft202012Validator:

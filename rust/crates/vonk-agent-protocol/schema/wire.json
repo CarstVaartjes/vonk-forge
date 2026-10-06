@@ -197,6 +197,21 @@
       "title": "AgentDirective",
       "type": "object"
     },
+    "AgentEvidenceCode": {
+      "description": "Optional agent evidence that was dropped so the mandatory report is kept.\n\nAn agent report carries a mandatory core (identity, lease, capacity, outcome)\nand optional evidence (NICs, the NAS route, fabric details, readings,\nprogress, diagnostics). Invalid optional evidence is never a reason to refuse\nthe core: the evidence is dropped and one of these words names what was lost,\non the agent that dropped it and on the Controller that received it.",
+      "enum": [
+        "agent_evidence.claim_hint_dropped",
+        "agent_evidence.failure_diagnostics_dropped",
+        "agent_evidence.inventory_fabric_dropped",
+        "agent_evidence.inventory_nas_route_dropped",
+        "agent_evidence.inventory_network_dropped",
+        "agent_evidence.inventory_network_interface_dropped",
+        "agent_evidence.progress_dropped",
+        "agent_evidence.telemetry_reading_dropped"
+      ],
+      "title": "AgentEvidenceCode",
+      "type": "string"
+    },
     "AgentFailureKind": {
       "enum": [
         "temporary-dependency",
@@ -500,6 +515,7 @@
     },
     "AgentProgress": {
       "additionalProperties": false,
+      "description": "The fence is the mandatory lease heartbeat; the progress document is\noptional evidence, dropped when invalid so the lease is still renewed.",
       "properties": {
         "fence": {
           "format": "uuid",
@@ -529,6 +545,7 @@
     },
     "AgentResult": {
       "additionalProperties": false,
+      "description": "The fence, state and outcome (its failure identity: reason, error code,\nsummary, kind) are mandatory; the diagnostics, the failing stage and the\nhelper's own code are optional evidence, dropped when invalid so the outcome\nis still recorded.",
       "properties": {
         "fence": {
           "format": "uuid",
@@ -1033,6 +1050,7 @@
     },
     "ClaimRequest": {
       "additionalProperties": false,
+      "description": "The claim identity is mandatory; the hostname and the last preflight\nfingerprint are hints, dropped when malformed instead of refusing the claim.",
       "properties": {
         "hostname": {
           "anyOf": [
@@ -3720,7 +3738,7 @@
     },
     "InventoryRequest": {
       "additionalProperties": false,
-      "description": "Canonical Controller body and Rust agent inventory wire shape.",
+      "description": "Canonical Controller body and Rust agent inventory wire shape.\n\nThe mandatory core is the capacity, pool, capability and version evidence.\nThe network interfaces, the NAS route and the fabric pair are optional\nevidence: when one is inconsistent it is dropped (and named in\n``evidence_warnings``) instead of refusing the core.",
       "properties": {
         "artifact_store_read_only": {
           "title": "Artifact Store Read Only",
@@ -4350,6 +4368,7 @@
             "wired",
             "wifi",
             "fabric",
+            "tunnel",
             "other"
           ],
           "title": "Kind",
@@ -5525,6 +5544,9 @@
         "admission_code": {
           "$ref": "#/$defs/AdmissionCode"
         },
+        "agent_evidence_code": {
+          "$ref": "#/$defs/AgentEvidenceCode"
+        },
         "artifact_lifecycle_code": {
           "$ref": "#/$defs/ArtifactLifecycleCode"
         },
@@ -5651,6 +5673,7 @@
       },
       "required": [
         "admission_code",
+        "agent_evidence_code",
         "artifact_lifecycle_code",
         "cache_reference_reason",
         "catalog_code",
@@ -8420,6 +8443,7 @@
     },
     "TelemetrySample": {
       "additionalProperties": false,
+      "description": "One host sample. The capacity scalars are the core; the 4.1 readings\n(temperature, CPU clocks) are optional evidence dropped when invalid.",
       "properties": {
         "boot_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",

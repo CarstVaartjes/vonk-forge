@@ -260,6 +260,7 @@ async fn run_control_lane(
                 vonk_agent::network::collect(
                     Path::new("/sys/class/net"),
                     Path::new("/proc/net/route"),
+                    Path::new("/proc/net/ipv6_route"),
                     vonk_agent::network::nas_address(&controller_url),
                 )
             })

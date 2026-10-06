@@ -23,6 +23,7 @@ from sqlalchemy.sql.functions import FunctionElement
 from vonk_agent_protocol import (
     AgentClaim,
     AgentDirective,
+    AgentEvidenceCode,
     AgentOperation,
     AgentProgress,
     AgentResult,
@@ -119,7 +120,7 @@ from .lifecycle.agent_operation import (
 from .lifecycle.artifact_job import ArtifactJobAdapter
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .lifecycle.types import State as _LifecycleState
-from .logging import redact_text
+from .logging import log_event, redact_text
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -3992,11 +3993,19 @@ class AgentJobService:
                         attempt.progress = observe_progress(
                             attempt.progress, validated, _aware(now)
                         )
-                except (TypeError, ValueError) as error:
-                    raise InvalidValue(
-                        f"operation progress is invalid: {error}",
-                        reason=InvalidRequestReason.MALFORMED,
-                    ) from error
+                except (TypeError, ValueError):
+                    # Progress is optional evidence on a lease heartbeat: a
+                    # progress document that does not follow the retained one
+                    # is not stored, and the heartbeat still renews the lease.
+                    log_event(
+                        _LOGGER,
+                        "agent.evidence_dropped",
+                        service="control-api",
+                        code=AgentEvidenceCode.PROGRESS_DROPPED.value,
+                        endpoint="heartbeat",
+                        node_id=operation.node_id,
+                    )
+                    write_progress = True
             if write_progress:
                 attempt.lease_deadline = deadline
                 operation.updated_at = now

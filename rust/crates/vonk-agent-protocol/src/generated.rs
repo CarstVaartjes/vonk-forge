@@ -204,6 +204,94 @@ pub struct AgentDirective {
     pub fence: ::uuid::Uuid,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum AgentEvidenceCode {
+    #[serde(rename = "agent_evidence.claim_hint_dropped")]
+    AgentEvidenceClaimHintDropped,
+    #[serde(rename = "agent_evidence.failure_diagnostics_dropped")]
+    AgentEvidenceFailureDiagnosticsDropped,
+    #[serde(rename = "agent_evidence.inventory_fabric_dropped")]
+    AgentEvidenceInventoryFabricDropped,
+    #[serde(rename = "agent_evidence.inventory_nas_route_dropped")]
+    AgentEvidenceInventoryNasRouteDropped,
+    #[serde(rename = "agent_evidence.inventory_network_dropped")]
+    AgentEvidenceInventoryNetworkDropped,
+    #[serde(rename = "agent_evidence.inventory_network_interface_dropped")]
+    AgentEvidenceInventoryNetworkInterfaceDropped,
+    #[serde(rename = "agent_evidence.progress_dropped")]
+    AgentEvidenceProgressDropped,
+    #[serde(rename = "agent_evidence.telemetry_reading_dropped")]
+    AgentEvidenceTelemetryReadingDropped,
+}
+impl ::std::fmt::Display for AgentEvidenceCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::AgentEvidenceClaimHintDropped => f.write_str("agent_evidence.claim_hint_dropped"),
+            Self::AgentEvidenceFailureDiagnosticsDropped => {
+                f.write_str("agent_evidence.failure_diagnostics_dropped")
+            }
+            Self::AgentEvidenceInventoryFabricDropped => {
+                f.write_str("agent_evidence.inventory_fabric_dropped")
+            }
+            Self::AgentEvidenceInventoryNasRouteDropped => {
+                f.write_str("agent_evidence.inventory_nas_route_dropped")
+            }
+            Self::AgentEvidenceInventoryNetworkDropped => {
+                f.write_str("agent_evidence.inventory_network_dropped")
+            }
+            Self::AgentEvidenceInventoryNetworkInterfaceDropped => {
+                f.write_str("agent_evidence.inventory_network_interface_dropped")
+            }
+            Self::AgentEvidenceProgressDropped => f.write_str("agent_evidence.progress_dropped"),
+            Self::AgentEvidenceTelemetryReadingDropped => {
+                f.write_str("agent_evidence.telemetry_reading_dropped")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for AgentEvidenceCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "agent_evidence.claim_hint_dropped" => Ok(Self::AgentEvidenceClaimHintDropped),
+            "agent_evidence.failure_diagnostics_dropped" => {
+                Ok(Self::AgentEvidenceFailureDiagnosticsDropped)
+            }
+            "agent_evidence.inventory_fabric_dropped" => {
+                Ok(Self::AgentEvidenceInventoryFabricDropped)
+            }
+            "agent_evidence.inventory_nas_route_dropped" => {
+                Ok(Self::AgentEvidenceInventoryNasRouteDropped)
+            }
+            "agent_evidence.inventory_network_dropped" => {
+                Ok(Self::AgentEvidenceInventoryNetworkDropped)
+            }
+            "agent_evidence.inventory_network_interface_dropped" => {
+                Ok(Self::AgentEvidenceInventoryNetworkInterfaceDropped)
+            }
+            "agent_evidence.progress_dropped" => Ok(Self::AgentEvidenceProgressDropped),
+            "agent_evidence.telemetry_reading_dropped" => {
+                Ok(Self::AgentEvidenceTelemetryReadingDropped)
+            }
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AgentEvidenceCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AgentEvidenceCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum AgentFailureKind {
     #[serde(rename = "temporary-dependency")]
     TemporaryDependency,
@@ -5276,6 +5364,8 @@ pub enum NetworkInterfaceKind {
     Wifi,
     #[serde(rename = "fabric")]
     Fabric,
+    #[serde(rename = "tunnel")]
+    Tunnel,
     #[serde(rename = "other")]
     Other,
 }
@@ -5285,6 +5375,7 @@ impl ::std::fmt::Display for NetworkInterfaceKind {
             Self::Wired => f.write_str("wired"),
             Self::Wifi => f.write_str("wifi"),
             Self::Fabric => f.write_str("fabric"),
+            Self::Tunnel => f.write_str("tunnel"),
             Self::Other => f.write_str("other"),
         }
     }
@@ -5296,6 +5387,7 @@ impl ::std::str::FromStr for NetworkInterfaceKind {
             "wired" => Ok(Self::Wired),
             "wifi" => Ok(Self::Wifi),
             "fabric" => Ok(Self::Fabric),
+            "tunnel" => Ok(Self::Tunnel),
             "other" => Ok(Self::Other),
             _ => Err("invalid value".into()),
         }
@@ -6690,6 +6782,7 @@ impl ::std::convert::TryFrom<::std::string::String> for ProjectionCode {
 #[derive(Eq)]
 pub struct ReasonCodeVocabulary {
     pub admission_code: AdmissionCode,
+    pub agent_evidence_code: AgentEvidenceCode,
     pub artifact_lifecycle_code: ArtifactLifecycleCode,
     pub cache_reference_reason: CacheReferenceReason,
     pub catalog_code: CatalogCode,
@@ -12709,6 +12802,102 @@ impl<'de> ::serde::Deserialize<'de> for AgentDirective {
             cancel_requested: raw.cancel_requested,
             deadline: raw.deadline,
             fence: raw.fence,
+        })
+    }
+}
+impl AgentEvidenceCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AgentEvidenceClaimHintDropped => "agent_evidence.claim_hint_dropped",
+            Self::AgentEvidenceFailureDiagnosticsDropped => {
+                "agent_evidence.failure_diagnostics_dropped"
+            }
+            Self::AgentEvidenceInventoryFabricDropped => "agent_evidence.inventory_fabric_dropped",
+            Self::AgentEvidenceInventoryNasRouteDropped => {
+                "agent_evidence.inventory_nas_route_dropped"
+            }
+            Self::AgentEvidenceInventoryNetworkDropped => {
+                "agent_evidence.inventory_network_dropped"
+            }
+            Self::AgentEvidenceInventoryNetworkInterfaceDropped => {
+                "agent_evidence.inventory_network_interface_dropped"
+            }
+            Self::AgentEvidenceProgressDropped => "agent_evidence.progress_dropped",
+            Self::AgentEvidenceTelemetryReadingDropped => {
+                "agent_evidence.telemetry_reading_dropped"
+            }
+        }
+    }
+}
+impl ::std::ops::Deref for AgentEvidenceCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for AgentEvidenceCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for AgentEvidenceCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AgentEvidenceCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("AgentEvidenceCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "agent_evidence.claim_hint_dropped")]
+            AgentEvidenceClaimHintDropped,
+            #[serde(rename = "agent_evidence.failure_diagnostics_dropped")]
+            AgentEvidenceFailureDiagnosticsDropped,
+            #[serde(rename = "agent_evidence.inventory_fabric_dropped")]
+            AgentEvidenceInventoryFabricDropped,
+            #[serde(rename = "agent_evidence.inventory_nas_route_dropped")]
+            AgentEvidenceInventoryNasRouteDropped,
+            #[serde(rename = "agent_evidence.inventory_network_dropped")]
+            AgentEvidenceInventoryNetworkDropped,
+            #[serde(rename = "agent_evidence.inventory_network_interface_dropped")]
+            AgentEvidenceInventoryNetworkInterfaceDropped,
+            #[serde(rename = "agent_evidence.progress_dropped")]
+            AgentEvidenceProgressDropped,
+            #[serde(rename = "agent_evidence.telemetry_reading_dropped")]
+            AgentEvidenceTelemetryReadingDropped,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::AgentEvidenceClaimHintDropped => Self::AgentEvidenceClaimHintDropped,
+            Raw::AgentEvidenceFailureDiagnosticsDropped => {
+                Self::AgentEvidenceFailureDiagnosticsDropped
+            }
+            Raw::AgentEvidenceInventoryFabricDropped => Self::AgentEvidenceInventoryFabricDropped,
+            Raw::AgentEvidenceInventoryNasRouteDropped => {
+                Self::AgentEvidenceInventoryNasRouteDropped
+            }
+            Raw::AgentEvidenceInventoryNetworkDropped => Self::AgentEvidenceInventoryNetworkDropped,
+            Raw::AgentEvidenceInventoryNetworkInterfaceDropped => {
+                Self::AgentEvidenceInventoryNetworkInterfaceDropped
+            }
+            Raw::AgentEvidenceProgressDropped => Self::AgentEvidenceProgressDropped,
+            Raw::AgentEvidenceTelemetryReadingDropped => Self::AgentEvidenceTelemetryReadingDropped,
         })
     }
 }
@@ -18766,6 +18955,7 @@ impl NetworkInterfaceKind {
             Self::Wired => "wired",
             Self::Wifi => "wifi",
             Self::Fabric => "fabric",
+            Self::Tunnel => "tunnel",
             Self::Other => "other",
         }
     }
@@ -20281,6 +20471,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
         #[derive(Eq)]
         struct Raw {
             pub admission_code: AdmissionCode,
+            pub agent_evidence_code: AgentEvidenceCode,
             pub artifact_lifecycle_code: ArtifactLifecycleCode,
             pub cache_reference_reason: CacheReferenceReason,
             pub catalog_code: CatalogCode,
@@ -20327,6 +20518,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             admission_code: raw.admission_code,
+            agent_evidence_code: raw.agent_evidence_code,
             artifact_lifecycle_code: raw.artifact_lifecycle_code,
             cache_reference_reason: raw.cache_reference_reason,
             catalog_code: raw.catalog_code,

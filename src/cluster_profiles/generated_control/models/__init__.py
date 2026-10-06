@@ -1,6 +1,7 @@
 """ Contains all the data models used in inputs/outputs """
 
 from .admission_code import AdmissionCode
+from .agent_evidence_code import AgentEvidenceCode
 from .agent_failure_kind import AgentFailureKind
 from .agent_failure_result import AgentFailureResult
 from .agent_install_result import AgentInstallResult
@@ -621,6 +622,7 @@ from .wait_verdict import WaitVerdict
 
 __all__ = (
     "AdmissionCode",
+    "AgentEvidenceCode",
     "AgentFailureKind",
     "AgentFailureResult",
     "AgentInstallResult",

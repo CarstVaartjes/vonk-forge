@@ -3,12 +3,14 @@
 //! A Spark that reaches the NAS over Wi-Fi shares airtime for every model
 //! transfer while its wired port may sit unplugged. The agent only reports
 //! what the kernel says (interface kind, negotiated speed, carrier, and which
-//! interface the NAS address routes through); the Controller owns the warning.
+//! interface the NAS address routes through, over IPv4 or IPv6); the Controller
+//! owns the warning. A route through a virtual overlay (Tailscale, WireGuard) is
+//! reported as a `tunnel` interface, which is never a Wi-Fi finding.
 
 use std::{
     collections::BTreeSet,
     fs,
-    net::{IpAddr, Ipv4Addr, ToSocketAddrs},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs},
     path::Path,
 };
 
@@ -26,30 +28,41 @@ pub struct NetworkEvidence {
     pub nas_route_interface: Option<String>,
 }
 
-/// Resolve the Controller (NAS) host to an IPv4 address when it is one.
-pub fn nas_address(controller_url: &Url) -> Option<Ipv4Addr> {
+/// Resolve the Controller (NAS) host to the address the agent will connect to:
+/// an IPv4 address when the host has one, otherwise its IPv6 address.
+pub fn nas_address(controller_url: &Url) -> Option<IpAddr> {
     match controller_url.host()? {
-        Host::Ipv4(address) => Some(address),
-        Host::Ipv6(_) => None,
-        Host::Domain(name) => (name, controller_url.port_or_known_default()?)
-            .to_socket_addrs()
-            .ok()?
-            .find_map(|address| match address.ip() {
-                IpAddr::V4(address) => Some(address),
-                IpAddr::V6(_) => None,
-            }),
+        Host::Ipv4(address) => Some(IpAddr::V4(address)),
+        Host::Ipv6(address) => Some(IpAddr::V6(address)),
+        Host::Domain(name) => {
+            let addresses: Vec<IpAddr> = (name, controller_url.port_or_known_default()?)
+                .to_socket_addrs()
+                .ok()?
+                .map(|address| address.ip())
+                .collect();
+            addresses
+                .iter()
+                .copied()
+                .find(IpAddr::is_ipv4)
+                .or_else(|| addresses.first().copied())
+        }
     }
 }
 
 pub fn collect(
     sys_class_net: &Path,
     proc_net_route: &Path,
-    nas: Option<Ipv4Addr>,
+    proc_net_ipv6_route: &Path,
+    nas: Option<IpAddr>,
 ) -> NetworkEvidence {
-    let route = nas.and_then(|address| {
-        fs::read_to_string(proc_net_route)
-            .ok()
-            .and_then(|table| route_interface(&table, address))
+    let route = nas.and_then(|address| match address {
+        IpAddr::V4(address) => read_route(proc_net_route, |table| route_interface(table, address)),
+        IpAddr::V6(address) => match address.to_ipv4_mapped() {
+            Some(mapped) => read_route(proc_net_route, |table| route_interface(table, mapped)),
+            None => read_route(proc_net_ipv6_route, |table| {
+                route_interface_v6(table, address)
+            }),
+        },
     });
     let Ok(entries) = fs::read_dir(sys_class_net) else {
         return NetworkEvidence::default();
@@ -80,6 +93,10 @@ pub fn collect(
         interfaces: Some(interfaces),
         nas_route_interface,
     }
+}
+
+fn read_route(path: &Path, find: impl Fn(&str) -> Option<String>) -> Option<String> {
+    fs::read_to_string(path).ok().and_then(|table| find(&table))
 }
 
 fn valid_name(name: &str) -> bool {
@@ -115,12 +132,24 @@ fn mellanox_driver(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with("mlx5") || name.starts_with("mlx4"))
 }
 
+/// A virtual point-to-point overlay (Tailscale, WireGuard, a TUN device): no
+/// backing hardware, and the kernel reports it as ARPHRD_NONE (65534).
+fn virtual_overlay(path: &Path, name: &str) -> bool {
+    !path.join("device").exists()
+        && (fs::read_to_string(path.join("type")).is_ok_and(|value| value.trim() == "65534")
+            || ["tailscale", "wg", "tun"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix)))
+}
+
 fn interface(path: &Path, name: String, rdma: bool) -> NetworkInterface {
     let read = |file: &str| fs::read_to_string(path.join(file)).ok();
     let wireless = path.join("wireless").exists() || path.join("phy80211").exists();
     let ethernet = read("type").is_some_and(|value| value.trim() == "1");
     let kind = if wireless {
         NetworkInterfaceKind::Wifi
+    } else if virtual_overlay(path, &name) {
+        NetworkInterfaceKind::Tunnel
     } else if rdma || mellanox_driver(path) {
         NetworkInterfaceKind::Fabric
     } else if ethernet && path.join("device").exists() {
@@ -168,6 +197,39 @@ fn route_interface(table: &str, destination: Ipv4Addr) -> Option<String> {
                     (*name).to_owned(),
                 )
             })
+        })
+        .max()
+        .map(|(_, _, name)| name)
+}
+
+/// Longest-prefix IPv6 route for `destination` from a `/proc/net/ipv6_route` body.
+///
+/// Each line is `dest(32 hex) prefix(2 hex) src(32) prefix(2) nexthop(32)
+/// metric refcnt use flags(8 hex) iface`; a rejected or down route is skipped.
+fn route_interface_v6(table: &str, destination: Ipv6Addr) -> Option<String> {
+    const RTF_UP: u32 = 0x1;
+    const RTF_REJECT: u32 = 0x200;
+    let target = u128::from(destination);
+    table
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let [network, prefix, _, _, _, metric, _, _, flags, name] = fields.get(..10)? else {
+                return None;
+            };
+            let network = u128::from_str_radix(network, 16).ok()?;
+            let prefix = u32::from_str_radix(prefix, 16)
+                .ok()
+                .filter(|value| *value <= 128)?;
+            let metric = u32::from_str_radix(metric, 16).ok()?;
+            let flags = u32::from_str_radix(flags, 16).ok()?;
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u128::MAX << (128 - prefix)
+            };
+            (flags & RTF_UP != 0 && flags & RTF_REJECT == 0 && target & mask == network & mask)
+                .then(|| (prefix, std::cmp::Reverse(metric), (*name).to_owned()))
         })
         .max()
         .map(|(_, _, name)| name)
@@ -224,6 +286,7 @@ enP7s7\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n";
         let evidence = collect(
             directory.path(),
             &table,
+            Path::new("/nonexistent-ipv6"),
             Some("192.168.1.20".parse().unwrap()),
         );
 
@@ -254,7 +317,12 @@ enP7s7\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n";
         );
         let table = directory.path().join("route");
         fs::write(&table, TABLE).unwrap();
-        let evidence = collect(directory.path(), &table, Some("10.0.0.5".parse().unwrap()));
+        let evidence = collect(
+            directory.path(),
+            &table,
+            Path::new("/nonexistent-ipv6"),
+            Some("10.0.0.5".parse().unwrap()),
+        );
         let interfaces = evidence.interfaces.unwrap();
         assert_eq!(interfaces[0].link_speed_mbps, Some(10_000));
         assert_eq!(evidence.nas_route_interface.as_deref(), Some("enP7s7"));
@@ -285,7 +353,12 @@ enP7s7\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n";
         std::os::unix::fs::symlink(&driver, net.join("enp1s0f1np1/device/driver")).unwrap();
         let table = directory.path().join("route");
         fs::write(&table, TABLE).unwrap();
-        let evidence = collect(&net, &table, Some("10.0.0.5".parse().unwrap()));
+        let evidence = collect(
+            &net,
+            &table,
+            Path::new("/nonexistent-ipv6"),
+            Some("10.0.0.5".parse().unwrap()),
+        );
         let kinds = evidence
             .interfaces
             .unwrap()
@@ -307,8 +380,105 @@ enP7s7\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n";
         let evidence = collect(
             Path::new("/nonexistent-sysfs"),
             Path::new("/nonexistent"),
+            Path::new("/nonexistent-ipv6"),
             None,
         );
         assert_eq!(evidence, NetworkEvidence::default());
+    }
+
+    // fd7a:115c:a1e0::/48 is Tailscale's ULA range, routed through tailscale0;
+    // the default route leaves through the wired port.
+    const TABLE_V6: &str = "\
+fd7a115ca1e000000000000000000000 30 00000000000000000000000000000000 00 00000000000000000000000000000000 00000400 00000001 00000000 00000001 tailscale0\n\
+00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 00000400 00000001 00000000 00000003 enP7s7\n\
+00000000000000000000000000000000 80 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200001 lo\n";
+
+    #[test]
+    fn an_ipv6_route_is_the_longest_prefix_that_is_up() {
+        let tailscale: Ipv6Addr = "fd7a:115c:a1e0::1".parse().unwrap();
+        let outside: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let table = TABLE_V6;
+        assert_eq!(
+            route_interface_v6(table, tailscale).as_deref(),
+            Some("tailscale0")
+        );
+        assert_eq!(
+            route_interface_v6(table, outside).as_deref(),
+            Some("enP7s7")
+        );
+    }
+
+    #[test]
+    fn a_tailscale_route_is_reported_as_a_tunnel_without_hardware() {
+        let directory = tempdir().unwrap();
+        nic(
+            directory.path(),
+            "enP7s7",
+            "wired",
+            Some("1\n"),
+            Some("1000\n"),
+        );
+        // No device directory: a virtual TUN interface, as the kernel names it.
+        let tunnel = directory.path().join("tailscale0");
+        fs::create_dir_all(&tunnel).unwrap();
+        fs::write(tunnel.join("type"), "65534\n").unwrap();
+        fs::write(tunnel.join("operstate"), "unknown\n").unwrap();
+        let v4 = directory.path().join("route");
+        fs::write(
+            &v4,
+            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n\
+tailscale0\t00000064\t00000000\t0001\t0\t0\t0\t000000FF\t0\t0\t0\n",
+        )
+        .unwrap();
+        let evidence = collect(
+            directory.path(),
+            &v4,
+            Path::new("/nonexistent-ipv6"),
+            Some("100.1.2.3".parse().unwrap()),
+        );
+        assert_eq!(evidence.nas_route_interface.as_deref(), Some("tailscale0"));
+        let kinds: Vec<_> = evidence
+            .interfaces
+            .unwrap()
+            .into_iter()
+            .map(|value| (value.name, value.kind))
+            .collect();
+        assert!(kinds.contains(&("tailscale0".to_owned(), NetworkInterfaceKind::Tunnel)));
+        assert!(kinds.contains(&("enP7s7".to_owned(), NetworkInterfaceKind::Wired)));
+    }
+
+    #[test]
+    fn an_ipv6_nas_address_is_routed_through_the_ipv6_table() {
+        let directory = tempdir().unwrap();
+        nic(
+            directory.path(),
+            "enP7s7",
+            "wired",
+            Some("1\n"),
+            Some("1000\n"),
+        );
+        let tunnel = directory.path().join("tailscale0");
+        fs::create_dir_all(&tunnel).unwrap();
+        fs::write(tunnel.join("type"), "65534\n").unwrap();
+        let v6 = directory.path().join("ipv6_route");
+        fs::write(&v6, TABLE_V6).unwrap();
+        let evidence = collect(
+            directory.path(),
+            Path::new("/nonexistent"),
+            &v6,
+            Some("fd7a:115c:a1e0::5".parse().unwrap()),
+        );
+        assert_eq!(evidence.nas_route_interface.as_deref(), Some("tailscale0"));
+    }
+
+    #[test]
+    fn nas_address_keeps_an_ipv6_literal_and_prefers_ipv4_for_a_name() {
+        let literal = Url::parse("https://[fd7a:115c:a1e0::5]:8443").unwrap();
+        assert_eq!(
+            nas_address(&literal),
+            Some("fd7a:115c:a1e0::5".parse().unwrap())
+        );
+        let v4 = Url::parse("https://192.168.1.231:8443").unwrap();
+        assert_eq!(nas_address(&v4), Some("192.168.1.231".parse().unwrap()));
     }
 }
