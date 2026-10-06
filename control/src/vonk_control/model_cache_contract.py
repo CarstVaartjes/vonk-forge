@@ -179,9 +179,16 @@ class ModelCacheTransfer(StrippedStrictModel):
     artifacts: dict[Digest, ModelCacheTransferArtifact]
 
 
+class ModelCacheMissingSourceObservation(StrippedStrictModel):
+    artifact_key: str = Field(min_length=1)
+    status: Literal[404, 410]
+    observations: int = Field(ge=1)
+
+
 class ModelCacheRetry(StrippedStrictModel):
     automatic_attempts: int = Field(ge=1)
     operator_retries: int = Field(ge=0)
+    missing_source: ModelCacheMissingSourceObservation | None = None
     next_retry_at: str | None = None
     retry_after_seconds: int | None = Field(default=None, ge=0)
     # Stat identity of the credential file observed at an authorization
@@ -832,6 +839,7 @@ __all__ = [
     "ModelCacheDownloadResult",
     "ModelCacheEntryState",
     "ModelCacheInventoryResponse",
+    "ModelCacheMissingSourceObservation",
     "ModelCacheObjectReceipt",
     "ModelCacheOperationKind",
     "ModelCacheOperationPayload",
