@@ -73,6 +73,19 @@ class VerifiedRouteBundle:
     litellm: Mapping[str, object]
 
 
+def recipe_route_run_id(raw: Mapping[str, object]) -> str | None:
+    """Identify a recipe route only from its accepted exact operation identity."""
+    operation_id = raw.get("operation_id")
+    if not isinstance(operation_id, str):
+        return None
+    match = re.fullmatch(
+        r"recipe:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}):rank:(?:0|[1-9][0-9]*)",
+        operation_id,
+    )
+    return None if match is None else match.group(1)
+
+
 class FileSupervisorAcknowledger:
     """Wait for a recent live-process ack bound to one exact marker request."""
 
