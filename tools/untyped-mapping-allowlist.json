@@ -408,16 +408,12 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/recipe_lifecycle_contract.py",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/recipe_operation_phases.py",
       "count": 2
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
-      "count": 51
+      "count": 31
     },
     {
       "path": "control/src/vonk_control/recipe_packages.py",

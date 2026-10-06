@@ -58,6 +58,7 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.run_admission import RunAdmissionService
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .test_recipe_builds import RecordingQueue as BuildQueue
 from .test_recipe_builds import setup as build_setup
 from .test_recipe_operations import (
@@ -286,9 +287,20 @@ def test_damaged_phases_end_a_start_through_its_recovery_error(tmp_path) -> None
 
 
 def test_stored_phases_are_retired_not_raised() -> None:
-    assert _stored_phases({}, subject="job") == ()
+    parent = Job(
+        id=str(uuid.uuid4()),
+        kind="recipe.start",
+        payload={
+            "schema_version": 1,
+            "owner_kind": "run",
+            "owner_id": str(uuid.uuid4()),
+            "plan_digest": "a" * 64,
+        },
+    )
+    assert _stored_phases(parent) == ()
     for damaged in ("garbage", [], [[]], [[{"operation_id": "x", "node_id": "n"}]]):
-        loaded = _stored_phases({"phases": damaged}, subject="job")
+        parent.payload = {**parent.payload, "phases": damaged}
+        loaded = _stored_phases(parent)
         assert isinstance(loaded, Residue)
         assert loaded.reason is BookkeepingReason.PERSISTED_STATE_DAMAGED
 
@@ -937,6 +949,19 @@ def test_a_busy_owner_is_a_retry_later_unknown_outcome(tmp_path) -> None:
 
 def test_role_phases_report_a_mismatch_instead_of_raising() -> None:
     assert _role_phases(("head",), (("n", {"compiled_execution_plan": {}}),)) is None
+
+
+def test_role_phases_use_exact_stop_identity_without_launch_history() -> None:
+    head = {**recipe_stop_payload("head", plan_digest="a" * 64), "role": "head"}
+    worker = {
+        **recipe_stop_payload("worker", plan_digest="a" * 64),
+        "role": "worker",
+        "rank": 1,
+    }
+    assert _role_phases(("worker", "head"), (("head", head), ("worker", worker))) == (
+        (("worker", worker),),
+        (("head", head),),
+    )
 
 
 # ------------------------------------------------------------------ the guard

@@ -11,12 +11,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, NoReturn, Protocol
 
+from pydantic import TypeAdapter
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    AgentInstallResult,
     InstallAdmissionCode,
     InstallationNodeState,
     InstallationState,
@@ -26,6 +28,8 @@ from vonk_agent_protocol import (
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeBuildCode,
+    RecipeBuildEvidence,
+    RecipeBuildRequest,
     RecipeInstallPayload,
     RecipeJobRunRequest,
     RecipeReconcilePayload,
@@ -41,11 +45,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
-    parse_recipe_operation_result,
     validate_result_for_operation,
-)
-from vonk_agent_protocol import (
-    AgentOperation as ProtocolAgentOperation,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
@@ -99,7 +99,19 @@ from .install_admission import (
 from .install_admission import (
     require_admissible as require_install_admissible,
 )
-from .job_documents import DistributedRecoveryMarker
+from .job_documents import (
+    DistributedRecoveryMarker,
+    ProfilePartialStop,
+    RecipeBuildCleanupParent,
+    RecipeBuildParent,
+    RecipeInstallParent,
+    RecipeJobActivateParent,
+    RecipeJobRunParent,
+    RecipeReconcileParent,
+    RecipeStartParent,
+    RecipeStopParent,
+    RecipeUninstallParent,
+)
 from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
 from .lifecycle.artifact_job import ArtifactJobAdapter
@@ -161,16 +173,23 @@ from .recipe_build_cancellation import (
 from .recipe_builds import RecipeBuildAdmissionBusy, RecipeBuildPlan, RecipeBuildService
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
+    StoredInstallationPlan,
+    StoredRunPlan,
     build_plan_document,
-    installation_plan_document,
     parse_stored_build_plan,
     parse_stored_build_policy,
     parse_stored_installation_plan,
+    parse_stored_run_plan,
     run_endpoint_document,
     run_plan_document,
 )
 from .recipe_lifecycle_contract import (
+    LifecycleCodeFailureResult,
+    LifecycleNodeResult,
+    RecipeLifecycleResult,
     RecipeOperationCancellationResult,
+    RecipeOperationProgressResult,
+    RecipeOperationResult,
     parse_recipe_lifecycle_result,
     validate_recipe_lifecycle_terminal,
 )
@@ -204,6 +223,7 @@ from .run_admission import (
 from .run_admission import (
     require_admissible as require_run_admissible,
 )
+from .run_switch_contract import RunSwitchReconciliationAuthority
 from .source_policy import SourcePolicyReport
 from .storage_demands import StorageDemands, spark_scope
 from .strict_json import read_stored_model, serialize_json_value
@@ -398,15 +418,15 @@ def _validated_result(kind: str, value: object) -> dict[str, object] | None:
     if not isinstance(value, Mapping):
         raise RecipeRequestInvalid("recipe operation result is invalid")
     try:
-        parse_recipe_lifecycle_result(kind, value)
+        parsed = parse_recipe_lifecycle_result(kind, value)
     except (TypeError, ValueError) as error:
         raise RecipeRequestInvalid("recipe operation result is invalid") from error
-    return dict(value)
+    return json.loads(canonical_message(parsed))
 
 
 def _recorded_result(
     kind: str, value: object, *, subject: str
-) -> dict[str, object] | None:
+) -> RecipeLifecycleResult | None:
     """A stored lifecycle result; damaged evidence is retired as unknown.
 
     The result is evidence of what was done, never a reason to refuse the next
@@ -416,24 +436,48 @@ def _recorded_result(
     if value is None:
         return None
 
-    def read() -> dict[str, object] | Damaged:
-        if not isinstance(value, Mapping):
-            return Damaged("stored recipe operation result is not an object")
-        parse_recipe_lifecycle_result(kind, value)
-        return dict(value)
+    def read() -> RecipeLifecycleResult:
+        return parse_recipe_lifecycle_result(kind, value)
 
     loaded = read_or_rebuild(kind="recipe.operation-result", subject=subject, read=read)
     return None if isinstance(loaded, Residue) else loaded
+
+
+def _recorded_result_document(
+    kind: str, value: object, *, subject: str
+) -> dict[str, object] | None:
+    """Serialize a validated result only for a merged write or API response."""
+    result = _recorded_result(kind, value, subject=subject)
+    return None if result is None else json.loads(canonical_message(result))
+
+
+def _node_result(
+    kind: str, node_id: str, evidence: object
+) -> LifecycleNodeResult | None:
+    try:
+        result = parse_recipe_lifecycle_result(
+            kind, {"node_evidence": {node_id: evidence}}
+        )
+    except (TypeError, ValueError):
+        return None
+    if (
+        isinstance(result, RecipeOperationProgressResult)
+        and result.node_evidence is not None
+    ):
+        return result.node_evidence[node_id]
+    return None
 
 
 # The one place the stored word of a failed rank is spelled for the rank rows.
 _RANK_FAILED = "failed"
 
 
-def _unproven_evidence(detail: str) -> dict[str, object]:
+def _unproven_evidence(detail: str) -> LifecycleCodeFailureResult:
     """The typed marker recorded for a node whose evidence cannot be accepted."""
 
-    return {"code": "recipe.evidence_unproven", "detail": detail[:512]}
+    return LifecycleCodeFailureResult(
+        code="recipe.evidence_unproven", detail=detail[:512]
+    )
 
 
 def _evidence_is_acceptable(kind: str, node_id: str, evidence: object) -> bool:
@@ -480,19 +524,11 @@ def _ranks_from_mapping(
 
 
 def _plan_ranks(
-    document: Mapping[str, object],
-) -> tuple[frozenset[tuple[str, int, str]], int] | Damaged:
-    nodes = document.get("nodes")
-    if not isinstance(nodes, list) or not all(
-        isinstance(item, Mapping) for item in nodes
-    ):
-        return Damaged("stored plan has no node list")
-    ranks = frozenset(
-        (item["node_id"], item["rank"], item["role"])
-        for item in nodes
-        if isinstance(item, Mapping)
+    plan: StoredRunPlan | StoredInstallationPlan,
+) -> tuple[frozenset[tuple[str, int, str]], int]:
+    return frozenset((node.node_id, node.rank, node.role) for node in plan.nodes), len(
+        plan.nodes
     )
-    return ranks, len(nodes)
 
 
 def _run_accepted_ranks(
@@ -506,18 +542,15 @@ def _run_accepted_ranks(
     """
 
     def read() -> _AcceptedRanks | Damaged:
-        document = run_plan_document(run.plan)
-        planned = _plan_ranks(document)
-        if isinstance(planned, Damaged):
-            return planned
-        ranks, count = planned
+        document = parse_stored_run_plan(run.plan)
+        ranks, count = _plan_ranks(document)
         return ranks, (
             len(ranks) == count
-            and document.get("installation_id") == run.installation_id
-            and document.get("mapping_id") == run.mapping_id
-            and document.get("mapping_generation") == run.mapping_generation
-            and document.get("recipe_revision_id") == revision_id
-            and document.get("plan_digest") == run.plan_digest
+            and document.installation_id == run.installation_id
+            and document.mapping_id == run.mapping_id
+            and document.mapping_generation == run.mapping_generation
+            and document.recipe_revision_id == revision_id
+            and document.plan_digest == run.plan_digest
         )
 
     return read_or_rebuild(
@@ -592,18 +625,15 @@ def _installation_accepted_ranks(
     """The ranks an installation was accepted with; rebuilt from its mapping."""
 
     def read() -> _AcceptedRanks | Damaged:
-        document = installation_plan_document(installation.plan, for_uninstall=True)
-        planned = _plan_ranks(document)
-        if isinstance(planned, Damaged):
-            return planned
-        ranks, count = planned
+        document = parse_stored_installation_plan(installation.plan, for_uninstall=True)
+        ranks, count = _plan_ranks(document)
         return ranks, (
             len(ranks) == count
-            and document.get("mapping_id") == installation.mapping_id
-            and document.get("mapping_generation") == installation.mapping_generation
-            and document.get("recipe_revision_id") == revision.id
-            and document.get("recipe_content_sha256") == revision.content_digest
-            and document.get("plan_digest") == installation.plan_digest
+            and document.mapping_id == installation.mapping_id
+            and document.mapping_generation == installation.mapping_generation
+            and document.recipe_revision_id == revision.id
+            and document.recipe_content_sha256 == revision.content_digest
+            and document.plan_digest == installation.plan_digest
         )
 
     return read_or_rebuild(
@@ -637,7 +667,7 @@ def _run_is_one_shot(session: Session, run: RecipeRun) -> bool:
     """
 
     def read() -> bool:
-        return run_plan_document(run.plan).get("execution_mode") == "one-shot-jobs"
+        return parse_stored_run_plan(run.plan).execution_mode == "one-shot-jobs"
 
     def rebuild() -> bool:
         return (
@@ -667,7 +697,7 @@ def _run_observes_per_generation(run: RecipeRun) -> bool:
     """
 
     def read() -> bool:
-        return run_plan_document(run.plan).get("observation_schema_version") == 2
+        return parse_stored_run_plan(run.plan).observation_schema_version == 2
 
     loaded = read_or_rebuild(kind="recipe.run-plan", subject=run.id, read=read)
     return True if isinstance(loaded, Residue) else loaded
@@ -691,9 +721,18 @@ class RecipeOperationView:
     state: str
     plan_digest: str
     nodes: tuple[str, ...]
-    result: dict[str, object] | None
+    lifecycle_result: RecipeLifecycleResult | None
     retry_due_at: datetime | None = None
     status_reason: str | None = None
+
+    @property
+    def result(self) -> dict[str, object] | None:
+        """Serialize the canonical result for the public JSON response."""
+        return (
+            None
+            if self.lifecycle_result is None
+            else json.loads(canonical_message(self.lifecycle_result))
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -770,7 +809,7 @@ _WORKLOAD_INTENT_KINDS = frozenset(
 def _bound_workload_intent(job: Job) -> int:
     """The exact intent a job was admitted under; a fence, so it never defaults."""
 
-    ordinal = job.payload.get("workload_intent_ordinal")
+    ordinal = _parent_intent(job)
     if type(ordinal) is not int or ordinal < 1:
         raise RecipeStopAuthorityRefused("workload operation lacks its admitted intent")
     return ordinal
@@ -782,7 +821,7 @@ def _job_workload_intent(session: Session, job: Job) -> int | None:
     the job as no longer current, never as the newest intent)."""
 
     def read() -> int | Damaged:
-        ordinal = job.payload.get("workload_intent_ordinal")
+        ordinal = _parent_intent(job)
         if type(ordinal) is not int or ordinal < 1:
             return Damaged("job payload carries no workload intent")
         return ordinal
@@ -952,17 +991,14 @@ def _active_owned_workload_jobs(
         job
         for job in session.scalars(statement)
         if job.state not in job_states.words(LifecycleState.NEEDS_OPERATOR)
-        or (
-            isinstance(job.result, Mapping)
-            and job.result.get("cancel_requested") is True
-        )
+        or (_cancel_requested(job))
     )
 
 
 def _unissued_workload_children(
     session: Session, job: Job, *, lock: bool = False
 ) -> tuple[AgentOperation, ...] | None:
-    ordinal = job.payload.get("workload_intent_ordinal")
+    ordinal = _parent_intent(job)
     if type(ordinal) is not int or ordinal < 1:
         return None
     statement = (
@@ -1158,10 +1194,7 @@ class RecipeOperationService:
             if (
                 existing.state not in {"succeeded", "cancelled"}
                 and not force
-                and not (
-                    isinstance(existing.result, Mapping)
-                    and existing.result.get("cancel_requested") is True
-                )
+                and not (_cancel_requested(existing))
             ):
                 with self._sessions() as session:
                     succeeded = self._successful_build_job_in_session(
@@ -1225,7 +1258,7 @@ class RecipeOperationService:
                     session, build.id, build.build_input_sha256
                 )
                 receipt = (
-                    _recorded_result(
+                    _recorded_result_document(
                         "recipe.build.v1", succeeded.result, subject=succeeded.id
                     )
                     if succeeded is not None
@@ -1852,8 +1885,7 @@ class RecipeOperationService:
             if active is not None:
                 if (
                     workload_intent_ordinal is not None
-                    and active.payload.get("workload_intent_ordinal")
-                    != workload_intent_ordinal
+                    and _parent_intent(active) != workload_intent_ordinal
                 ):
                     raise RecipeRetryLater(
                         "prior installation intent requires exact observation before replacement"
@@ -1949,13 +1981,13 @@ class RecipeOperationService:
         if (
             existing is None
             or existing.kind != "recipe.start"
-            or existing.payload.get("owner_kind") != "run"
+            or _parent_identity(existing, "owner_kind") != "run"
         ):
             return None
-        recorded_digest = existing.payload.get("plan_digest")
+        recorded_digest = _parent_identity(existing, "plan_digest")
         if not isinstance(recorded_digest, str):
             return None
-        owner_id = existing.payload.get("owner_id")
+        owner_id = _parent_identity(existing, "owner_id")
         if not isinstance(owner_id, str):
             return None
         run = session.get(RecipeRun, owner_id)
@@ -2040,8 +2072,8 @@ class RecipeOperationService:
             if (
                 existing is None
                 or existing.kind != kind
-                or existing.payload.get("owner_kind") != owner_kind
-                or existing.payload.get("owner_id") != owner_id
+                or _parent_identity(existing, "owner_kind") != owner_kind
+                or _parent_identity(existing, "owner_id") != owner_id
             ):
                 return None
             return self._view(existing)
@@ -2091,7 +2123,7 @@ class RecipeOperationService:
                     )
                     .order_by(Job.created_at, Job.id)
                 )
-                if isinstance(job.payload.get("recovery"), Mapping)
+                if _parent_recovery(job) is not None
             )
             recovery_owners: list[RecipeRunRecoveryOwner] = []
             for job in recovery_jobs:
@@ -2623,18 +2655,15 @@ class RecipeOperationService:
                 if installation is not None
                 else None
             )
-            interfaces = (
-                revision.document.get("interfaces")
-                if revision is not None and isinstance(revision.document, Mapping)
-                else None
-            )
+            recipe = None
+            if revision is not None:
+                try:
+                    recipe = read_recipe(revision.document)
+                except (TypeError, ValueError):
+                    pass
             adapters = (
-                [
-                    item.get("adapter")
-                    for item in interfaces
-                    if isinstance(item, Mapping)
-                ]
-                if isinstance(interfaces, list)
+                [interface.adapter for interface in recipe.interfaces]
+                if recipe is not None
                 else []
             )
             artifact_adapters = {
@@ -2644,12 +2673,13 @@ class RecipeOperationService:
                 "mesh-job",
                 "artifact-job",
             }
-            if len(adapters) != 1 or adapters[0] not in artifact_adapters:
+            if (
+                recipe is None
+                or len(adapters) != 1
+                or adapters[0] not in artifact_adapters
+            ):
                 raise RecipeRequestInvalid("recipe is not an artifact job recipe")
-            topology = (
-                revision.document.get("topology") if revision is not None else None
-            )
-            if not isinstance(topology, Mapping) or topology.get("node_count") != 1:
+            if recipe.topology.node_count != 1:
                 raise RecipeRequestInvalid(
                     "artifact job recipes currently require a single-node topology"
                 )
@@ -2666,8 +2696,9 @@ class RecipeOperationService:
             # The run row was written by this very transaction: its plan must
             # accept the one-shot mode before anything can commit it.
             try:
-                updated_plan = run_plan_document(run.plan)
-                updated_plan["execution_mode"] = "one-shot-jobs"
+                updated_plan = parse_stored_run_plan(run.plan).model_copy(
+                    update={"execution_mode": "one-shot-jobs"}
+                )
                 run.plan = run_plan_document(updated_plan)
             except RecipeExecutionContractError as error:
                 raise RecipeRequestInvalid("stored run plan is invalid") from error
@@ -2851,7 +2882,7 @@ class RecipeOperationService:
                         min(latest_lease, now + timedelta(seconds=30)),
                     ),
                 )
-                plan_digest = job.payload.get("plan_digest")
+                plan_digest = _parent_identity(job, "plan_digest")
                 pending.append(
                     IssuedWorkloadReconciliation(
                         job_id=job.id,
@@ -2908,7 +2939,7 @@ class RecipeOperationService:
             ):
                 raise RecipeRequestInvalid("workload intent was superseded")
             for job in _active_owned_workload_jobs(session, kind, owner_id, lock=True):
-                previous_ordinal = job.payload.get("workload_intent_ordinal")
+                previous_ordinal = _parent_intent(job)
                 if tuple(sorted(job.targets)) != scope:
                     # The job's Sparks and the owner's rows disagree: the job is
                     # not retired on this evidence, and stays for observation.
@@ -3387,7 +3418,7 @@ class RecipeOperationService:
         admitted: StopPlan,
         *,
         stop_run_generation: int | None = None,
-    ) -> tuple[tuple[str, ...] | None, Mapping[str, Mapping[str, object]], set[str]]:
+    ) -> tuple[tuple[str, ...] | None, Mapping[str, RecipeStopPayload], set[str]]:
         """Bind exact run identity before route withdrawal or destructive work.
 
         Current consent and durable run/rank ownership authorize Stop. Historical
@@ -3553,7 +3584,7 @@ class RecipeOperationService:
             if (
                 job is None
                 or job.state != "succeeded"
-                or canonical_message(job.payload.get("reconciliation_authority", {}))
+                or canonical_message(_parent_reconciliation(job))
                 != canonical_message(expected_authority)
             ):
                 return False
@@ -4281,7 +4312,7 @@ class RecipeOperationService:
         with self._sessions.begin() as session:
             previous = session.get(Job, operation_id, with_for_update=True)
             previous_plan_digest = (
-                _payload_string(previous.payload, "plan_digest")
+                _parent_identity(previous, "plan_digest")
                 if previous is not None
                 else None
             )
@@ -4291,8 +4322,7 @@ class RecipeOperationService:
             if existing is not None:
                 if (
                     existing.kind != previous.kind
-                    or _payload_string(existing.payload, "plan_digest")
-                    != previous_plan_digest
+                    or _parent_identity(existing, "plan_digest") != previous_plan_digest
                 ):
                     raise RecipeRequestInvalid("request key was already used")
                 return self._view(existing)
@@ -4323,8 +4353,8 @@ class RecipeOperationService:
         request_id: str,
         now: datetime,
     ) -> Job:
-        previous_plan_digest = _payload_string(previous.payload, "plan_digest")
-        owner_id = _payload_string(previous.payload, "owner_id")
+        previous_plan_digest = _parent_identity(previous, "plan_digest")
+        owner_id = _parent_identity(previous, "owner_id")
         if previous_plan_digest is None or owner_id is None:
             raise RecipeRequestInvalid("recipe operation is not retryable")
         installation = session.get(RecipeInstallation, owner_id, with_for_update=True)
@@ -4414,7 +4444,7 @@ class RecipeOperationService:
             raise RecipeRequestInvalid("cancelled recipe build intent is not retryable")
         if self._builds is None:
             raise RecipeRetryLater("recipe build service is unavailable")
-        owner_id = _payload_string(previous.payload, "owner_id")
+        owner_id = _parent_identity(previous, "owner_id")
         build = (
             session.get(RecipeBuild, owner_id, with_for_update=True)
             if owner_id is not None
@@ -4435,7 +4465,7 @@ class RecipeOperationService:
                 if job.id != previous.id
                 and job.state in {"queued", "running"}
                 and isinstance(job.payload, Mapping)
-                and job.payload.get("owner_id") == owner_id
+                and _parent_identity(job, "owner_id") == owner_id
             ),
             None,
         )
@@ -4587,12 +4617,9 @@ class RecipeOperationService:
         state = getattr(message, "state", None)
         result = getattr(message, "result", None)
         if state == "cancelled" and job.kind in _WORKLOAD_INTENT_KINDS:
-            if (
-                not isinstance(job.result, Mapping)
-                or job.result.get("cancel_requested") is not True
-            ):
+            if not isinstance(job.result, Mapping) or not _cancel_requested(job):
                 raise RecipeRequestInvalid("recipe cancellation was not requested")
-            owner_id = _payload_string(job.payload, "owner_id")
+            owner_id = _parent_identity(job, "owner_id")
             if owner_id is None:
                 retire_as_unknown(
                     "recipe.operation",
@@ -4671,28 +4698,14 @@ class RecipeOperationService:
                 # here or turn its scheduled cleanup into a terminal failure.
                 return
         succeeded = state == "succeeded"
-        raw_evidence: Mapping[str, object] | None = None
+        raw_evidence: LifecycleNodeResult | None = None
         unproven: str | None = None
-        if state not in {"succeeded", "failed"} or not isinstance(result, Mapping):
+        if state not in {"succeeded", "failed"}:
             unproven = "the agent result carried no final evidence"
-        elif succeeded and job.kind in {
-            "recipe.stop",
-            "recipe.uninstall",
-            "recipe.reconcile",
-        }:
-            try:
-                parsed_result = parse_recipe_operation_result(
-                    ProtocolAgentOperation(job.kind), result
-                )
-            except (KeyError, ValueError):
-                unproven = "the agent success evidence does not match its operation"
-            else:
-                raw_evidence = parsed_result.model_dump(mode="json")
         else:
-            raw_evidence = result.get("evidence", result)
-            if not isinstance(raw_evidence, Mapping):
-                raw_evidence = None
-                unproven = "the agent evidence is not an object"
+            raw_evidence = _node_result(job.kind, operation.node_id, result)
+            if raw_evidence is None:
+                unproven = "the agent evidence does not match its operation"
         if raw_evidence is None:
             # The effect is unknown: the node is recorded failed with a typed
             # marker (its retry or cleanup is the owner's), and the operation
@@ -4720,23 +4733,17 @@ class RecipeOperationService:
     ) -> bool:
         """Every pending rank's fenced reconcile succeeded and is uninstalled."""
 
-        authority = job.payload.get("reconciliation_authority")
-        targets_value = (
-            authority.get("targets") if isinstance(authority, Mapping) else None
-        )
+        authority = _parent_reconciliation(job)
         if (
-            not isinstance(authority, Mapping)
-            or authority.get("installation_id") != job.payload.get("owner_id")
-            or not isinstance(targets_value, list)
-            or not targets_value
-            or not all(isinstance(target, Mapping) for target in targets_value)
+            authority is None
+            or authority.installation_id != _parent_identity(job, "owner_id")
+            or not authority.targets
         ):
             return False
-        targets = {str(target["node_id"]): target for target in targets_value}
+        targets = {target.node_id: target for target in authority.targets}
+        targets_value = authority.targets
         pending = {
-            node_id
-            for node_id, target in targets.items()
-            if target.get("state") == "pending"
+            node_id for node_id, target in targets.items() if target.state == "pending"
         }
         if (
             len(targets) != len(targets_value)
@@ -4746,7 +4753,7 @@ class RecipeOperationService:
             or any(child.state != "succeeded" for child in children)
         ):
             return False
-        installation_id = str(authority["installation_id"])
+        installation_id = authority.installation_id
         node_rows = tuple(
             session.scalars(
                 select(InstallationNode).where(
@@ -4763,7 +4770,7 @@ class RecipeOperationService:
         session: Session,
         job: Job,
         operation: AgentOperation,
-        evidence: Mapping[str, object],
+        evidence: object,
         *,
         owner_id: str,
         now: datetime,
@@ -4785,11 +4792,10 @@ class RecipeOperationService:
                 canonical_message(operation.payload),
                 from_json=True,
             )
-            requested = read_stored_model(
-                RecipeOperationCancellationResult,
-                canonical_message(job.payload["build_cancellation"]),
-                from_json=True,
-            )
+            parent = _parse_recipe_parent(job)
+            if not isinstance(parent, RecipeBuildCleanupParent):
+                return "recipe build cleanup parent kind is invalid"
+            requested = parent.build_cancellation
         except (KeyError, TypeError, ValueError) as error:
             reason = f"recipe build cleanup record is invalid: {error}"
             retire_as_unknown(
@@ -4821,7 +4827,7 @@ class RecipeOperationService:
             or original.node_id != operation.node_id
             or original.kind != "recipe.build.v1"
             or original_job is None
-            or original_job.payload.get("owner_id") != owner_id
+            or _parent_identity(original_job, "owner_id") != owner_id
             or build is None
         ):
             retire_as_unknown(
@@ -4864,7 +4870,7 @@ class RecipeOperationService:
         operation: AgentOperation,
         *,
         succeeded: bool,
-        evidence: Mapping[str, object],
+        evidence: object,
         now: datetime,
     ) -> bool:
         cleanup_queued = False
@@ -4888,8 +4894,10 @@ class RecipeOperationService:
         # A node whose evidence cannot be accepted: the typed marker is recorded
         # in its place and the node is counted failed (its retry or cleanup is
         # the owner's), so the operation completes instead of rolling back.
+        node_result = _node_result(job.kind, node_id, evidence)
         unproven: dict[str, str] = {}
-        owner_id = _payload_string(job.payload, "owner_id")
+        start_wire: RecipeStartPayload | Residue | None = None
+        owner_id = _parent_identity(job, "owner_id")
         if owner_id is None:
             retire_as_unknown(
                 "recipe.operation",
@@ -4936,7 +4944,7 @@ class RecipeOperationService:
                         # waits for an operator (audit C7).
                         RecipeOperationAdapter().cancel_race(job, now)
                     return False
-                force_rebuild = job.payload.get("force_rebuild") is True
+                force_rebuild = _parent_force_rebuild(job) is True
                 recorded_build = succeeded and record_build_evidence(
                     session,
                     build,
@@ -4955,7 +4963,9 @@ class RecipeOperationService:
                     build.error = (
                         unproven[node_id]
                         if node_id in unproven
-                        else str(evidence.get("reason", "agent build failed"))[:512]
+                        else node_result.reason[:512]
+                        if isinstance(node_result, AgentFailureResult)
+                        else "agent build failed"
                     )
                     build.updated_at = now
         elif job.kind == "recipe.install":
@@ -4972,7 +4982,11 @@ class RecipeOperationService:
                 else InstallationNodeState.FAILED
             )
             if succeeded:
-                installed_bytes = evidence.get("installed_bytes")
+                installed_bytes = (
+                    node_result.installed_bytes
+                    if isinstance(node_result, AgentInstallResult)
+                    else None
+                )
                 if (
                     not isinstance(installed_bytes, int)
                     or isinstance(installed_bytes, bool)
@@ -4992,9 +5006,25 @@ class RecipeOperationService:
                 )
             )
             assert node is not None
-            start_phase = (
-                operation.payload.get("phase") if job.kind == "recipe.start" else None
+            start_wire = (
+                read_or_rebuild(
+                    kind="recipe.start-payload",
+                    subject=operation.id,
+                    read=lambda: read_stored_model(
+                        RecipeStartPayload,
+                        canonical_message(operation.payload),
+                        from_json=True,
+                    ),
+                )
+                if job.kind == "recipe.start"
+                else None
             )
+            start_phase = (
+                start_wire.phase if isinstance(start_wire, RecipeStartPayload) else None
+            )
+            if isinstance(start_wire, Residue):
+                unproven[node_id] = start_wire.note
+                succeeded = False
             if start_phase == "rank-launch":
                 if not succeeded:
                     node.state = _RANK_FAILED
@@ -5011,10 +5041,19 @@ class RecipeOperationService:
                     node.state = _RANK_FAILED
                 if succeeded:
                     endpoint = _start_endpoint(operation, evidence)
-                    recorded = (
-                        _recorded_result(job.kind, job.result, subject=job.id) or {}
+                    recorded = _recorded_result(job.kind, job.result, subject=job.id)
+                    launches = (
+                        recorded.launch_evidence
+                        if isinstance(
+                            recorded,
+                            (
+                                RecipeOperationResult,
+                                RecipeOperationProgressResult,
+                                RecipeOperationCancellationResult,
+                            ),
+                        )
+                        else None
                     )
-                    launches = recorded.get("launch_evidence")
                     run_nodes = tuple(
                         session.scalars(
                             select(RunNode).where(RunNode.run_id == owner_id)
@@ -5023,8 +5062,8 @@ class RecipeOperationService:
                     if isinstance(endpoint, Residue):
                         node.state = _RANK_FAILED
                         unproven[node_id] = endpoint.note
-                    elif not isinstance(launches, Mapping) or any(
-                        not isinstance(launches.get(started.node_id), Mapping)
+                    elif launches is None or any(
+                        not isinstance(launches.get(started.node_id), RecipeStartResult)
                         for started in run_nodes
                     ):
                         # Readiness cannot be proven without every rank's launch
@@ -5103,21 +5142,10 @@ class RecipeOperationService:
                     "the installation or its node row disappeared",
                 )
                 unproven[node_id] = "reconciliation scope changed"
-            authority = job.payload.get("reconciliation_authority")
-            authority_targets = (
-                authority.get("targets") if isinstance(authority, Mapping) else None
-            )
-            target = (
-                next(
-                    (
-                        item
-                        for item in authority_targets
-                        if isinstance(item, Mapping) and item.get("node_id") == node_id
-                    ),
-                    None,
-                )
-                if isinstance(authority_targets, list)
-                else None
+            authority = _parent_reconciliation(job)
+            authority_targets = authority.targets if authority is not None else []
+            target = next(
+                (item for item in authority_targets if item.node_id == node_id), None
             )
             try:
                 expected = read_stored_model(
@@ -5140,21 +5168,20 @@ class RecipeOperationService:
                 pass
             elif (
                 expected is None
-                or not isinstance(authority, Mapping)
-                or authority.get("installation_id") != owner_id
-                or authority.get("original_plan_digest") != expected.plan_digest
+                or authority is None
+                or authority.installation_id != owner_id
+                or authority.original_plan_digest != expected.plan_digest
                 or target is None
-                or target.get("state") != "pending"
-                or target.get("rank") != node.rank
-                or target.get("role") != node.role
-                or target.get("installed_bytes") != node.installed_bytes
+                or target.state != "pending"
+                or target.rank != node.rank
+                or target.role != node.role
+                or target.installed_bytes != node.installed_bytes
                 or expected.installation_id != owner_id
-                or not isinstance(authority_targets, list)
                 or job.targets
                 != sorted(
-                    str(item.get("node_id"))
+                    item.node_id
                     for item in authority_targets
-                    if isinstance(item, Mapping) and item.get("state") == "pending"
+                    if item.state == "pending"
                 )
             ):
                 retire_as_unknown(
@@ -5187,44 +5214,41 @@ class RecipeOperationService:
                 else InstallationNodeState.FAILED
             )
             node.updated_at = now
-        recorded_result = _recorded_result(job.kind, job.result, subject=job.id) or {}
+        recorded_result = _recorded_result(job.kind, job.result, subject=job.id)
+        start_payload = (
+            start_wire
+            if job.kind == "recipe.start" and isinstance(start_wire, RecipeStartPayload)
+            else None
+        )
         evidence_field = (
             "launch_evidence"
-            if job.kind == "recipe.start"
-            and (
-                operation.payload.get("phase") == "rank-launch"
-                or operation.payload.get("phase") is None
-            )
+            if start_payload is not None
+            and start_payload.phase in {None, "rank-launch"}
             else "node_evidence"
         )
-        raw_node_evidence = recorded_result.get(evidence_field, {})
-        node_evidence: dict[str, dict[str, object]] = {}
-        if isinstance(raw_node_evidence, Mapping):
-            node_evidence = {
-                recorded_node: dict(recorded_evidence)
-                for recorded_node, recorded_evidence in raw_node_evidence.items()
-                if isinstance(recorded_node, str)
-                and isinstance(recorded_evidence, Mapping)
-                and _evidence_is_acceptable(job.kind, recorded_node, recorded_evidence)
-            }
-        if not isinstance(raw_node_evidence, Mapping) or len(node_evidence) != len(
-            raw_node_evidence
+        node_evidence: dict[str, LifecycleNodeResult] = {}
+        if isinstance(
+            recorded_result,
+            (
+                RecipeOperationResult,
+                RecipeOperationProgressResult,
+                RecipeOperationCancellationResult,
+            ),
         ):
-            # Recorded evidence that does not hold is dropped, never refused:
-            # what the agents report next is recorded again beside what survives.
-            retire_as_unknown(
-                "recipe.operation-evidence",
-                job.id,
-                BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                "recorded node evidence was damaged",
+            existing_evidence = (
+                recorded_result.launch_evidence
+                if evidence_field == "launch_evidence"
+                else recorded_result.node_evidence
             )
-        observed_evidence: dict[str, object] = json.loads(canonical_message(evidence))
-        if node_id not in unproven and not _evidence_is_acceptable(
-            job.kind, node_id, observed_evidence
-        ):
+            node_evidence = dict(existing_evidence or {})
+        observed_evidence = _node_result(job.kind, node_id, evidence)
+        if node_id not in unproven and observed_evidence is None:
             unproven[node_id] = "recipe node evidence is invalid"
         if node_id in unproven:
-            observed_evidence = _unproven_evidence(unproven[node_id])
+            observed_evidence = LifecycleCodeFailureResult(
+                code="recipe.evidence_unproven", detail=unproven[node_id][:512]
+            )
+        assert observed_evidence is not None
         if node_id in node_evidence and node_evidence[node_id] != observed_evidence:
             # The first receipt of a node stands; a differing replay is residue.
             retire_as_unknown(
@@ -5237,7 +5261,14 @@ class RecipeOperationService:
             node_evidence[node_id] = observed_evidence
         job.result = _validated_result(
             job.kind,
-            {**recorded_result, evidence_field: node_evidence},
+            {
+                **(
+                    json.loads(canonical_message(recorded_result))
+                    if recorded_result is not None
+                    else {}
+                ),
+                evidence_field: node_evidence,
+            },
         )
         children = tuple(
             session.scalars(
@@ -5246,20 +5277,27 @@ class RecipeOperationService:
         )
         # Nodes whose evidence was recorded as unproven (by this or an earlier
         # result of the same operation) count as failed, whatever their order said.
-        recorded_for_phases = (
-            _recorded_result(job.kind, job.result, subject=job.id) or {}
-        )
+        recorded_for_phases = _recorded_result(job.kind, job.result, subject=job.id)
         marker_nodes = set(unproven)
-        for field in ("node_evidence", "launch_evidence"):
-            recorded_field = recorded_for_phases.get(field)
-            if isinstance(recorded_field, Mapping):
+        if isinstance(
+            recorded_for_phases,
+            (
+                RecipeOperationResult,
+                RecipeOperationProgressResult,
+                RecipeOperationCancellationResult,
+            ),
+        ):
+            for recorded_field in (
+                recorded_for_phases.node_evidence,
+                recorded_for_phases.launch_evidence,
+            ):
                 marker_nodes |= {
                     recorded_node
-                    for recorded_node, recorded_item in recorded_field.items()
-                    if isinstance(recorded_item, Mapping)
-                    and recorded_item.get("code") == "recipe.evidence_unproven"
+                    for recorded_node, recorded_item in (recorded_field or {}).items()
+                    if isinstance(recorded_item, LifecycleCodeFailureResult)
+                    and recorded_item.code == "recipe.evidence_unproven"
                 }
-        loaded_phases = _stored_phases(job.payload, subject=job.id)
+        loaded_phases = _stored_phases(job)
         recovery_error: DistributedLifecycleError | None = None
         if isinstance(loaded_phases, Residue):
             # Nothing re-derives how a multi-phase operation was grouped: it ends
@@ -5277,7 +5315,7 @@ class RecipeOperationService:
         else:
             stored_phases = loaded_phases
         if stored_phases:
-            deadline_failure = _start_deadline_failure(job.payload, now=now)
+            deadline_failure = _start_deadline_failure(job, now=now)
             phase_error: DistributedLifecycleError | None = None
             if deadline_failure is not None:
                 phase_error = DistributedLifecycleError(deadline_failure)
@@ -5326,7 +5364,7 @@ class RecipeOperationService:
                             next_node_id,
                             job.kind,
                             job.authority_revision,
-                            next_payload,
+                            json.loads(canonical_message(next_payload)),
                             operation_id=next_operation_id,
                         )
                     RecipeOperationAdapter().project(job, now)
@@ -5366,7 +5404,7 @@ class RecipeOperationService:
                         "topology cleanup did not uninstall every rank"
                     )
             if job.kind == "recipe.start" and recovery_error is None:
-                late_failure = _start_deadline_failure(job.payload, now=now)
+                late_failure = _start_deadline_failure(job, now=now)
                 if late_failure is not None:
                     recovery_error = DistributedLifecycleError(late_failure)
                 else:
@@ -5375,7 +5413,7 @@ class RecipeOperationService:
                     except DistributedLifecycleError as error:
                         recovery_error = error
             start_failed = bool(failed) or recovery_error is not None
-            if job.payload.get("execution_mode") == "profile-jobrun-stop":
+            if _parent_execution_mode(job) == "profile-jobrun-stop":
                 failed = sorted(
                     set(failed)
                     | {
@@ -5389,14 +5427,11 @@ class RecipeOperationService:
                 or reconciliation_error is not None
                 or (job.kind == "recipe.reconcile" and not reconciliation_complete)
                 or (
-                    job.payload.get("execution_mode") == "profile-jobrun-stop"
+                    _parent_execution_mode(job) == "profile-jobrun-stop"
                     and bool(failed)
                 )
             )
-            if (
-                job.payload.get("execution_mode") == "profile-jobrun-stop"
-                and not job_failed
-            ):
+            if _parent_execution_mode(job) == "profile-jobrun-stop" and not job_failed:
                 completion = self._complete_profile_jobrun_stop_in_session(
                     session, job, children, now=now
                 )
@@ -5410,17 +5445,23 @@ class RecipeOperationService:
                     job_failed = True
                     recovery_error = DistributedLifecycleError(profile_completion_note)
             RecipeOperationAdapter().finish(job, now, failed=job_failed)
-            stored_result = job.result
-            projected_result = (
-                dict(stored_result) if isinstance(stored_result, Mapping) else {}
-            )
-            final_result = {
+            projected_result = _recorded_result(job.kind, job.result, subject=job.id)
+            final_result: dict[str, object] = {
                 "successful_nodes": successful,
                 "failed_nodes": failed,
-                "node_evidence": projected_result.get("node_evidence", {}),
+                "node_evidence": {},
             }
-            if "launch_evidence" in projected_result:
-                final_result["launch_evidence"] = projected_result["launch_evidence"]
+            if isinstance(
+                projected_result,
+                (
+                    RecipeOperationResult,
+                    RecipeOperationProgressResult,
+                    RecipeOperationCancellationResult,
+                ),
+            ):
+                final_result["node_evidence"] = projected_result.node_evidence or {}
+                if projected_result.launch_evidence is not None:
+                    final_result["launch_evidence"] = projected_result.launch_evidence
             job.result = _validated_result(job.kind, final_result)
             if recovery_error is not None:
                 job.result = _validated_result(
@@ -5522,7 +5563,7 @@ class RecipeOperationService:
                         )
                         try:
                             exact_stop_payloads: (
-                                Mapping[str, Mapping[str, object]] | None
+                                Mapping[str, RecipeStopPayload] | None
                             ) = durable_run_stop_payloads(
                                 session,
                                 run,
@@ -5589,12 +5630,19 @@ class RecipeOperationService:
             elif job.kind == "recipe.stop":
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
-                partial_scope = job.payload.get("profile_partial_stop")
+                stop_parent = _recorded_parent(job)
+                partial_scope = (
+                    stop_parent.profile_partial_stop
+                    if isinstance(stop_parent, RecipeStopParent)
+                    else None
+                )
                 profile_jobrun_partial_targets: set[str] | None = None
                 profile_jobrun_partial_nodes: set[str] | None = None
                 profile_jobrun_parent: ProfileJobRunStopJob | None = None
-                parent_damage: str | None = None
-                if job.payload.get("execution_mode") == "profile-jobrun-stop":
+                parent_damage: str | None = (
+                    stop_parent.note if isinstance(stop_parent, Residue) else None
+                )
+                if _parent_execution_mode(job) == "profile-jobrun-stop":
                     loaded_parent = _profile_jobrun_parent(job)
                     if isinstance(loaded_parent, Residue):
                         # The accepted scope of this Stop cannot be read: the run
@@ -5613,10 +5661,10 @@ class RecipeOperationService:
                             profile_jobrun_partial_nodes = set(
                                 authorization.run_node_ids
                             )
-                            partial_scope = {
-                                "target_node_ids": authorization.reachable_node_ids,
-                                "missing_node_ids": authorization.missing_node_ids,
-                            }
+                            partial_scope = ProfilePartialStop(
+                                target_node_ids=authorization.reachable_node_ids,
+                                missing_node_ids=authorization.missing_node_ids,
+                            )
                 if profile_completion_note is not None and parent_damage is None:
                     parent_damage = profile_completion_note
                 recovery = None
@@ -5707,13 +5755,13 @@ class RecipeOperationService:
                     cleanup_queued = True
                 else:
                     partial_targets = (
-                        partial_scope.get("target_node_ids")
-                        if isinstance(partial_scope, Mapping)
+                        partial_scope.target_node_ids
+                        if partial_scope is not None
                         else None
                     )
                     partial_missing = (
-                        partial_scope.get("missing_node_ids")
-                        if isinstance(partial_scope, Mapping)
+                        partial_scope.missing_node_ids
+                        if partial_scope is not None
                         else None
                     )
                     full_run_nodes = tuple(
@@ -5862,7 +5910,7 @@ class RecipeOperationService:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or not job.kind.startswith("recipe."):
                 raise RecipeRequestInvalid("recipe operation is not cancellable")
-            bound_ordinal = job.payload.get("workload_intent_ordinal")
+            bound_ordinal = _parent_intent(job)
             superseded = False
             if (
                 job.kind in _WORKLOAD_INTENT_KINDS | {"recipe.job.run.v1"}
@@ -5887,8 +5935,7 @@ class RecipeOperationService:
                 job.state in {"cancelled", "failed"}
                 or (
                     job.state in job_states.words(LifecycleState.NEEDS_OPERATOR)
-                    and isinstance(job.result, Mapping)
-                    and job.result.get("cancel_requested") is True
+                    and _cancel_requested(job)
                 )
             )
             if already_invalidated:
@@ -5928,11 +5975,11 @@ class RecipeOperationService:
                 )
                 return self._view(job)
             if job.state == "cancelled":
-                previous = _recorded_result(job.kind, job.result, subject=job.id) or {}
-                if (
-                    previous.get("cancel_request_id") == request_id
-                    and previous.get("reason") == cancellation_reason
-                    and previous.get("cancel_actor") == actor
+                previous = _recorded_result(job.kind, job.result, subject=job.id)
+                if isinstance(previous, RecipeOperationCancellationResult) and (
+                    previous.cancel_request_id == request_id
+                    and previous.reason == cancellation_reason
+                    and previous.cancel_actor == actor
                 ):
                     return self._view(job)
                 raise RecipeRequestInvalid(
@@ -5948,12 +5995,12 @@ class RecipeOperationService:
                 # order's wait (the Stop of a one-shot job in doubt, a legacy
                 # parked order) accepts it, and the orders end it.
                 raise RecipeRequestInvalid("recipe operation is not cancellable")
-            previous = _recorded_result(job.kind, job.result, subject=job.id) or {}
-            if previous.get("cancel_requested") is True:
+            previous = _recorded_result(job.kind, job.result, subject=job.id)
+            if isinstance(previous, RecipeOperationCancellationResult):
                 if (
-                    previous.get("cancel_request_id") == request_id
-                    and previous.get("reason") == cancellation_reason
-                    and previous.get("cancel_actor") == actor
+                    previous.cancel_request_id == request_id
+                    and previous.reason == cancellation_reason
+                    and previous.cancel_actor == actor
                 ):
                     return self._view(job)
                 raise RecipeRequestInvalid(
@@ -5982,7 +6029,11 @@ class RecipeOperationService:
                 job.result = _validated_result(
                     job.kind,
                     {
-                        **previous,
+                        **(
+                            json.loads(canonical_message(previous))
+                            if previous is not None
+                            else {}
+                        ),
                         "cancel_requested": True,
                         "cancel_request_id": request_id,
                         "cancel_actor": actor,
@@ -5999,7 +6050,10 @@ class RecipeOperationService:
             job.result = _validated_result(
                 job.kind,
                 {
-                    **(_recorded_result(job.kind, job.result, subject=job.id) or {}),
+                    **(
+                        _recorded_result_document(job.kind, job.result, subject=job.id)
+                        or {}
+                    ),
                     "cancelled": True,
                     "cancel_requested": True,
                     "cancel_request_id": request_id,
@@ -6146,7 +6200,7 @@ class RecipeOperationService:
                 uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:retirement-cleanup:{job.id}")
             )
             try:
-                owner_id = _payload_string(job.payload, "owner_id")
+                owner_id = _parent_identity(job, "owner_id")
                 with self._sessions() as probe:
                     ordinal = _job_workload_intent(probe, job)
                 kind = (
@@ -6158,7 +6212,7 @@ class RecipeOperationService:
                 if (
                     owner_id is None
                     or ordinal is None
-                    or job.payload.get("owner_kind") != owner_kind
+                    or _parent_identity(job, "owner_kind") != owner_kind
                 ):
                     # The retired operation lost its owner or its workload intent:
                     # a cleanup is never issued without them (it would take a
@@ -6210,7 +6264,7 @@ class RecipeOperationService:
                             stored.kind,
                             {
                                 **(
-                                    _recorded_result(
+                                    _recorded_result_document(
                                         stored.kind, stored.result, subject=stored.id
                                     )
                                     or {}
@@ -6402,7 +6456,7 @@ class RecipeOperationService:
                 # A cancel always completes: a build that already ended has
                 # nothing left to cancel.
                 return False
-            build_id = _payload_string(job.payload, "owner_id")
+            build_id = _parent_identity(job, "owner_id")
             build = (
                 session.get(RecipeBuild, build_id, with_for_update={"nowait": True})
                 if build_id is not None
@@ -6449,9 +6503,7 @@ class RecipeOperationService:
             )
             if build.state == "building":
                 build.state = (
-                    "succeeded"
-                    if job.payload.get("force_rebuild") is True
-                    else "failed"
+                    "succeeded" if _parent_force_rebuild(job) is True else "failed"
                 )
             build.error = cancellation.reason
             build.updated_at = now
@@ -6533,7 +6585,7 @@ class RecipeOperationService:
                 )
                 return False
             child = children[0]
-            build_owner = _payload_string(job.payload, "owner_id")
+            build_owner = _parent_identity(job, "owner_id")
             # A lock held by another writer (SQLSTATE 55P03) reaches
             # ``_cancel_current_build``, which reports it for a bounded retry.
             build = (
@@ -6570,9 +6622,7 @@ class RecipeOperationService:
             # image. Explicit cache removal independently invalidates its bytes.
             if build.state == "building":
                 build.state = (
-                    "succeeded"
-                    if job.payload.get("force_rebuild") is True
-                    else "failed"
+                    "succeeded" if _parent_force_rebuild(job) is True else "failed"
                 )
             build.error = cancellation.reason
             build.updated_at = now
@@ -6660,7 +6710,7 @@ class RecipeOperationService:
                 select(Job).where(Job.request_id == request_id).with_for_update(of=Job)
             )
             if pending_job is not None:
-                if pending_job.payload.get("execution_mode") == "profile-jobrun-stop":
+                if _parent_execution_mode(pending_job) == "profile-jobrun-stop":
                     if profile_application_id is None or pending_job.state != "running":
                         raise RecipeRequestInvalid(
                             "profile JobRun Stop request identity changed"
@@ -6713,8 +6763,8 @@ class RecipeOperationService:
                 if (
                     pending_job.kind != "recipe.stop"
                     or pending_job.state != "running"
-                    or pending_job.payload.get("owner_id") != run_id
-                    or pending_job.payload.get("execution_mode") != "one-shot-jobs"
+                    or _parent_identity(pending_job, "owner_id") != run_id
+                    or _parent_execution_mode(pending_job) != "one-shot-jobs"
                 ):
                     raise RecipeRequestInvalid(
                         "request key was already used differently",
@@ -6895,7 +6945,7 @@ class RecipeOperationService:
                 job is not None
                 and job.kind == "recipe.stop"
                 and job.state == "running"
-                and job.payload.get("execution_mode") == "one-shot-jobs"
+                and _parent_execution_mode(job) == "one-shot-jobs"
             )
 
     def _profile_jobrun_stop_is_pending(self, request_id: str) -> bool:
@@ -6905,7 +6955,7 @@ class RecipeOperationService:
                 job is None
                 or job.kind != "recipe.stop"
                 or job.state != "running"
-                or job.payload.get("execution_mode") != "profile-jobrun-stop"
+                or _parent_execution_mode(job) != "profile-jobrun-stop"
             ):
                 return False
             try:
@@ -6937,7 +6987,7 @@ class RecipeOperationService:
 
         if (
             job.kind != "recipe.stop"
-            or job.payload.get("execution_mode") != "profile-jobrun-stop"
+            or _parent_execution_mode(job) != "profile-jobrun-stop"
             or job.payload_digest
             != hashlib.sha256(canonical_message(job.payload)).hexdigest()
         ):
@@ -6948,7 +6998,7 @@ class RecipeOperationService:
         parent = _profile_jobrun_parent(job)
         if isinstance(parent, Residue):
             return parent
-        loaded_phases = _stored_phases(job.payload, subject=job.id)
+        loaded_phases = _stored_phases(job)
         phase_matches = (
             []
             if isinstance(loaded_phases, Residue)
@@ -7270,8 +7320,8 @@ class RecipeOperationService:
             if (
                 source_job is None
                 or source_job.kind != "recipe.job.run.v1"
-                or source_job.payload.get("owner_kind") != "artifact-job"
-                or source_job.payload.get("owner_id") != artifact.id
+                or _parent_identity(source_job, "owner_kind") != "artifact-job"
+                or _parent_identity(source_job, "owner_id") != artifact.id
                 or source_job.payload_digest
                 != hashlib.sha256(canonical_message(source_job.payload)).hexdigest()
                 or len(source_operations) != 1
@@ -7512,7 +7562,7 @@ class RecipeOperationService:
             if (
                 parent is None
                 or parent.kind != "recipe.job.run.v1"
-                or parent.payload.get("owner_id") != artifact.id
+                or _parent_identity(parent, "owner_id") != artifact.id
                 or len(children) != 1
                 or children[0].node_id not in parent.targets
             ):
@@ -8101,15 +8151,18 @@ class RecipeOperationService:
         existing = session.scalar(select(Job).where(Job.request_id == request_id))
         if existing is None:
             return None
-        existing_digest = existing.payload.get("plan_digest")
+        existing_digest = _parent_identity(existing, "plan_digest")
         if (
             existing.kind != kind
             or (plan_digest is not None and existing_digest != plan_digest)
             or (
                 owner_kind is not None
-                and existing.payload.get("owner_kind") != owner_kind
+                and _parent_identity(existing, "owner_kind") != owner_kind
             )
-            or (owner_id is not None and existing.payload.get("owner_id") != owner_id)
+            or (
+                owner_id is not None
+                and _parent_identity(existing, "owner_id") != owner_id
+            )
         ):
             raise RecipeRequestInvalid(
                 "request key was already used differently",
@@ -8118,13 +8171,13 @@ class RecipeOperationService:
         if installation_id is not None:
             if (
                 existing.kind not in {"recipe.start", "recipe.job.activate.v1"}
-                or existing.payload.get("owner_kind") != "run"
+                or _parent_identity(existing, "owner_kind") != "run"
             ):
                 raise RecipeRequestInvalid(
                     "request key was already used differently",
                     reason=InvalidRequestReason.CONFLICT,
                 )
-            run = session.get(RecipeRun, existing.payload.get("owner_id"))
+            run = session.get(RecipeRun, _parent_identity(existing, "owner_id"))
             if run is None or run.installation_id != installation_id:
                 raise RecipeRequestInvalid(
                     "request key was already used differently",
@@ -8134,8 +8187,8 @@ class RecipeOperationService:
             # An install replay returns the old job only for the same mapping
             # and build; a reused key for another mapping is a conflict.
             installation = (
-                session.get(RecipeInstallation, existing.payload.get("owner_id"))
-                if existing.payload.get("owner_kind") == "installation"
+                session.get(RecipeInstallation, _parent_identity(existing, "owner_id"))
+                if _parent_identity(existing, "owner_kind") == "installation"
                 else None
             )
             if (
@@ -8456,11 +8509,11 @@ class RecipeOperationService:
         return RecipeOperationView(
             id=job.id,
             kind=job.kind,
-            owner_id=_payload_string(job.payload, "owner_id") or "",
+            owner_id=_parent_identity(job, "owner_id") or "",
             state=job.state,
-            plan_digest=_payload_string(job.payload, "plan_digest") or "",
+            plan_digest=_parent_identity(job, "plan_digest") or "",
             nodes=tuple(job.targets),
-            result=_recorded_result(job.kind, job.result, subject=job.id),
+            lifecycle_result=_recorded_result(job.kind, job.result, subject=job.id),
             retry_due_at=retry_due_at,
             status_reason=child_reason or job.status_reason,
         )
@@ -8494,11 +8547,134 @@ class RecipeOperationService:
             reservation.released_at = now
 
 
-def _payload_string(value: Mapping[str, object], key: str) -> str | None:
-    """A string field of a stored job payload, or ``None`` when it is damaged."""
+RecipeParent = (
+    RecipeInstallParent
+    | RecipeStartParent
+    | RecipeStopParent
+    | RecipeUninstallParent
+    | RecipeReconcileParent
+    | RecipeJobRunParent
+    | RecipeJobActivateParent
+    | RecipeBuildParent
+    | RecipeBuildCleanupParent
+    | ProfileJobRunStopJob
+)
+_RECIPE_PARENT_READERS: dict[str, TypeAdapter[RecipeParent]] = {
+    "recipe.install": TypeAdapter(RecipeInstallParent),
+    "recipe.start": TypeAdapter(RecipeStartParent),
+    "recipe.stop": TypeAdapter(RecipeStopParent | ProfileJobRunStopJob),
+    "recipe.uninstall": TypeAdapter(RecipeUninstallParent),
+    "recipe.reconcile": TypeAdapter(RecipeReconcileParent),
+    "recipe.job.run.v1": TypeAdapter(RecipeJobRunParent),
+    "recipe.job.activate.v1": TypeAdapter(RecipeJobActivateParent),
+    "recipe.build.v1": TypeAdapter(RecipeBuildParent),
+    "recipe.build.cleanup.v1": TypeAdapter(RecipeBuildCleanupParent),
+}
 
-    item = value.get(key)
-    return item if isinstance(item, str) else None
+
+def _parse_recipe_parent(job: Job) -> RecipeParent:
+    parent = _RECIPE_PARENT_READERS[job.kind].validate_json(
+        canonical_message(job.payload)
+    )
+    if isinstance(parent, ProfileJobRunStopJob):
+        return ProfileJobRunStopJob.model_validate_parent(job.payload)
+    return parent
+
+
+def _recorded_parent(job: Job) -> RecipeParent | Residue:
+    return read_or_rebuild(
+        kind="recipe.operation-parent",
+        subject=job.id,
+        read=lambda: _parse_recipe_parent(job),
+    )
+
+
+def _parent_identity(
+    job: Job, key: Literal["owner_id", "owner_kind", "plan_digest"]
+) -> str | None:
+    """Identity from the canonical parent, or unknown for damaged bookkeeping."""
+    parent = _recorded_parent(job)
+    if isinstance(parent, Residue):
+        # Phase history is bookkeeping. Rebuild only the exact affected owner
+        # from relational child rows with current canonical payloads; this does
+        # not restore review digests, executable phases, or security authority.
+        if key != "owner_id":
+            return None
+        session = object_session(job)
+        reader = _RECIPE_WIRE_PAYLOAD_MODELS.get(job.kind)
+        if session is None or reader is None:
+            return None
+        owners: set[str] = set()
+        try:
+            for child in session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            ):
+                if child.kind != job.kind or child.node_id not in job.targets:
+                    return None
+                wire = reader.model_validate_json(canonical_message(child.payload))
+                if isinstance(wire, (RecipeStartPayload, RecipeStopPayload)):
+                    owners.add(wire.run_id)
+                elif isinstance(
+                    wire,
+                    (
+                        RecipeInstallPayload,
+                        RecipeUninstallPayload,
+                        RecipeReconcilePayload,
+                    ),
+                ):
+                    owners.add(wire.installation_id)
+                elif isinstance(wire, RecipeBuildCleanupRequest):
+                    owners.add(wire.build_id)
+                else:
+                    return None
+        except (TypeError, ValueError):
+            return None
+        return owners.pop() if len(owners) == 1 else None
+    if key == "owner_id":
+        return parent.owner_id
+    return parent.owner_kind if key == "owner_kind" else parent.plan_digest
+
+
+def _parent_intent(job: Job) -> int | None:
+    parent = _recorded_parent(job)
+    return None if isinstance(parent, Residue) else parent.workload_intent_ordinal
+
+
+def _parent_execution_mode(
+    job: Job,
+) -> Literal["one-shot-jobs", "profile-jobrun-stop"] | None:
+    parent = _recorded_parent(job)
+    return None if isinstance(parent, Residue) else parent.execution_mode
+
+
+def _parent_force_rebuild(job: Job) -> bool:
+    parent = _recorded_parent(job)
+    return isinstance(parent, RecipeBuildParent) and parent.force_rebuild
+
+
+def _parent_recovery(job: Job) -> DistributedRecoveryMarker | None:
+    parent = _recorded_parent(job)
+    return (
+        parent.recovery
+        if isinstance(parent, (RecipeStartParent, RecipeStopParent))
+        else None
+    )
+
+
+def _parent_reconciliation(job: Job) -> RunSwitchReconciliationAuthority | None:
+    parent = _recorded_parent(job)
+    return (
+        parent.reconciliation_authority
+        if isinstance(parent, RecipeReconcileParent)
+        else None
+    )
+
+
+def _cancel_requested(job: Job) -> bool:
+    return isinstance(
+        _recorded_result(job.kind, job.result, subject=job.id),
+        RecipeOperationCancellationResult,
+    )
 
 
 def _lower_hex_digest(value: object) -> bool:
@@ -8509,43 +8685,21 @@ def _lower_hex_digest(value: object) -> bool:
     )
 
 
-def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str] | None:
-    """The primary model's (digest, title), or ``None`` when the document has none.
-
-    A recipe document that names no usable model is catalog content the catalog
-    re-sync replaces; callers re-derive the identity from the installation row
-    or keep the model (never remove one they cannot prove unused).
-    """
-
-    selections = document.get("models")
-    selection = (
-        selections[0]
-        if isinstance(selections, Sequence)
-        and not isinstance(selections, (str, bytes))
-        and selections
-        else None
-    )
-    model = selection.get("model") if isinstance(selection, Mapping) else None
-    if not isinstance(model, Mapping):
+def _primary_model_identity(document: object) -> tuple[str, str] | None:
+    """The canonical primary model identity, or unknown for unreadable content."""
+    try:
+        recipe = read_recipe(document)
+    except (TypeError, ValueError):
         return None
-    digest = model.get("content_sha256")
-    publisher = model.get("publisher")
-    slug = model.get("slug")
-    if (
-        not isinstance(digest, str)
-        or not _lower_hex_digest(digest)
-        or not isinstance(publisher, str)
-        or not publisher
-        or not isinstance(slug, str)
-        or not slug
-    ):
+    if not recipe.models:
         return None
-    return digest, f"{publisher}/{slug}"
+    model = recipe.models[0].model
+    return model.content_sha256, f"{model.publisher}/{model.slug}"
 
 
 def _recipe_model_identities(
     session: Session,
-    document: Mapping[str, object],
+    document: object,
 ) -> tuple[tuple[str, str], ...] | None:
     """Every model a recipe needs (its own and the dependencies of those).
 
@@ -8621,28 +8775,16 @@ def _canonical_distributed_readiness(
     return readiness
 
 
-def _start_deadline_failure(
-    payload: Mapping[str, object], *, now: datetime
-) -> str | None:
-    """Why a distributed start's accepted budget no longer holds, else ``None``.
-
-    An elapsed budget is the operation's own timeout outcome; a malformed stored
-    deadline is bookkeeping damage.  Both end the start through its recovery
-    error (the failed ranks are stopped), neither is raised.
-    """
-
-    value = payload.get("start_deadline")
-    if value is None:
+def _start_deadline_failure(job: Job, *, now: datetime) -> str | None:
+    """The accepted start budget, with damaged bookkeeping ended by recovery."""
+    if job.kind != "recipe.start":
         return None
-    if not isinstance(value, str):
+    parent = _recorded_parent(job)
+    if not isinstance(parent, RecipeStartParent):
         return "distributed start deadline is invalid"
-    try:
-        deadline = datetime.fromisoformat(value)
-    except ValueError:
-        return "distributed start deadline is invalid"
-    if deadline.tzinfo is None or deadline.utcoffset() is None:
-        return "distributed start deadline is invalid"
-    if _aware(now) >= _aware(deadline):
+    if parent.start_deadline is not None and _aware(now) >= _aware(
+        parent.start_deadline
+    ):
         return "distributed start deadline elapsed"
     return None
 
@@ -8655,13 +8797,17 @@ def _role_phases(
     match the recipe's order (the caller decides whether to order or refuse)."""
 
     by_role: dict[str, list[tuple[str, Mapping[str, object]]]] = {}
+    reader = TypeAdapter(RecipeStartPayload | RecipeStopPayload)
     for node_id, payload in node_payloads:
-        plan = payload.get("compiled_execution_plan")
-        runtime = plan.get("runtime") if isinstance(plan, Mapping) else None
-        placement = runtime.get("placement") if isinstance(runtime, Mapping) else None
-        role = placement.get("role") if isinstance(placement, Mapping) else None
-        if not isinstance(role, str):
+        try:
+            wire = reader.validate_json(canonical_message(payload))
+        except (TypeError, ValueError):
             return None
+        role = (
+            wire.role
+            if isinstance(wire, RecipeStopPayload)
+            else wire.compiled_execution_plan.runtime.placement.role
+        )
         by_role.setdefault(role, []).append((node_id, dict(payload)))
     if set(by_role) != set(order) or len(set(order)) != len(order):
         return None
@@ -8670,57 +8816,50 @@ def _role_phases(
     )
 
 
-_PhaseGroups = tuple[tuple[tuple[str, str, Mapping[str, object]], ...], ...]
+RecipeWirePayload = (
+    RecipeInstallPayload
+    | RecipeStartPayload
+    | RecipeStopPayload
+    | RecipeUninstallPayload
+    | RecipeReconcilePayload
+    | RecipeJobRunRequest
+    | RecipeBuildRequest
+    | RecipeBuildCleanupRequest
+)
 
 
-def _stored_phases(
-    payload: Mapping[str, object], *, subject: str
-) -> _PhaseGroups | Residue:
-    """The phases a job was queued with; damaged phases are retired as unknown.
+_PhaseGroups = tuple[tuple[tuple[str, str, RecipeWirePayload], ...], ...]
 
-    Nothing re-derives the grouping of a multi-phase operation, so the caller ends
-    the operation through its recovery error (its ranks are stopped) instead of
-    advancing it blind.
-    """
 
-    invalid = "stored operation phases are invalid"
+def _stored_phases(job: Job) -> _PhaseGroups | Residue:
+    """Read the canonical parent and its typed phase payloads; damage is unknown."""
 
     def read() -> _PhaseGroups | Damaged:
-        raw_phases = payload.get("phases")
-        if raw_phases is None:
+        parent = _parse_recipe_parent(job)
+        if isinstance(parent, RecipeJobActivateParent):
             return ()
-        if not isinstance(raw_phases, list) or not raw_phases:
-            return Damaged(invalid)
-        phases: list[tuple[tuple[str, str, Mapping[str, object]], ...]] = []
+        if parent.phases is None:
+            return ()
+        if not parent.phases or any(not phase for phase in parent.phases):
+            return Damaged("stored operation phases are invalid")
         seen_operations: set[str] = set()
-        for raw_phase in raw_phases:
-            if not isinstance(raw_phase, list) or not raw_phase:
-                return Damaged(invalid)
-            group: list[tuple[str, str, Mapping[str, object]]] = []
-            for raw_item in raw_phase:
-                if not isinstance(raw_item, Mapping):
-                    return Damaged(invalid)
-                operation_id = raw_item.get("operation_id")
-                node_id = raw_item.get("node_id")
-                item_payload = raw_item.get("payload")
-                if not isinstance(node_id, str) or not isinstance(
-                    item_payload, Mapping
-                ):
-                    return Damaged(invalid)
-                if not isinstance(operation_id, str) or operation_id in seen_operations:
-                    return Damaged(invalid)
-                uuid.UUID(operation_id)
-                seen_operations.add(operation_id)
-                group.append((operation_id, node_id, dict(item_payload)))
-            phases.append(tuple(group))
-        return tuple(phases)
+        groups: list[tuple[tuple[str, str, RecipeWirePayload], ...]] = []
+        for phase in parent.phases:
+            group: list[tuple[str, str, RecipeWirePayload]] = []
+            for item in phase:
+                if item.operation_id in seen_operations:
+                    return Damaged("stored operation phases are invalid")
+                seen_operations.add(item.operation_id)
+                group.append((item.operation_id, item.node_id, item.payload))
+            groups.append(tuple(group))
+        return tuple(groups)
 
-    return read_or_rebuild(kind="recipe.operation-phases", subject=subject, read=read)
+    return read_or_rebuild(kind="recipe.operation-phases", subject=job.id, read=read)
 
 
 def _current_phase_index(
     children: Sequence[AgentOperation],
-    phases: Sequence[Sequence[tuple[str, str, Mapping[str, object]]]],
+    phases: _PhaseGroups,
 ) -> int | None:
     child_operations = {child.id for child in children}
     for index in range(len(phases) - 1, -1, -1):
@@ -8735,7 +8874,7 @@ def _current_phase_index(
 def record_build_evidence(
     session: Session,
     build: RecipeBuild,
-    evidence: Mapping[str, object],
+    evidence: object,
     *,
     now: datetime,
     replace_existing: bool = False,
@@ -8753,10 +8892,13 @@ def record_build_evidence(
     # terminal evidence is compared with the upload transaction that just
     # completed, not with stale in-memory values.
     session.refresh(build, with_for_update=True)
-    expected = {"image_bytes", "image_digest", "oci_layout_sha256"}
-    image_digest = evidence.get("image_digest")
-    layout_digest = evidence.get("oci_layout_sha256")
-    image_bytes = evidence.get("image_bytes")
+    try:
+        result = RecipeBuildEvidence.model_validate_json(canonical_message(evidence))
+    except (TypeError, ValueError):
+        return False
+    image_digest = result.image_digest
+    layout_digest = result.oci_layout_sha256
+    image_bytes = result.image_bytes
     try:
         parse_stored_build_plan(build.plan)
         parse_stored_build_policy(build.policy_report)
@@ -8768,18 +8910,7 @@ def record_build_evidence(
             f"stored recipe build envelope is invalid{error.detail}",
         )
     if (
-        set(evidence) != expected
-        or not isinstance(image_digest, str)
-        or len(image_digest) != 71
-        or not image_digest.startswith("sha256:")
-        or any(character not in "0123456789abcdef" for character in image_digest[7:])
-        or not isinstance(layout_digest, str)
-        or len(layout_digest) != 64
-        or any(character not in "0123456789abcdef" for character in layout_digest)
-        or not isinstance(image_bytes, int)
-        or isinstance(image_bytes, bool)
-        or not 1 <= image_bytes <= 16 * 1024**4
-        or (not replace_existing and build.image_digest not in {None, image_digest})
+        (not replace_existing and build.image_digest not in {None, image_digest})
         or (
             not replace_existing
             and build.oci_layout_sha256 not in {None, layout_digest}
@@ -8797,7 +8928,7 @@ def record_build_evidence(
 
 
 def _start_endpoint(
-    operation: AgentOperation, evidence: Mapping[str, object]
+    operation: AgentOperation, evidence: object
 ) -> str | Residue | None:
     """The serving rank reports its ready endpoint; every other result is empty.
 

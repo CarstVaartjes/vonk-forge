@@ -128,7 +128,7 @@ RecipeLifecycleResult = (
 )
 
 
-def parse_recipe_lifecycle_result(kind: str, value: object) -> object:
+def parse_recipe_lifecycle_result(kind: str, value: object) -> RecipeLifecycleResult:
     """Validate one persisted lifecycle result against its operation kind."""
 
     if kind == "recipe.job.activate.v1":
@@ -226,13 +226,13 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
         if not isinstance(evidence, Mapping):
             raise TypeError("recipe operation evidence is invalid")
         for item in evidence.values():
-            if not isinstance(item, Mapping):
+            if not isinstance(item, (Mapping, BaseModel)):
                 raise TypeError("recipe operation evidence is invalid")
             if not any(_model_accepts(model, item) for model in evidence_models):
                 raise ValueError("recipe operation evidence kind is invalid")
 
 
-def _model_accepts(model: type[BaseModel], value: Mapping[str, object]) -> bool:
+def _model_accepts(model: type[BaseModel], value: object) -> bool:
     try:
         model.model_validate_json(canonical_message(value))
     except (TypeError, ValueError):
