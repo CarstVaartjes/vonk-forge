@@ -400,10 +400,8 @@ def _recorded_result(
     return None if isinstance(loaded, Residue) else loaded
 
 
-def _mark_failed(row: InstallationNode | RunNode) -> None:
-    """Record a rank as failed (one place spells the stored word)."""
-
-    row.state = "failed"
+# The one place the stored word of a failed rank is spelled for the rank rows.
+_RANK_FAILED = "failed"
 
 
 def _unproven_evidence(detail: str) -> dict[str, object]:
@@ -4509,7 +4507,7 @@ class RecipeOperationService:
                     raise RecipeOperationConflict(
                         "installation cancellation scope changed"
                     )
-                _mark_failed(node)
+                node.state = _RANK_FAILED
                 node.updated_at = now
                 installation.state = "partial"
                 installation.updated_at = now
@@ -4863,7 +4861,7 @@ class RecipeOperationService:
                 ):
                     # An install whose byte count cannot be proven is not
                     # installed: the rank is failed and the install retried.
-                    _mark_failed(node)
+                    node.state = _RANK_FAILED
                     unproven[node_id] = "install evidence is invalid"
                 else:
                     node.installed_bytes = installed_bytes
@@ -4880,18 +4878,18 @@ class RecipeOperationService:
             )
             if start_phase == "rank-launch":
                 if not succeeded:
-                    _mark_failed(node)
+                    node.state = _RANK_FAILED
                 elif node.state != "failed":
                     node.state = "starting"
                 if succeeded:
                     launch_endpoint = _start_endpoint(operation, evidence)
                     if isinstance(launch_endpoint, Residue):
-                        _mark_failed(node)
+                        node.state = _RANK_FAILED
                         unproven[node_id] = launch_endpoint.note
                 node.updated_at = now
             elif start_phase == "collective-readiness":
                 if not succeeded:
-                    _mark_failed(node)
+                    node.state = _RANK_FAILED
                 if succeeded:
                     endpoint = _start_endpoint(operation, evidence)
                     recorded = (
@@ -4904,7 +4902,7 @@ class RecipeOperationService:
                         )
                     )
                     if isinstance(endpoint, Residue):
-                        _mark_failed(node)
+                        node.state = _RANK_FAILED
                         unproven[node_id] = endpoint.note
                     elif not isinstance(launches, Mapping) or any(
                         not isinstance(launches.get(started.node_id), Mapping)
@@ -4913,7 +4911,7 @@ class RecipeOperationService:
                         # Readiness cannot be proven without every rank's launch
                         # evidence: no rank is marked running and the start ends
                         # through its recovery error.
-                        _mark_failed(node)
+                        node.state = _RANK_FAILED
                         unproven[node_id] = "collective readiness preceded rank launch"
                     else:
                         for started_node in run_nodes:
@@ -4922,7 +4920,7 @@ class RecipeOperationService:
                         try:
                             node.endpoint = run_endpoint_document({"url": endpoint})
                         except RecipeExecutionContractError:
-                            _mark_failed(node)
+                            node.state = _RANK_FAILED
                             unproven[node_id] = (
                                 "recipe start endpoint evidence is invalid"
                             )
@@ -4938,14 +4936,14 @@ class RecipeOperationService:
                 if job.kind == "recipe.start" and succeeded:
                     endpoint = _start_endpoint(operation, evidence)
                     if isinstance(endpoint, Residue):
-                        _mark_failed(node)
+                        node.state = _RANK_FAILED
                         unproven[node_id] = endpoint.note
                     else:
                         try:
                             if endpoint is not None:
                                 node.endpoint = run_endpoint_document({"url": endpoint})
                         except RecipeExecutionContractError:
-                            _mark_failed(node)
+                            node.state = _RANK_FAILED
                             unproven[node_id] = (
                                 "recipe start endpoint evidence is invalid"
                             )
@@ -8623,7 +8621,7 @@ def prepare_exact_recipe_run_observation_nodes(
             if _aware(node.updated_at) >= observed_at:
                 continue
             if run.state not in STOPPABLE_NOT_RUNNING_RUN_STATES:
-                _mark_failed(node)
+                node.state = _RANK_FAILED
                 node.observed_run_generation = None
                 node.observation_process_running = None
                 node.observation_observed_at = None
