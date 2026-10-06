@@ -1,8 +1,8 @@
 from typing import Literal
 
-RecipeUpdateChildState = Literal['cancelled', 'cancelling', 'failed', 'partial', 'pending', 'queued', 'running', 'succeeded']
+RecipeUpdateChildState = Literal['backoff', 'cancelled', 'failed', 'observing', 'pending', 'queued', 'running', 'succeeded']
 
-RECIPE_UPDATE_CHILD_STATE_VALUES: set[RecipeUpdateChildState] = { 'cancelled', 'cancelling', 'failed', 'partial', 'pending', 'queued', 'running', 'succeeded',  }
+RECIPE_UPDATE_CHILD_STATE_VALUES: set[RecipeUpdateChildState] = { 'backoff', 'cancelled', 'failed', 'observing', 'pending', 'queued', 'running', 'succeeded',  }
 
 def check_recipe_update_child_state(value: str) -> RecipeUpdateChildState:
     if value in RECIPE_UPDATE_CHILD_STATE_VALUES:

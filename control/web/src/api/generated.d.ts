@@ -5428,7 +5428,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "partial" | "cancelling" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
         };
         /** RecipeImageAvailabilityResponse */
         RecipeImageAvailabilityResponse: {
@@ -5467,7 +5467,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "partial" | "cancelling" | "succeeded" | "failed" | "cancelled";
+            state: "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
             /** Updated At */
             updated_at: string;
         };
@@ -5779,7 +5779,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "accepted" | "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
+            state: "accepted" | "queued" | "running" | "backoff" | "succeeded" | "failed" | "cancelled";
             /** With Model */
             with_model: boolean;
         };
@@ -6172,7 +6172,7 @@ export interface components {
              * @default pending
              * @enum {string}
              */
-            state: "pending" | "queued" | "running" | "cancelling" | "succeeded" | "partial" | "failed" | "cancelled";
+            state: "pending" | "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
         };
         /**
          * RecipeUpdateFailure
@@ -6256,6 +6256,11 @@ export interface components {
             kind: "recipe.cache.update.v2";
             /** Next Attempt At */
             next_attempt_at?: string | null;
+            /**
+             * Partial
+             * @default false
+             */
+            partial: boolean;
             progress: components["schemas"]["OperationProgress"];
             request: components["schemas"]["RecipeUpdateScope"];
             /** Request Id */
@@ -6266,7 +6271,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "cancelling" | "succeeded" | "partial" | "failed" | "cancelled";
+            state: "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
             /**
              * Updated At
              * Format: date-time

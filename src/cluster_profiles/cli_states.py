@@ -65,3 +65,13 @@ def lifecycle_state(job: dict[str, object]) -> object:
 ARTIFACT_JOB_IN_FLIGHT = frozenset(
     {"queued", "running", "backoff", "observing", LEGACY_CANCELLING}
 )
+
+# -- operations ------------------------------------------------------------------
+
+#: What an older Controller called an update batch that ended with some children
+#: done (now ``failed`` with ``partial`` set) and a cache operation that retries
+#: (now ``backoff``).
+LEGACY_PARTIAL = "partial"
+#: An accepted cancel: still being driven (``observing``, or the old
+#: ``cancelling``) or already ended.
+CANCEL_ACCEPTED_STATES = frozenset({"observing", LEGACY_CANCELLING, "cancelled"})

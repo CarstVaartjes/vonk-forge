@@ -11,6 +11,7 @@ from typing import Any
 import httpx2
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.model_cache import ModelCacheService
@@ -230,7 +231,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     assert new_parent.model_child is not None
     assert new_parent.model_child["id"] != seeded.id
     resumed_waiting = service.get(resumed_parent.id)
-    assert resumed_waiting.state == "partial"
+    assert resumed_waiting.state == LifecycleState.BACKOFF
     assert resumed_waiting.model_child is not None
     assert resumed_waiting.model_child["id"] == new_parent.model_child["id"]
     assert len(image_builds) == 1

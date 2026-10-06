@@ -13951,8 +13951,8 @@
             "enum": [
               "queued",
               "running",
-              "partial",
-              "cancelling",
+              "backoff",
+              "observing",
               "succeeded",
               "failed",
               "cancelled"
@@ -14100,8 +14100,8 @@
             "enum": [
               "queued",
               "running",
-              "partial",
-              "cancelling",
+              "backoff",
+              "observing",
               "succeeded",
               "failed",
               "cancelled"
@@ -15179,7 +15179,7 @@
               "accepted",
               "queued",
               "running",
-              "partial",
+              "backoff",
               "succeeded",
               "failed",
               "cancelled"
@@ -16352,9 +16352,9 @@
               "pending",
               "queued",
               "running",
-              "cancelling",
+              "backoff",
+              "observing",
               "succeeded",
-              "partial",
               "failed",
               "cancelled"
             ],
@@ -16581,6 +16581,11 @@
             ],
             "title": "Next Attempt At"
           },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
           "progress": {
             "$ref": "#/components/schemas/OperationProgress"
           },
@@ -16608,9 +16613,9 @@
             "enum": [
               "queued",
               "running",
-              "cancelling",
+              "backoff",
+              "observing",
               "succeeded",
-              "partial",
               "failed",
               "cancelled"
             ],

@@ -427,17 +427,21 @@ def check_words(
     return stored_words(subject, states)
 
 
-def state_adopter(subject: LifecycleSubject) -> Callable[[Any], Any]:
+def state_adopter(
+    subject: LifecycleSubject, kind: str | None = None
+) -> Callable[[Any], Any]:
     """A pydantic ``BeforeValidator`` that adopts a retired spelling of ``subject``.
 
     A contract model that carries a stored state (a persisted document, an API
     view built from a row) validates a row written before the rename as the
     word it means now; anything else passes through for the field to judge.
+    ``kind`` scopes the adoption to one kind of generic job (see
+    :data:`JOB_KIND_ALIASES`).
     """
 
     def adopt(value: Any) -> Any:
         if isinstance(value, str):
-            adopted = adopt_state(subject, value)
+            adopted = adopt_state(subject, value, kind)
             if adopted is not None:
                 return adopted.state
         return value

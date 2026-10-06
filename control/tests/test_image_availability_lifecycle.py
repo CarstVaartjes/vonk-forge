@@ -20,6 +20,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
+from vonk_control import job_states
 from vonk_control.lifecycle import (
     STOP_BUDGET,
     CancelRequested,
@@ -192,7 +194,7 @@ def test_a_definite_failure_ends_and_a_removal_failure_is_partial() -> None:
     assert prep.state == "failed"
     removal = _job(REMOVAL_KIND, "running", attempt=1)
     after = adapter.fail(removal, NOW, retryable=True, reason="busy", count=2)
-    assert after.state is State.BACKOFF and removal.state == "partial"
+    assert after.state is State.BACKOFF and removal.state == LifecycleState.BACKOFF
     assert after.next_action_at is not None and after.next_action_at > NOW
 
 
@@ -206,7 +208,7 @@ def test_a_dependency_wait_is_partial_and_does_not_count_as_a_failure() -> None:
     )
     payload = dict(job.payload)
     after = adapter.defer(job, NOW, NOW + timedelta(seconds=1), payload=payload)
-    assert job.state == "partial" and after.state is State.BACKOFF
+    assert job.state == LifecycleState.BACKOFF and after.state is State.BACKOFF
     assert "retry_after_at" in payload
 
 
@@ -251,7 +253,7 @@ def test_a_cancel_of_issued_work_observes_then_ends_when_nothing_is_outstanding(
     live = (NOW + timedelta(minutes=1)).isoformat()
     job = _job(state="running", claim_owner="w", claim_until=live, attempt=1)
     adapter.request_cancel(job, "k", "stop", NOW)
-    assert job.state == "cancelling"
+    assert job.state == LifecycleState.OBSERVING
     job.payload = dict(job.payload) | {
         "cancellation": {
             "cancel_requested_at": NOW.isoformat(),
@@ -259,7 +261,7 @@ def test_a_cancel_of_issued_work_observes_then_ends_when_nothing_is_outstanding(
         }
     }
     still = adapter.settle_cancel(job, NOW, outstanding=True)
-    assert still.state is State.OBSERVING and job.state == "cancelling"
+    assert still.state is State.OBSERVING and job.state == LifecycleState.OBSERVING
     done = adapter.settle_cancel(job, NOW, outstanding=False)
     assert done.state is State.CANCELLED and job.state == "cancelled"
 
@@ -268,7 +270,7 @@ def test_an_update_batch_is_always_observed_by_its_owner() -> None:
     adapter = _adapter()
     job = _job(UPDATE_KIND, "queued")
     assert adapter.request_cancel(job, "k", "stop", NOW).state is State.OBSERVING
-    assert job.state == "cancelling"
+    assert job.state == LifecycleState.OBSERVING
 
 
 def test_a_supersede_ends_an_unstarted_preparation() -> None:
@@ -341,7 +343,9 @@ def test_a_legacy_cancelling_preparation_with_a_stuck_claim_heals(
     service.reconcile_cancellations()
     with sessions() as session:
         stuck = session.get(Job, queued.id)
-        assert stuck is not None and stuck.state == "cancelling"  # inside the budget
+        assert stuck is not None and job_states.means(
+            stuck.state, LifecycleState.OBSERVING
+        )  # inside the budget (an old row keeps its word until it changes)
     now[0] = NOW + CANCEL_BUDGET
     service.reconcile_cancellations()
     with sessions() as session:

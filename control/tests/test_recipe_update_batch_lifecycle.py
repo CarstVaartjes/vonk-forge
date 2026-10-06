@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from vonk_agent_protocol import LifecycleState
 from vonk_control.lifecycle import (
     CancelRequested,
     Outcome,
@@ -107,8 +108,8 @@ def test_no_event_leaves_a_batch_waiting_for_an_operator(stored) -> None:
     ("children", "stored"),
     [
         (("succeeded", "succeeded"), "succeeded"),
-        (("succeeded", "failed"), "partial"),
-        (("succeeded", "cancelled"), "partial"),
+        (("succeeded", "failed"), "failed"),
+        (("succeeded", "cancelled"), "failed"),
         (("failed", "failed"), "failed"),
         (("cancelled",), "failed"),
     ],
@@ -161,7 +162,7 @@ def test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget() -> None:
         settled_children=False,
         reason="stop it",
     )
-    assert job.state == "cancelling"  # still within the budget
+    assert job.state == "observing"  # still within the budget
     adapter.cancel_progress(
         job,
         document,
@@ -199,7 +200,7 @@ def test_a_cancel_that_a_child_will_not_confirm_completes(update_env) -> None:  
 
     service._cancel_update_child = refuse
     service.reconcile_cancellations()
-    assert service.get_operator_operation(parent.id).state == "cancelling"
+    assert service.get_operator_operation(parent.id).state == LifecycleState.OBSERVING
     now[0] += CANCEL_BUDGET + timedelta(seconds=5)
     service.reconcile_cancellations()
     observed = service.get_operator_operation(parent.id)

@@ -9,7 +9,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, cast
 
-from .cli_states import OPERATOR_WAIT_STATES
+from .cli_states import (
+    CANCEL_ACCEPTED_STATES,
+    LEGACY_PARTIAL,
+    OPERATOR_WAIT_STATES,
+)
 
 OutcomeContext = Literal["read", "preview", "mutation", "await"]
 
@@ -106,10 +110,14 @@ class CommandOutcome:
             context = "preview"
         elif getattr(args, "follow", False):
             context = "await"
-        elif "cancel" in {
-            getattr(args, "model_action", None),
-            getattr(args, "recipe_action", None),
-        } and operation_state(result) in {"cancelling", "cancelled"}:
+        elif (
+            "cancel"
+            in {
+                getattr(args, "model_action", None),
+                getattr(args, "recipe_action", None),
+            }
+            and operation_state(result) in CANCEL_ACCEPTED_STATES
+        ):
             # An accepted cancel succeeded whether it is still being driven or
             # already ended (work that never ran is cancelled at once).
             context = "read"
@@ -140,7 +148,7 @@ class CommandOutcome:
         if self.context == "read":
             return 0
         state = operation_state(self.document)
-        if state == "partial":
+        if state == LEGACY_PARTIAL or self.document.get("partial") is True:
             return 1
         if state in {
             "failed",

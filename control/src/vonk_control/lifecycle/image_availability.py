@@ -62,8 +62,9 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from vonk_agent_protocol import LEGACY_WAIT_STATE
+from vonk_agent_protocol import LifecycleState
 
+from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..models import Job
 from ..recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
@@ -89,7 +90,7 @@ from .types import (
 KIND = "image-availability"
 OPERATION_KIND = "recipe.image.availability.v2"
 REMOVAL_KIND = RECIPE_CACHE_REMOVE_KIND
-WAITING = LEGACY_WAIT_STATE
+WAITING = LifecycleState.NEEDS_OPERATOR.value
 CANCEL_BUDGET = timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 #: How long a stored ``running`` removal is trusted to be between two steps.
 REMOVAL_STEP_LEASE = timedelta(minutes=2)
@@ -108,7 +109,7 @@ KEEP: Any = object()
 _STORED = {
     State.QUEUED: State.QUEUED.value,
     State.RUNNING: State.RUNNING.value,
-    State.OBSERVING: "cancelling",
+    State.OBSERVING: State.OBSERVING.value,
     State.NEEDS_OPERATOR: WAITING,
     State.SUCCEEDED: State.SUCCEEDED.value,
     State.FAILED: State.FAILED.value,
@@ -178,7 +179,7 @@ class ImageAvailabilityAdapter:
         )
         if stored == State.QUEUED:
             state = State.BACKOFF if due is not None and due > now else State.QUEUED
-        elif stored == "partial":
+        elif job_states.means(stored, State.BACKOFF):
             state = State.BACKOFF
         elif stored == State.RUNNING:
             lease = (
@@ -194,7 +195,7 @@ class ImageAvailabilityAdapter:
                 # re-claims it, which is the retry of idempotent work.
                 state = State.BACKOFF
                 due = lease if lease is not None else due
-        elif stored == "cancelling":
+        elif job_states.means(stored, State.OBSERVING):
             state = State.OBSERVING
         elif stored == State.SUCCEEDED:
             state = State.SUCCEEDED
@@ -301,7 +302,7 @@ class ImageAvailabilityAdapter:
         now = aware(now)
         if after.state is State.BACKOFF:
             state = visible or (
-                "partial" if job.kind == REMOVAL_KIND else State.QUEUED.value
+                State.BACKOFF.value if job.kind == REMOVAL_KIND else State.QUEUED.value
             )
         elif after.state is State.QUEUED and job.kind == REMOVAL_KIND:
             state = visible or (
@@ -484,7 +485,7 @@ class ImageAvailabilityAdapter:
             now,
             row=row,
             reason=KEEP,
-            visible="partial",
+            visible=State.BACKOFF.value,
             payload=payload,
         ).row
 

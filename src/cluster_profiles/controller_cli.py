@@ -37,7 +37,11 @@ from .cli_outcome import (
 )
 from .cli_render import render_payload, terminal_text
 from .cli_select import SelectorError
-from .cli_states import OPERATOR_WAIT_STATES
+from .cli_states import (
+    CANCEL_ACCEPTED_STATES,
+    LEGACY_PARTIAL,
+    OPERATOR_WAIT_STATES,
+)
 from .control_client import (
     ControlClientError,
     ControlConflict,
@@ -1022,7 +1026,7 @@ _TERMINAL_STATES = {
     "succeeded",
     "completed",
     "failed",
-    "partial",
+    LEGACY_PARTIAL,
     "cancelled",
     "superseded",
     "blocked",
@@ -1915,7 +1919,7 @@ def _submit_model_cancellation(
             not isinstance(cancellation, Mapping)
             or cancellation.get("request_key") != key
             or cancellation.get("reason") != reason
-            or result.get("state") not in {"cancelling", "cancelled"}
+            or result.get("state") not in CANCEL_ACCEPTED_STATES
         ):
             raise ControlMalformedResponse(
                 "model cancellation receipt identifies another cancellation"
@@ -2000,7 +2004,7 @@ def _submit_recipe_cancellation(
             not isinstance(cancellation, Mapping)
             or cancellation.get("cancel_request_id") != key
             or cancellation.get("reason") != reason
-            or result.get("state") not in {"cancelling", "cancelled"}
+            or result.get("state") not in CANCEL_ACCEPTED_STATES
         ):
             raise ControlMalformedResponse(
                 "recipe cancellation receipt identifies another cancellation"

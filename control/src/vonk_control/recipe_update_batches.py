@@ -295,7 +295,7 @@ class RecipeUpdateBatches:
         for index, child in enumerate(worst.children):
             suffix = str(index)
             child.operation_id = "\x01" * (128 - len(suffix)) + suffix
-            child.state = "cancelled"
+            child.state = LifecycleState.CANCELLED
             child.failure = RecipeUpdateFailure(
                 code="x" * 96, detail="\x01" * 512, retryable=False
             )
@@ -310,7 +310,7 @@ class RecipeUpdateBatches:
             reason="\x01" * 512,
         )
         response = self._view(job, worst).model_copy(
-            update={"attempt": 2_147_483_647, "state": "cancelled"}
+            update={"attempt": 2_147_483_647, "state": LifecycleState.CANCELLED}
         )
         size = max(len(_encoded(worst)), len(_encoded(response)))
         if size > MAX_CONTROL_DOCUMENT_BYTES:
@@ -327,11 +327,17 @@ class RecipeUpdateBatches:
             LifecycleState.OBSERVING,
             kind=UPDATE_KIND,
         ) and bool(document.children)
+        partial = job_states.means(
+            job.state, LifecycleState.FAILED, kind=UPDATE_KIND
+        ) and any(
+            child.state == LifecycleState.SUCCEEDED for child in document.children
+        )
         return RecipeUpdateResponse(
             id=job.id,
             request_id=job.request_id,
             request=document.request,
             state=cast(UpdateState, job.state),
+            partial=partial,
             attempt=job.current_attempt,
             children=document.children,
             cancellation=document.cancellation,
@@ -885,14 +891,14 @@ class RecipeUpdateBatches:
                     detail=str(redact_text(error.detail))[:512],
                     retryable=retryable,
                 )
-                child.state = "pending" if retryable else "failed"
+                child.state = "pending" if retryable else LifecycleState.FAILED
                 child.retry_at = (
                     now + timedelta(seconds=max(2, error.retry_after_seconds or 2))
                     if retryable
                     else None
                 )
             except (ValueError, TypeError):
-                child.state = "failed"
+                child.state = LifecycleState.FAILED
                 child.failure = RecipeUpdateFailure(
                     code="recipe_update.observation_invalid",
                     detail="child operation returned invalid persisted evidence",

@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import ValidationError
+from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
@@ -463,7 +464,7 @@ def test_remove_response_preserves_partial_progress_and_failure() -> None:
 
     assert response.status_code == 202, response.text
     body = response.json()
-    assert body["state"] == "partial"
+    assert body["state"] == LifecycleState.BACKOFF
     assert body["progress"]["phase"] == "reclaiming"
     assert body["progress"]["completed_bytes"] == 13
     assert body["progress"]["total_bytes"] is None
@@ -594,7 +595,7 @@ def test_recipe_cancel_requires_mutation_role_and_returns_durable_request() -> N
         },
     )
     assert response.status_code == 202, response.text
-    assert response.json()["state"] == "cancelling"
+    assert response.json()["state"] == LifecycleState.OBSERVING
     assert response.json()["cancellation"]["cancel_request_id"] == (
         cancellation.cancel_request_id
     )
