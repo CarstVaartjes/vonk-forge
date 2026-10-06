@@ -1121,7 +1121,7 @@ def test_malformed_operation_is_rejected_without_aborting_the_batch(
     assert after_index != before_index
 
 
-def test_default_run_switch_admission_uses_the_recipe_memory_reserve(
+def test_run_switch_admission_declares_the_resource_estimate_uncertain(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
@@ -1129,6 +1129,7 @@ def test_default_run_switch_admission_uses_the_recipe_memory_reserve(
     )
     service = RunSwitchOperationService(
         sessions,
+        memory_floor_bytes=0,
         lifecycle=lifecycle,
         clock=lambda: lifecycle._clock(),
         artifacts=CompleteArtifactInspector(),
@@ -3424,6 +3425,49 @@ def test_recheck_binds_the_inventory_sample_it_reads_not_the_reviewed_one(
     assert uncertainty.inventory_observed_at == sample.observed_at
 
 
+def test_switch_admits_an_idle_spark_below_the_declared_envelope_as_unverified(
+    tmp_path: Path,
+) -> None:
+    """No Vonk claim holds memory, so a declared shortfall is an estimate, not a refusal."""
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    node_id = nodes[0]
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    request = _request(sessions, node_id, action="switch")
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    baseline = service.preview(request, actor="admin")
+    required = baseline.fit_current.nodes[0].memory_required_bytes
+    floor = baseline.fit_current.nodes[0].memory_floor_bytes
+    assert required is not None and floor is not None
+    # The whole Spark is smaller than the declared peak plus the platform floor.
+    total = required + floor - 1
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.host_memory_total_bytes = total
+        snapshot.host_memory_free_bytes = total
+        snapshot.gpu_memory_total_bytes = total
+        snapshot.gpu_memory_free_bytes = total
+    plan = service.preview(request, actor="admin")
+
+    assert plan.fit_current.allowed is True
+    assert not any(
+        reason.code.startswith("run-switch.resource.insufficient")
+        or reason.code == "run.insufficient_memory"
+        for reason in plan.blockers
+    )
+    warnings = {reason.code for reason in plan.warnings}
+    assert "run-switch.resource.envelope_unverified" in warnings
+    assert "run-switch.resource.envelope_exceeds_capacity" in warnings
+
+
 def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
     tmp_path: Path,
 ) -> None:
@@ -3754,6 +3798,7 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
     )
     service = RunSwitchOperationService(
         sessions,
+        memory_floor_bytes=0,
         lifecycle=lifecycle,
         clock=lambda: lifecycle._clock(),
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
@@ -4677,6 +4722,7 @@ def _parked_start_switch(tmp_path: Path, *, healthy: bool):
     observing = _ObservingLifecycle(lifecycle, healthy=healthy)
     service = RunSwitchOperationService(
         sessions,
+        memory_floor_bytes=0,
         lifecycle=observing,
         clock=lambda: lifecycle._clock(),
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),

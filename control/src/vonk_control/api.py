@@ -137,6 +137,7 @@ from .profile_application_cancel_api import install_profile_application_cancel_r
 from .recipe_builds import RecipeBuildService
 from .recipe_operations import RecipeOperationService
 from .recipe_packages import RecipePackageClient
+from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .run_switch_operations import RunSwitchOperationService
 from .settings import (
     AGENT_CA_PROVISIONER_NAME,
@@ -1362,6 +1363,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         run_admission=RunAdmissionService(
             sessions,
             inventory_max_age=300,
+            memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
         ),
         agent_jobs=agent_services.operations,
         clock=clock,
@@ -1372,6 +1374,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     run_switch_operations = RunSwitchOperationService(
         sessions,
+        memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
         lifecycle=recipe_operations,
         clock=clock,
         mappings=ClusterMappingService(sessions),

@@ -1,4 +1,6 @@
 from vonk_control.resource_planning import (
+    ENVELOPE_EXCEEDS_CAPACITY,
+    ENVELOPE_UNVERIFIED,
     CapacitySnapshot,
     EffectiveResourceSettings,
     MemoryReservationTotals,
@@ -317,6 +319,117 @@ def test_fresh_aggregate_shortfall_remains_a_physical_capacity_blocker() -> None
     }
 
 
+def _declared_demand(total: int):
+    settings = resolve_effective_settings(
+        _recipe_document(_recipe_settings(context=65_536))
+    ).settings
+    assert settings is not None
+    return resource_demand(
+        settings,
+        ResourceEvidence(
+            weights_bytes=total,
+            runtime_overhead_bytes=None,
+            declared_total_bytes=total,
+            baseline_context_tokens=32_768,
+            baseline_concurrency=1,
+            evidence_state="declared",
+        ),
+    )
+
+
+def _idle_capacity(total: int, free: int, *, claimed: int = 0):
+    return memory_capacity_snapshot(
+        "rank-0",
+        "unified",
+        host=(total, free),
+        accelerator=(total, free),
+        reservations=MemoryReservationTotals(
+            {"unified-memory": claimed} if claimed else {}, {}, {}
+        ),
+        memory_pool="shared",
+        evidence_state="fresh",
+    )
+
+
+def test_envelope_larger_than_an_idle_spark_is_admitted_as_an_unverified_fit() -> None:
+    # Peak plus floor (105) exceeds the 100-byte Spark, but no Vonk claim holds
+    # memory: the declared envelope is an estimate, so the attempt is admitted.
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(100)},
+        [_idle_capacity(100, 96)],
+        memory_floor_bytes=5,
+    )
+    assert plan.allowed
+    assert plan.nodes[0].allowed
+    assert not any(reason.severity == "blocker" for reason in plan.reasons)
+    by_code = {reason.code: reason for reason in plan.nodes[0].reasons}
+    assert by_code[ENVELOPE_UNVERIFIED].severity == "warning"
+    exceeds = by_code[ENVELOPE_EXCEEDS_CAPACITY]
+    assert exceeds.severity == "warning"
+    assert "105 bytes" in exceeds.detail and "100-byte" in exceeds.detail
+    assert not plan.nodes[0].stop_required
+
+
+def test_envelope_larger_than_the_spark_with_a_vonk_claim_stays_a_capacity_wait() -> (
+    None
+):
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(100)},
+        [_idle_capacity(100, 90, claimed=10)],
+        memory_floor_bytes=5,
+    )
+    assert not plan.allowed
+    codes = {reason.code for reason in plan.nodes[0].reasons}
+    assert ENVELOPE_UNVERIFIED not in codes
+    assert ENVELOPE_EXCEEDS_CAPACITY not in codes
+    assert "resource.insufficient_reservation_budget" in codes
+
+
+def test_envelope_that_misses_free_memory_on_an_idle_spark_is_admitted_unverified() -> (
+    None
+):
+    # 95 + 4 fits the 100-byte Spark; the OS leaves 96 free, no claim holds
+    # memory. The shortfall is only the declared estimate, so it is admitted.
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(95)},
+        [_idle_capacity(100, 96)],
+        memory_floor_bytes=4,
+    )
+    assert plan.allowed
+    codes = {reason.code for reason in plan.nodes[0].reasons}
+    assert ENVELOPE_UNVERIFIED in codes
+    assert ENVELOPE_EXCEEDS_CAPACITY not in codes
+    assert "resource.insufficient_capacity" not in codes
+
+
+def test_idle_spark_with_less_free_memory_than_the_floor_alone_still_refuses() -> None:
+    # Observed free memory is below the platform floor regardless of any
+    # declared envelope: that is a measurement, not an estimate.
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(50)},
+        [_idle_capacity(100, 3)],
+        memory_floor_bytes=5,
+    )
+    assert not plan.allowed
+    assert ENVELOPE_UNVERIFIED not in {reason.code for reason in plan.nodes[0].reasons}
+
+
+def test_unknown_capacity_evidence_still_blocks_an_idle_unverified_fit() -> None:
+    capacity = memory_capacity_snapshot(
+        "rank-0",
+        "unified",
+        host=(100, 96),
+        accelerator=(100, 96),
+        reservations=MemoryReservationTotals({}, {}, {}),
+        memory_pool="shared",
+        evidence_state="unknown",
+    )
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(100)}, [capacity], memory_floor_bytes=5
+    )
+    assert not plan.allowed
+
+
 def test_uncertain_bound_still_refuses_actual_free_floor_and_budget_exhaustion() -> (
     None
 ):
@@ -427,3 +540,44 @@ def test_composed_preflight_returns_settings_demand_and_capacity() -> None:
     assert result.allowed
     assert result.settings is not None
     assert result.demands["rank-0"].total_bytes == 120
+
+
+def test_production_services_use_exactly_the_platform_memory_floor() -> None:
+    import ast
+    from pathlib import Path
+
+    from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
+
+    source = Path(__file__).resolve().parents[1] / "src" / "vonk_control"
+    services = {"RunAdmissionService", "RunSwitchOperationService"}
+    seen: dict[str, int] = {}
+    for path in sorted(source.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else None
+            if name not in services:
+                continue
+            seen[name] = seen.get(name, 0) + 1
+            floors = [
+                item for item in node.keywords if item.arg == "memory_floor_bytes"
+            ]
+            # Omitting the argument takes the constant default; passing it must
+            # pass the constant itself.
+            for item in floors:
+                assert (
+                    isinstance(item.value, ast.Name)
+                    and item.value.id == "PLATFORM_MEMORY_FLOOR_BYTES"
+                ), (
+                    f"{path.name}:{node.lineno} passes a floor other than the platform constant"
+                )
+    assert seen == {"RunAdmissionService": 2, "RunSwitchOperationService": 2}
+    import inspect
+
+    from vonk_control.run_admission import RunAdmissionService
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    for service in (RunAdmissionService, RunSwitchOperationService):
+        default = inspect.signature(service).parameters["memory_floor_bytes"].default
+        assert default == PLATFORM_MEMORY_FLOOR_BYTES == 2_000_000_000

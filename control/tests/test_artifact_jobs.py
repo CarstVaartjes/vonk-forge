@@ -749,7 +749,8 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         )
         assert placement["reserved_memory_bytes"] == planned_node.required_memory_bytes
         planned_floor = planned_node.memory_floor_bytes
-        assert planned_floor == 107
+        # The recipe's 107-byte reserve is informational; the platform floor applies.
+        assert planned_floor == 50
         assert placement["memory_floor_bytes"] == planned_floor
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256
         compiled_plan = _mapping(operation.payload["compiled_execution_plan"])

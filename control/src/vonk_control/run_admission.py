@@ -68,6 +68,7 @@ from .recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from .resource_planning import (
+    PLATFORM_MEMORY_FLOOR_BYTES,
     memory_capacity_snapshot,
     memory_requirement,
     memory_reservation_kind,
@@ -437,7 +438,7 @@ class RunAdmissionService:
         sessions: sessionmaker[Session],
         *,
         inventory_max_age: int = 300,
-        memory_floor_bytes: int = 0,
+        memory_floor_bytes: int = PLATFORM_MEMORY_FLOOR_BYTES,
     ) -> None:
         self._sessions = sessions
         self._inventory = InventoryRepository(sessions)
