@@ -16,11 +16,13 @@ from pydantic import (
 from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
+    ModelCacheOperatorStatus,
     canonical_message,
     state_adopter,
 )
 from vonk_forge_contracts.model import ModelReference
 
+from .machine_states import ModelFileStateField
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure, OperationProgress
 from .strict_json import StrictJSONModel, read_stored_model
@@ -52,7 +54,9 @@ ModelCacheOperationState = Annotated[
     # A row written before the rename may still say ``partial`` or ``cancelling``.
     BeforeValidator(state_adopter(LifecycleSubject.MODEL_CACHE_OPERATION)),
 ]
-ModelCacheOperatorState = Literal["accepted"] | ModelCacheOperationState
+ModelCacheOperatorState = (
+    Literal[ModelCacheOperatorStatus.ACCEPTED] | ModelCacheOperationState
+)
 ModelCacheOperatorAction = Literal["download", "remove"]
 ModelCacheOperationPhase = Literal[
     "queued",
@@ -441,7 +445,7 @@ class CacheArtifactResponse(StrictModel):
     expected_bytes: int = Field(ge=0)
     actual_bytes: int = Field(ge=0)
     roles: list[str] = Field(min_length=1, max_length=32)
-    state: Literal["partial", "verified", "missing", "corrupt"]
+    state: ModelFileStateField
     source: str = Field(min_length=1, max_length=2048)
 
     @field_validator("path")

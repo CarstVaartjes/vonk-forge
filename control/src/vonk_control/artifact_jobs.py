@@ -35,6 +35,7 @@ from vonk_agent_protocol import (
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
+    RunState,
     UnknownOutcomeError,
     canonical_message,
     recipe_job_manifest_sha256,
@@ -966,7 +967,7 @@ class ArtifactJobService:
         ):
             raise ArtifactJobError("request key was already used differently")
         run = session.get(RecipeRun, run_id)
-        if run is None or existing is None and run.state != "running":
+        if run is None or existing is None and run.state != RunState.RUNNING:
             raise ArtifactJobError("recipe run is not accepting jobs")
         installation = session.get(RecipeInstallation, run.installation_id)
         resolved = (
@@ -1195,7 +1196,7 @@ class ArtifactJobService:
             if ajs.preparation_of(artifact_job) != ajs.READY:
                 raise ArtifactJobError("artifact job is not ready")
             run = session.get(RecipeRun, artifact_job.run_id, with_for_update=True)
-            if run is None or run.state != "running":
+            if run is None or run.state != RunState.RUNNING:
                 raise ArtifactJobError("recipe run is not accepting jobs")
             concurrent = session.scalar(
                 select(ArtifactJob.id)

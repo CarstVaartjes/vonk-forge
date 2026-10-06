@@ -11,7 +11,7 @@ import hashlib
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import AssetAvailability, canonical_message
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -19,7 +19,6 @@ from .strict_json import StrictJSONModel
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 ArtifactKind = Literal["model-set", "model-object", "runtime-image"]
-AssetAvailability = Literal["verified", "partial", "missing", "unknown"]
 AssetDisposition = Literal["remove", "retain-shared"]
 FindingClassification = Literal["saved-reference", "active-work"]
 MAX_CACHE_REMOVAL_REVIEW_BYTES = MAX_CONTROL_DOCUMENT_BYTES
@@ -41,7 +40,7 @@ class CacheRemovalAsset(_CacheRemovalModel):
 
     @model_validator(mode="after")
     def byte_observation_is_consistent(self) -> CacheRemovalAsset:
-        if self.availability == "verified" and (
+        if self.availability == AssetAvailability.VERIFIED and (
             self.expected_bytes is None or self.available_bytes != self.expected_bytes
         ):
             raise ValueError("verified asset requires its exact expected byte length")
@@ -202,7 +201,6 @@ def seal_cache_removal_review(
 __all__ = [
     "MAX_CACHE_REMOVAL_REVIEW_BYTES",
     "ArtifactKind",
-    "AssetAvailability",
     "AssetDisposition",
     "CacheRemovalAsset",
     "CacheRemovalBlocker",

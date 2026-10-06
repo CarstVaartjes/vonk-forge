@@ -17,7 +17,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import ReservationState, canonical_message
 from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
@@ -1554,7 +1554,7 @@ class RecipeBuildService:
                     amount_bytes=disk_bytes,
                     owner_kind="recipe-build",
                     owner_id=plan.build_id,
-                    state="active",
+                    state=ReservationState.ACTIVE,
                     plan_digest=plan.build_input_sha256,
                     created_at=now,
                 ),
@@ -1565,7 +1565,7 @@ class RecipeBuildService:
                     amount_bytes=memory_bytes,
                     owner_kind="recipe-build",
                     owner_id=plan.build_id,
-                    state="active",
+                    state=ReservationState.ACTIVE,
                     plan_digest=plan.build_input_sha256,
                     created_at=now,
                 ),
@@ -1632,7 +1632,9 @@ def _available_build_memory(
             select(ResourceReservation)
             .where(
                 ResourceReservation.node_id == snapshot.node_id,
-                ResourceReservation.state.in_(("active", "promised")),
+                ResourceReservation.state.in_(
+                    (ReservationState.ACTIVE, ReservationState.PROMISED)
+                ),
             )
             .order_by(ResourceReservation.id)
             .with_for_update(nowait=True)

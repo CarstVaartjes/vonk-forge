@@ -35,6 +35,7 @@ from .artifact_storage_impact_retention import ArtifactStorageImpactRetention
 from .artifact_storage_impact_running_coverage import ArtifactStorageImpactRunningCoverage
 from .artifact_storage_impact_spark_coverage import ArtifactStorageImpactSparkCoverage
 from .artifact_verification_evidence import ArtifactVerificationEvidence
+from .asset_availability import AssetAvailability
 from .availability_operation_failure import AvailabilityOperationFailure
 from .availability_recovery_action import AvailabilityRecoveryAction
 from .blocker_category import BlockerCategory
@@ -48,7 +49,6 @@ from .build_patch import BuildPatch
 from .build_source_evidence import BuildSourceEvidence
 from .build_source_evidence_state import BuildSourceEvidenceState
 from .cache_removal_asset import CacheRemovalAsset
-from .cache_removal_asset_availability import CacheRemovalAssetAvailability
 from .cache_removal_asset_disposition import CacheRemovalAssetDisposition
 from .cache_removal_asset_kind import CacheRemovalAssetKind
 from .cache_removal_blocker import CacheRemovalBlocker
@@ -60,6 +60,8 @@ from .cache_removal_review_resource_kind import CacheRemovalReviewResourceKind
 from .cancel_request import CancelRequest
 from .capacity_reservations import CapacityReservations
 from .catalog_problem import CatalogProblem
+from .catalog_sync_state import CatalogSyncState
+from .certificate_state import CertificateState
 from .compatibility_identity import CompatibilityIdentity
 from .compatibility_preparation import CompatibilityPreparation
 from .compatibility_preparation_kind import CompatibilityPreparationKind
@@ -72,6 +74,8 @@ from .conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
+from .desired_assignment_state import DesiredAssignmentState
+from .distribution_assignment_state import DistributionAssignmentState
 from .distribution_object import DistributionObject
 from .effective_parallelism import EffectiveParallelism
 from .effective_settings_selection import EffectiveSettingsSelection
@@ -80,12 +84,13 @@ from .effective_settings_selection_change_effects_additional_property import Eff
 from .effective_settings_selection_kind import EffectiveSettingsSelectionKind
 from .effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs
 from .endpoint_response import EndpointResponse
+from .endpoint_state import EndpointState
 from .enrollment_grant_response import EnrollmentGrantResponse
 from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInstallerUrl
 from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
+from .enrollment_grant_state import EnrollmentGrantState
 from .enrollment_grant_status import EnrollmentGrantStatus
 from .enrollment_grant_status_purpose import EnrollmentGrantStatusPurpose
-from .enrollment_grant_status_state import EnrollmentGrantStatusState
 from .enum_parameter import EnumParameter
 from .error_catalog import ErrorCatalog
 from .error_category import ErrorCategory
@@ -134,17 +139,13 @@ from .fleet_profile_application_view_reason_code_type_0 import FleetProfileAppli
 from .fleet_profile_application_view_state import FleetProfileApplicationViewState
 from .fleet_profile_assignment import FleetProfileAssignment
 from .fleet_profile_assignment_assessment import FleetProfileAssignmentAssessment
-from .fleet_profile_assignment_desired_state import FleetProfileAssignmentDesiredState
 from .fleet_profile_assignment_failure import FleetProfileAssignmentFailure
 from .fleet_profile_assignment_input import FleetProfileAssignmentInput
-from .fleet_profile_assignment_input_desired_state import FleetProfileAssignmentInputDesiredState
 from .fleet_profile_assignment_input_option_choices import FleetProfileAssignmentInputOptionChoices
 from .fleet_profile_assignment_option_choices import FleetProfileAssignmentOptionChoices
 from .fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
 from .fleet_profile_assignment_preview import FleetProfileAssignmentPreview
 from .fleet_profile_assignment_preview_actions_item import FleetProfileAssignmentPreviewActionsItem
-from .fleet_profile_assignment_preview_current_state import FleetProfileAssignmentPreviewCurrentState
-from .fleet_profile_assignment_preview_desired_state import FleetProfileAssignmentPreviewDesiredState
 from .fleet_profile_assignment_preview_option_choices import FleetProfileAssignmentPreviewOptionChoices
 from .fleet_profile_assignment_view import FleetProfileAssignmentView
 from .fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel
@@ -162,8 +163,6 @@ from .fleet_profile_definition_labels import FleetProfileDefinitionLabels
 from .fleet_profile_definition_view import FleetProfileDefinitionView
 from .fleet_profile_effects import FleetProfileEffects
 from .fleet_profile_endpoint_assignment_view import FleetProfileEndpointAssignmentView
-from .fleet_profile_endpoint_assignment_view_desired_state import FleetProfileEndpointAssignmentViewDesiredState
-from .fleet_profile_endpoint_assignment_view_state import FleetProfileEndpointAssignmentViewState
 from .fleet_profile_endpoint_projection_issue import FleetProfileEndpointProjectionIssue
 from .fleet_profile_endpoints_view import FleetProfileEndpointsView
 from .fleet_profile_endpoints_view_application_state_type_0 import FleetProfileEndpointsViewApplicationStateType0
@@ -225,16 +224,17 @@ from .gateway_key_created import GatewayKeyCreated
 from .gateway_key_list import GatewayKeyList
 from .gateway_key_revoked import GatewayKeyRevoked
 from .gateway_key_view import GatewayKeyView
+from .gateway_route_state import GatewayRouteState
 from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from .git_hub_release_asset import GitHubReleaseAsset
 from .git_hub_release_source import GitHubReleaseSource
 from .install_partial_evidence import InstallPartialEvidence
-from .install_partial_evidence_group_state import InstallPartialEvidenceGroupState
-from .install_partial_evidence_rank_state import InstallPartialEvidenceRankState
 from .install_partial_evidence_reason import InstallPartialEvidenceReason
 from .installation_node_change import InstallationNodeChange
 from .installation_node_payload import InstallationNodePayload
+from .installation_node_state import InstallationNodeState
 from .installation_reconcile_request import InstallationReconcileRequest
+from .installation_state import InstallationState
 from .integer_parameter import IntegerParameter
 from .invalid_request import InvalidRequest
 from .invalid_request_reason import InvalidRequestReason
@@ -279,7 +279,6 @@ from .managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
 from .managed_catalog_sync_failure import ManagedCatalogSyncFailure
 from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
 from .managed_catalog_sync_response import ManagedCatalogSyncResponse
-from .managed_catalog_sync_response_state import ManagedCatalogSyncResponseState
 from .managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
 from .managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
 from .mapping_selection import MappingSelection
@@ -298,6 +297,7 @@ from .model_cache_operator_request import ModelCacheOperatorRequest
 from .model_cache_operator_response import ModelCacheOperatorResponse
 from .model_cache_operator_response_action import ModelCacheOperatorResponseAction
 from .model_cache_operator_response_state_type_1 import ModelCacheOperatorResponseStateType1
+from .model_cache_operator_status import ModelCacheOperatorStatus
 from .model_cache_removal_request import ModelCacheRemovalRequest
 from .model_cache_removal_result import ModelCacheRemovalResult
 from .model_definition import ModelDefinition
@@ -306,6 +306,7 @@ from .model_detail_response import ModelDetailResponse
 from .model_family import ModelFamily
 from .model_file import ModelFile
 from .model_file_part import ModelFilePart
+from .model_file_state import ModelFileState
 from .model_format import ModelFormat
 from .model_identity import ModelIdentity
 from .model_library_response import ModelLibraryResponse
@@ -319,13 +320,13 @@ from .network_interface import NetworkInterface
 from .network_interface_kind import NetworkInterfaceKind
 from .node_connection import NodeConnection
 from .node_connection_agent_state import NodeConnectionAgentState
-from .node_connection_certificate_state import NodeConnectionCertificateState
 from .node_connection_offline_reason_type_0 import NodeConnectionOfflineReasonType0
 from .node_connection_online_state import NodeConnectionOnlineState
 from .node_distribution_assignment import NodeDistributionAssignment
 from .node_profile_change import NodeProfileChange
 from .node_profile_payload import NodeProfilePayload
 from .observation_cause import ObservationCause
+from .observed_assignment_state import ObservedAssignmentState
 from .operation_blocker import OperationBlocker
 from .operation_blocker_severity import OperationBlockerSeverity
 from .operation_checkpoint import OperationCheckpoint
@@ -346,6 +347,8 @@ from .outcome_kind import OutcomeKind
 from .output_limits import OutputLimits
 from .package_activation_receipt import PackageActivationReceipt
 from .package_activation_receipt_phase import PackageActivationReceiptPhase
+from .placement_install_state import PlacementInstallState
+from .placement_load_state import PlacementLoadState
 from .preparation_reason import PreparationReason
 from .preparation_reason_severity import PreparationReasonSeverity
 from .projection_reason import ProjectionReason
@@ -415,8 +418,6 @@ from .recipe_output_slot import RecipeOutputSlot
 from .recipe_parallelism import RecipeParallelism
 from .recipe_presence import RecipePresence
 from .recipe_presence_degraded_reason_type_0 import RecipePresenceDegradedReasonType0
-from .recipe_presence_group_state import RecipePresenceGroupState
-from .recipe_presence_rank_state import RecipePresenceRankState
 from .recipe_provenance import RecipeProvenance
 from .recipe_readiness import RecipeReadiness
 from .recipe_readiness_check import RecipeReadinessCheck
@@ -456,10 +457,13 @@ from .recipe_validation_check_kind import RecipeValidationCheckKind
 from .removed_recipe_node_result import RemovedRecipeNodeResult
 from .request_validation_issue import RequestValidationIssue
 from .request_validation_problem import RequestValidationProblem
+from .reservation_state import ReservationState
 from .resource_blocker_code import ResourceBlockerCode
 from .resource_demand_evidence import ResourceDemandEvidence
 from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
 from .rollout_preparation import RolloutPreparation
+from .route_publication_state import RoutePublicationState
+from .route_state import RouteState
 from .run_admission_code import RunAdmissionCode
 from .run_memory_residual_range import RunMemoryResidualRange
 from .run_memory_residual_range_reservation_kind import RunMemoryResidualRangeReservationKind
@@ -469,9 +473,7 @@ from .run_presence import RunPresence
 from .run_presence_degraded_reason_type_0 import RunPresenceDegradedReasonType0
 from .run_presence_group_state import RunPresenceGroupState
 from .run_presence_option_choices import RunPresenceOptionChoices
-from .run_presence_rank_state import RunPresenceRankState
-from .run_presence_route_state import RunPresenceRouteState
-from .run_presence_run_state import RunPresenceRunState
+from .run_state import RunState
 from .run_switch_assessment import RunSwitchAssessment
 from .run_switch_build_evidence import RunSwitchBuildEvidence
 from .run_switch_build_evidence_state import RunSwitchBuildEvidenceState
@@ -617,6 +619,7 @@ __all__ = (
     "ArtifactStorageImpactRunningCoverage",
     "ArtifactStorageImpactSparkCoverage",
     "ArtifactVerificationEvidence",
+    "AssetAvailability",
     "AvailabilityOperationFailure",
     "AvailabilityRecoveryAction",
     "BlockerCategory",
@@ -630,7 +633,6 @@ __all__ = (
     "BuildSourceEvidence",
     "BuildSourceEvidenceState",
     "CacheRemovalAsset",
-    "CacheRemovalAssetAvailability",
     "CacheRemovalAssetDisposition",
     "CacheRemovalAssetKind",
     "CacheRemovalBlocker",
@@ -642,6 +644,8 @@ __all__ = (
     "CancelRequest",
     "CapacityReservations",
     "CatalogProblem",
+    "CatalogSyncState",
+    "CertificateState",
     "CompatibilityIdentity",
     "CompatibilityPreparation",
     "CompatibilityPreparationKind",
@@ -654,6 +658,8 @@ __all__ = (
     "ControllerAssetState",
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
+    "DesiredAssignmentState",
+    "DistributionAssignmentState",
     "DistributionObject",
     "EffectiveParallelism",
     "EffectiveSettingsSelection",
@@ -662,12 +668,13 @@ __all__ = (
     "EffectiveSettingsSelectionKind",
     "EffectiveSettingsSelectionKnobs",
     "EndpointResponse",
+    "EndpointState",
     "EnrollmentGrantResponse",
     "EnrollmentGrantResponseInstallerUrl",
     "EnrollmentGrantResponsePurpose",
+    "EnrollmentGrantState",
     "EnrollmentGrantStatus",
     "EnrollmentGrantStatusPurpose",
-    "EnrollmentGrantStatusState",
     "EnumParameter",
     "ErrorCatalog",
     "ErrorCategory",
@@ -716,17 +723,13 @@ __all__ = (
     "FleetProfileApplicationViewState",
     "FleetProfileAssignment",
     "FleetProfileAssignmentAssessment",
-    "FleetProfileAssignmentDesiredState",
     "FleetProfileAssignmentFailure",
     "FleetProfileAssignmentInput",
-    "FleetProfileAssignmentInputDesiredState",
     "FleetProfileAssignmentInputOptionChoices",
     "FleetProfileAssignmentOptionChoices",
     "FleetProfileAssignmentPreparation",
     "FleetProfileAssignmentPreview",
     "FleetProfileAssignmentPreviewActionsItem",
-    "FleetProfileAssignmentPreviewCurrentState",
-    "FleetProfileAssignmentPreviewDesiredState",
     "FleetProfileAssignmentPreviewOptionChoices",
     "FleetProfileAssignmentView",
     "FleetProfileAssignmentViewModel",
@@ -744,8 +747,6 @@ __all__ = (
     "FleetProfileDefinitionView",
     "FleetProfileEffects",
     "FleetProfileEndpointAssignmentView",
-    "FleetProfileEndpointAssignmentViewDesiredState",
-    "FleetProfileEndpointAssignmentViewState",
     "FleetProfileEndpointProjectionIssue",
     "FleetProfileEndpointsView",
     "FleetProfileEndpointsViewApplicationStateType0",
@@ -807,15 +808,16 @@ __all__ = (
     "GatewayKeyList",
     "GatewayKeyRevoked",
     "GatewayKeyView",
+    "GatewayRouteState",
     "GetFleetLogInfoSourceType0",
     "GitHubReleaseAsset",
     "GitHubReleaseSource",
     "InstallationNodeChange",
     "InstallationNodePayload",
+    "InstallationNodeState",
     "InstallationReconcileRequest",
+    "InstallationState",
     "InstallPartialEvidence",
-    "InstallPartialEvidenceGroupState",
-    "InstallPartialEvidenceRankState",
     "InstallPartialEvidenceReason",
     "IntegerParameter",
     "InvalidRequest",
@@ -861,7 +863,6 @@ __all__ = (
     "ManagedCatalogSyncFailure",
     "ManagedCatalogSyncProblem",
     "ManagedCatalogSyncResponse",
-    "ManagedCatalogSyncResponseState",
     "ManagedCatalogSyncResponseTrigger",
     "ManagedCatalogWithdrawnRecipe",
     "MappingSelection",
@@ -880,6 +881,7 @@ __all__ = (
     "ModelCacheOperatorResponse",
     "ModelCacheOperatorResponseAction",
     "ModelCacheOperatorResponseStateType1",
+    "ModelCacheOperatorStatus",
     "ModelCacheRemovalRequest",
     "ModelCacheRemovalResult",
     "ModelDefinition",
@@ -888,6 +890,7 @@ __all__ = (
     "ModelFamily",
     "ModelFile",
     "ModelFilePart",
+    "ModelFileState",
     "ModelFormat",
     "ModelIdentity",
     "ModelLibraryResponse",
@@ -901,13 +904,13 @@ __all__ = (
     "NetworkInterfaceKind",
     "NodeConnection",
     "NodeConnectionAgentState",
-    "NodeConnectionCertificateState",
     "NodeConnectionOfflineReasonType0",
     "NodeConnectionOnlineState",
     "NodeDistributionAssignment",
     "NodeProfileChange",
     "NodeProfilePayload",
     "ObservationCause",
+    "ObservedAssignmentState",
     "OperationBlocker",
     "OperationBlockerSeverity",
     "OperationCheckpoint",
@@ -928,6 +931,8 @@ __all__ = (
     "OutputLimits",
     "PackageActivationReceipt",
     "PackageActivationReceiptPhase",
+    "PlacementInstallState",
+    "PlacementLoadState",
     "PreparationReason",
     "PreparationReasonSeverity",
     "ProjectionReason",
@@ -997,8 +1002,6 @@ __all__ = (
     "RecipeParallelism",
     "RecipePresence",
     "RecipePresenceDegradedReasonType0",
-    "RecipePresenceGroupState",
-    "RecipePresenceRankState",
     "RecipeProvenance",
     "RecipeReadiness",
     "RecipeReadinessCheck",
@@ -1038,10 +1041,13 @@ __all__ = (
     "RemovedRecipeNodeResult",
     "RequestValidationIssue",
     "RequestValidationProblem",
+    "ReservationState",
     "ResourceBlockerCode",
     "ResourceDemandEvidence",
     "ResourceDemandEvidenceEvidenceState",
     "RolloutPreparation",
+    "RoutePublicationState",
+    "RouteState",
     "RunAdmissionCode",
     "RunMemoryResidualRange",
     "RunMemoryResidualRangeReservationKind",
@@ -1051,9 +1057,7 @@ __all__ = (
     "RunPresenceDegradedReasonType0",
     "RunPresenceGroupState",
     "RunPresenceOptionChoices",
-    "RunPresenceRankState",
-    "RunPresenceRouteState",
-    "RunPresenceRunState",
+    "RunState",
     "RunSwitchAssessment",
     "RunSwitchBuildEvidence",
     "RunSwitchBuildEvidenceState",

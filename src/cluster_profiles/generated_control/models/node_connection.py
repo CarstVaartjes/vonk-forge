@@ -8,10 +8,10 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.certificate_state import CertificateState
+from ..models.certificate_state import check_certificate_state
 from ..models.node_connection_agent_state import check_node_connection_agent_state
 from ..models.node_connection_agent_state import NodeConnectionAgentState
-from ..models.node_connection_certificate_state import check_node_connection_certificate_state
-from ..models.node_connection_certificate_state import NodeConnectionCertificateState
 from ..models.node_connection_offline_reason_type_0 import check_node_connection_offline_reason_type_0
 from ..models.node_connection_offline_reason_type_0 import NodeConnectionOfflineReasonType0
 from ..models.node_connection_online_state import check_node_connection_online_state
@@ -33,7 +33,8 @@ class NodeConnection:
     """
         Attributes:
             agent_state (NodeConnectionAgentState):
-            certificate_state (NodeConnectionCertificateState):
+            certificate_state (CertificateState): The standing of a node's client certificate, as the fleet projection shows
+                it.
             last_seen_age_seconds (float | None):
             last_seen_at (datetime.datetime | None):
             offline_reason (NodeConnectionOfflineReasonType0 | None):
@@ -41,7 +42,7 @@ class NodeConnection:
      """
 
     agent_state: NodeConnectionAgentState
-    certificate_state: NodeConnectionCertificateState
+    certificate_state: CertificateState
     last_seen_age_seconds: float | None
     last_seen_at: datetime.datetime | None
     offline_reason: NodeConnectionOfflineReasonType0 | None
@@ -97,7 +98,7 @@ class NodeConnection:
 
 
 
-        certificate_state = check_node_connection_certificate_state(d.pop("certificate_state"))
+        certificate_state = check_certificate_state(d.pop("certificate_state"))
 
 
 

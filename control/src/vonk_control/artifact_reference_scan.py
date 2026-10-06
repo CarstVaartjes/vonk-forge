@@ -15,7 +15,11 @@ from typing import Literal
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    LifecycleState,
+    RunState,
+    canonical_message,
+)
 
 from . import job_states, model_cache_states
 from .artifact_lifecycle import (
@@ -28,6 +32,7 @@ from .fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfilePreview,
 )
+from .machine_states import DISTRIBUTION_HELD, INSTALLATION_ACTIVE
 from .model_cache_contract import CacheManifest
 from .models import (
     ArtifactDistributionAssignment,
@@ -62,8 +67,8 @@ _ACTIVE_RUN_SWITCH_JOBS = job_states.words(
     LifecycleState.BACKOFF,
     LifecycleState.NEEDS_OPERATOR,
 )
-_ACTIVE_INSTALLATIONS = ("planned", "installing", "installed", "partial")
-_ACTIVE_RUNS = ("starting", "running", "stopping")
+_ACTIVE_INSTALLATIONS = INSTALLATION_ACTIVE
+_ACTIVE_RUNS = (RunState.STARTING, RunState.RUNNING, RunState.STOPPING)
 _ACTIVE_ARTIFACT_JOBS = job_states.words(
     LifecycleState.QUEUED,
     LifecycleState.RUNNING,
@@ -441,7 +446,7 @@ def model_set_reference_findings(
         select(ArtifactDistributionAssignment)
         # Expiry does not prove that a serving worker has stopped. Explicit
         # revocation is the existing durable fence for this reference owner.
-        .where(ArtifactDistributionAssignment.state.in_(("active", "expired")))
+        .where(ArtifactDistributionAssignment.state.in_(DISTRIBUTION_HELD))
         .order_by(ArtifactDistributionAssignment.id)
     ):
         account(distribution.objects)
@@ -702,7 +707,7 @@ def runtime_image_reference_findings(
     for distribution in session.scalars(
         select(ArtifactDistributionAssignment)
         # Expiry is only a serving deadline; it does not fence a stale worker.
-        .where(ArtifactDistributionAssignment.state.in_(("active", "expired")))
+        .where(ArtifactDistributionAssignment.state.in_(DISTRIBUTION_HELD))
         .order_by(ArtifactDistributionAssignment.id)
     ):
         if distribution.oci_archive_sha256 in selected:

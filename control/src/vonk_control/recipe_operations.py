@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    InstallationNodeState,
+    InstallationState,
     InvalidRequestError,
     LifecycleState,
     RecipeBuildCleanupEvidence,
@@ -28,6 +30,9 @@ from vonk_agent_protocol import (
     RecipeStartResult,
     RecipeStopPayload,
     RecipeUninstallPayload,
+    ReservationState,
+    RouteState,
+    RunState,
     SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
@@ -1596,9 +1601,14 @@ class RecipeOperationService:
                 RecipeInstallation.recipe_build_id == plan.recipe_build_id,
                 RecipeInstallation.plan_digest == plan.plan_digest,
                 RecipeInstallation.state.in_(
-                    ("planned",)
+                    (InstallationState.PLANNED,)
                     if planned_only
-                    else ("planned", "installing", "partial", "installed")
+                    else (
+                        InstallationState.PLANNED,
+                        InstallationState.INSTALLING,
+                        InstallationState.PARTIAL,
+                        InstallationState.INSTALLED,
+                    )
                 ),
             )
             .order_by(RecipeInstallation.created_at.desc())
@@ -1720,7 +1730,7 @@ class RecipeOperationService:
             if reconciliation is not None:
                 raise RecipeRetryLater("recipe installation is being reconciled")
             receipt_missing = False
-            if installation.state == "installed":
+            if installation.state == InstallationState.INSTALLED:
                 completed = session.scalar(
                     select(Job)
                     .where(
@@ -1767,10 +1777,10 @@ class RecipeOperationService:
                     )
                 return self._view(active)
             if not receipt_missing and installation.state not in {
-                "planned",
-                "partial",
-                "failed",
-                "installing",
+                InstallationState.PLANNED,
+                InstallationState.PARTIAL,
+                InstallationState.FAILED,
+                InstallationState.INSTALLING,
             }:
                 raise RecipeRequestInvalid("recipe installation is not launchable")
             nodes = tuple(
@@ -1791,10 +1801,10 @@ class RecipeOperationService:
             revision = _active_recipe_revision(session, installation.recipe_revision_id)
             if revision is None or revision.content_digest is None:
                 raise RecipeRequestInvalid("recipe revision is unavailable")
-            installation.state = "installing"
+            installation.state = InstallationState.INSTALLING
             installation.updated_at = now
             for node in nodes:
-                node.state = "planned"
+                node.state = InstallationNodeState.PLANNED
                 node.updated_at = now
             job = self._queue_in_session(
                 session,
@@ -2123,7 +2133,7 @@ class RecipeOperationService:
                 raise RecipeRequestInvalid(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             assert installation is not None
-            installation.state = "installing"
+            installation.state = InstallationState.INSTALLING
             installation.updated_at = now
             compiled_plans = plan.compiled_plan_by_node
             if set(compiled_plans) != {node.node_id for node in plan.nodes}:
@@ -2293,7 +2303,7 @@ class RecipeOperationService:
                 if two_phase_start
                 else None
             )
-            run.state = "starting"
+            run.state = RunState.STARTING
             run.updated_at = now
             recipe_digest = revision.content_digest
             assert recipe_digest is not None
@@ -2402,13 +2412,13 @@ class RecipeOperationService:
     ) -> Job:
         """Enqueue one fenced job without changing the service run lifecycle."""
         run = session.get(RecipeRun, run_id, with_for_update=True)
-        if run is None or run.state != "running":
+        if run is None or run.state != RunState.RUNNING:
             raise RecipeOperationConflict("recipe run is not accepting jobs")
         node = session.scalar(
             select(RunNode).where(
                 RunNode.run_id == run_id,
                 RunNode.node_id == node_id,
-                RunNode.state == "running",
+                RunNode.state == RunState.RUNNING,
             )
         )
         if node is None:
@@ -2510,8 +2520,8 @@ class RecipeOperationService:
                 raise RecipeRequestInvalid(str(error)) from error
             run = session.get(RecipeRun, run_id)
             assert run is not None and revision is not None
-            run.state = "running"
-            run.route_state = "withdrawn"
+            run.state = RunState.RUNNING
+            run.route_state = RouteState.WITHDRAWN
             # The run row was written by this very transaction: its plan must
             # accept the one-shot mode before anything can commit it.
             try:
@@ -2529,7 +2539,7 @@ class RecipeOperationService:
                 )
             )
             for node in nodes:
-                node.state = "running"
+                node.state = RunState.RUNNING
                 node.updated_at = now
             targets = sorted(node.node_id for node in nodes)
             target_nodes = tuple(
@@ -3064,7 +3074,11 @@ class RecipeOperationService:
         """
 
         run = session.get(RecipeRun, run_id, with_for_update=True)
-        if run is None or run.state != "running" or run.route_state != "withdrawn":
+        if (
+            run is None
+            or run.state != RunState.RUNNING
+            or run.route_state != RouteState.WITHDRAWN
+        ):
             return retire_as_unknown(
                 "recipe.recovery",
                 run_id,
@@ -3285,8 +3299,8 @@ class RecipeOperationService:
         stop_phases = (
             _role_phases(stop_order, stop_payloads) if stop_order is not None else None
         )
-        run.state = "stopping"
-        run.route_state = "withdrawn"
+        run.state = RunState.STOPPING
+        run.route_state = RouteState.WITHDRAWN
         run.updated_at = now
         job = self._queue_in_session(
             session,
@@ -3637,7 +3651,10 @@ class RecipeOperationService:
                 "reconcile.installation_identity_mismatch",
                 "The relational model identity differs from the exact accepted recipe revision.",
             )
-        if installation.state not in {"installed", "partial"}:
+        if installation.state not in {
+            InstallationState.INSTALLED,
+            InstallationState.PARTIAL,
+        }:
             blocked(
                 "reconcile.installation_effect_unknown",
                 f"Installation state {installation.state} does not prove a complete installed effect.",
@@ -3713,7 +3730,7 @@ class RecipeOperationService:
             active_runs_statement = active_runs_statement.with_for_update(of=RecipeRun)
         installation_runs = tuple(session.scalars(active_runs_statement))
         if any(
-            run.state != "stopped" or run.route_state != "withdrawn"
+            run.state != RunState.STOPPED or run.route_state != RouteState.WITHDRAWN
             for run in installation_runs
         ):
             blocked(
@@ -3956,7 +3973,9 @@ class RecipeOperationService:
                     rank=node.rank,
                     role=node.role,
                     installed_bytes=node.installed_bytes,
-                    state="reconciled" if node.state == "uninstalled" else "pending",
+                    state="reconciled"
+                    if node.state == InstallationNodeState.UNINSTALLED
+                    else "pending",
                 )
             )
 
@@ -4174,7 +4193,7 @@ class RecipeOperationService:
                             },
                         )
                         for node in plan.nodes
-                        if node.state != "uninstalled"
+                        if node.state != InstallationNodeState.UNINSTALLED
                     ),
                     authority_digest=plan.installation_authority_digest,
                     now=now,
@@ -4219,7 +4238,7 @@ class RecipeOperationService:
             )
             if installation is None:
                 raise RecipeRequestInvalid("recipe installation does not exist")
-            if installation.state == "uninstalled":
+            if installation.state == InstallationState.UNINSTALLED:
                 # A restarted cleanup phase replays the disposal.  The row is
                 # already resolved, so the replay succeeds instead of failing
                 # the operation after the effect has landed.
@@ -4240,9 +4259,9 @@ class RecipeOperationService:
                 )
             )
             for node in nodes:
-                node.state = "uninstalled"
+                node.state = InstallationNodeState.UNINSTALLED
                 node.updated_at = now
-            installation.state = "uninstalled"
+            installation.state = InstallationState.UNINSTALLED
             installation.updated_at = now
             self._release(session, "installation", installation_id, now)
         return {
@@ -4304,7 +4323,10 @@ class RecipeOperationService:
         if previous_plan_digest is None or owner_id is None:
             raise RecipeRequestInvalid("recipe operation is not retryable")
         installation = session.get(RecipeInstallation, owner_id, with_for_update=True)
-        if installation is None or installation.state not in {"partial", "failed"}:
+        if installation is None or installation.state not in {
+            InstallationState.PARTIAL,
+            InstallationState.FAILED,
+        }:
             raise RecipeRequestInvalid("recipe installation is not retryable")
         nodes = tuple(
             session.scalars(
@@ -4324,10 +4346,10 @@ class RecipeOperationService:
                 "stored compiled execution plan is unreadable for install retry; it "
                 "is recorded and the next preparation installs afresh"
             )
-        installation.state = "installing"
+        installation.state = InstallationState.INSTALLING
         installation.updated_at = now
         for node in nodes:
-            node.state = "planned"
+            node.state = InstallationNodeState.PLANNED
         # The attempt that failed may have had its disk claim released as
         # abandoned (nothing was issued for it); the retry is that operation
         # again, so it takes the same exact claim back.
@@ -4336,11 +4358,11 @@ class RecipeOperationService:
                 ResourceReservation.owner_kind == "installation",
                 ResourceReservation.owner_id == owner_id,
                 ResourceReservation.kind == "disk",
-                ResourceReservation.state == "released",
+                ResourceReservation.state == ReservationState.RELEASED,
                 ResourceReservation.plan_digest == previous_plan_digest,
             )
         ):
-            claim.state = "active"
+            claim.state = ReservationState.ACTIVE
             claim.released_at = None
         return self._queue_in_session(
             session,
@@ -4570,7 +4592,7 @@ class RecipeOperationService:
                     )
                 node.state = _RANK_FAILED
                 node.updated_at = now
-                installation.state = "partial"
+                installation.state = InstallationState.PARTIAL
                 installation.updated_at = now
             elif job.kind in {"recipe.start", "recipe.stop"}:
                 node = session.scalar(
@@ -4585,10 +4607,10 @@ class RecipeOperationService:
                     raise RecipeOperationConflict("run cancellation scope changed")
                 # The agent sends cancelled only after its exact host STOP has
                 # returned. Keep reservations for the current intent's stop.
-                node.state = "stopped"
+                node.state = RunState.STOPPED
                 node.updated_at = now
-                run.state = "lost"
-                run.route_state = "withdrawn"
+                run.state = RunState.LOST
+                run.route_state = RouteState.WITHDRAWN
                 run.updated_at = now
             return
         if state == agent_operation_states.WIRE_UNKNOWN and isinstance(result, Mapping):
@@ -4701,7 +4723,7 @@ class RecipeOperationService:
             )
         )
         return {node.node_id for node in node_rows} == set(targets) and all(
-            node.state == "uninstalled" for node in node_rows
+            node.state == InstallationNodeState.UNINSTALLED for node in node_rows
         )
 
     def _apply_build_cleanup(
@@ -4912,7 +4934,11 @@ class RecipeOperationService:
                 )
             )
             assert node is not None
-            node.state = "installed" if succeeded else "failed"
+            node.state = (
+                InstallationNodeState.INSTALLED
+                if succeeded
+                else InstallationNodeState.FAILED
+            )
             if succeeded:
                 installed_bytes = evidence.get("installed_bytes")
                 if (
@@ -4941,7 +4967,7 @@ class RecipeOperationService:
                 if not succeeded:
                     node.state = _RANK_FAILED
                 elif node.state != "failed":
-                    node.state = "starting"
+                    node.state = RunState.STARTING
                 if succeeded:
                     launch_endpoint = _start_endpoint(operation, evidence)
                     if isinstance(launch_endpoint, Residue):
@@ -4976,7 +5002,7 @@ class RecipeOperationService:
                         unproven[node_id] = "collective readiness preceded rank launch"
                     else:
                         for started_node in run_nodes:
-                            started_node.state = "running"
+                            started_node.state = RunState.RUNNING
                             started_node.updated_at = now
                         try:
                             node.endpoint = run_endpoint_document({"url": endpoint})
@@ -4988,11 +5014,11 @@ class RecipeOperationService:
                 node.updated_at = now
             else:
                 node.state = (
-                    "running"
+                    RunState.RUNNING
                     if job.kind == "recipe.start" and succeeded
-                    else "stopped"
+                    else RunState.STOPPED
                     if succeeded
-                    else "failed"
+                    else RunState.FAILED
                 )
                 if job.kind == "recipe.start" and succeeded:
                     endpoint = _start_endpoint(operation, evidence)
@@ -5109,7 +5135,11 @@ class RecipeOperationService:
                     "reconciliation operation differs from its reviewed authority"
                 )
             else:
-                node.state = "uninstalled" if succeeded else "failed"
+                node.state = (
+                    InstallationNodeState.UNINSTALLED
+                    if succeeded
+                    else InstallationNodeState.FAILED
+                )
                 node.updated_at = now
         elif job.kind == "recipe.uninstall":
             node = session.scalar(
@@ -5119,7 +5149,11 @@ class RecipeOperationService:
                 )
             )
             assert node is not None
-            node.state = "uninstalled" if succeeded else "failed"
+            node.state = (
+                InstallationNodeState.UNINSTALLED
+                if succeeded
+                else InstallationNodeState.FAILED
+            )
             node.updated_at = now
         recorded_result = _recorded_result(job.kind, job.result, subject=job.id) or {}
         evidence_field = (
@@ -5378,14 +5412,16 @@ class RecipeOperationService:
             elif job.kind == "recipe.install":
                 installation = session.get(RecipeInstallation, owner_id)
                 assert installation is not None
-                installation.state = "partial" if failed else "installed"
+                installation.state = (
+                    InstallationState.PARTIAL if failed else InstallationState.INSTALLED
+                )
                 installation.updated_at = now
             elif job.kind == "recipe.start":
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
                 if start_failed:
-                    run.state = "stopping"
-                    run.route_state = "withdrawn"
+                    run.state = RunState.STOPPING
+                    run.route_state = RouteState.WITHDRAWN
                     run.route_error = (
                         f"{recovery_error}; cleanup queued"
                         if recovery_error is not None
@@ -5402,7 +5438,7 @@ class RecipeOperationService:
                         session, intent, job.targets
                     )
                     if not intent_current:
-                        run.state = "failed"
+                        run.state = RunState.FAILED
                         run.route_error = (
                             "start cleanup superseded by a newer workload intent"
                             if intent is not None
@@ -5461,7 +5497,7 @@ class RecipeOperationService:
                                 BookkeepingReason.ROW_INCOMPLETE,
                                 "failed Start lacks exact cleanup authority",
                             )
-                            run.state = "failed"
+                            run.state = RunState.FAILED
                             run.route_error = (
                                 "failed recipe Start lacks exact cleanup authority"
                             )
@@ -5499,8 +5535,8 @@ class RecipeOperationService:
                             )
                             cleanup_queued = True
                 else:
-                    run.state = "running"
-                    run.route_state = "pending"
+                    run.state = RunState.RUNNING
+                    run.route_state = RouteState.PENDING
                     run.route_error = None
                 run.updated_at = now
             elif job.kind == "recipe.stop":
@@ -5608,8 +5644,8 @@ class RecipeOperationService:
                             "start_deadline": marker["deadline"],
                         },
                     )
-                    run.state = "starting"
-                    run.route_state = "withdrawn"
+                    run.state = RunState.STARTING
+                    run.route_state = RouteState.WITHDRAWN
                     run.route_error = "distributed recovery restarting"
                     run.updated_at = now
                     cleanup_queued = True
@@ -5662,12 +5698,12 @@ class RecipeOperationService:
                         == {node.node_id for node in full_run_nodes}
                         and bool(partial_missing)
                         and all(
-                            node.state == "stopped"
+                            node.state == RunState.STOPPED
                             for node in full_run_nodes
                             if node.node_id in partial_targets
                         )
                         and all(
-                            node.state != "stopped"
+                            node.state != RunState.STOPPED
                             for node in full_run_nodes
                             if node.node_id in partial_missing
                         )
@@ -5679,21 +5715,21 @@ class RecipeOperationService:
                         and parent_damage is None
                     )
                     run.state = (
-                        "lost"
+                        RunState.LOST
                         if partial_success
-                        else "failed"
+                        else RunState.FAILED
                         if failed
                         or recovery_error
                         or partial_scope is not None
                         or parent_damage is not None
-                        else "stopped"
+                        else RunState.STOPPED
                     )
                     run.stopped_at = (
                         now
                         if not failed and not partial_scope and parent_damage is None
                         else None
                     )
-                    run.route_state = "withdrawn"
+                    run.route_state = RouteState.WITHDRAWN
                     if parent_damage is not None:
                         run.route_error = parent_damage[:512]
                     elif partial_success:
@@ -5718,7 +5754,11 @@ class RecipeOperationService:
             elif job.kind == "recipe.uninstall":
                 installation = session.get(RecipeInstallation, owner_id)
                 assert installation is not None
-                installation.state = "failed" if failed else "uninstalled"
+                installation.state = (
+                    InstallationState.FAILED
+                    if failed
+                    else InstallationState.UNINSTALLED
+                )
                 installation.updated_at = now
                 if not failed:
                     self._release(session, "installation", owner_id, now)
@@ -5726,7 +5766,9 @@ class RecipeOperationService:
                 installation = session.get(RecipeInstallation, owner_id)
                 assert installation is not None
                 installation.state = (
-                    "uninstalled" if reconciliation_complete else "partial"
+                    InstallationState.UNINSTALLED
+                    if reconciliation_complete
+                    else InstallationState.PARTIAL
                 )
                 installation.updated_at = now
                 if reconciliation_complete:
@@ -6145,14 +6187,18 @@ class RecipeOperationService:
             completed = (
                 owner is not None
                 and owner.state
-                == ("stopped" if kind == "recipe.stop" else "uninstalled")
+                == (
+                    RunState.STOPPED
+                    if kind == "recipe.stop"
+                    else InstallationState.UNINSTALLED
+                )
                 and session.scalar(
                     select(ResourceReservation.id)
                     .where(
                         ResourceReservation.owner_kind
                         == ("run" if kind == "recipe.stop" else "installation"),
                         ResourceReservation.owner_id == owner_id,
-                        ResourceReservation.state == "active",
+                        ResourceReservation.state == ReservationState.ACTIVE,
                     )
                     .limit(1)
                 )
@@ -6706,10 +6752,10 @@ class RecipeOperationService:
                 return pending
             for node in nodes:
                 if node.node_id in targets:
-                    node.state = "stopped"
+                    node.state = RunState.STOPPED
                     node.updated_at = now
-            run.state = "lost" if admitted.missing_node_ids else "stopped"
-            run.route_state = "withdrawn"
+            run.state = RunState.LOST if admitted.missing_node_ids else RunState.STOPPED
+            run.route_state = RouteState.WITHDRAWN
             run.stopped_at = None if admitted.missing_node_ids else now
             if admitted.missing_node_ids:
                 run.route_error = (
@@ -6998,7 +7044,7 @@ class RecipeOperationService:
                 reason=reason,
             )
         for node in reachable_nodes:
-            node.state = "stopped"
+            node.state = RunState.STOPPED
             node.updated_at = now
         return None
 
@@ -7269,8 +7315,8 @@ class RecipeOperationService:
         node_payloads = tuple(
             (node_id, grouped[node_id][0][0]) for node_id in sorted(grouped)
         )
-        run.state = "stopping"
-        run.route_state = "withdrawn"
+        run.state = RunState.STOPPING
+        run.route_state = RouteState.WITHDRAWN
         run.route_error = "profile Stop is confirming every exact JobRun runtime"
         run.updated_at = now
         job = self._queue_in_session(
@@ -7464,7 +7510,7 @@ class RecipeOperationService:
                 ResourceReservation.owner_kind == "run",
                 ResourceReservation.owner_id == run_id,
                 ResourceReservation.kind.in_(_MEMORY_RESERVATION_KINDS),
-                ResourceReservation.state == "active",
+                ResourceReservation.state == ReservationState.ACTIVE,
             )
             .order_by(
                 ResourceReservation.node_id,
@@ -7630,7 +7676,7 @@ class RecipeOperationService:
             session.scalar(
                 select(func.count(RecipeRun.id)).where(
                     RecipeRun.installation_id == installation_id,
-                    RecipeRun.state != "stopped",
+                    RecipeRun.state != RunState.STOPPED,
                 )
             )
             or 0
@@ -7639,7 +7685,7 @@ class RecipeOperationService:
             select(RecipeRun)
             .where(
                 RecipeRun.installation_id == installation_id,
-                RecipeRun.state != "stopped",
+                RecipeRun.state != RunState.STOPPED,
             )
             .order_by(RecipeRun.id)
             .limit(_MAX_ACTIVE_RUNS)
@@ -7768,7 +7814,11 @@ class RecipeOperationService:
                     # a planned rank's count proves it never installed.
                     installed_bytes=(
                         node.installed_bytes
-                        if node.state in {"installed", "planned"}
+                        if node.state
+                        in {
+                            InstallationNodeState.INSTALLED,
+                            InstallationNodeState.PLANNED,
+                        }
                         else None
                     ),
                 )
@@ -7802,7 +7852,7 @@ class RecipeOperationService:
         lock: bool,
     ) -> dict[str, tuple[str, ...]]:
         statement = select(RecipeInstallation).where(
-            RecipeInstallation.state != "uninstalled"
+            RecipeInstallation.state != InstallationState.UNINSTALLED
         )
         if exclude_installation_id is not None:
             statement = statement.where(
@@ -7822,7 +7872,7 @@ class RecipeOperationService:
             select(InstallationNode.installation_id, InstallationNode.node_id).where(
                 InstallationNode.installation_id.in_(candidate_ids),
                 InstallationNode.node_id.in_(node_ids),
-                InstallationNode.state != "uninstalled",
+                InstallationNode.state != InstallationNodeState.UNINSTALLED,
             )
         ):
             memberships.setdefault(installation_id, set()).add(node_id)
@@ -8334,10 +8384,10 @@ class RecipeOperationService:
                 ResourceReservation.owner_kind == "run",
                 ResourceReservation.owner_id == run_id,
                 ResourceReservation.node_id.in_(node_ids),
-                ResourceReservation.state == "active",
+                ResourceReservation.state == ReservationState.ACTIVE,
             )
         ):
-            reservation.state = "released"
+            reservation.state = ReservationState.RELEASED
             reservation.released_at = now
 
 

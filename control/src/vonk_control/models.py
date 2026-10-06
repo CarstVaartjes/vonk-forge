@@ -41,9 +41,18 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql.functions import FunctionElement
 from vonk_agent_protocol import (
     ArtifactPreparation,
+    DistributionAssignmentState,
+    InstallationNodeState,
+    InstallationState,
     LifecycleState,
     LifecycleSubject,
+    ModelFileState,
+    ReservationState,
+    RoutePublicationState,
+    RouteState,
+    RunState,
     check_words,
+    machine_check,
 )
 from vonk_agent_protocol.inventory import MemoryPool
 
@@ -215,8 +224,7 @@ class RoutePublication(Base):
     __tablename__ = "route_publications"
     __table_args__ = (
         CheckConstraint(
-            "state IN ('withdrawal-pending', 'routes-withdrawn', "
-            "'publication-pending', 'completed', 'failed')",
+            machine_check(RoutePublicationState),
             name="ck_route_publications_state",
         ),
         CheckConstraint(
@@ -777,7 +785,7 @@ class ArtifactDistributionAssignment(Base):
         ),
         CheckConstraint("generation >= 1", name="ck_distribution_generation"),
         CheckConstraint(
-            "state IN ('active','revoked','expired')", name="ck_distribution_state"
+            machine_check(DistributionAssignmentState), name="ck_distribution_state"
         ),
     )
     id: Mapped[str] = mapped_column(
@@ -801,7 +809,10 @@ class ArtifactDistributionAssignment(Base):
     oci_image_config_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     oci_archive_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="active", index=True
+        String(16),
+        nullable=False,
+        default=DistributionAssignmentState.ACTIVE.value,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -1797,7 +1808,7 @@ class NodeArtifact(Base):
             name="ck_node_artifacts_kind",
         ),
         CheckConstraint(
-            "state IN ('partial','verified','missing','corrupt')",
+            machine_check(ModelFileState),
             name="ck_node_artifacts_state",
         ),
         CheckConstraint(
@@ -1834,7 +1845,7 @@ class RecipeInstallation(Base):
             _lower_hex("plan_digest", 64), name="ck_recipe_installations_digest"
         ),
         CheckConstraint(
-            "state IN ('planned','installing','installed','partial','failed','uninstalled')",
+            machine_check(InstallationState),
             name="ck_recipe_installations_state",
         ),
         CheckConstraint(
@@ -1889,6 +1900,10 @@ class InstallationNode(Base):
             "required_bytes>=0 AND installed_bytes>=0",
             name="ck_installation_nodes_bytes",
         ),
+        CheckConstraint(
+            machine_check(InstallationNodeState),
+            name="ck_installation_nodes_state",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -1917,14 +1932,16 @@ class InstallationNode(Base):
 
 #: Stoppable runs that no running-run path (observation, recovery) advances.
 STOPPABLE_NOT_RUNNING_RUN_STATES = frozenset(
-    {"planned", "starting", "stopping", "lost"}
+    {RunState.PLANNED, RunState.STARTING, RunState.STOPPING, RunState.LOST}
 )
-ACTIVE_RUN_STATES = (STOPPABLE_NOT_RUNNING_RUN_STATES - {"lost"}) | {"running"}
+ACTIVE_RUN_STATES = (STOPPABLE_NOT_RUNNING_RUN_STATES - {RunState.LOST}) | {
+    RunState.RUNNING
+}
 #: The run states that own capacity and a Spark lifecycle: any load that needs
 #: such a run's Sparks plans its exact Stop, which releases the claims. A run in
 #: any other state can never be stopped by a plan, so it holds no ports or
 #: memory and is not wanted on any Spark.
-STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {"lost"}
+STOPPABLE_RUN_STATES = ACTIVE_RUN_STATES | {RunState.LOST}
 
 
 class RecipeRun(Base):
@@ -1932,11 +1949,11 @@ class RecipeRun(Base):
     __table_args__ = (
         CheckConstraint(_lower_hex("plan_digest", 64), name="ck_recipe_runs_digest"),
         CheckConstraint(
-            "state IN ('planned','starting','running','stopping','stopped','failed','lost')",
+            machine_check(RunState),
             name="ck_recipe_runs_state",
         ),
         CheckConstraint(
-            "route_state IN ('withdrawn','pending','published','failed')",
+            machine_check(RouteState, "route_state"),
             name="ck_recipe_runs_route_state",
         ),
         CheckConstraint(
@@ -1985,7 +2002,10 @@ class RecipeRun(Base):
     plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     route_state: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="withdrawn", server_default="withdrawn"
+        String(24),
+        nullable=False,
+        default=RouteState.WITHDRAWN.value,
+        server_default=RouteState.WITHDRAWN.value,
     )
     route_generation: Mapped[int | None] = mapped_column(BigInteger)
     route_digest: Mapped[str | None] = mapped_column(String(64))
@@ -2211,7 +2231,7 @@ class ResourceReservation(Base):
             name="ck_reservations_kind",
         ),
         CheckConstraint(
-            "state IN ('active','promised','released','expired') AND amount_bytes>=0",
+            f"{machine_check(ReservationState)} AND amount_bytes>=0",
             name="ck_reservations_state",
         ),
         CheckConstraint(

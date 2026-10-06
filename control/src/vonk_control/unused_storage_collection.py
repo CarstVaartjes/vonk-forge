@@ -70,7 +70,12 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    InstallationState,
+    LifecycleState,
+    RunState,
+    canonical_message,
+)
 
 from . import job_states, model_cache_states
 from .artifact_lifecycle import (
@@ -148,9 +153,14 @@ SWEEP_BUDGET_SECONDS = 30.0
 # A Spark's inventory older than this proves nothing about its free space.
 INVENTORY_MAX_AGE = timedelta(seconds=300)
 # A failed run holds nothing; any other state but stopped may still be on a Spark.
-_DEAD_RUNS = ("stopped", "failed")
+_DEAD_RUNS = (RunState.STOPPED, RunState.FAILED)
 # Installations that may hold files on their Sparks (a plan holds none).
-_HOLDING_STATES = ("installed", "installing", "partial", "failed")
+_HOLDING_STATES = (
+    InstallationState.INSTALLED,
+    InstallationState.INSTALLING,
+    InstallationState.PARTIAL,
+    InstallationState.FAILED,
+)
 _FINISHED_JOBS = job_states.words(
     LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
 )
@@ -1073,7 +1083,7 @@ class UnusedStorageCollector:
             reasons = {
                 installation_id: (
                     _installation_kept(session, installation_id, evidence)
-                    if state == "installed"
+                    if state == InstallationState.INSTALLED
                     else "not installed"
                 )
                 for installation_id, state, _installed in members
@@ -1322,7 +1332,7 @@ def _installation_kept(
     """Why an installation stays, or ``None`` when nothing uses it."""
 
     installation = session.get(RecipeInstallation, installation_id)
-    if installation is None or installation.state != "installed":
+    if installation is None or installation.state != InstallationState.INSTALLED:
         return "not installed"
     revision = session.execute(
         select(

@@ -20,6 +20,27 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, NamedTuple
 
+from .state_machines import (
+    AssetAvailability,
+    CatalogSyncState,
+    CertificateState,
+    DesiredAssignmentState,
+    DistributionAssignmentState,
+    EndpointState,
+    EnrollmentGrantState,
+    GatewayRouteState,
+    InstallationNodeState,
+    InstallationState,
+    ModelCacheOperatorStatus,
+    ModelFileState,
+    ObservedAssignmentState,
+    PlacementInstallState,
+    PlacementLoadState,
+    ReservationState,
+    RoutePublicationState,
+    RouteState,
+    RunState,
+)
 from .wire_model import WireEnum, WireModel
 
 
@@ -739,6 +760,25 @@ class LifecycleVocabulary(WireModel):
     failure_code: FailureCode
     run_admission_code: RunAdmissionCode
     resource_blocker_code: ResourceBlockerCode
+    installation_state: InstallationState
+    installation_node_state: InstallationNodeState
+    distribution_assignment_state: DistributionAssignmentState
+    run_state: RunState
+    route_state: RouteState
+    route_publication_state: RoutePublicationState
+    certificate_state: CertificateState
+    enrollment_grant_state: EnrollmentGrantState
+    model_file_state: ModelFileState
+    catalog_sync_state: CatalogSyncState
+    reservation_state: ReservationState
+    gateway_route_state: GatewayRouteState
+    desired_assignment_state: DesiredAssignmentState
+    endpoint_state: EndpointState
+    observed_assignment_state: ObservedAssignmentState
+    asset_availability: AssetAvailability
+    placement_install_state: PlacementInstallState
+    placement_load_state: PlacementLoadState
+    model_cache_operator_status: ModelCacheOperatorStatus
 
 
 __all__ = [

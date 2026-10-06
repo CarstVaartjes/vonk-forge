@@ -24,6 +24,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
+    EndpointState,
+    GatewayRouteState,
     LifecycleState,
     LifecycleSubject,
     OperationMemberProgress,
@@ -1451,7 +1453,7 @@ class _DurableOperationProjection:
         if (
             active_marker.model_dump() != snapshot.marker
             or active_marker.digest != snapshot.marker_digest
-            or active_marker.state != "published"
+            or active_marker.state != GatewayRouteState.PUBLISHED
             or active_marker.authority_id != snapshot.authority_id
             or active_marker.plan_digest != snapshot.plan_digest
             or active_marker.generation != snapshot.publication_generation
@@ -1466,7 +1468,7 @@ class _DurableOperationProjection:
         route_document = routes.get("routes")
         if (
             routes.get("generation") != snapshot.publication_generation
-            or routes.get("state") != "published"
+            or routes.get("state") != GatewayRouteState.PUBLISHED
             or not isinstance(route_document, Mapping)
         ):
             raise RuntimeError("active route state does not match publication")
@@ -1569,37 +1571,37 @@ class _DurableOperationProjection:
         if unavailable:
             for item in assignments:
                 if item.expected_run_id is not None:
-                    states[item.assignment_id] = "unavailable"
+                    states[item.assignment_id] = EndpointState.UNAVAILABLE
         elif snapshot is not None:
             try:
                 active_marker, route_document = self._verified_routes(snapshot)
             except (OSError, RuntimeError, TypeError, ValueError):
                 for item in assignments:
                     if item.expected_run_id is not None:
-                        states[item.assignment_id] = "unavailable"
+                        states[item.assignment_id] = EndpointState.UNAVAILABLE
             else:
                 for item in assignments:
                     if item.expected_run_id is None or item.alias is None:
                         continue
                     raw = route_document.get(item.alias)
                     if not isinstance(raw, Mapping):
-                        states[item.assignment_id] = "withdrawn"
+                        states[item.assignment_id] = EndpointState.WITHDRAWN
                         continue
                     route_run_id = self._route_run_id(raw)
                     if route_run_id is None:
-                        states[item.assignment_id] = "unavailable"
+                        states[item.assignment_id] = EndpointState.UNAVAILABLE
                         continue
                     if route_run_id != item.expected_run_id:
-                        states[item.assignment_id] = "withdrawn"
+                        states[item.assignment_id] = EndpointState.WITHDRAWN
                         continue
                     try:
                         endpoints[item.assignment_id] = self._endpoint_payload(
                             item.alias, raw, active_marker, gateway_api_base
                         )
                     except (RuntimeError, TypeError, ValueError):
-                        states[item.assignment_id] = "unavailable"
+                        states[item.assignment_id] = EndpointState.UNAVAILABLE
                     else:
-                        states[item.assignment_id] = "published"
+                        states[item.assignment_id] = EndpointState.PUBLISHED
 
                 # A new application or route generation between membership
                 # lookup and bundle verification must never authorize a stale

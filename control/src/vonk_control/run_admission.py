@@ -12,7 +12,15 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import ResourceBlockerCode, RunAdmissionCode
+from vonk_agent_protocol import (
+    InstallationNodeState,
+    InstallationState,
+    ReservationState,
+    ResourceBlockerCode,
+    RouteState,
+    RunAdmissionCode,
+    RunState,
+)
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 
@@ -179,7 +187,9 @@ def allocate_service_port(
             select(ResourceReservation.resource_key).where(
                 ResourceReservation.node_id == node_id,
                 ResourceReservation.kind == "port",
-                ResourceReservation.state.in_(("active", "promised")),
+                ResourceReservation.state.in_(
+                    (ReservationState.ACTIVE, ReservationState.PROMISED)
+                ),
                 reservation_visible(
                     excluded_profile_application_ids,
                     excluded_run_ids=excluded_run_ids,
@@ -197,7 +207,7 @@ def allocate_service_port(
                 select(ResourceReservation.resource_key).where(
                     ResourceReservation.node_id == node_id,
                     ResourceReservation.kind == "port",
-                    ResourceReservation.state == "promised",
+                    ResourceReservation.state == ReservationState.PROMISED,
                     ResourceReservation.owner_kind == "fleet-profile",
                     ResourceReservation.owner_id.in_(
                         tuple(excluded_profile_application_ids)
@@ -229,7 +239,9 @@ def run_port_blockers(
         select(ResourceReservation).where(
             ResourceReservation.node_id == node_id,
             ResourceReservation.kind == "port",
-            ResourceReservation.state.in_(("active", "promised")),
+            ResourceReservation.state.in_(
+                (ReservationState.ACTIVE, ReservationState.PROMISED)
+            ),
             reservation_visible(
                 excluded_profile_application_ids, excluded_run_ids=excluded_run_ids
             ),
@@ -443,7 +455,7 @@ class RunAdmissionService:
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
                 raise KeyError(installation_id)
-            if installation.state != "installed":
+            if installation.state != InstallationState.INSTALLED:
                 raise ValueError("recipe installation is not complete")
             mapping = session.get(ClusterMapping, installation.mapping_id)
             if (
@@ -502,8 +514,8 @@ class RunAdmissionService:
                     RunNode.node_id.in_(
                         [mapping_node.node_id for mapping_node in mapping_nodes]
                     ),
-                    RunNode.state != "stopped",
-                    RecipeRun.state == "lost",
+                    RunNode.state != RunState.STOPPED,
+                    RecipeRun.state == RunState.LOST,
                     # A reviewed plan that stops the lost run reconciles it.
                     RecipeRun.id.not_in(tuple(released_run_ids)),
                 )
@@ -517,7 +529,7 @@ class RunAdmissionService:
                 for row in session.scalars(
                     select(InstallationNode).where(
                         InstallationNode.installation_id == installation_id,
-                        InstallationNode.state == "installed",
+                        InstallationNode.state == InstallationNodeState.INSTALLED,
                     )
                 )
             }
@@ -1001,8 +1013,8 @@ class RunAdmissionService:
             alias=plan.alias,
             plan_digest=plan.plan_digest,
             plan=persisted_plan,
-            state="planned",
-            route_state="withdrawn",
+            state=RunState.PLANNED,
+            route_state=RouteState.WITHDRAWN,
             actor=actor,
             created_at=now,
             updated_at=now,
@@ -1016,7 +1028,7 @@ class RunAdmissionService:
                     node_id=node.node_id,
                     rank=node.rank,
                     role=node.role,
-                    state="planned",
+                    state=RunState.PLANNED,
                     port=node.port,
                     reserved_memory_bytes=node.required_memory_bytes,
                     updated_at=now,
@@ -1039,7 +1051,7 @@ class RunAdmissionService:
                         amount_bytes=node.required_memory_bytes,
                         owner_kind="run",
                         owner_id=run.id,
-                        state="active",
+                        state=ReservationState.ACTIVE,
                         plan_digest=plan.plan_digest,
                         created_at=now,
                     )
@@ -1060,7 +1072,7 @@ class RunAdmissionService:
                         amount_bytes=0,
                         owner_kind="run",
                         owner_id=run.id,
-                        state="active",
+                        state=ReservationState.ACTIVE,
                         plan_digest=plan.plan_digest,
                         created_at=now,
                     )

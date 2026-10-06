@@ -481,7 +481,10 @@ def test_stream_resume_header_is_in_openapi_custom_transport_contract() -> None:
 
 def test_generated_fleet_projection_vocabulary_is_finite() -> None:
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    assert schema["NodeConnection"]["properties"]["certificate_state"]["enum"] == [
+    assert schema["NodeConnection"]["properties"]["certificate_state"] == {
+        "$ref": "#/components/schemas/CertificateState"
+    }
+    assert schema["CertificateState"]["enum"] == [
         "valid",
         "missing",
         "not-yet-valid",
@@ -508,7 +511,7 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
         "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     )
     typescript = TYPESCRIPT_CLIENT.read_text()
-    assert 'certificate_state: "valid" | "missing" | "not-yet-valid"' in typescript
+    assert 'certificate_state: components["schemas"]["CertificateState"]' in typescript
     assert 'degraded_reason?: ("external-member" | "mapping-incomplete"' in typescript
 
 

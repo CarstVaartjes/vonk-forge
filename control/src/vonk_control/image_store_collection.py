@@ -26,6 +26,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import DistributionAssignmentState
 
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -172,7 +173,8 @@ class ImageStoreCollector:
             referenced.update(
                 session.scalars(
                     select(ArtifactDistributionAssignment.oci_archive_sha256).where(
-                        ArtifactDistributionAssignment.state == "active",
+                        ArtifactDistributionAssignment.state
+                        == DistributionAssignmentState.ACTIVE,
                         ArtifactDistributionAssignment.expires_at > now,
                     )
                 )

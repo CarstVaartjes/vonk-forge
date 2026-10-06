@@ -8,12 +8,12 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.desired_assignment_state import check_desired_assignment_state
+from ..models.desired_assignment_state import DesiredAssignmentState
 from ..models.fleet_profile_assignment_preview_actions_item import check_fleet_profile_assignment_preview_actions_item
 from ..models.fleet_profile_assignment_preview_actions_item import FleetProfileAssignmentPreviewActionsItem
-from ..models.fleet_profile_assignment_preview_current_state import check_fleet_profile_assignment_preview_current_state
-from ..models.fleet_profile_assignment_preview_current_state import FleetProfileAssignmentPreviewCurrentState
-from ..models.fleet_profile_assignment_preview_desired_state import check_fleet_profile_assignment_preview_desired_state
-from ..models.fleet_profile_assignment_preview_desired_state import FleetProfileAssignmentPreviewDesiredState
+from ..models.observed_assignment_state import check_observed_assignment_state
+from ..models.observed_assignment_state import ObservedAssignmentState
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -35,8 +35,8 @@ class FleetProfileAssignmentPreview:
         Attributes:
             actions (list[FleetProfileAssignmentPreviewActionsItem]):
             assignment_id (str):
-            current_state (FleetProfileAssignmentPreviewCurrentState):
-            desired_state (FleetProfileAssignmentPreviewDesiredState):
+            current_state (ObservedAssignmentState): Where a fleet-profile assignment stands on the Sparks, as observed.
+            desired_state (DesiredAssignmentState): What a fleet-profile assignment is asked to become on its Sparks.
             node_ids (list[str]):
             reasons (list[FleetProfileReason]):
             recipe_revision_id (str):
@@ -46,8 +46,8 @@ class FleetProfileAssignmentPreview:
 
     actions: list[FleetProfileAssignmentPreviewActionsItem]
     assignment_id: str
-    current_state: FleetProfileAssignmentPreviewCurrentState
-    desired_state: FleetProfileAssignmentPreviewDesiredState
+    current_state: ObservedAssignmentState
+    desired_state: DesiredAssignmentState
     node_ids: list[str]
     reasons: list[FleetProfileReason]
     recipe_revision_id: str
@@ -130,12 +130,12 @@ class FleetProfileAssignmentPreview:
 
         assignment_id = d.pop("assignment_id")
 
-        current_state = check_fleet_profile_assignment_preview_current_state(d.pop("current_state"))
+        current_state = check_observed_assignment_state(d.pop("current_state"))
 
 
 
 
-        desired_state = check_fleet_profile_assignment_preview_desired_state(d.pop("desired_state"))
+        desired_state = check_desired_assignment_state(d.pop("desired_state"))
 
 
 

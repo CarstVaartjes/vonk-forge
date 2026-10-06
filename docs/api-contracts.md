@@ -305,6 +305,22 @@ state stays the core's), and why an attempt is observed (`observation_cause`:
 children done is `failed` with `partial: true`. The agent wire keeps its four result
 words and is mapped to the stored words at one place.
 
+The stored records that are not lifecycle subjects have their own closed state
+machines in `agent_protocol/src/vonk_agent_protocol/state_machines.py`: the
+installation and its ranks (`InstallationState`, `InstallationNodeState`), the
+distribution assignment (`DistributionAssignmentState`), the run and its route
+(`RunState`, `RouteState`, `RoutePublicationState`, `GatewayRouteState`), the
+fleet-profile endpoint and observed assignment (`EndpointState`,
+`ObservedAssignmentState`, `DesiredAssignmentState`), and the certificate,
+enrollment grant, model file, asset availability, catalog sync, reservation and
+placement words. They are carried by the same `LifecycleVocabulary` and so reach
+the Rust declarations, the OpenAPI document and the generated TypeScript. The
+Controller's CHECK constraints are generated from them (`machine_check`), models
+and projections validate through `vonk_control.machine_states` (which adopts an
+old spelling through `MACHINE_ALIASES`, empty until a word is renamed), and the
+vocabulary ratchet's `machine_state` tier fails a hand-spelled word with no
+baseline and no exception list.
+
 Every agent operation result is one `OperationOutcome`
 (`agent_protocol/src/vonk_agent_protocol/outcome.py`), tagged by `kind`:
 

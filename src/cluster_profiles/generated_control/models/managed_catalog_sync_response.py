@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.managed_catalog_sync_response_state import check_managed_catalog_sync_response_state
-from ..models.managed_catalog_sync_response_state import ManagedCatalogSyncResponseState
+from ..models.catalog_sync_state import CatalogSyncState
+from ..models.catalog_sync_state import check_catalog_sync_state
 from ..models.managed_catalog_sync_response_trigger import check_managed_catalog_sync_response_trigger
 from ..models.managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
 from ..types import UNSET, Unset
@@ -42,7 +42,7 @@ class ManagedCatalogSyncResponse:
             request_key (str):
             skipped_count (int):
             stale_recipes (list[ManagedCatalogStaleRecipe]):
-            state (ManagedCatalogSyncResponseState):
+            state (CatalogSyncState): The outcome of a catalog synchronization, as the catalog shows it.
             sync_id (str):
             total_count (int):
             trigger (ManagedCatalogSyncResponseTrigger):
@@ -66,7 +66,7 @@ class ManagedCatalogSyncResponse:
     request_key: str
     skipped_count: int
     stale_recipes: list[ManagedCatalogStaleRecipe]
-    state: ManagedCatalogSyncResponseState
+    state: CatalogSyncState
     sync_id: str
     total_count: int
     trigger: ManagedCatalogSyncResponseTrigger
@@ -255,7 +255,7 @@ class ManagedCatalogSyncResponse:
             stale_recipes.append(stale_recipes_item)
 
 
-        state = check_managed_catalog_sync_response_state(d.pop("state"))
+        state = check_catalog_sync_state(d.pop("state"))
 
 
 

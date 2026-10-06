@@ -26,11 +26,16 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentProgress,
     AgentResult,
+    DistributionAssignmentState,
     FailureCode,
+    InstallationState,
     LifecycleState,
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
+    ReservationState,
+    RouteState,
+    RunState,
     canonical_message,
     outcome_state,
     validate_result_for_operation,
@@ -427,7 +432,11 @@ def _renew_distribution_grant(
     already lapsed.
     """
 
-    states = {"active"} if live_only else {"active", "expired"}
+    states = (
+        {DistributionAssignmentState.ACTIVE}
+        if live_only
+        else {DistributionAssignmentState.ACTIVE, DistributionAssignmentState.EXPIRED}
+    )
     conditions = [
         ArtifactDistributionAssignment.node_id == operation.node_id,
         ArtifactDistributionAssignment.plan_digest == operation.authority_revision,
@@ -556,10 +565,10 @@ def release_owned_reservations_in_session(
         select(ResourceReservation).where(
             ResourceReservation.owner_kind == owner_kind,
             ResourceReservation.owner_id == owner_id,
-            ResourceReservation.state == "active",
+            ResourceReservation.state == ReservationState.ACTIVE,
         )
     ):
-        reservation.state = "released"
+        reservation.state = ReservationState.RELEASED
         reservation.released_at = now
 
 
@@ -882,9 +891,9 @@ def _release_retired_owner_in_session(
     if isinstance(owner_kind, str) and isinstance(owner_id, str):
         if owner_kind == "run":
             run = session.get(RecipeRun, owner_id, with_for_update=True)
-            if run is not None and run.state != "stopped":
-                run.state = "lost"
-                run.route_state = "withdrawn"
+            if run is not None and run.state != RunState.STOPPED:
+                run.state = RunState.LOST
+                run.route_state = RouteState.WITHDRAWN
                 run.route_error = reason[:512]
                 run.updated_at = now
             elif run is not None:
@@ -895,8 +904,11 @@ def _release_retired_owner_in_session(
             installation = session.get(
                 RecipeInstallation, owner_id, with_for_update=True
             )
-            if installation is not None and installation.state != "uninstalled":
-                installation.state = "partial"
+            if (
+                installation is not None
+                and installation.state != InstallationState.UNINSTALLED
+            ):
+                installation.state = InstallationState.PARTIAL
                 installation.updated_at = now
             elif installation is not None:
                 release_owned_reservations_in_session(
@@ -1985,7 +1997,7 @@ class AgentJobService:
                 # only when its run is durably stopped and every parked child
                 # is an unissued claim refusal; an uncertain issued effect must
                 # remain visible and block until its normal receipt arrives.
-                if run is None or run.state != "stopped" or not children:
+                if run is None or run.state != RunState.STOPPED or not children:
                     continue
                 if any(
                     child.state not in {"succeeded", "failed", "cancelled"}

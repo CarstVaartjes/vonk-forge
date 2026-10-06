@@ -9,6 +9,7 @@ from typing import Protocol
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import RouteState, RunState
 
 from .models import RecipeRun, RunNode
 from .recipe_execution_contract import (
@@ -108,8 +109,8 @@ class RecipeOperationWorker:
                 session.scalars(
                     select(RecipeRun.id)
                     .where(
-                        RecipeRun.state == "running",
-                        RecipeRun.route_state == "pending",
+                        RecipeRun.state == RunState.RUNNING,
+                        RecipeRun.route_state == RouteState.PENDING,
                         # A run that failed publication temporarily holds
                         # ``pending`` and is only due once its recorded
                         # next-attempt time arrives; an untouched run has no
@@ -146,7 +147,7 @@ class RecipeOperationWorker:
         now = self._clock()
         with self._sessions.begin() as session:
             run = session.get(RecipeRun, run_id, with_for_update=True)
-            if run is None or run.route_state != "pending":
+            if run is None or run.route_state != RouteState.PENDING:
                 return
             attempts = int(run.route_attempts or 0) + 1
             run.route_attempts = attempts
@@ -166,8 +167,8 @@ class RecipeOperationWorker:
                 session.scalars(
                     select(RecipeRun)
                     .where(
-                        RecipeRun.state == "running",
-                        RecipeRun.route_state == "pending",
+                        RecipeRun.state == RunState.RUNNING,
+                        RecipeRun.route_state == RouteState.PENDING,
                     )
                     .order_by(RecipeRun.created_at, RecipeRun.id)
                     .with_for_update(of=RecipeRun)
@@ -212,7 +213,7 @@ class RecipeOperationWorker:
                     node.observation_process_running = None
                     node.observation_observed_at = None
                     node.updated_at = now
-                run.route_state = "withdrawn"
+                run.route_state = RouteState.WITHDRAWN
                 run.route_error = "initial exact observation deadline elapsed"
                 run.updated_at = now
                 return True

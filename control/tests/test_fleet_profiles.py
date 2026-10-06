@@ -15,7 +15,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import Engine, Table, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import DesiredAssignmentState, LifecycleState
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -2853,12 +2853,12 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
         FleetProfileAssignmentInput(
             recipe_selector="vonk-forge/synthetic-tiny-build",
             spark_ids=[_node_id(2)],
-            desired_state="installed",
+            desired_state=DesiredAssignmentState.INSTALLED,
         ),
         FleetProfileAssignmentInput(
             recipe_selector="vonk-forge/synthetic-tiny-build",
             spark_ids=[_node_id(1)],
-            desired_state="installed",
+            desired_state=DesiredAssignmentState.INSTALLED,
         ),
     ]
     service = FleetProfileService(

@@ -8,7 +8,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    InstallationNodeState,
+    InstallationState,
+    RunState,
+    canonical_message,
+)
 
 SharedCachePolicy = Literal["retain-shared-download-cache"]
 
@@ -151,7 +156,13 @@ def stop_plan(
         and bool(target_ids)
     )
     blockers: list[ActionReason] = []
-    if run_state not in {"starting", "running", "stopping", "failed", "lost"}:
+    if run_state not in {
+        RunState.STARTING,
+        RunState.RUNNING,
+        RunState.STOPPING,
+        RunState.FAILED,
+        RunState.LOST,
+    }:
         blockers.append(
             ActionReason(
                 "stop.run_not_stoppable",
@@ -308,10 +319,11 @@ def uninstall_plan(
     # shows any effect keeps the row on the ordinary uninstall path, where the
     # integrity check above reports it.
     never_installed = bool(
-        installation_state == "planned"
+        installation_state == InstallationState.PLANNED
         and ordered_nodes
         and all(
-            node.state == "planned" and node.installed_bytes in (None, 0)
+            node.state == InstallationNodeState.PLANNED
+            and node.installed_bytes in (None, 0)
             for node in ordered_nodes
         )
     )
@@ -319,11 +331,12 @@ def uninstall_plan(
         "abandon" if never_installed else "uninstall"
     )
     bytes_known = disposition == "abandon" or (
-        installation_state == "installed"
+        installation_state == InstallationState.INSTALLED
         and bool(ordered_nodes)
         and immutable_membership_exact
         and all(
-            node.state == "installed" and node.installed_bytes is not None
+            node.state == InstallationNodeState.INSTALLED
+            and node.installed_bytes is not None
             for node in ordered_nodes
         )
     )
@@ -336,9 +349,9 @@ def uninstall_plan(
     )
     blockers: list[ActionReason] = []
     if disposition != "abandon" and installation_state not in {
-        "installed",
-        "partial",
-        "failed",
+        InstallationState.INSTALLED,
+        InstallationState.PARTIAL,
+        InstallationState.FAILED,
     }:
         blockers.append(
             ActionReason(

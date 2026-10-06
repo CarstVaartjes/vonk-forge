@@ -8,7 +8,11 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import RunAdmissionCode
+from vonk_agent_protocol import (
+    InstallationNodeState,
+    InstallationState,
+    RunAdmissionCode,
+)
 
 from .library_contract import (
     _MAX_CANDIDATE_NODES,
@@ -103,15 +107,16 @@ def _installation_coverage(
     installed_identities = {
         item.identity
         for item in actual
-        if item.state == "installed" and item.identity in expected_identities
+        if item.state == InstallationNodeState.INSTALLED
+        and item.identity in expected_identities
     }
     complete = (
-        installation_state == "installed"
+        installation_state == InstallationState.INSTALLED
         and mapping_state == "ready"
         and mapping_generation == installation_mapping_generation
         and len(expected) == declared_expected_count
         and _members_are_exact(expected, actual)
-        and all(item.state == "installed" for item in actual)
+        and all(item.state == InstallationNodeState.INSTALLED for item in actual)
     )
     return _InstallationCoverage(
         expected_rank_count=declared_expected_count,
@@ -294,7 +299,7 @@ def load_placement_operational_evidence(
             select(RecipeInstallation)
             .where(
                 RecipeInstallation.recipe_revision_id == recipe_revision_id,
-                RecipeInstallation.state != "uninstalled",
+                RecipeInstallation.state != InstallationState.UNINSTALLED,
             )
             .order_by(
                 case(
@@ -302,7 +307,7 @@ def load_placement_operational_evidence(
                         RecipeInstallation.id.in_(referenced_installation_ids),
                         0,
                     ),
-                    (RecipeInstallation.state == "installed", 1),
+                    (RecipeInstallation.state == InstallationState.INSTALLED, 1),
                     else_=2,
                 ),
                 RecipeInstallation.updated_at.desc(),

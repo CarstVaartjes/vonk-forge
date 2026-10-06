@@ -8,6 +8,11 @@ from datetime import UTC, datetime
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import (
+    InstallationNodeState,
+    InstallationState,
+    ReservationState,
+)
 
 from .content_identity import same_image
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
@@ -39,7 +44,13 @@ def models_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
             )
             .where(
                 InstallationNode.node_id == node_id,
-                RecipeInstallation.state.in_(("installed", "installing", "partial")),
+                RecipeInstallation.state.in_(
+                    (
+                        InstallationState.INSTALLED,
+                        InstallationState.INSTALLING,
+                        InstallationState.PARTIAL,
+                    )
+                ),
                 RecipeInstallation.model_content_sha256.is_not(None),
             )
         )
@@ -144,7 +155,7 @@ def outstanding_disk_charges(
         .where(
             ResourceReservation.node_id == node_id,
             ResourceReservation.kind == "disk",
-            ResourceReservation.state == "active",
+            ResourceReservation.state == ReservationState.ACTIVE,
             reservation_visible(
                 tuple(excluded_profile_application_ids),
                 excluded_run_ids=tuple(excluded_run_ids),
@@ -158,9 +169,9 @@ def outstanding_disk_charges(
         if (
             inventory_observed_at is not None
             and installation is not None
-            and installation.state == "installed"
+            and installation.state == InstallationState.INSTALLED
             and node is not None
-            and node.state == "installed"
+            and node.state == InstallationNodeState.INSTALLED
             and _aware(inventory_observed_at)
             > _aware(node.updated_at) + MAX_INVENTORY_FUTURE_SKEW
             and reservation.plan_digest == installation.plan_digest

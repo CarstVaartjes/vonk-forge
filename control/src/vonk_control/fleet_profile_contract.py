@@ -15,9 +15,13 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol import (
+    DesiredAssignmentState,
+    EndpointState,
     LifecycleState,
     LifecycleSubject,
+    ObservedAssignmentState,
     OperationProgress,
+    machine_adopter,
     state_adopter,
 )
 from vonk_agent_protocol.inventory import MemoryPool
@@ -173,19 +177,17 @@ FleetProfileChildPhase = Literal[
     "uninstall",
     "final_verify",
 ]
-FleetProfileAssignmentState = Literal[
-    "not-placed", "placed", "installing", "installed", "running", "degraded"
+DesiredAssignmentStateField = Annotated[
+    DesiredAssignmentState, BeforeValidator(machine_adopter(DesiredAssignmentState))
+]
+FleetProfileAssignmentState = Annotated[
+    ObservedAssignmentState, BeforeValidator(machine_adopter(ObservedAssignmentState))
 ]
 FleetProfileAction = Literal["switch", "keep"]
 FleetProfilePlanStepKind = Literal["switch", "prepare"]
 FleetProfileOperationKind = Literal["fleet-profile.apply"]
-FleetProfileEndpointState = Literal[
-    "installed-only",
-    "not-published-yet",
-    "published",
-    "expired",
-    "withdrawn",
-    "unavailable",
+FleetProfileEndpointState = Annotated[
+    EndpointState, BeforeValidator(machine_adopter(EndpointState))
 ]
 
 
@@ -206,7 +208,7 @@ class FleetProfileEndpointAssignmentIntent:
 
     assignment_id: str
     recipe_title: str
-    desired_state: Literal["installed", "running"]
+    desired_state: DesiredAssignmentStateField
     alias: str | None
     state: FleetProfileEndpointState
     expected_run_id: str | None = None
@@ -227,21 +229,24 @@ class FleetProfileEndpointIntent:
 class FleetProfileEndpointAssignmentView(_StrictModel):
     assignment_id: UuidId
     recipe_title: Name
-    desired_state: Literal["installed", "running"]
+    desired_state: DesiredAssignmentStateField
     alias: Alias | None = None
     state: FleetProfileEndpointState
     endpoint: EndpointResponse | None = None
 
     @model_validator(mode="after")
     def endpoint_matches_assignment(self) -> FleetProfileEndpointAssignmentView:
-        if self.state == "published":
+        if self.state == EndpointState.PUBLISHED:
             if self.alias is None or self.endpoint is None:
                 raise ValueError("published profile endpoint is incomplete")
             if self.endpoint.alias != self.alias:
                 raise ValueError("published profile endpoint alias is inconsistent")
         elif self.endpoint is not None:
             raise ValueError("unpublished profile endpoint contains route data")
-        if self.state == "installed-only" and self.desired_state != "installed":
+        if (
+            self.state == EndpointState.INSTALLED_ONLY
+            and self.desired_state != DesiredAssignmentState.INSTALLED
+        ):
             raise ValueError("installed-only endpoint has a running assignment")
         return self
 
@@ -311,7 +316,7 @@ class FleetProfileAssignmentInput(_StrictModel):
     model_variant: (
         Annotated[str, StringConstraints(min_length=1, max_length=200)] | None
     ) = None
-    desired_state: Literal["installed", "running"] = "running"
+    desired_state: DesiredAssignmentStateField = DesiredAssignmentState.RUNNING
     # Saved with every option the recipe declares (a choice left out is filled
     # with the recipe default when the profile is saved). Changing a choice
     # changes the profile revision and needs a reload of the workload.
@@ -332,7 +337,7 @@ class StoredFleetProfileAssignment(_StrictModel):
     id: UuidId
     recipe_revision_id: UuidId
     topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
-    desired_state: Literal["installed", "running"]
+    desired_state: DesiredAssignmentStateField
     alias: Alias | None = None
     nodes: list[FleetProfileNode] = Field(min_length=1, max_length=32)
     # Effective recipe-option choices; a snapshot from before options existed
@@ -349,9 +354,12 @@ class StoredFleetProfileAssignment(_StrictModel):
             raise ValueError("profile assignment ranks must be contiguous from zero")
         if sum(node.endpoint_owner for node in self.nodes) != 1:
             raise ValueError("profile assignment must have exactly one endpoint owner")
-        if self.desired_state == "running" and self.alias is None:
+        if self.desired_state == DesiredAssignmentState.RUNNING and self.alias is None:
             raise ValueError("running profile assignments require an endpoint alias")
-        if self.desired_state == "installed" and self.alias is not None:
+        if (
+            self.desired_state == DesiredAssignmentState.INSTALLED
+            and self.alias is not None
+        ):
             raise ValueError(
                 "installed-only profile assignments cannot declare an endpoint alias"
             )
@@ -492,7 +500,7 @@ class FleetProfileAssignmentPreview(_StrictModel):
     assignment_id: UuidId
     recipe_revision_id: UuidId
     recipe_title: Name
-    desired_state: Literal["installed", "running"]
+    desired_state: DesiredAssignmentStateField
     current_state: FleetProfileAssignmentState
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     option_choices: OptionChoices = Field(default_factory=dict)

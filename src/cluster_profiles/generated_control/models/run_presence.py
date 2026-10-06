@@ -8,16 +8,14 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.route_state import check_route_state
+from ..models.route_state import RouteState
 from ..models.run_presence_degraded_reason_type_0 import check_run_presence_degraded_reason_type_0
 from ..models.run_presence_degraded_reason_type_0 import RunPresenceDegradedReasonType0
 from ..models.run_presence_group_state import check_run_presence_group_state
 from ..models.run_presence_group_state import RunPresenceGroupState
-from ..models.run_presence_rank_state import check_run_presence_rank_state
-from ..models.run_presence_rank_state import RunPresenceRankState
-from ..models.run_presence_route_state import check_run_presence_route_state
-from ..models.run_presence_route_state import RunPresenceRouteState
-from ..models.run_presence_run_state import check_run_presence_run_state
-from ..models.run_presence_run_state import RunPresenceRunState
+from ..models.run_state import check_run_state
+from ..models.run_state import RunState
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -47,13 +45,13 @@ class RunPresence:
             rank (int):
             rank_age_seconds (float):
             rank_fresh (bool):
-            rank_state (RunPresenceRankState):
+            rank_state (RunState): The condition of a recipe run (and of each of its ranks).
             recipe_id (str):
             recipe_revision_id (str):
             role (str):
-            route_state (RunPresenceRouteState):
+            route_state (RouteState): Whether a run's inference route is published to the gateway.
             run_id (str):
-            run_state (RunPresenceRunState):
+            run_state (RunState): The condition of a recipe run (and of each of its ranks).
             title (str):
             degraded_reason (None | RunPresenceDegradedReasonType0 | Unset):
             option_choices (RunPresenceOptionChoices | Unset):
@@ -71,13 +69,13 @@ class RunPresence:
     rank: int
     rank_age_seconds: float
     rank_fresh: bool
-    rank_state: RunPresenceRankState
+    rank_state: RunState
     recipe_id: str
     recipe_revision_id: str
     role: str
-    route_state: RunPresenceRouteState
+    route_state: RouteState
     run_id: str
-    run_state: RunPresenceRunState
+    run_state: RunState
     title: str
     degraded_reason: None | RunPresenceDegradedReasonType0 | Unset = UNSET
     option_choices: RunPresenceOptionChoices | Unset = UNSET
@@ -223,7 +221,7 @@ class RunPresence:
 
         rank_fresh = d.pop("rank_fresh")
 
-        rank_state = check_run_presence_rank_state(d.pop("rank_state"))
+        rank_state = check_run_state(d.pop("rank_state"))
 
 
 
@@ -234,14 +232,14 @@ class RunPresence:
 
         role = d.pop("role")
 
-        route_state = check_run_presence_route_state(d.pop("route_state"))
+        route_state = check_route_state(d.pop("route_state"))
 
 
 
 
         run_id = d.pop("run_id")
 
-        run_state = check_run_presence_run_state(d.pop("run_state"))
+        run_state = check_run_state(d.pop("run_state"))
 
 
 

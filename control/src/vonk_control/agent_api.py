@@ -40,6 +40,8 @@ from vonk_agent_protocol import (
     DistributionAssignment,
     InventoryRequest,
     RecipeRunObservationsWire,
+    RouteState,
+    RunState,
     SignedHostHelperGrant,
     canonical_message,
 )
@@ -1079,8 +1081,9 @@ def install_agent_routes(
                         node.observation_process_running = evidence.process_running
                         node.observation_observed_at = observed_at
                         continue
-                    if node.state not in {"running", "failed"} or (
-                        node.state == "failed" and run.route_state != "withdrawn"
+                    if node.state not in {RunState.RUNNING, RunState.FAILED} or (
+                        node.state == "failed"
+                        and run.route_state != RouteState.WITHDRAWN
                     ):
                         # The start or recovery operation owns this rank now.
                         continue
@@ -1120,12 +1123,12 @@ def install_agent_routes(
                             else observed_at
                         )
                         node.state = (
-                            "running"
+                            RunState.RUNNING
                             if evidence.process_running
                             and (
                                 not unready or observed_at - since < RANK_UNREADY_GRACE
                             )
-                            else "failed"
+                            else RunState.FAILED
                         )
                         if unready and node.state == "failed":
                             log_event(
@@ -1163,7 +1166,7 @@ def install_agent_routes(
                     )
                     node.updated_at = observed_at
                     if (
-                        run.route_state == "withdrawn"
+                        run.route_state == RouteState.WITHDRAWN
                         and run.route_next_attempt_at is not None
                     ):
                         run.route_next_attempt_at = None
@@ -1238,7 +1241,7 @@ def install_agent_routes(
             # agent's word that its process is gone releases its claims.
             generation = (
                 run.run_generation
-                if run is not None and run.state in {"running", "lost"}
+                if run is not None and run.state in {RunState.RUNNING, RunState.LOST}
                 else None
             )
         response = Response(status_code=status.HTTP_204_NO_CONTENT)

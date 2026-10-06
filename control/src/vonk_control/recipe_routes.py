@@ -21,6 +21,8 @@ from urllib.parse import urlsplit
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import GatewayRouteState, RoutePublicationState, RunState
+from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_forge_contracts import read_recipe
 
@@ -308,7 +310,7 @@ class AtomicRecipeRoutePublisher:
             candidate.state.digest,
             render_config(candidate.state, candidate.policy),
             endpoints=candidate.endpoints,
-            state="published",
+            state=GatewayRouteState.PUBLISHED,
         )
 
     def publish_empty(self, route_digest: str) -> LiteLlmGeneration:
@@ -316,7 +318,7 @@ class AtomicRecipeRoutePublisher:
             route_digest,
             render_empty_config(),
             endpoints={},
-            state="maintenance",
+            state=GatewayRouteState.MAINTENANCE,
         )
 
     def active_marker_digest(self) -> str | None:
@@ -344,7 +346,7 @@ class AtomicRecipeRoutePublisher:
         litellm: bytes,
         *,
         endpoints: dict[str, _RecipeEndpoint],
-        state: str,
+        state: GatewayRouteState,
     ) -> LiteLlmGeneration:
         self._publisher._identity(self._AUTHORITY_ID, route_digest, route_digest)
         acknowledgement_error: Exception | None = None
@@ -366,7 +368,7 @@ class AtomicRecipeRoutePublisher:
                     "schema_version": 2,
                     "state": state,
                 }
-                if state == "maintenance":
+                if state == GatewayRouteState.MAINTENANCE:
                     document["reason"] = "recipe routes withdrawn"
                 return (
                     json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
@@ -502,13 +504,13 @@ class RecipeRouteService:
             session.add(
                 RoutePublication(
                     authority_id=RECIPE_ROUTE_CLAIM_ID,
-                    state="publication-pending",
+                    state=RoutePublicationState.PUBLICATION_PENDING,
                     plan_digest=digest,
                     activation_marker=marker,
                 )
             )
         else:
-            pending.state = "publication-pending"
+            pending.state = RoutePublicationState.PUBLICATION_PENDING
             pending.plan_digest = digest
             pending.activation_marker = marker
         session.flush()
@@ -520,7 +522,7 @@ class RecipeRouteService:
         owner = session.get(RoutePublicationOwner, 1)
         return (
             pending is not None
-            and pending.state == "publication-pending"
+            and pending.state == RoutePublicationState.PUBLICATION_PENDING
             and _claim_ordinal(pending) == claim.ordinal
             and (owner.owner_generation if owner is not None else 0)
             == claim.base_generation
@@ -604,7 +606,7 @@ class RecipeRouteService:
                 raise RecipeRouteSuperseded("route publication was superseded")
             pending = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
             assert pending is not None
-            pending.state = "completed"
+            pending.state = RoutePublicationState.COMPLETED
             try:
                 publication.complete(session, generation)
             except (
@@ -622,7 +624,7 @@ class RecipeRouteService:
         run = session.get(RecipeRun, run_id, with_for_update=True)
         if run is None:
             raise KeyError(run_id)
-        if run.state != "running":
+        if run.state != RunState.RUNNING:
             raise RecipeRouteError("recipe run is not ready for publication")
         self._enforce_recovery_publication_deadline(session, run)
         candidate = self.candidate_in_session(
@@ -657,7 +659,7 @@ class RecipeRouteService:
         generation: LiteLlmGeneration,
     ) -> None:
         run = session.get(RecipeRun, run_id, with_for_update=True)
-        if run is None or run.state != "running":
+        if run is None or run.state != RunState.RUNNING:
             raise RecipeRouteError("recipe run changed during publication")
         recovery = self._recovery_context(session, run)
         if recovery is not None:
@@ -674,7 +676,9 @@ class RecipeRouteService:
                     generation=generation,
                 )
                 raise
-        self.projection_in_session(session, generation, state="completed")
+        self.projection_in_session(
+            session, generation, state=RoutePublicationState.COMPLETED
+        )
         if recovery is not None:
             result = (
                 dict(recovery.job.result)
@@ -687,7 +691,7 @@ class RecipeRouteService:
             included = session.get(RecipeRun, included_id, with_for_update=True)
             if included is None or included.state != "running":
                 raise RecipeRouteError("recipe run changed during publication")
-            included.route_state = "published"
+            included.route_state = RunRouteState.PUBLISHED
             included.route_generation = generation.generation
             included.route_digest = generation.route_digest
             included.route_error = None
@@ -750,7 +754,9 @@ class RecipeRouteService:
         """
 
         if generation is not None:
-            self.projection_in_session(session, generation, state="withdrawal-pending")
+            self.projection_in_session(
+                session, generation, state=RoutePublicationState.WITHDRAWAL_PENDING
+            )
         recovery_result = (
             dict(recovery.job.result)
             if isinstance(recovery.job.result, Mapping)
@@ -762,12 +768,12 @@ class RecipeRouteService:
             "recovery_error": str(failure),
         }
         recovery.job.updated_at = self._clock()
-        run.state = "failed"
-        run.route_state = "withdrawn"
+        run.state = RunState.FAILED
+        run.route_state = RunRouteState.WITHDRAWN
         run.route_error = str(failure)[:512]
         publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
         if publication is not None:
-            publication.state = "withdrawal-pending"
+            publication.state = RoutePublicationState.WITHDRAWAL_PENDING
         run.updated_at = self._clock()
 
     def _recovery_job(self, session: Session, run: RecipeRun) -> Job | None:
@@ -819,8 +825,8 @@ class RecipeRouteService:
         try:
             enforce_recovery_deadline(recovery_job.payload, now=self._clock())
         except DistributedLifecycleError as error:
-            run.state = "failed"
-            run.route_state = "withdrawn"
+            run.state = RunState.FAILED
+            run.route_state = RunRouteState.WITHDRAWN
             run.route_error = str(error)[:512]
             run.updated_at = self._clock()
             raise RecipeRecoveryDeadlineError(str(error), run_id=run.id) from error
@@ -887,7 +893,7 @@ class RecipeRouteService:
             def record_reason(session: Session) -> None:
                 for run_id in sorted(run_ids):
                     run = session.get(RecipeRun, run_id, with_for_update=True)
-                    if run is not None and run.state == "running" and reason:
+                    if run is not None and run.state == RunState.RUNNING and reason:
                         run.route_error = reason[:512]
 
             publication = self._withdrawal_publication(
@@ -923,14 +929,15 @@ class RecipeRouteService:
             # database that never published): the runs' own route state is the
             # only evidence there is.
             return not any(
-                run.route_state == "published"
+                run.route_state == RunRouteState.PUBLISHED
                 for run in session.scalars(
                     select(RecipeRun).where(RecipeRun.id.in_(set(run_ids)))
                 )
             )
         assert owner is not None
         return (
-            publication.state in ("completed", "routes-withdrawn")
+            publication.state
+            in (RoutePublicationState.COMPLETED, RoutePublicationState.ROUTES_WITHDRAWN)
             and publication.generation == owner.owner_generation
             and publication.plan_digest == candidate.state.digest
             and self._publisher.active_marker_digest()
@@ -982,7 +989,7 @@ class RecipeRouteService:
         for run_id in sorted(withdrawal.excluded):
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is not None:
-                run.route_state = "withdrawn"
+                run.route_state = RunRouteState.WITHDRAWN
                 run.updated_at = self._clock()
         if after is not None:
             # Applied now so a superseding publication keeps the reason, and
@@ -1010,12 +1017,16 @@ class RecipeRouteService:
         self.projection_in_session(
             session,
             generation,
-            state=("completed" if candidate.state.aliases else "routes-withdrawn"),
+            state=(
+                RoutePublicationState.COMPLETED
+                if candidate.state.aliases
+                else RoutePublicationState.ROUTES_WITHDRAWN
+            ),
         )
         for included_id in sorted(candidate.included):
             included = session.get(RecipeRun, included_id, with_for_update=True)
             if included is not None:
-                included.route_state = "published"
+                included.route_state = RunRouteState.PUBLISHED
                 included.route_generation = generation.generation
                 included.route_digest = generation.route_digest
                 included.route_error = None
@@ -1028,7 +1039,7 @@ class RecipeRouteService:
                 if run_id in withdrawal.initial:
                     raise RecipeRouteError("recipe run changed during withdrawal")
                 continue
-            run.route_state = "withdrawn"
+            run.route_state = RunRouteState.WITHDRAWN
             run.route_generation = generation.generation
             run.route_digest = generation.route_digest
             run.route_error = None
@@ -1068,15 +1079,15 @@ class RecipeRouteService:
         for run in session.scalars(
             select(RecipeRun)
             .where(
-                RecipeRun.state == "running",
-                RecipeRun.route_state == "withdrawn",
+                RecipeRun.state == RunState.RUNNING,
+                RecipeRun.route_state == RunRouteState.WITHDRAWN,
                 RecipeRun.route_error == STOP_WITHDRAWAL_PENDING,
             )
             .with_for_update(of=RecipeRun)
         ):
             if _aware(run.updated_at) > now - STOP_DISPATCH_GRACE:
                 continue
-            run.route_state = "pending"
+            run.route_state = RunRouteState.PENDING
             run.route_error = None
             run.route_attempts = 0
             run.route_next_attempt_at = None
@@ -1095,14 +1106,17 @@ class RecipeRouteService:
         if self._restore_abandoned_stop_withdrawals(session):
             return True
         pending = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-        if pending is not None and pending.state == "withdrawal-pending":
+        if (
+            pending is not None
+            and pending.state == RoutePublicationState.WITHDRAWAL_PENDING
+        ):
             return self._withdrawal_publication(
                 session, self.prepare_withdrawal_in_session(session, frozenset())
             )
         published = tuple(
             session.scalars(
                 select(RecipeRun)
-                .where(RecipeRun.route_state == "published")
+                .where(RecipeRun.route_state == RunRouteState.PUBLISHED)
                 .order_by(RecipeRun.created_at, RecipeRun.id)
                 .with_for_update(of=RecipeRun)
             )
@@ -1111,8 +1125,8 @@ class RecipeRouteService:
             session.scalars(
                 select(RecipeRun)
                 .where(
-                    RecipeRun.state == "running",
-                    RecipeRun.route_state == "withdrawn",
+                    RecipeRun.state == RunState.RUNNING,
+                    RecipeRun.route_state == RunRouteState.WITHDRAWN,
                     RecipeRun.route_error.startswith(_HEALTH_RECOVERY_ERROR),
                 )
                 .order_by(RecipeRun.created_at, RecipeRun.id)
@@ -1127,7 +1141,9 @@ class RecipeRouteService:
             return replace(recovery, contained=True)
         if not published:
             return self._maintain_empty_routes(session)
-        not_running = frozenset(run.id for run in published if run.state != "running")
+        not_running = frozenset(
+            run.id for run in published if run.state != RunState.RUNNING
+        )
         if not_running:
             for run in published:
                 if run.id in not_running:
@@ -1171,8 +1187,8 @@ class RecipeRouteService:
                     session.scalars(
                         select(RecipeRun).where(
                             RecipeRun.id.in_(published_ids),
-                            RecipeRun.state == "running",
-                            RecipeRun.route_state == "withdrawn",
+                            RecipeRun.state == RunState.RUNNING,
+                            RecipeRun.route_state == RunRouteState.WITHDRAWN,
                         )
                     )
                 )
@@ -1195,7 +1211,7 @@ class RecipeRouteService:
         durable_current = (
             owner is not None
             and publication is not None
-            and publication.state == "completed"
+            and publication.state == RoutePublicationState.COMPLETED
             and publication.generation == owner.owner_generation
             # A missing, replaced or unreadable live marker is republished.
             and self._publisher.active_marker_digest()
@@ -1206,7 +1222,9 @@ class RecipeRouteService:
             claim = self._claim_in_session(session, candidate.state.digest)
 
             def complete(session: Session, generation: LiteLlmGeneration) -> None:
-                self.projection_in_session(session, generation, state="completed")
+                self.projection_in_session(
+                    session, generation, state=RoutePublicationState.COMPLETED
+                )
                 for run_id in sorted(candidate.included):
                     run = session.get(RecipeRun, run_id, with_for_update=True)
                     if run is not None:
@@ -1237,7 +1255,7 @@ class RecipeRouteService:
             owner is not None
             and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
             and publication is not None
-            and publication.state == "completed"
+            and publication.state == RoutePublicationState.COMPLETED
             and publication.generation == owner.owner_generation
         ):
             # The live bundle still lists models although no run is published:
@@ -1346,9 +1364,9 @@ class RecipeRouteService:
         run_statement = (
             select(RecipeRun)
             .where(
-                RecipeRun.state == "running",
+                RecipeRun.state == RunState.RUNNING,
                 or_(
-                    RecipeRun.route_state == "published",
+                    RecipeRun.route_state == RunRouteState.PUBLISHED,
                     RecipeRun.id == include_run_id,
                 ),
             )
@@ -1377,14 +1395,16 @@ class RecipeRouteService:
             # stayed unready past its grace period is evidence, and fails
             # below as before. A route not yet published still needs current
             # proof before it is first served.
-            serving = run.route_state == "published" and run.id != include_run_id
+            serving = (
+                run.route_state == RunRouteState.PUBLISHED and run.id != include_run_id
+            )
             retained: list[str] = []
             if _ALIAS.fullmatch(run.alias) is None or run.alias in aliases:
                 raise RecipeRouteError(
                     "recipe run alias is invalid or duplicated", run_id=run.id
                 )
             upstream_model = _primary_model_alias(session, run)
-            if not nodes or any(node.state != "running" for node in nodes):
+            if not nodes or any(node.state != RunState.RUNNING for node in nodes):
                 raise RecipeRouteError(
                     "every recipe rank must be running", run_id=run.id
                 )

@@ -10,6 +10,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
+from . import cli_states
 from .cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
 
 
@@ -505,7 +506,7 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
             notes.append(f"{title} is {_text(first.get('run_state'))}")
         if first.get("group_state") != "healthy":
             notes.append(f"{title} group is {_text(first.get('group_state'))}")
-        if first.get("route_state") != "published":
+        if first.get("route_state") != cli_states.PUBLISHED:
             route_note = f"{title} route is {_text(first.get('route_state'))}"
             if first.get("route_reason") is not None:
                 route_note += f": {_text(first.get('route_reason'))}"
@@ -969,7 +970,7 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         _field("Endpoint state", assignment.get("state"))
         alias = assignment.get("alias")
         endpoint = _optional(assignment.get("endpoint"), "endpoint")
-        if assignment.get("state") == "published":
+        if assignment.get("state") == cli_states.PUBLISHED:
             _field("Client model identifier", alias)
             api_base = endpoint.get("api_base")
             _field("API base (inference gateway)", api_base)
@@ -995,11 +996,11 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         if alias is not None:
             _field("Client model identifier", alias)
         messages = {
-            "installed-only": "Install-only assignment; no published endpoint was requested.",
-            "not-published-yet": "The current assignment route is not published yet.",
-            "expired": "The published route lease has expired.",
-            "withdrawn": "No current published route is associated with this assignment.",
-            "unavailable": "The Controller cannot verify a current route for this assignment.",
+            cli_states.ENDPOINT_INSTALLED_ONLY: "Install-only assignment; no published endpoint was requested.",
+            cli_states.ENDPOINT_NOT_PUBLISHED_YET: "The current assignment route is not published yet.",
+            cli_states.ENDPOINT_EXPIRED: "The published route lease has expired.",
+            cli_states.ENDPOINT_WITHDRAWN: "No current published route is associated with this assignment.",
+            cli_states.ENDPOINT_UNAVAILABLE: "The Controller cannot verify a current route for this assignment.",
         }
         print(
             messages.get(str(assignment.get("state")), "Endpoint state is unavailable.")

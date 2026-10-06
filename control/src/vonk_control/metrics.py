@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, OperationProgress
+from vonk_agent_protocol import (
+    CertificateState,
+    GatewayRouteState,
+    LifecycleState,
+    OperationProgress,
+)
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 
 from . import job_states
@@ -49,7 +54,7 @@ _JOB_STATES = frozenset(
         LifecycleState.FAILED,
     )
 )
-_ROUTE_STATES = frozenset({"published", "maintenance", "unavailable"})
+_ROUTE_STATES = frozenset(state.value for state in GatewayRouteState)
 _AGENT_STATES = frozenset({"active", "retired"})
 _AGENT_OPERATIONS = frozenset(
     {
@@ -66,14 +71,7 @@ _AGENT_OPERATIONS = frozenset(
 )
 _VERSION_BUCKETS = frozenset({"supported", "old", "new", "incompatible"})
 _CONNECTION_STATES = ("online", "offline", "unregistered")
-_CERTIFICATE_STATES = (
-    "valid",
-    "missing",
-    "not-yet-valid",
-    "expired",
-    "revoked",
-    "inactive",
-)
+_CERTIFICATE_STATES = tuple(state.value for state in CertificateState)
 _INVENTORY_FRESHNESS = ("fresh", "stale", "missing")
 _TELEMETRY_FRESHNESS = ("live", "delayed", "stale", "missing")
 _BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)

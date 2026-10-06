@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import EnrollmentGrantState
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, EnrollmentEvidence
 
 from .enrollment_contract import ENROLLMENT_ID_PATTERN, EnrollmentGrantStatus
@@ -244,13 +245,13 @@ class EnrollmentService:
             {
                 "id": grant.id,
                 "state": (
-                    "revoked"
+                    EnrollmentGrantState.REVOKED
                     if grant.revoked_at is not None
-                    else "consumed"
+                    else EnrollmentGrantState.CONSUMED
                     if grant.consumed_at is not None
-                    else "expired"
+                    else EnrollmentGrantState.EXPIRED
                     if _stored_utc(grant.expires_at) <= now
-                    else "pending"
+                    else EnrollmentGrantState.PENDING
                 ),
                 "purpose": grant.purpose,
                 "node_id": grant.node_id,
@@ -280,11 +281,11 @@ class EnrollmentService:
             if grant is None or grant.created_by != actor:
                 raise KeyError(grant_id)
             current = self._grant_status(grant)
-            if current.state == "consumed":
+            if current.state == EnrollmentGrantState.CONSUMED:
                 raise EnrollmentDenied(
                     "enrollment grant is consumed; inspect the enrolled Spark"
                 )
-            if current.state == "pending":
+            if current.state == EnrollmentGrantState.PENDING:
                 grant.revoked_at = _utc(self._clock())
                 session.flush()
             return self._grant_status(grant)

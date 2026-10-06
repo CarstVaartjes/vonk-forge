@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol import DesiredAssignmentState
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
@@ -224,7 +225,7 @@ def test_definition_preserves_authoring_fields_without_consulting_cache() -> Non
                 spark_ids=[NODE_1],
                 assignment_name="draft",
                 model_variant="precise-variant",
-                desired_state="installed",
+                desired_state=DesiredAssignmentState.INSTALLED,
             )
         ],
     )

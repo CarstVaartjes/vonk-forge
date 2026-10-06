@@ -10,7 +10,12 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ContainerRuntimeAction, canonical_message
+from vonk_agent_protocol import (
+    ContainerRuntimeAction,
+    InstallationState,
+    RunState,
+    canonical_message,
+)
 from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
@@ -205,8 +210,8 @@ def _service_run_authority(
         or stored.recipe_revision_id != authority.revision.id
         or action is ContainerRuntimeAction.START
         and (
-            run.state not in {"starting", "running"}
-            or authority.installation.state != "installed"
+            run.state not in {RunState.STARTING, RunState.RUNNING}
+            or authority.installation.state != InstallationState.INSTALLED
             or authority.mapping.state != "ready"
             or authority.revision.state != "active"
         )
@@ -250,8 +255,8 @@ def _job_run_authority(
         raise RuntimePlanAuthorityError("artifact JobRun identity is stale")
     if action is ContainerRuntimeAction.START and (
         request.run_generation != run.run_generation
-        or run.state != "running"
-        or authority.installation.state != "installed"
+        or run.state != RunState.RUNNING
+        or authority.installation.state != InstallationState.INSTALLED
         or authority.mapping.state != "ready"
         or authority.revision.state != "active"
     ):

@@ -392,12 +392,19 @@ A third tier, `legacy_state`, keeps the retired state spellings that are ordinar
 words (`waiting`, `partial`, `cancelling`, `expired`) out of lifecycle code: a literal
 equal to one of them in a statement that also names a state (`row.state`, `state=`,
 `*_STATES`, `State.X`) counts. The migration is finished, so its baseline is empty and
-`test_no_lifecycle_code_spells_a_retired_state_word` keeps it so; what remains is listed
-with a reason in `NON_LIFECYCLE_STATE_SITES` (a certificate, an installation, a
-distribution assignment, an endpoint). `waiting-for-operator` is found in any context
-by the distinctive tier. Only the contract's alias table (`STATE_ALIASES`) may spell
-them; the CLI, which ships without the contract, keeps its one copy in
-`cli_states.py`, and a test keeps it equal to the contract.
+`test_no_lifecycle_code_spells_a_retired_state_word` keeps it so. A fourth tier,
+`machine_state`, applies the same context rule to the plain words of the contract's
+other state machines (`installed`, `uninstalled`, `withdrawn`, `published`,
+`stopped`, `verified`, ...; see
+`agent_protocol/src/vonk_agent_protocol/state_machines.py`); its baseline is empty,
+and the distinctive words of those machines (`withdrawal-pending`, `not-yet-valid`)
+are caught by the first tier. There is no exception list: a certificate, an
+enrollment grant, an installation record, a distribution assignment, an endpoint or a
+catalog sync speaks its contract enum like everything else. `waiting-for-operator` is
+found in any context by the distinctive tier. Only the contract's alias table
+(`STATE_ALIASES`) may spell the retired words; the CLI, which ships without the
+contract, keeps its one copy in `cli_states.py`, and a test keeps it equal to the
+contract.
 
 The Rust agent has
 the equivalent check in `rust/crates/vonk-agent/tests/protocol_literals.rs`: no

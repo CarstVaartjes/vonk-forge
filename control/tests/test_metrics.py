@@ -28,7 +28,7 @@ def _fleet_snapshot(
     inventory: Literal["fresh", "stale"] | None = "fresh",
     telemetry: Literal["live", "delayed", "stale"] | None = "live",
     online_state: Literal["online", "offline", "unregistered"] = "online",
-    certificate_state: CertificateState = "valid",
+    certificate_state: CertificateState = CertificateState.VALID,
     gpu_utilization: float | None = None,
 ) -> FleetSnapshot:
     point = TelemetryPoint(
@@ -169,7 +169,9 @@ def test_metrics_export_typed_gpu_utilization_and_omit_unknown() -> None:
 def test_metrics_keep_connection_and_certificate_validity_independent() -> None:
     metrics = MetricsRegistry()
     metrics.update_fleet(
-        _fleet_snapshot(online_state="offline", certificate_state="expired")
+        _fleet_snapshot(
+            online_state="offline", certificate_state=CertificateState.EXPIRED
+        )
     )
     text = metrics.render()
     assert f'vonk_node_connection_state{{node_id="{NODE}",state="offline"}} 1' in text
