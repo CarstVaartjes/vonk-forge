@@ -16,6 +16,9 @@ pub struct ComposeService<'a>(Option<&'a Mapping>);
 pub struct ComposeVolume {
     pub source: String,
     pub explicit_bind: bool,
+    /// Whether the entry names a container-engine socket (anywhere in a short-form
+    /// entry, as the Controller reads it).
+    pub names_container_socket: bool,
 }
 
 impl ComposeDocument {
@@ -84,6 +87,7 @@ impl ComposeService<'_> {
                             short.split(':').next().map(|source| ComposeVolume {
                                 source: source.to_owned(),
                                 explicit_bind: false,
+                                names_container_socket: names_container_socket(short),
                             })
                         }
                         Value::Mapping(long) => get(Some(long), "source")
@@ -92,6 +96,7 @@ impl ComposeService<'_> {
                                 source: source.to_owned(),
                                 explicit_bind: get(Some(long), "type").and_then(Value::as_str)
                                     == Some("bind"),
+                                names_container_socket: names_container_socket(source),
                             }),
                         _ => None,
                     })
@@ -99,6 +104,10 @@ impl ComposeService<'_> {
             })
             .unwrap_or_default()
     }
+}
+
+fn names_container_socket(value: &str) -> bool {
+    value.contains("docker.sock") || value.contains("podman.sock")
 }
 
 fn get<'a>(mapping: Option<&'a Mapping>, key: &str) -> Option<&'a Value> {

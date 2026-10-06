@@ -344,8 +344,7 @@ fn inspect_compose(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>
         for volume in service.volumes() {
             let source = volume.source;
             if volume.explicit_bind
-                || source.contains("docker.sock")
-                || source.contains("podman.sock")
+                || volume.names_container_socket
                 || source.starts_with('/')
                 || source.starts_with("./")
                 || source.starts_with("../")

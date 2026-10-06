@@ -16,8 +16,8 @@ use vonk_agent_protocol::generated::{
     ActivateRequest, AgentUpgradeGrantRequest, BoundedErrorResponse, ClaimRequest,
     ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse, HostRuntimeGrantRequest,
     HostRuntimeGrantRequestAction, IssuedCertificateResponse, PackageActivationGrantRequest,
-    ProgressPhase, RenewRequest, RequestValidationIssueLocItem, RequestValidationProblem, SecurityRefusalReason,
-    TelemetryRequest,
+    ProgressPhase, RenewRequest, RequestValidationIssueLocItem, RequestValidationProblem,
+    SecurityRefusalReason, TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,

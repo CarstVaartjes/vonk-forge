@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::HelperErrorCode;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
-use vonk_agent_protocol::generated::{HelperErrorCode, HostHelperResponseStatus};
+use vonk_agent_protocol::generated::HostHelperResponseStatus;
 use vonk_agent_protocol::{AgentClaim, AgentUpgradeRequest, canonical_json, parse_strict};
 
 use crate::client::{AgentHttpClient, ClientError};
