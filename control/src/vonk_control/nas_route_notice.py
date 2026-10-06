@@ -44,10 +44,10 @@ def nas_route_notice(
     route = next((item for item in interfaces if item.name == route_interface), None)
     if route is None or route.kind != "wifi":
         return None
-    detail = (
-        f"Reaches the NAS over Wi-Fi ({route.name}, {_speed(route.link_speed_mbps)} "
-        "link, shared airtime)."
-    )
+    rate = "" if route.link_speed_mbps is None else f", {_speed(route.link_speed_mbps)}"
+    detail = f"Reaches the NAS over Wi-Fi ({route.name}{rate}, shared airtime)."
+    # Fabric (RDMA/ConnectX) ports link Sparks to each other and never reach the
+    # NAS, so only general-purpose wired ports are candidates for the NAS route.
     wired = [item for item in interfaces if item.kind == "wired"]
     linked = [item for item in wired if item.carrier]
     if linked:
@@ -63,8 +63,8 @@ def nas_route_notice(
         return NasRouteNotice(
             "network.nas-route-wifi-wired-port-down",
             detail,
-            f"Wired port {wired[0].name} has no link; connect it to the NAS "
-            "network with a cable.",
+            f"Connect a network cable to the RJ45 port {wired[0].name} and "
+            "connect it to the NAS network.",
         )
     return NasRouteNotice(
         "network.nas-route-wifi-no-wired-port",

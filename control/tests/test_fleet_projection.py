@@ -2230,15 +2230,47 @@ def _route_warnings(interfaces, route):
 
 _WIFI = {"name": "wlP9s9", "kind": "wifi", "link_speed_mbps": 2402, "carrier": True}
 
+_FABRIC = [
+    {
+        "name": "enP2p1s0f1np1",
+        "kind": "fabric",
+        "link_speed_mbps": 200000,
+        "carrier": True,
+    },
+    {
+        "name": "enp1s0f1np1",
+        "kind": "fabric",
+        "link_speed_mbps": 200000,
+        "carrier": True,
+    },
+]
+
+
+def test_production_shape_never_recommends_a_fabric_port_for_the_nas() -> None:
+    # Linked 200 Gb/s fabric ports plus an unplugged RJ45 port, NAS over Wi-Fi.
+    rj45 = {"name": "enP7s7", "kind": "wired", "carrier": False}
+    wifi = {"name": "wlP9s9", "kind": "wifi", "carrier": True}
+    (warning,) = _route_warnings([*_FABRIC, rj45, wifi], "wlP9s9")
+    assert warning.code == "network.nas-route-wifi-wired-port-down"
+    assert "unknown speed" not in warning.detail
+    assert warning.recommendation is not None
+    assert "network cable to the RJ45 port enP7s7" in warning.recommendation
+    assert "enP2p1s0f1np1" not in warning.recommendation
+    assert "enp1s0f1np1" not in warning.recommendation
+
+    # Without any RJ45 port, only the fabric ports are wired: still no port.
+    (warning,) = _route_warnings([*_FABRIC, wifi], "wlP9s9")
+    assert warning.code == "network.nas-route-wifi-no-wired-port"
+
 
 def test_wifi_nas_route_is_a_typed_warning_with_a_recommendation() -> None:
     down = {"name": "enP7s7", "kind": "wired", "carrier": False}
     (warning,) = _route_warnings([down, _WIFI], "wlP9s9")
     assert warning.code == "network.nas-route-wifi-wired-port-down"
     assert warning.severity == "warning"
-    assert "over Wi-Fi (wlP9s9, 2.402 Gb/s link" in warning.detail
+    assert "over Wi-Fi (wlP9s9, 2.402 Gb/s, shared airtime)" in warning.detail
     assert warning.recommendation is not None
-    assert "enP7s7 has no link" in warning.recommendation
+    assert "network cable to the RJ45 port enP7s7" in warning.recommendation
 
     up = {"name": "enP7s7", "kind": "wired", "link_speed_mbps": 10000, "carrier": True}
     (warning,) = _route_warnings([up, _WIFI], "wlP9s9")

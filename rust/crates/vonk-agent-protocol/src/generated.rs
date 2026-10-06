@@ -2773,6 +2773,8 @@ pub enum NetworkInterfaceKind {
     Wired,
     #[serde(rename = "wifi")]
     Wifi,
+    #[serde(rename = "fabric")]
+    Fabric,
     #[serde(rename = "other")]
     Other,
 }
@@ -2781,6 +2783,7 @@ impl ::std::fmt::Display for NetworkInterfaceKind {
         match *self {
             Self::Wired => f.write_str("wired"),
             Self::Wifi => f.write_str("wifi"),
+            Self::Fabric => f.write_str("fabric"),
             Self::Other => f.write_str("other"),
         }
     }
@@ -2791,6 +2794,7 @@ impl ::std::str::FromStr for NetworkInterfaceKind {
         match value {
             "wired" => Ok(Self::Wired),
             "wifi" => Ok(Self::Wifi),
+            "fabric" => Ok(Self::Fabric),
             "other" => Ok(Self::Other),
             _ => Err("invalid value".into()),
         }
@@ -8527,6 +8531,7 @@ impl NetworkInterfaceKind {
         match self {
             Self::Wired => "wired",
             Self::Wifi => "wifi",
+            Self::Fabric => "fabric",
             Self::Other => "other",
         }
     }

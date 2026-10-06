@@ -1,8 +1,8 @@
 from typing import Literal
 
-NetworkInterfaceKind = Literal['other', 'wifi', 'wired']
+NetworkInterfaceKind = Literal['fabric', 'other', 'wifi', 'wired']
 
-NETWORK_INTERFACE_KIND_VALUES: set[NetworkInterfaceKind] = { 'other', 'wifi', 'wired',  }
+NETWORK_INTERFACE_KIND_VALUES: set[NetworkInterfaceKind] = { 'fabric', 'other', 'wifi', 'wired',  }
 
 def check_network_interface_kind(value: str) -> NetworkInterfaceKind:
     if value in NETWORK_INTERFACE_KIND_VALUES:
