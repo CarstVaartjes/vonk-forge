@@ -128,6 +128,20 @@ impl HelperRejection {
                 ),
                 logs.clone(),
             ),
+            OperationError::RuntimeJobWaitFailed { evidence } => (
+                Some(
+                    evidence
+                        .as_ref()
+                        .map_or_else(
+                            || "runtime job wait failed; logs unavailable".to_owned(),
+                            |evidence| format!("runtime job wait failed; {}", evidence.summary),
+                        )
+                        .chars()
+                        .take(480)
+                        .collect(),
+                ),
+                evidence.as_ref().and_then(|evidence| evidence.logs.clone()),
+            ),
             // The firewall's refusal names the argument and rule, so it travels
             // as the diagnostic instead of collapsing to the stable code.
             OperationError::RuntimeFabricFirewallRejected { reason }

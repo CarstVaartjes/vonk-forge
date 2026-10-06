@@ -87,6 +87,8 @@ pub enum OperationError {
     },
     #[error("compiled command failed")]
     CommandFailed,
+    #[error("runtime job wait failed")]
+    RuntimeJobWaitFailed { evidence: Option<Box<JobEvidence>> },
     #[error("projected runtime invocation exceeds a host argument limit")]
     RuntimeInvocationLimitExceeded {
         string_limit: bool,
@@ -149,7 +151,7 @@ impl OperationError {
             Self::PackageMetadataInvalid => "helper.package_metadata_invalid",
             Self::PackagePreflightFailed => "helper.package_preflight_failed",
             Self::PackageInstallFailed { .. } => "helper.package_install_failed",
-            Self::CommandFailed => "helper.command_failed",
+            Self::CommandFailed | Self::RuntimeJobWaitFailed { .. } => "helper.command_failed",
             Self::RuntimeInvocationLimitExceeded {
                 string_limit: false,
                 ..
@@ -189,6 +191,7 @@ impl OperationError {
             Self::PackagePreflightFailed => "package activation prerequisites failed",
             Self::PackageInstallFailed { .. } => "package installation failed",
             Self::CommandFailed => "compiled command failed",
+            Self::RuntimeJobWaitFailed { .. } => "runtime job wait failed",
             Self::RuntimeInvocationLimitExceeded {
                 string_limit: false,
                 ..
@@ -935,7 +938,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             status,
             exit_code: exit_code.map(i64::from),
             diagnostic: evidence.as_ref().map(|evidence| evidence.summary.clone()),
-            process_logs: evidence.and_then(|evidence| evidence.logs),
+            process_logs: evidence
+                .and_then(|evidence| evidence.logs)
+                .map(|logs| *logs),
         })
     }
 
@@ -2466,7 +2471,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 if cancelled {
                     Ok((Some(124), None))
                 } else {
-                    Err(OperationError::CommandFailed)
+                    Err(OperationError::RuntimeJobWaitFailed { evidence })
                 }
             }
             Err(_) => {

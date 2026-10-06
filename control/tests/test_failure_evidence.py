@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -693,7 +694,10 @@ def _child_diagnostics_document(stderr: str) -> dict[str, object]:
     }
 
 
-def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(service):
+@pytest.mark.parametrize("unrelated_jobs", [0, 205])
+def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
+    service, unrelated_jobs
+):
     """A Controller-owned parent shows what its Spark-side child captured.
 
     Wrong implementation caught: the download rendered the parent's own result,
@@ -705,6 +709,7 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(service):
 
     job_id = str(uuid4())
     child_id = str(uuid4())
+    application_id = str(uuid4())
     with service.sessions.begin() as session:
         session.add(
             Job(
@@ -717,7 +722,7 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(service):
                 targets=[NODE_A],
                 payload_digest="b" * 64,
                 payload={},
-                result={"phase_index": 3},
+                result={"phase_index": 3, "profile_application_id": application_id},
                 status_reason="run-switch phase operation failed: the workload process exited",
                 current_attempt=0,
                 created_at=NOW,
@@ -756,6 +761,65 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(service):
                 },
             )
         )
+    # Empty later receipts and unrelated later jobs must not hide the exact
+    # parent's evidence through a global history-window cap.
+    with service.sessions.begin() as session:
+        for index in range(9):
+            empty_child_id = str(uuid4())
+            session.add(
+                AgentOperation(
+                    id=empty_child_id,
+                    parent_job_id=job_id,
+                    node_id=NODE_A,
+                    kind=ProtocolAgentOperation.RECIPE_START.value,
+                    payload_digest="b" * 64,
+                    payload={},
+                    authority_revision=COMMIT,
+                    state="failed",
+                    status_reason="failed",
+                    current_attempt=1,
+                    created_at=NOW,
+                    updated_at=NOW + timedelta(seconds=index + 1),
+                )
+            )
+            session.add(
+                AgentOperationAttempt(
+                    id=str(uuid4()),
+                    operation_id=empty_child_id,
+                    attempt=1,
+                    fence=str(uuid4()),
+                    lease_deadline=NOW,
+                    agent_certificate_serial="test-serial",
+                    state="failed",
+                    progress=None,
+                    result={"error_code": "recipe_start_failed"},
+                )
+            )
+        for index in range(unrelated_jobs):
+            session.add(
+                Job(
+                    id=str(uuid4()),
+                    request_id=str(uuid4()),
+                    kind="recipe.run-switch.v2",
+                    state="failed",
+                    actor="test",
+                    authority_revision="a" * 64,
+                    targets=[NODE_A],
+                    payload_digest="b" * 64,
+                    payload={},
+                    result={"profile_application_id": str(uuid4())},
+                    current_attempt=0,
+                    created_at=NOW,
+                    updated_at=NOW + timedelta(seconds=index + 1),
+                )
+            )
+    with service.sessions() as session:
+        diagnostics = service._application_child_diagnostics(
+            session, SimpleNamespace(id=application_id)
+        )
+    assert diagnostics is not None
+    assert diagnostics["stderr"]["text"] == "Killed\n"
+
     for attempt in (0, 1):
         bundle = service.read(job_id, attempt)
         assert bundle.diagnostics.stderr.text == "Killed"

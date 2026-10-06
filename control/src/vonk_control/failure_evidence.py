@@ -567,7 +567,7 @@ class FailureEvidenceService:
         log tails.  Reporting only the parent's reason text was how a workload
         that exited left empty stdout/stderr and category ``unknown``.
         """
-        rows = session.execute(
+        result = session.execute(
             select(AgentOperationAttempt.result)
             .join(
                 AgentOperation,
@@ -576,18 +576,19 @@ class FailureEvidenceService:
             .where(
                 AgentOperation.parent_job_id == job_id,
                 failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+                AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
             )
             .order_by(
                 AgentOperation.updated_at.desc(),
                 AgentOperationAttempt.attempt.desc(),
             )
-            .limit(8)
-        ).scalars()
-        for result in rows:
-            diagnostics = mapping((mapping(result) or {}).get("diagnostics"))
-            if diagnostics is not None:
-                return {str(key): value for key, value in diagnostics.items()}
-        return None
+            # Select the newest receipt that actually contains evidence, rather
+            # than cutting off an arbitrary window of unrelated empty receipts.
+            # One persisted receipt has the producer's bounded evidence size.
+            .limit(1)
+        ).scalar_one_or_none()
+        diagnostics = mapping((mapping(result) or {}).get("diagnostics"))
+        return dict(diagnostics) if diagnostics is not None else None
 
     @classmethod
     def _job_result(cls, session, job) -> dict[str, object]:
@@ -604,23 +605,29 @@ class FailureEvidenceService:
     @classmethod
     def _application_child_diagnostics(cls, session, application):
         """Diagnostics of the newest failed run-switch child of an application."""
-        jobs = session.execute(
-            select(Job)
-            .where(
-                Job.kind.like("recipe.run-switch%"),
-                Job.state.in_(FAILED_ATTEMPT_STATES),
+        result = session.execute(
+            select(AgentOperationAttempt.result)
+            .join(
+                AgentOperation,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
             )
-            .order_by(Job.updated_at.desc())
-            .limit(200)
-        ).scalars()
-        for job in jobs:
-            if (mapping(job.result) or {}).get(
-                "profile_application_id"
-            ) == application.id:
-                found = cls._child_diagnostics(session, job.id)
-                if found is not None:
-                    return found
-        return None
+            .join(Job, AgentOperation.parent_job_id == Job.id)
+            .where(
+                Job.kind == "recipe.run-switch.v2",
+                Job.state.in_(FAILED_ATTEMPT_STATES),
+                Job.result["profile_application_id"].as_string() == application.id,
+                failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+                AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
+            )
+            .order_by(
+                Job.updated_at.desc(),
+                AgentOperation.updated_at.desc(),
+                AgentOperationAttempt.attempt.desc(),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        diagnostics = mapping((mapping(result) or {}).get("diagnostics"))
+        return dict(diagnostics) if diagnostics is not None else None
 
     @staticmethod
     def _item(
