@@ -63,9 +63,24 @@ class RouteRunIdentity(StrictModel):
     ranks: list[RouteRankIdentity]
 
 
+class RouteAcceptedModelPolicy(StrictModel):
+    requests_per_minute: int = Field(ge=1, le=100_000)
+    tokens_per_minute: int = Field(ge=1, le=100_000_000)
+    upstream_model: str = Field(min_length=1, max_length=256)
+
+
+class RouteAcceptedRunIdentity(StrictModel):
+    """Retained immutable serving facts while current bookkeeping is unreadable."""
+
+    run_id: str = Field(min_length=1, max_length=128)
+    alias: str = Field(min_length=1, max_length=128)
+    accepted_endpoint: RouteEndpointDocument
+    accepted_policy: RouteAcceptedModelPolicy
+
+
 class RouteIdentityDocument(StrictModel):
     """The document whose digest names one candidate route bundle."""
 
     schema_version: Literal[1] = 1
-    runs: list[RouteRunIdentity]
+    runs: list[RouteRunIdentity | RouteAcceptedRunIdentity]
     aliases: dict[Identifier, str]
