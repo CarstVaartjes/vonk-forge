@@ -3641,7 +3641,8 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         assert child is not None
         run = _required(session.get(RecipeRun, start.owner_id))
         expected_floor = parse_stored_run_plan(run.plan).nodes[0].memory_floor_bytes
-        assert expected_floor == 107
+        # The recipe's 107-byte reserve is informational; the platform floor applies.
+        assert expected_floor == 50
         assert _placement(child.payload)["memory_floor_bytes"] == expected_floor
         start_payload = RecipeStartPayload.model_validate(child.payload)
         assert (

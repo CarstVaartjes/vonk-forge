@@ -40,6 +40,7 @@ def setup(
     free_memory=300,
     port_reserved=False,
     system_reserve=0,
+    peak_bytes=225,
     memory_pool: MemoryPool = "shared",
     denied_jurisdictions=(),
     github_release_source=False,
@@ -80,7 +81,7 @@ def setup(
     model = ModelDefinition.model_validate(model_document)
     document["models"][0]["model"]["content_sha256"] = document_sha256(model_document)
     memory = document["topology"]["roles"][0]["resources"]["memory"]
-    memory.update({"peak_bytes": 225, "reserve_bytes": system_reserve})
+    memory.update({"peak_bytes": peak_bytes, "reserve_bytes": system_reserve})
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -311,49 +312,37 @@ def test_territorial_license_run_admission_is_informational(tmp_path) -> None:
     )
 
 
-@pytest.mark.parametrize("platform_floor", [None, 50])
-def test_system_reserve_is_a_floor_not_workload_memory(
-    tmp_path, platform_floor
+def test_declared_reserve_is_informational_and_the_platform_floor_applies(
+    tmp_path,
 ) -> None:
+    # The recipe declares a 75-byte reserve; only the 50-byte platform floor counts.
     sessions, now, _node, installation = setup(
-        tmp_path,
-        free_memory=300,
-        system_reserve=75,
+        tmp_path, free_memory=275, system_reserve=75
     )
-    service = (
-        RunAdmissionService(sessions, inventory_max_age=300)
-        if platform_floor is None
-        else RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=50)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
     )
 
     plan = service.plan_run(installation, alias="qwen", now=now)
 
     assert plan.allowed is True
     assert plan.nodes[0].required_memory_bytes == 225
-    assert plan.nodes[0].free_after_bytes == 75
-    assert plan.nodes[0].memory_floor_bytes == 75
+    assert plan.nodes[0].free_after_bytes == 50
+    assert plan.nodes[0].memory_floor_bytes == 50
 
 
-@pytest.mark.parametrize("platform_floor", [None, 50])
-def test_system_reserve_still_blocks_a_run_without_headroom(
-    tmp_path, platform_floor
-) -> None:
+def test_platform_floor_still_blocks_a_run_without_headroom(tmp_path) -> None:
     sessions, now, _node, installation = setup(
-        tmp_path,
-        free_memory=299,
-        system_reserve=75,
+        tmp_path, free_memory=274, system_reserve=75
     )
-    service = (
-        RunAdmissionService(sessions, inventory_max_age=300)
-        if platform_floor is None
-        else RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=50)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
     )
+
     plan = service.plan_run(installation, alias="qwen", now=now)
 
     assert plan.allowed is False
-    assert plan.nodes[0].required_memory_bytes == 225
-    assert plan.nodes[0].free_after_bytes == 74
-    assert plan.nodes[0].memory_floor_bytes == 75
+    assert plan.nodes[0].memory_floor_bytes == 50
     assert "run.insufficient_memory" in {
         reason.code for reason in plan.nodes[0].blockers
     }
@@ -368,13 +357,13 @@ def test_envelope_larger_than_the_spark_is_terminal_not_a_capacity_wait(
         require_admissible,
     )
 
-    # 225 peak + 776 reserve = 1001 bytes on a 1000-byte Spark.
+    # A 1001-byte peak on a 1000-byte Spark; the declared reserve is not added.
     sessions, now, _node, installation = setup(
-        tmp_path, free_memory=300, system_reserve=776
+        tmp_path, free_memory=300, peak_bytes=1001
     )
-    plan = RunAdmissionService(sessions, inventory_max_age=300).plan_run(
-        installation, alias="qwen", now=now
-    )
+    plan = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=0
+    ).plan_run(installation, alias="qwen", now=now)
 
     codes = {reason.code for reason in plan.nodes[0].blockers}
     assert plan.allowed is False

@@ -53,6 +53,10 @@ class _EffectiveSettingsProjection(Protocol):
     parallelism: _ParallelismProjection
 
 
+# The memory the platform keeps free on every Spark beyond a workload's declared
+# peak. A recipe's own ``reserve_bytes`` is informational and is never added.
+PLATFORM_MEMORY_FLOOR_BYTES = 2_000_000_000
+
 # A recipe whose declared peak plus reserve exceeds a Spark's physical memory.
 ENVELOPE_EXCEEDS_CAPACITY = "resource.envelope_exceeds_capacity"
 
@@ -240,7 +244,10 @@ def memory_requirement(
     settings: object | None = None,
     platform_floor_bytes: int = 0,
 ) -> MemoryRequirement:
-    """DGX Spark memory is unified; one peak and one reserve describe a role."""
+    """DGX Spark memory is unified; the declared peak plus the platform floor describe a role.
+
+    The recipe's ``reserve_bytes`` is informational: it is not added to the peak.
+    """
     if platform_floor_bytes < 0:
         raise ValueError("recipe memory envelope is invalid")
     selected = settings if settings is not None else recipe_document
@@ -260,9 +267,7 @@ def memory_requirement(
         resolution.settings if resolution.settings is not None else selected,
         evidence,
     )
-    return MemoryRequirement(
-        "unified", max(platform_floor_bytes, memory.reserve_bytes), demand
-    )
+    return MemoryRequirement("unified", platform_floor_bytes, demand)
 
 
 def memory_capacity_snapshot(
