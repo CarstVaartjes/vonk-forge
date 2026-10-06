@@ -3818,14 +3818,7 @@ class RunSwitchOperationService:
             try:
                 advanced = self._advance(str(job_id)) or advanced
                 self._record_wait(str(job_id))
-            except (
-                RunSwitchOperationConflict,
-                OSError,
-                RuntimeError,
-                TypeError,
-                ValueError,
-                KeyError,
-            ) as error:
+            except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
                 # One persisted operation must never deny unrelated operations
                 # their turn.  A malformed contract is rejected and retained by
                 # ``_advance`` itself; this contains an unexpected per-job

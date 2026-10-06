@@ -287,6 +287,12 @@ class RecipeRetryLater(UnknownOutcomeError, RecipeOperationConflict):
     not reported); nothing was persisted and the caller retries it."""
 
 
+class RecipeBuildOwnershipBusy(RecipeRetryLater):
+    """A build's owner rows are locked by another writer: the cancellation that
+    met it repeats its transaction, and the requester hears of it only after the
+    attempts are spent."""
+
+
 class _RouteNotWithdrawn(UnknownOutcomeError):
     """The run's route is listed again; withdraw it again before dispatching."""
 
@@ -6439,7 +6445,7 @@ class RecipeOperationService:
         reason: str,
         only_if_unneeded: bool = False,
     ) -> bool:
-        refused: RecipeRetryLater | None = None
+        refused: RecipeBuildOwnershipBusy | None = None
         for _attempt in admission_attempts():
             try:
                 return self._cancel_current_build(
@@ -6449,7 +6455,7 @@ class RecipeOperationService:
                     reason=reason,
                     only_if_unneeded=only_if_unneeded,
                 )
-            except RecipeRetryLater as error:
+            except RecipeBuildOwnershipBusy as error:
                 refused = error
         assert refused is not None
         raise refused
@@ -6481,7 +6487,7 @@ class RecipeOperationService:
                 "57014",
             }:
                 raise
-            raise RecipeRetryLater(
+            raise RecipeBuildOwnershipBusy(
                 f"{RecipeBuildCode.CONSUMER_BUSY}: build ownership is changing; retry cancellation",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error

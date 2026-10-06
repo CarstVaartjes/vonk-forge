@@ -52,7 +52,7 @@
   },
   "max_debt": 9,
   "debt_ceiling": {
-    "total": 64,
+    "total": 65,
     "unaudited": 451,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
@@ -192,7 +192,7 @@
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService._cancel_build",
       "catches": [
-        "RecipeRetryLater"
+        "RecipeBuildOwnershipBusy"
       ],
       "reason": "A build cancellation that meets a lock another writer holds repeats its transaction a bounded number of times with short jittered pauses; the cancellation request key makes a repeat idempotent."
     },
@@ -221,14 +221,6 @@
         "ModelCacheError"
       ],
       "reason": "A cooperative stop is recorded as a resumable partial and any other cache error is recorded through the failure path; both report an unknown outcome to the cache operation's lifecycle, which retries the exact transfer with bounded backoff."
-    },
-    {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService.tick",
-      "catches": [
-        "RunSwitchOperationConflict"
-      ],
-      "reason": "The tick gives every due Run/Switch operation a turn; an operation that raised a typed conflict is held with its failure shown and a backoff, never ends the batch, and is advanced again at its next tick."
     }
   ],
   "operator_waits": [
@@ -3284,16 +3276,17 @@
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: class InstallAdmissionBusy is an unknown outcome with no proven retry loop.",
       "sites": [
         ["control/src/vonk_control/recipe_operations.py", "RecipeReconciliationBlocked", "RecipeOperationService._reconciliation_authority_in_session.blocked", "message", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._admit_workload_intent", "workload-intent-differs-across-the-target-sparks", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "recipe-build-service-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "stored-recipe-build-plan-is-unreadable-it-is-recorded-and-t", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_install_in_session", "stored-compiled-execution-plan-is-unreadable-for-install-ret", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_build_in_session", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._stop_logical_job_run", "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.check_build_source", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.preview_build", "recipe-build-service-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "compiled-execution-plan-is-unavailable-for-the-installed-rec", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-installation-is-not-runnable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-node-endpoint-evidence-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._stop_logical_job_run", "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.check_build_source", "recipe-build-service-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.preview_build", "recipe-build-service-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "prior-installation-intent-requires-exact-observation-before", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "recipe-installation-is-being-reconciled", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "stored-installation-plan-is-unreadable-it-is-recorded-and-t", 1],
@@ -3537,8 +3530,7 @@
         ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._reconcile_installation_once", "reconcile.capacity_busy", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._build_once", "message", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._queue_prebuilt_build_in_session", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._admit_workload_intent", "workload-intent-differs-across-the-target-sparks", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._cancel_current_build", "build.consumer_busy", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeBuildOwnershipBusy", "RecipeOperationService._cancel_current_build", "build.consumer_busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._activate_job_run_once", "run-capacity-writer-is-busy", 1],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._admit_workload_intent", "run-capacity-writer-is-busy", 2],
         ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._queue_in_session", "run-capacity-writer-is-busy", 3],
