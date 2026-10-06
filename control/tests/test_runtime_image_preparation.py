@@ -1172,6 +1172,7 @@ def test_temporary_unreadable_receipt_does_not_block_verified_reuse(
         "expected_architecture": "linux/arm64",
         "expected_runtime_interface": "vonk.runtime.v1",
     }
+    assert published.build_input_sha256 is not None
     found = (
         storage.find_verified(published.image_digest, **arguments)
         if lookup == "image"
