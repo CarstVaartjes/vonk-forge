@@ -2446,9 +2446,10 @@
     {
       "family": "runtime_image_preparation.security-edge",
       "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check. A PermissionError reading a managed receipt is an explicit permission_denied refusal, never an automatic repair or absent-image observation.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.digest_mismatch", 1]
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.digest_mismatch", 1],
+        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_load_receipt_document", "permission-denied", 1]
       ]
     },
     {
