@@ -73,6 +73,7 @@ from ..run_switch_contract import (
 from ..run_switch_observation_contract import (
     RunSwitchStoredChildIdentity,
     RunSwitchStoredIdentity,
+    RunSwitchStoredLifecycle,
 )
 from .adapter import Dispatch
 from .agent_operation import AgentOperationAdapter
@@ -207,7 +208,19 @@ class RunSwitchAdapter:
                 canonical_message(stored.result), strict=True
             )
         except (TypeError, ValueError):
-            result = RunSwitchOperationResult()
+            try:
+                retained = RunSwitchStoredLifecycle.model_validate_json(
+                    canonical_message(stored.result), strict=True
+                )
+            except (TypeError, ValueError):
+                retained = RunSwitchStoredLifecycle()
+            result = RunSwitchOperationResult(
+                child_operation_id=retained.child_operation_id,
+                cancellation=retained.cancellation,
+                observation_due_at=retained.observation_due_at,
+                retry_attempt=retained.retry_attempt,
+                retry_reason=retained.retry_reason,
+            )
         return self.lifecycle(stored, result, self.now())
 
     def lifecycle(

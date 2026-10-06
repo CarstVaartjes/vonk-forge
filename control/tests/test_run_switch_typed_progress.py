@@ -55,6 +55,15 @@ def test_damaged_sibling_bookkeeping_retains_exact_child_without_coercion() -> N
         == child_id
     )
     assert _stored_child({"child_operation_id": 3}) is None
+    now = datetime(2026, 10, 6, 12, tzinfo=UTC)
+    job = Job(
+        id=str(uuid4()),
+        kind="recipe.run-switch.v2",
+        state="running",
+        payload={"workload_intent_ordinal": 7},
+        result={"child_operation_id": child_id, "phase_results": ["bad"]},
+    )
+    assert RunSwitchAdapter(clock=lambda: now).adopt(job).effect.value == "issued"
     identity = RunSwitchStoredIdentity.model_validate(
         {
             "action": "run",

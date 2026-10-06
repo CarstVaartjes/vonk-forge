@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -15,7 +16,7 @@ from pydantic import (
 from vonk_agent_protocol import OperationProgress, canonical_message
 
 from .recipe_lifecycle_contract import LifecycleNodeResult
-from .run_switch_contract import RunSwitchMemberReceipt
+from .run_switch_contract import RunSwitchCancellation, RunSwitchMemberReceipt
 from .runtime_image_preparation import RuntimeImageReceipt
 
 
@@ -156,3 +157,19 @@ class RunSwitchStoredChildIdentity(BaseModel):
         ]
         | None
     ) = None
+
+
+class RunSwitchStoredLifecycle(RunSwitchStoredChildIdentity):
+    """Retain issued work and its stop clock independently of damaged receipts."""
+
+    cancellation: Annotated[
+        RunSwitchCancellation | None,
+        readable_or_none(TypeAdapter(RunSwitchCancellation)),
+    ] = None
+    observation_due_at: Annotated[
+        datetime | None, readable_or_none(TypeAdapter(datetime))
+    ] = None
+    retry_attempt: Annotated[
+        int | None, readable_or_none(TypeAdapter(Annotated[int, Field(ge=2)]))
+    ] = None
+    retry_reason: Annotated[str | None, readable_or_none(TypeAdapter(str))] = None
