@@ -54,11 +54,15 @@ from vonk_control.operation_api import merge_operation_providers
 from vonk_control.operation_item_contract import operation_item
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
+    RunSwitchDistributionChildResult,
+    RunSwitchModelDownloadResult,
     RunSwitchOperationResult,
     RunSwitchPhase,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchTargetTransferEvidenceResult,
+    RunSwitchTargetTransferResult,
+    RunSwitchVerifyResult,
     SparkGroup,
     SparkGroupNode,
 )
@@ -67,6 +71,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
     _validate_artifact_execution,
 )
+from vonk_control.strict_json import read_stored_model
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .runtime_image_fixtures import place_test_image
@@ -293,13 +298,11 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         progress=RunSwitchOperationResult.model_validate(build_progress),
     )
     assert first.operation_id is not None
+    assert isinstance(first.result, RunSwitchTargetTransferResult)
     pending = executor.get(first.operation_id)
-    assert (
-        _receipt_json(pending.result)["progress"]["members"][0]["completed_bytes"] == 0
-    )
-    assert isinstance(
-        _receipt_json(pending.result)["progress"]["members"][0]["completed_bytes"], int
-    )
+    assert isinstance(pending.result, RunSwitchDistributionChildResult)
+    assert pending.result.progress.members[0].completed_bytes == 0
+    assert isinstance(pending.result.progress.members[0].completed_bytes, int)
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
         assert child is not None
@@ -349,18 +352,22 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             )
         )
     view = executor.get(first.operation_id)
+    assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.state == "succeeded"
-    assert [member["node_id"] for member in _receipt_json(view.result)["members"]] == [
+    assert [member.node_id for member in view.result.members] == [
         NODE_A,
         NODE_B,
     ]
-    assert _receipt_json(view.result)["progress"]["completed_bytes"] == 30
-    assert _receipt_json(view.result)["progress"]["total_bytes"] == 30
+    assert view.result.progress.completed_bytes == 30
+    assert view.result.progress.total_bytes == 30
     with services.sessions() as session:
         persisted = session.get(Job, first.operation_id)
         assert persisted is not None and persisted.result is not None
-        assert persisted.result["progress"]["completed_bytes"] == 30
-        assert persisted.result["progress"]["members"][0]["state"] == "succeeded"
+        persisted_receipt = read_stored_model(
+            RunSwitchDistributionChildResult, persisted.result
+        )
+        assert persisted_receipt.progress.completed_bytes == 30
+        assert persisted_receipt.progress.members[0].state == "succeeded"
     executor.source_available = False
     replay = executor.execute(
         plan,
@@ -400,8 +407,8 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             ]
         ),
     )
-    assert verify.result is not None
-    assert _receipt_json(verify.result)["verified"] is True
+    assert isinstance(verify.result, RunSwitchVerifyResult)
+    assert verify.result.verified is True
 
     with services.sessions.begin() as session:
         attempt = session.scalar(
@@ -413,8 +420,9 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         assert attempt is not None and attempt.result is not None
         attempt.result = {**attempt.result, "downloaded_bytes": 14}
     mismatch = executor.get(first.operation_id)
+    assert isinstance(mismatch.result, RunSwitchDistributionChildResult)
     assert mismatch.state == "failed"
-    assert _receipt_json(mismatch.result)["members"][0]["error"] == (
+    assert mismatch.result.members[0].error == (
         "distributed transfer byte evidence mismatch"
     )
     with services.sessions.begin() as session:
@@ -552,9 +560,9 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
         request_key="00000000-0000-4000-8000-000000000001",
         progress=RunSwitchOperationResult(),
     )
-    assert cached.result is not None
-    assert _receipt_json(cached.result)["skipped"] is True
-    assert _receipt_json(cached.result)["verified_build_id"] == build_id
+    assert isinstance(cached.result, RunSwitchVerifyResult)
+    assert cached.result.skipped is True
+    assert cached.result.verified_build_id == build_id
     _validate_artifact_execution(plan, _phase(kind="verify"), cached.result)
 
 
@@ -625,9 +633,10 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
         )
         child_id = child.id
     view = executor.get(child_id)
+    assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.state == "failed"
-    assert _receipt_json(view.result)["members"][0]["error"] == "digest mismatch"
-    assert _receipt_json(view.result)["reason"] == "digest mismatch"
+    assert view.result.members[0].error == "digest mismatch"
+    assert view.result.reason == "digest mismatch"
 
 
 @pytest.mark.parametrize("running", [False, True])
@@ -781,13 +790,12 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
         )
         child_id = child.id
     view = executor.get(child_id)
-    member = _receipt_json(view.result)["members"][0]
-    assert member["failure_kind"] == failure_kind
-    assert member["diagnostic"] == "http_status=404 error_code=controller.http_404"
-    assert (
-        _receipt_json(view.result)["evidence"][0]["diagnostic"] == member["diagnostic"]
-    )
-    assert _receipt_json(view.result)["failure_kind"] == failure_kind
+    assert isinstance(view.result, RunSwitchDistributionChildResult)
+    member = view.result.members[0]
+    assert member.failure_kind == failure_kind
+    assert member.diagnostic == "http_status=404 error_code=controller.http_404"
+    assert view.result.evidence[0].diagnostic == member.diagnostic
+    assert view.result.failure_kind == failure_kind
     decision = classify(_child_failure_kind(view))
     assert (decision is RecoveryDecision.RETRY) is retried
 
@@ -1013,19 +1021,18 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
     assert first.operation_id
     service.run_pending(limit=2)
     completed = executor.get(first.operation_id)
+    assert isinstance(completed.result, RunSwitchModelDownloadResult)
     assert completed.state == "succeeded"
-    assert (
-        _receipt_json(completed.result)["artifact_set_sha256"]
-        == manifest.digest
-        == artifact_set
-    )
-    assert _receipt_json(completed.result)["coverage"] == "complete"
-    assert _receipt_json(completed.result)["evidence"]["coverage"] == "complete"
+    assert completed.result.artifact_set_sha256 == manifest.digest == artifact_set
+    assert completed.result.coverage == "complete"
+    assert completed.result.evidence is not None
+    assert completed.result.evidence.coverage == "complete"
     # The set was completed by the earlier resumable operation before this
     # child ran, so this operation received no bytes despite its planned
     # remaining range.
-    assert _receipt_json(completed.result)["progress"]["completed_bytes"] == 0
-    assert _receipt_json(completed.result)["progress"]["total_bytes"] < len(payload)
+    assert completed.result.progress.completed_bytes == 0
+    assert completed.result.progress.total_bytes is not None
+    assert completed.result.progress.total_bytes < len(payload)
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -1290,10 +1297,11 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert cache.run_pending() == 1
     assert model_child.operation_id is not None
     model_result = executor.get(model_child.operation_id)
+    assert isinstance(model_result.result, RunSwitchModelDownloadResult)
     assert model_result.state == "succeeded"
-    assert _receipt_json(model_result.result)["coverage"] == "complete"
-    assert _receipt_json(model_result.result)["artifact_set_sha256"] == artifact_set
-    assert _receipt_json(model_result.result)["progress"]["completed_bytes"] == (
+    assert model_result.result.coverage == "complete"
+    assert model_result.result.artifact_set_sha256 == artifact_set
+    assert model_result.result.progress.completed_bytes == (
         len(model_payload) + len(auxiliary_payload)
     )
 
@@ -1387,11 +1395,10 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             assert payload_response.status_code == 200
             assert payload_response.headers["x-vonk-file"].endswith(item["sha256"])
     view = executor.get(copy_child.operation_id)
+    assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.state == "succeeded"
-    assert {
-        member["node_id"] for member in _receipt_json(view.result)["members"]
-    } == set(nodes)
-    assert len(_receipt_json(view.result)["evidence"]) == 2
+    assert {member.node_id for member in view.result.members} == set(nodes)
+    assert len(view.result.evidence) == 2
     replay = executor.execute(
         plan,
         copy_phase,
@@ -1431,7 +1438,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     }
 
     copy_view = executor.get(copy_child.operation_id)
-    member_progress = _receipt_json(copy_view.result)["progress"]["members"]
+    assert isinstance(copy_view.result, RunSwitchDistributionChildResult)
+    member_progress = copy_view.result.progress.members
     (tmp_path / "run-switch-plan").mkdir()
     (
         plan_sessions,
@@ -1473,8 +1481,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         actor="operator",
     )
     operation_plan_payload = operation_plan.model_dump(mode="json")
-    member_progress = [
-        {**member, "node_id": plan_nodes[index]}
+    persisted_members = [
+        {**member.model_dump(mode="json"), "node_id": plan_nodes[index]}
         for index, member in enumerate(member_progress)
     ]
     run_id = str(uuid.uuid4())
@@ -1500,7 +1508,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                     "completed_bytes": 90,
                     "total_bytes": 90,
                     "total_bytes_known": True,
-                    "members": member_progress,
+                    "members": persisted_members,
                 },
                 created_at=now,
                 updated_at=now,
@@ -1513,7 +1521,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     family_item = run_provider.get_operation(run_id)
     family_progress = _operation_progress(family_item)
     assert family_progress["completed_bytes"] == 90
-    expected_target_bytes = _receipt_json(view.result)["members"][0]["total_bytes"]
+    expected_target_bytes = view.result.members[0].total_bytes
     assert {
         _member_totals(item)
         for item in require_sequence(family_progress["members"], "operation members")
