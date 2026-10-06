@@ -507,11 +507,6 @@ class RunAdmissionService:
             }
             model_version = resolved_models[0] if resolved_models else None
             model_document = model_version.document if model_version else None
-            if not isinstance(model_document, Mapping):
-                raise InvalidValue(
-                    "exact model license authority is unavailable",
-                    reason=InvalidRequestReason.NOT_FOUND,
-                )
             legal_admission = territorial_admission(
                 model_document,
                 operation="run",
