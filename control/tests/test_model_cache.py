@@ -210,6 +210,29 @@ def _artifact(
     }
 
 
+@pytest.fixture
+def threaded_cache(tmp_path: Path):
+    """Background workers use independent connections, like the Controller."""
+
+    engine = create_engine(
+        f"sqlite+pysqlite:///{tmp_path / 'background-cache.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "background-nas-cache",
+        reserve_bytes=0,
+        fixture_sources=True,
+    )
+    try:
+        yield service, sessions
+    finally:
+        service.close()
+        engine.dispose()
+
+
 def _download(
     service: ModelCacheService,
     artifacts: list[dict[str, object]],
@@ -4154,11 +4177,11 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
 
 
 def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
-    cache, tmp_path, monkeypatch
+    threaded_cache, tmp_path, monkeypatch
 ):
     from concurrent.futures import wait
 
-    _existing, sessions = cache
+    _existing, sessions = threaded_cache
     handler, payload, served = _gone_handler([404] * 5)
     service, client = _http_cache_service(
         tmp_path, sessions, handler, clock=lambda: NOW
