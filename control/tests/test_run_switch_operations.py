@@ -127,6 +127,7 @@ from .test_recipe_operations import (
     _CanonicalModelCache,
     installed_recipe,
     setup_services,
+    started_recipe,
 )
 
 
@@ -6123,3 +6124,126 @@ def test_missing_per_node_evidence_means_missing_here_never_an_error(
     )
     _total, per_node = _planned_transfer_bytes(uneven)
     assert per_node == {SPARK_A: 0, SPARK_B: 1024 + 1025}
+
+
+def test_stop_verification_keeps_waiting_for_a_lost_run_that_is_not_stopped(
+    tmp_path: Path,
+) -> None:
+    """A lost run still owning residue is not a verified stop and not a failure.
+
+    Wrong implementation this catches: the wait was keyed on the active-run
+    set, which excludes ``lost``, so the stop verification failed outright
+    instead of waiting for the teardown of the residue to converge.
+    """
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    ranks = [
+        SimpleNamespace(
+            node_id=nodes[0], rank=0, role="entrypoint", state="running", fresh=True
+        )
+    ]
+    status = SimpleNamespace(
+        state="lost",
+        route_state="published",
+        route_error=None,
+        healthy=False,
+        run_generation=1,
+        ranks=ranks,
+        recovery_owners=(),
+        route_recovery_pending=False,
+        route_next_attempt_at=None,
+        observation_deadline_at=None,
+    )
+    stub = SimpleNamespace(run_status=lambda _run_id: status)
+    service = RecipeLifecyclePhaseExecutor(
+        stub,  # type: ignore[arg-type]
+        sessions,
+        ClusterMappingService(sessions),
+        lifecycle._clock,
+    )
+    plan = SimpleNamespace(
+        action="stop", run_id=str(uuid.uuid4()), profile_stop_scope=None, alias="x"
+    )
+
+    execution = service.execute(
+        plan,  # type: ignore[arg-type]
+        SimpleNamespace(kind="final_verify"),  # type: ignore[arg-type]
+        item_index=0,
+        actor="admin",
+        request_key=str(uuid.uuid4()),
+        progress={},
+    )
+
+    assert execution.waiting is True
+    assert execution.result is not None
+    assert execution.result["final_verified"] is False
+
+
+def test_installation_verification_refuses_a_lost_run_that_still_has_residue(
+    tmp_path: Path,
+) -> None:
+    """A lost run with residue keeps its installation from being verified.
+
+    Wrong implementation this catches: the active-run count excluded ``lost``,
+    so an installation whose lost run still owned ranks verified as free.
+    """
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    run = started_recipe(
+        sessions,
+        lifecycle,
+        installation.owner_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    with sessions.begin() as session:
+        row = session.get(RecipeRun, run.owner_id)
+        assert row is not None
+        row.state = "lost"
+        row.route_state = "withdrawn"
+    service = RecipeLifecyclePhaseExecutor(
+        lifecycle,
+        sessions,
+        ClusterMappingService(sessions),
+        lifecycle._clock,
+    )
+
+    def bound(session, _plan, installation_id, _mapping_id, _digest):
+        stored = session.get(RecipeInstallation, installation_id)
+        members = tuple(
+            session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        return stored, members
+
+    service._bound_installation = bound  # type: ignore[method-assign,assignment]
+    plan = SimpleNamespace(
+        action="install",
+        installation_id=installation.owner_id,
+        mapping=SimpleNamespace(mapping_id=mapping_id),
+    )
+
+    with pytest.raises(
+        RunSwitchOperationConflict,
+        match="run-switch.installation-verification-failed",
+    ):
+        service.execute(
+            plan,  # type: ignore[arg-type]
+            SimpleNamespace(kind="final_verify"),  # type: ignore[arg-type]
+            item_index=0,
+            actor="admin",
+            request_key=str(uuid.uuid4()),
+            progress={},
+        )
