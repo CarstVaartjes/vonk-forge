@@ -57,7 +57,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LEGACY_WAIT_STATE, AgentOperation
+from vonk_agent_protocol import AgentOperation, LifecycleState
 
 from .. import agent_operation_states as aos
 from ..agent_operation_facts import (
@@ -103,7 +103,7 @@ IRREVERSIBLE_OPERATIONS = frozenset(
     }
 )
 #: The word of a parent *job* that waits (the job table converts with its own kind).
-WAITING = LEGACY_WAIT_STATE
+WAITING = LifecycleState.NEEDS_OPERATOR.value
 JOB_RUN_OPERATION = AgentOperation.RECIPE_JOB_RUN.value
 #: The owner kind a one-shot job's order carries in its parent job's payload.
 OWNER_KIND = "artifact-job"

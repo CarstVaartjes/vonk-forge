@@ -408,7 +408,7 @@ class RecipeRunRankStatus:
 class RecipeRunRecoveryOwner:
     operation_id: str
     kind: Literal["recipe.start", "recipe.stop"]
-    state: Literal["queued", "running", "waiting-for-operator"]
+    state: str  # a word of the core vocabulary
 
 
 @dataclass(frozen=True, slots=True)
@@ -1583,13 +1583,11 @@ class RecipeOperationService:
                 else:
                     continue
                 if job.state == "queued":
-                    state: Literal["queued", "running", "waiting-for-operator"] = (
-                        "queued"
-                    )
+                    state = LifecycleState.QUEUED.value
                 elif job.state == "running":
-                    state = "running"
+                    state = LifecycleState.RUNNING.value
                 elif job.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
-                    state = "waiting-for-operator"
+                    state = LifecycleState.NEEDS_OPERATOR.value
                 else:
                     continue
                 recovery_owners.append(

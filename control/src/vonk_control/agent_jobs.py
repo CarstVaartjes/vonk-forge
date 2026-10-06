@@ -4636,7 +4636,11 @@ class AgentJobService:
             # A stopped build needs a separate cleanup receipt before its
             # reservation can be released, even if completion raced removal.
             set_parent_state(
-                job, "waiting-for-operator", None, self._clock(), keep_reason=True
+                job,
+                LifecycleState.NEEDS_OPERATOR.value,
+                None,
+                self._clock(),
+                keep_reason=True,
             )
             return
         if job.kind == "agent-upgrade" and self._advance_rollout is not None:

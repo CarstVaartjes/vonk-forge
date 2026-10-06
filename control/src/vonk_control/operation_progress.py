@@ -10,8 +10,14 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from math import exp
 
-from vonk_agent_protocol import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol import (
+    LifecycleState,
+    OperationMemberProgress,
+    OperationProgress,
+    StateAlias,
+)
 
+from . import job_states
 from .bounded_json import BoundedJSONError, integer
 from .strict_json import read_stored_model
 
@@ -27,7 +33,16 @@ TRANSFER_PHASES = frozenset(
         "distribution",
     }
 )
-WAITING_PHASES = frozenset({"queued", "pending", "waiting", "waiting-for-operator"})
+WAITING_PHASES = frozenset(
+    {
+        "queued",
+        "pending",
+        StateAlias.WAITING.value,
+        LifecycleState.OBSERVING.value,
+        LifecycleState.BACKOFF.value,
+        *job_states.words(LifecycleState.NEEDS_OPERATOR),
+    }
+)
 STALE_AFTER_SECONDS = 45.0
 STALL_AFTER_SECONDS = 120.0
 PROGRESS_INTERVAL_SECONDS = 1.0

@@ -34,8 +34,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from vonk_agent_protocol import LEGACY_WAIT_STATE
-
+from .. import job_states
 from ..agent_operation_facts import aware
 from ..models import Job
 from .adapter import Dispatch
@@ -53,7 +52,6 @@ from .types import (
 )
 
 KIND = "recipe-operation"
-WAITING = LEGACY_WAIT_STATE
 _MAX_REASON = 1024
 _BORN = frozenset({"queued", "running", "succeeded"})
 _STORED = {
@@ -102,15 +100,7 @@ class RecipeOperationAdapter:
         ``needs-operator`` and is re-evaluated by its first decision.
         """
 
-        stored = job.state
-        state = {
-            "queued": State.QUEUED,
-            "running": State.RUNNING,
-            "waiting": State.OBSERVING,
-            "succeeded": State.SUCCEEDED,
-            "failed": State.FAILED,
-            "cancelled": State.CANCELLED,
-        }.get(stored, State.NEEDS_OPERATOR)
+        state = job_states.core(job.state) or State.NEEDS_OPERATOR
         result = job.result if isinstance(job.result, Mapping) else {}
         requested = None
         key = None
@@ -278,7 +268,9 @@ class RecipeOperationAdapter:
         """A legacy ``waiting-for-operator`` parent that is cancelling is shown as
         ``running`` again; the sweeper (or its orders) completes the cancel."""
 
-        if job.state != WAITING or not cancel_flagged(job):
+        if not job_states.means(job.state, State.NEEDS_OPERATOR) or not cancel_flagged(
+            job
+        ):
             return False
         before = self.lifecycle(job, issued=True, now=now)
         self._write(job, replace(before, state=State.OBSERVING), now, None, True)

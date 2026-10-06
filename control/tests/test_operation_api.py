@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_control import agent_operation_states as aos
 from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService, OperatorRetirementRefused
 from vonk_control.agent_upgrade_status import (
@@ -897,8 +898,8 @@ def test_resume_action_disappearing_after_preflight_is_refused(
     with sessions() as session:
         parent = session.get(Job, job_id)
         stored = session.get(AgentOperation, operation.id)
-        assert parent is not None and parent.state == "waiting-for-operator"
-        assert stored is not None and stored.state == "waiting-for-operator"
+        assert parent is not None and parent.state == "needs-operator"
+        assert stored is not None and stored.state in aos.PARKED
         assert stored.next_action_at is None
 
 
@@ -1008,8 +1009,8 @@ def test_durable_retire_refuses_live_current_attempt_without_transition(
                 AgentOperationAttempt.attempt == limit,
             )
         )
-        assert parent is not None and parent.state == "waiting-for-operator"
-        assert stored is not None and stored.state == "waiting-for-operator"
+        assert parent is not None and parent.state == "needs-operator"
+        assert stored is not None and stored.state in aos.PARKED
         assert current_attempt is not None and current_attempt.state == "running"
 
 
