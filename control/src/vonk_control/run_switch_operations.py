@@ -18,7 +18,15 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, Protocol, TypeGuard, get_args, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Protocol,
+    TypeGuard,
+    get_args,
+    runtime_checkable,
+)
 
 import httpx2
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -211,7 +219,6 @@ from .recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
     RecipeOperationView,
-    RecipeReconciliationBlocked,
 )
 from .recipe_runtime_specs import (
     OPTION_CHOICES_KEY,
@@ -543,6 +550,10 @@ class RunSwitchArtifactInspector(Protocol):
     ) -> ArtifactInspection: ...
 
 
+if TYPE_CHECKING:
+    from .distribution_executor import _ChildView
+
+
 @dataclass(frozen=True, slots=True)
 class PhaseExecution:
     """Result of one phase invocation.
@@ -553,7 +564,7 @@ class PhaseExecution:
     """
 
     operation_id: str | None = None
-    result: Mapping[str, object] | None = None
+    result: RunSwitchPhaseResult | None = None
     waiting: bool = False
     status_reason: str | None = None
 
@@ -578,7 +589,9 @@ class RunSwitchArtifactPhaseExecutor(Protocol):
         progress: RunSwitchOperationResult,
     ) -> PhaseExecution: ...
 
-    def get(self, operation_id: str) -> Any: ...
+    def get(
+        self, operation_id: str
+    ) -> RecipeOperationView | _ChildView | RunSwitchOperation: ...
 
 
 class RunSwitchPhaseExecutor(Protocol):
@@ -1411,7 +1424,15 @@ class RecipeLifecyclePhaseExecutor:
                     reason=WaitReason.STALE_PLAN,
                 )
             if build.state == "succeeded":
-                return PhaseExecution(result=_container_build_result(build))
+                return PhaseExecution(
+                    result=_phase_result(
+                        {
+                            "phase": "prepare",
+                            "subphase": "container-build",
+                            **_container_build_result(build),
+                        }
+                    )
+                )
             if build.state not in {"planned", "building", "failed"}:
                 raise RunSwitchRetryLater(
                     RunSwitchCode.CONTAINER_BUILD_STATE_INVALID,
@@ -1429,7 +1450,16 @@ class RecipeLifecyclePhaseExecutor:
                 .limit(1)
             )
             if active is not None:
-                return PhaseExecution(active.id, _container_build_result(build))
+                return PhaseExecution(
+                    active.id,
+                    _phase_result(
+                        {
+                            "phase": "prepare",
+                            "subphase": "container-build",
+                            **_container_build_result(build),
+                        }
+                    ),
+                )
             builder_node_id = build.builder_node_id
             build_input_sha256 = build.build_input_sha256
             source_bundle_sha256 = build.source_bundle_sha256
@@ -1532,8 +1562,17 @@ class RecipeLifecyclePhaseExecutor:
                 )
             result = _container_build_result(persisted)
             if persisted.state == "succeeded":
-                return PhaseExecution(result=result)
-        return PhaseExecution(_started_operation_id(value), result)
+                return PhaseExecution(
+                    result=_phase_result(
+                        {"phase": "prepare", "subphase": "container-build", **result}
+                    )
+                )
+        return PhaseExecution(
+            _started_operation_id(value),
+            _phase_result(
+                {"phase": "prepare", "subphase": "container-build", **result}
+            ),
+        )
 
     def _observe_older_issued(
         self,
@@ -1660,7 +1699,9 @@ class RecipeLifecyclePhaseExecutor:
                         run.state == RunState.STOPPED
                         and run.route_state == RouteState.WITHDRAWN
                     ):
-                        return PhaseExecution(result={"run_id": target.run_id})
+                        return PhaseExecution(
+                            result=_phase_result({"run_id": target.run_id}, phase=phase)
+                        )
                 fresh = self._lifecycle.preview_stop(
                     target.run_id,
                     profile_target_node_ids=profile_target_node_ids,
@@ -1697,7 +1738,9 @@ class RecipeLifecyclePhaseExecutor:
                     observe_due_at=pending.observe_due_at,
                     observation_deadline=pending.observation_deadline,
                 ) from pending
-            return PhaseExecution(value.id, {"run_id": target.run_id})
+            return PhaseExecution(
+                value.id, _phase_result({"run_id": target.run_id}, phase=phase)
+            )
         if phase.kind == "prepare" and phase.subphase == "container-build":
             return self._execute_container_build(
                 plan,
@@ -1736,7 +1779,9 @@ class RecipeLifecyclePhaseExecutor:
                     mapping_plan, actor=actor, now=_now(self._clock)
                 )
             if mapping_id is None:
-                return PhaseExecution(result={"prepared": True})
+                return PhaseExecution(
+                    result=_phase_result({"prepared": True}, phase=phase)
+                )
             profile_application_id = _string_or_none(progress.profile_application_id)
             if profile_application_id is not None:
                 with self._sessions() as session:
@@ -1911,7 +1956,7 @@ class RecipeLifecyclePhaseExecutor:
                 ) from error
             return PhaseExecution(
                 _started_operation_id(value),
-                {"installation_id": installation_id},
+                _phase_result({"installation_id": installation_id}, phase=phase),
             )
         if phase.kind == "prepare":
             raise _RunSwitchDefiniteConflict(RunSwitchCode.PREPARE_SUBPHASE_UNSUPPORTED)
@@ -1942,7 +1987,9 @@ class RecipeLifecyclePhaseExecutor:
                 installation_id, plan.alias, request_id=start_request_id
             )
             if adopted is not None:
-                return PhaseExecution(adopted.id, {"run_id": adopted.owner_id})
+                return PhaseExecution(
+                    adopted.id, _phase_result({"run_id": adopted.owner_id}, phase=phase)
+                )
             self._require_post_stop_inventory(plan)
             self._lifecycle.reconcile_superseded_unissued(
                 "recipe.uninstall", installation_id, ordinal
@@ -1962,7 +2009,9 @@ class RecipeLifecyclePhaseExecutor:
                 workload_intent_ordinal=ordinal,
                 profile_application_id=profile_application_id,
             )
-            return PhaseExecution(value.id, {"run_id": value.owner_id})
+            return PhaseExecution(
+                value.id, _phase_result({"run_id": value.owner_id}, phase=phase)
+            )
         if phase.kind == "uninstall":
             ordinal = _bound_workload_intent(progress)
             installation_id = plan.installation_id
@@ -1992,7 +2041,10 @@ class RecipeLifecyclePhaseExecutor:
                 )
                 if adopted is not None:
                     return PhaseExecution(
-                        adopted.id, {"installation_id": installation_id}
+                        adopted.id,
+                        _phase_result(
+                            {"installation_id": installation_id}, phase=phase
+                        ),
                     )
                 self._lifecycle.reconcile_superseded_unissued(
                     "recipe.reconcile", installation_id, ordinal
@@ -2001,7 +2053,7 @@ class RecipeLifecyclePhaseExecutor:
                 try:
                     value = self._lifecycle.reconcile_installation(
                         installation_id,
-                        expected_authority=authority.model_dump(mode="json"),
+                        expected_authority=authority,
                         run_switch_plan_digest=plan.plan_digest,
                         actor=actor,
                         request_id=reconcile_request_id,
@@ -2026,7 +2078,10 @@ class RecipeLifecyclePhaseExecutor:
                     raise RunSwitchRetryLater(
                         f"{RunSwitchCode.RECONCILIATION_START_FAILED}: {error}"
                     ) from error
-                return PhaseExecution(value.id, {"installation_id": installation_id})
+                return PhaseExecution(
+                    value.id,
+                    _phase_result({"installation_id": installation_id}, phase=phase),
+                )
             if plan.cleanup_disposition == "abandon":
                 # The installation's own assessment proved the plan never
                 # reached a node, so no agent order is queued.  The lifecycle
@@ -2045,10 +2100,13 @@ class RecipeLifecyclePhaseExecutor:
                         f"{RunSwitchCode.UNINSTALL_ABANDON_FAILED}: {error}"
                     ) from error
                 return PhaseExecution(
-                    result={
-                        **abandoned,
-                        "reason": InstallDegradedReason.INSTALLATION_NOT_INSTALLED,
-                    }
+                    result=_phase_result(
+                        {
+                            **abandoned,
+                            "reason": InstallDegradedReason.INSTALLATION_NOT_INSTALLED,
+                        },
+                        phase=phase,
+                    )
                 )
             uninstall_request_id = str(uuid.uuid5(uuid.UUID(request_key), "uninstall"))
             # Reconnect to the removal this operation already queued before
@@ -2061,7 +2119,10 @@ class RecipeLifecyclePhaseExecutor:
                 owner_id=installation_id,
             )
             if adopted is not None:
-                return PhaseExecution(adopted.id, {"installation_id": installation_id})
+                return PhaseExecution(
+                    adopted.id,
+                    _phase_result({"installation_id": installation_id}, phase=phase),
+                )
             self._lifecycle.reconcile_superseded_unissued(
                 "recipe.uninstall", installation_id, ordinal
             )
@@ -2091,7 +2152,10 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchRetryLater(
                     f"{RunSwitchCode.UNINSTALL_START_FAILED}: {error}"
                 ) from error
-            return PhaseExecution(value.id, {"installation_id": installation_id})
+            return PhaseExecution(
+                value.id,
+                _phase_result({"installation_id": installation_id}, phase=phase),
+            )
         if phase.kind == "final_verify":
             if plan.action == "cleanup":
                 return self._verify_cleanup(plan, request_key=request_key)
@@ -2256,10 +2320,16 @@ class RecipeLifecyclePhaseExecutor:
                 ],
             }
             if verified:
-                return PhaseExecution(result={"final_verified": True, **evidence})
+                return PhaseExecution(
+                    result=_phase_result(
+                        {"final_verified": True, **evidence}, phase=phase
+                    )
+                )
             if waiting:
                 return PhaseExecution(
-                    result={"final_verified": False, **evidence},
+                    result=_phase_result(
+                        {"final_verified": False, **evidence}, phase=phase
+                    ),
                     waiting=True,
                     status_reason=status_reason,
                 )
@@ -2276,18 +2346,24 @@ class RecipeLifecyclePhaseExecutor:
         first_compiled = next(iter(compiled.values()), None)
         identity = first_compiled.identity if first_compiled is not None else None
         return PhaseExecution(
-            result={
-                "installation_id": installation_id,
-                "mapping_id": mapping_id,
-                "install_plan_digest": install_plan_digest,
-                "model_artifact_set_sha256": (
-                    identity.model_artifact_set_sha256 if identity is not None else None
-                ),
-                "model_artifact_set_bytes": (
-                    identity.model_artifact_bytes if identity is not None else None
-                ),
-                "compiled_plan_persisted": True,
-            }
+            result=_phase_result(
+                {
+                    "phase": "prepare",
+                    "subphase": "runtime-plan",
+                    "installation_id": installation_id,
+                    "mapping_id": mapping_id,
+                    "install_plan_digest": install_plan_digest,
+                    "model_artifact_set_sha256": (
+                        identity.model_artifact_set_sha256
+                        if identity is not None
+                        else None
+                    ),
+                    "model_artifact_set_bytes": (
+                        identity.model_artifact_bytes if identity is not None else None
+                    ),
+                    "compiled_plan_persisted": True,
+                }
+            )
         )
 
     @staticmethod
@@ -2393,12 +2469,21 @@ class RecipeLifecyclePhaseExecutor:
                 ],
             }
             if verified:
-                return PhaseExecution(result=evidence)
+                return PhaseExecution(
+                    result=_phase_result(
+                        {"phase": "final_verify", "subphase": None, **evidence}
+                    )
+                )
             if installation.state in {
                 InstallationState.PLANNED,
                 InstallationState.INSTALLING,
             }:
-                return PhaseExecution(result=evidence, waiting=True)
+                return PhaseExecution(
+                    result=_phase_result(
+                        {"phase": "final_verify", "subphase": None, **evidence}
+                    ),
+                    waiting=True,
+                )
         raise RunSwitchRetryLater(RunSwitchCode.INSTALLATION_VERIFICATION_FAILED)
 
     def _verify_cleanup(
@@ -2432,9 +2517,7 @@ class RecipeLifecyclePhaseExecutor:
             assert reconcile_request_id is not None
             reconciliation_complete = self._lifecycle.reconciliation_complete(
                 reconcile_request_id,
-                expected_authority=plan.reconciliation_authority.model_dump(
-                    mode="json"
-                ),
+                expected_authority=plan.reconciliation_authority,
             )
         with self._sessions() as session:
             installation = session.get(RecipeInstallation, installation_id)
@@ -2507,9 +2590,26 @@ class RecipeLifecyclePhaseExecutor:
             ),
         }
         if removed and not active_runs:
-            return PhaseExecution(result={"final_verified": True, **evidence})
+            return PhaseExecution(
+                result=_phase_result(
+                    {
+                        "phase": "final_verify",
+                        "subphase": None,
+                        "final_verified": True,
+                        **evidence,
+                    }
+                )
+            )
         return PhaseExecution(
-            result={"final_verified": False, **evidence}, waiting=True
+            result=_phase_result(
+                {
+                    "phase": "final_verify",
+                    "subphase": None,
+                    "final_verified": False,
+                    **evidence,
+                }
+            ),
+            waiting=True,
         )
 
     def abandon(
@@ -2522,7 +2622,9 @@ class RecipeLifecyclePhaseExecutor:
             callable(abandon) and abandon(session, operation_id, now, reason=reason)
         )
 
-    def get(self, operation_id: str) -> Any:
+    def get(
+        self, operation_id: str
+    ) -> RecipeOperationView | _ChildView | RunSwitchOperation:
         """Resolve an artifact child first, then an existing recipe child."""
 
         if self._artifact_executor is not None:
@@ -7562,6 +7664,7 @@ class RunSwitchOperationService:
                     # The effect is established under current authority, so the
                     # ordinary success path records the checkpoint the missing
                     # acknowledgement would have produced.
+                    assert isinstance(child, RecipeOperationView)
                     child = _EstablishedEffect(child, established)
                 elif _start_still_progressing(
                     self._lifecycle, plan.phases[phase_index], child
@@ -7675,9 +7778,11 @@ class RunSwitchOperationService:
                 # model object and the imported OCI identity reached the
                 # target; the receipts are the durable handoff across a
                 # restart.
-                child_result = _progress_mapping(getattr(child, "result", None))
+                child_result = _child_result(child)
                 child_receipts = (
-                    child_result.get("evidence") if child_result is not None else None
+                    child_result.evidence
+                    if isinstance(child_result, RunSwitchDistributionChildResult)
+                    else None
                 )
                 if isinstance(child_receipts, list):
                     results = list(progress.phase_results)
@@ -7685,7 +7790,6 @@ class RunSwitchOperationService:
                         results.extend(
                             _phase_result(receipt, phase=phase)
                             for receipt in child_receipts
-                            if isinstance(receipt, Mapping)
                         )
                     except RunSwitchOperationConflict as error:
                         # A receipt that does not validate is an unknown, not a
@@ -7718,7 +7822,7 @@ class RunSwitchOperationService:
                         _validate_artifact_execution(
                             persisted_plan,
                             phase,
-                            getattr(child, "result", None),
+                            child_result,
                             expected_image=expected_image,
                         )
                     except RunSwitchOperationConflict as error:
@@ -8688,14 +8792,18 @@ class RunSwitchOperationService:
             )
         )
 
-    def _get_child_operation(self, operation_id: str) -> Any:
+    def _get_child_operation(
+        self, operation_id: str
+    ) -> RecipeOperationView | _ChildView | RunSwitchOperation | None:
+        from .distribution_executor import _ChildView
+
         getter = getattr(self._phase_executor, "get", None)
         if callable(getter):
             try:
                 child = getter(operation_id)
             except KeyError:
                 child = None
-            if child is not None:
+            if isinstance(child, RecipeOperationView | _ChildView | RunSwitchOperation):
                 return child
         if self._lifecycle is not None:
             return self._lifecycle.get(operation_id)
