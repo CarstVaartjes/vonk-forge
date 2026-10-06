@@ -64,6 +64,7 @@ def test_old_contract_run_on_both_sparks_does_not_block_a_new_load(
     _old_contract_run_does_not_block_a_new_load(tmp_path, state)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_old_contract_run_does_not_block_a_new_load_on_postgres(
     tmp_path: Path, postgres_engine
 ) -> None:

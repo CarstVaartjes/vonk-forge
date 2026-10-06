@@ -333,7 +333,7 @@ class AvailabilityJobPayload(_Document):
     request: RecipeAvailabilityIntent
     recipe_revision_id: str = Field(min_length=1, max_length=128)
     recipe_content_sha256: DigestText
-    effective_execution_key: DigestText
+    effective_execution_key: DigestText | None = None
     model_digest: str | None = None
     build_input_sha256: DigestText | None = None
     identity_key: DigestText | None = None

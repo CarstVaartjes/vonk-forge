@@ -72,6 +72,7 @@ def test_parent_detaches_without_cancelling_an_independent_producer(
         )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_shared_build_survives_one_detachment_then_stops_after_last_consumer(
     tmp_path, postgres_engine
 ):
@@ -171,6 +172,7 @@ def test_parent_detachment_refuses_a_busy_build_boundary_without_partial_changes
 
 
 @pytest.mark.parametrize("issued", [False, True])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_new_consumer_cannot_join_across_last_consumer_cleanup(
     tmp_path, postgres_engine, monkeypatch, issued
 ):
@@ -240,6 +242,7 @@ def test_new_consumer_cannot_join_across_last_consumer_cleanup(
     assert lifecycle.get(child_id).state == "cancelled"
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_malformed_ownership_cannot_starve_an_unneeded_valid_build(
     tmp_path, postgres_engine
 ):

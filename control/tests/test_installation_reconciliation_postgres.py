@@ -155,6 +155,7 @@ def test_postgres_reconcile_lock_excludes_concurrent_group_start(
         assert session.scalar(select(Job.id).where(Job.kind == "recipe.start")) is None
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
     tmp_path: Path, postgres_engine
 ) -> None:

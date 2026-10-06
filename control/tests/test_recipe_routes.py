@@ -1715,6 +1715,7 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
         ("after-activation", True),
     ],
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     tmp_path: Path, postgres_engine, failure_point: str, recovering: bool
 ) -> None:

@@ -1515,6 +1515,7 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
     production.close()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_postgres_builder_transaction_does_not_cross_session_block(
     tmp_path, postgres_engine
 ) -> None:
@@ -1730,6 +1731,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
     production.close()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_postgres_connected_source_build_queues_model_child_until_builder_eligible(
     tmp_path, postgres_engine, monkeypatch
 ) -> None:

@@ -2071,6 +2071,7 @@ def test_publication_contention_reschedules_without_spending_transfer_retry(
     engine.dispose()
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_postgres_model_child_lock_contention_resumes_same_preparation(
     tmp_path: Path, postgres_engine
 ) -> None:

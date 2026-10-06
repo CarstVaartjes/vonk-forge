@@ -104,6 +104,7 @@ def _load(profile, api, headers):
 
 
 @pytest.mark.parametrize("node_count", [1, 2])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_ports_block_competing_start_and_transfer_without_a_gap(
     tmp_path, postgres_engine, node_count
 ):

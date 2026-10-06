@@ -21,6 +21,7 @@ from .test_profile_installed_execution import _drive_to_job
 
 
 @pytest.mark.parametrize("node_count", [1, 2])
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
     tmp_path, postgres_engine, node_count: int
 ):

@@ -29,6 +29,7 @@ from .test_recipe_operations import (
 )
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_slow_distributed_restart_retains_accepted_startup_budget(
     tmp_path, postgres_engine
 ):
