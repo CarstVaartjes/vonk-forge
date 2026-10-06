@@ -3898,3 +3898,164 @@ def test_range_disk_reservation_falls_back_without_source_io(
     assert not service._download_parallel_ranges(spec, partial, "b" * 64, "unused", 0)
     assert partial.read_bytes() == b"m"
     assert service._range_reserved_bytes == 0
+
+
+def _gone_handler(statuses: list[int]):
+    """Answer each request with the next status; the last one repeats."""
+
+    served = {"count": 0}
+    payload = b"source gone payload"
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        index = min(served["count"], len(statuses) - 1)
+        served["count"] += 1
+        if statuses[index] == 200:
+            return httpx2.Response(200, request=request, content=payload)
+        return httpx2.Response(statuses[index], request=request)
+
+    return handler, payload, served
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_permanent_missing_source_ends_and_admits_a_fresh_download(
+    cache, tmp_path: Path, status: int
+) -> None:
+    _existing, sessions = cache
+    handler, payload, served = _gone_handler([status] * 5 + [200])
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
+    try:
+        artifact = _http_artifact(payload)
+        preview = service.download_preview(
+            model_content_sha256="b" * 64, artifacts=[artifact]
+        )
+        operation = service.start_download(
+            actor="test",
+            request_key="00000000-0000-4000-8000-000000000940",
+            plan_digest=str(preview["plan_digest"]),
+            model_content_sha256="b" * 64,
+            artifacts=[artifact],
+        )
+        # Bounded: a 404 is first a transient wait, never a terminal on sight.
+        for _ in range(4):
+            service.run_pending()
+            waiting = service.get_operation(operation.id)
+            assert waiting.state == "queued"
+            assert waiting.failure is not None
+            assert waiting.failure["code"] == "model_cache.source_unavailable"
+        service.run_pending()
+        gone = service.get_operation(operation.id)
+        assert gone.state == "failed"
+        assert gone.failure is not None
+        assert gone.failure["code"] == "model_cache.source_gone"
+        assert gone.failure["retryable"] is False
+        assert gone.failure["recovery_actions"] == ["download_again"]
+        detail = str(gone.failure["detail"])
+        assert "weights.bin" in detail
+        assert f"HTTP {status}" in detail
+        assert served["count"] == 5
+        # Nothing waits any more: no blocker, no retry clock.
+        assert gone.blockers == () and gone.next_attempt_at is None
+        assert service.run_pending() == 0
+        fresh = _download(
+            service,
+            [artifact],
+            model_content_sha256="b" * 64,
+            request_key="00000000-0000-4000-8000-000000000945",
+        )
+        assert fresh.id != gone.id
+        assert fresh.state == "succeeded"
+        assert service.get_operation(gone.id).state == "failed"
+    finally:
+        service.close()
+        client.close()
+
+
+def test_a_transient_404_retries_and_then_succeeds(cache, tmp_path: Path) -> None:
+    _existing, sessions = cache
+    handler, payload, _served = _gone_handler([404, 404, 200])
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
+    try:
+        operation = _download(
+            service,
+            [_http_artifact(payload)],
+            model_content_sha256="b" * 64,
+            request_key="00000000-0000-4000-8000-000000000941",
+        )
+        assert operation.state == "queued"
+        for _ in range(2):
+            service.run_pending()
+            operation = service.get_operation(operation.id)
+        assert operation.state == "succeeded"
+    finally:
+        service.close()
+        client.close()
+
+
+def test_a_server_error_never_becomes_source_gone(cache, tmp_path: Path) -> None:
+    _existing, sessions = cache
+    handler, payload, _served = _gone_handler([503])
+    service, client = _http_cache_service(
+        tmp_path, sessions, handler, clock=lambda: NOW
+    )
+    try:
+        operation = _download(
+            service,
+            [_http_artifact(payload)],
+            model_content_sha256="b" * 64,
+            request_key="00000000-0000-4000-8000-000000000942",
+        )
+        for _ in range(model_cache_module._SOURCE_GONE_ATTEMPTS + 3):
+            service.run_pending()
+            operation = service.get_operation(operation.id)
+            assert operation.state == "queued"
+            assert operation.failure is not None
+            assert operation.failure["code"] == "model_cache.source_unavailable"
+    finally:
+        service.close()
+        client.close()
+
+
+def test_operation_reads_answer_without_an_operator_selector(
+    cache, tmp_path: Path
+) -> None:
+    """A recipe preparation or a repair has no operator selector: reads still answer."""
+
+    service, _sessions = cache
+    model = "e" * 64
+    artifact = _artifact(tmp_path, b"selectorless", model_content_sha256=model)
+    download_key = "00000000-0000-4000-8000-000000000943"
+    download = _download(
+        service,
+        [artifact],
+        model_content_sha256=model,
+        request_key=download_key,
+    )
+    repair = service.start_repair(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000944",
+        artifact_set_sha256=download.artifact_set_sha256 or "",
+        plan_digest=str(
+            service.repair_preview(download.artifact_set_sha256 or "")["plan_digest"]
+        ),
+    )
+    actor = Actor("test", "administrator")
+    app = FastAPI()
+    install_model_operator_routes(
+        app, actor_dependency=Depends(lambda: actor), service=service
+    )
+    with TestClient(app) as api:
+        for operation in (download, repair):
+            read = api.get(f"/api/model/operations/{operation.id}")
+            assert read.status_code == 200, read.text
+            body = read.json()
+            assert body["operation_id"] == operation.id
+            assert body["action"] == "download"
+            # No catalog row here, so the content digest names the model.
+            assert body["selector"] == model
+            by_key = api.get(f"/api/model/requests/{operation.request_key}")
+            assert by_key.status_code == 200, by_key.text
+            assert by_key.json()["operation_id"] == operation.id

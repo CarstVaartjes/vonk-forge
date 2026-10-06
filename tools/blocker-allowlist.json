@@ -693,7 +693,6 @@
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService._collect_model_definitions", "model_cache.model_definition_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService._collect_model_definitions", "model_cache.model_dependency_cycle", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService._recipe_document", "model_cache.recipe_invalid", 1],
-        ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService.get_operator_operation", "model_cache.operation_not_observable", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService.resolve_artifact_set", "model_cache.pin_required", 2],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService.resolve_latest_cached", "model_cache.recipe_identity_invalid", 1],
         ["control/src/vonk_control/model_cache.py", "ModelCacheResolutionInvalid", "ModelCacheService.resolve_latest_cached", "model_cache.recipe_revision_missing", 3],
