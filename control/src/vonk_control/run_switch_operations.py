@@ -9510,12 +9510,6 @@ def _progress_phase(value: object) -> RunSwitchPhaseKind | None:
     return value if value in _PHASES else None
 
 
-def _progress_mapping(value: object) -> Mapping[str, object] | None:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    return value if isinstance(value, Mapping) else None
-
-
 def _stored_result(value: object) -> RunSwitchOperationResult | Residue | None:
     """Parse stored JSON strictly, including nested datetime and tuple fields.
 

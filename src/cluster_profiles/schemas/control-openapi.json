@@ -30306,6 +30306,18 @@
             ],
             "title": "Copied Bytes"
           },
+          "diagnostic": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostic"
+          },
           "downloaded_bytes": {
             "anyOf": [
               {
@@ -30318,6 +30330,46 @@
             ],
             "title": "Downloaded Bytes"
           },
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
           "node_id": {
             "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
@@ -30328,16 +30380,33 @@
             "title": "Phase",
             "type": "string"
           },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
           "subphase": {
             "const": "target-copy",
             "title": "Subphase",
             "type": "string"
+          },
+          "uncertain": {
+            "default": false,
+            "title": "Uncertain",
+            "type": "boolean"
           }
         },
         "required": [
+          "node_id",
           "phase",
-          "subphase",
-          "node_id"
+          "subphase"
         ],
         "title": "RunSwitchTargetTransferEvidenceResult",
         "type": "object"

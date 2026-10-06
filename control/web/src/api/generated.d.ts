@@ -10848,8 +10848,16 @@ export interface components {
         RunSwitchTargetTransferEvidenceResult: {
             /** Copied Bytes */
             copied_bytes?: number | null;
+            /** Diagnostic */
+            diagnostic?: string | null;
             /** Downloaded Bytes */
             downloaded_bytes?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Failure Kind */
+            failure_kind?: string | null;
             /** Node Id */
             node_id: string;
             /**
@@ -10857,11 +10865,18 @@ export interface components {
              * @constant
              */
             phase: "transfer";
+            /** Reason */
+            reason?: string | null;
             /**
              * Subphase
              * @constant
              */
             subphase: "target-copy";
+            /**
+             * Uncertain
+             * @default false
+             */
+            uncertain: boolean;
         };
         /** RunSwitchTargetTransferResult */
         RunSwitchTargetTransferResult: {
