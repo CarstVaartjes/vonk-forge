@@ -1914,6 +1914,7 @@ def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
         service.finalize(created.id)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_artifact_input_manifest_is_rebuilt_from_the_uploaded_inputs(tmp_path):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path

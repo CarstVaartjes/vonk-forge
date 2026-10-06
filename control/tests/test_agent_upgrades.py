@@ -1546,6 +1546,7 @@ def test_a_release_that_is_mid_publication_is_fetched_again(
 @pytest.mark.parametrize(
     "damage", ["node-order", "payload-digest", "sources", "extra-key"]
 )
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_resume_of_a_damaged_stored_plan_ends_the_rollout_instead_of_raising(
     tmp_path, damage
 ) -> None:
