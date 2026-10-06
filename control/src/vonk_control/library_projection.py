@@ -9,7 +9,7 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel
@@ -218,6 +218,19 @@ def _filter_digest(filters: Mapping[str, object]) -> str:
 
 _LOGGER = logging.getLogger(__name__)
 _LOGGED_UNREADABLE: set[str] = set()
+
+
+def _note_unreadable(kind: str, key: str, detail: str) -> None:
+    """Say once that a stored row is unreadable.
+
+    The projection leaves that one row out (or reads it as unknown) and goes on:
+    a damaged row is evidence to rebuild, never a reason to fail the whole page.
+    """
+
+    marker = f"{kind}:{key}"
+    if marker not in _LOGGED_UNREADABLE:
+        _LOGGED_UNREADABLE.add(marker)
+        _LOGGER.warning("ignoring unreadable %s %s: %s", kind, key, detail)
 
 
 def _readable(revision: CatalogDocumentRevision) -> bool:
@@ -485,7 +498,10 @@ class LibraryProjection:
         phase: object,
         completed: object,
         total: object,
-    ) -> dict[str, object]:
+    ) -> dict[str, object] | None:
+        """The progress of one cache operation, or ``None`` when its stored
+        state does not read: the asset then shows no progress (unknown)."""
+
         projected_state = {
             "queued": "queued",
             "running": "running",
@@ -495,11 +511,14 @@ class LibraryProjection:
             "cancelled": "failed",
         }.get(state)
         if projected_state is None:
-            raise LibraryProjectionError("persisted cache operation state is invalid")
+            _note_unreadable("cache operation state", operation_id, state)
+            return None
         if type(completed) is not int or completed < 0:
-            raise LibraryProjectionError("persisted cache progress bytes are invalid")
+            _note_unreadable("cache progress bytes", operation_id, repr(completed))
+            return None
         if total is not None and (type(total) is not int or total < 0):
-            raise LibraryProjectionError("persisted cache progress total is invalid")
+            _note_unreadable("cache progress total", operation_id, repr(total))
+            return None
         return {
             "operation_id": operation_id,
             "state": projected_state,
@@ -609,7 +628,9 @@ class LibraryProjection:
                 for image in images
             ]
         if invalid_run is not None:
-            raise LibraryProjectionError("persisted recipe run state is invalid")
+            # A run in a state this vocabulary does not know is left out of the
+            # local state; it does not take the whole library down with it.
+            _note_unreadable("recipe run state", str(invalid_run), "unknown state")
 
         revision_digests = {revision_id: digest for revision_id, digest, _ in revisions}
         head_digests = {digest for _, digest, is_head in revisions if is_head}
@@ -667,7 +688,8 @@ class LibraryProjection:
             )
             for digest in digest_values:
                 if digest is not None and not isinstance(digest, str):
-                    raise LibraryProjectionError("persisted cache digest is invalid")
+                    _note_unreadable("cache digest", operation_id, repr(digest))
+                    continue
                 self._merge_local(
                     result,
                     digest,
@@ -719,9 +741,8 @@ class LibraryProjection:
             nodes_by_run.setdefault(run_id, []).append(node_id)
         for run_id, installation_id, model_digest in runs:
             if model_digest is not None and not isinstance(model_digest, str):
-                raise LibraryProjectionError(
-                    "persisted recipe run model digest is invalid"
-                )
+                _note_unreadable("recipe run model digest", run_id, repr(model_digest))
+                model_digest = None
             nodes = nodes_by_run.get(run_id, [])
             if model_digest is not None:
                 self._merge_local(
@@ -1672,9 +1693,15 @@ class LibraryProjection:
                 )
             )
             if model is None:
-                raise LibraryProjectionError(
-                    "active recipe references a missing active Model document"
+                # The recipe pins a Model document that is not active: leave it
+                # out of the detail (the pin stays in ``selection``) instead of
+                # refusing the whole recipe.
+                _note_unreadable(
+                    "recipe model document",
+                    f"{selection.model.publisher}/{selection.model.slug}",
+                    "no active document matches the pinned content",
                 )
+                continue
             model_documents.append(
                 LibraryRecipeModel(selection=selection, model_document=model)
             )
@@ -1701,7 +1728,7 @@ class LibraryProjection:
             if revision is None:
                 raise KeyError(recipe_id)
             recipe_document = _canonical_recipe(revision)
-            model_revisions: list[CatalogDocumentRevision] = []
+            model_revisions: list[tuple[Any, CatalogDocumentRevision]] = []
             references = [selection.model for selection in recipe_document.models]
             if references:
                 active_models = list(
@@ -1716,7 +1743,8 @@ class LibraryProjection:
                     (model.publisher, model.slug, model.content_digest): model
                     for model in active_models
                 }
-                for reference in references:
+                for selection in recipe_document.models:
+                    reference = selection.model
                     model_revision = model_by_key.get(
                         (
                             reference.publisher,
@@ -1725,19 +1753,20 @@ class LibraryProjection:
                         )
                     )
                     if model_revision is None:
-                        raise LibraryProjectionError(
-                            "active recipe references a missing active Model document"
+                        _note_unreadable(
+                            "recipe model document",
+                            f"{reference.publisher}/{reference.slug}",
+                            "no active document matches the pinned content",
                         )
-                    model_revisions.append(model_revision)
+                        continue
+                    model_revisions.append((selection, model_revision))
         document = recipe_document
         model_documents = [
             LibraryRecipeModel(
                 selection=selection,
                 model_document=_canonical_model(model_revision),
             )
-            for selection, model_revision in zip(
-                document.models, model_revisions, strict=True
-            )
+            for selection, model_revision in model_revisions
         ]
         return LibraryRecipeAuthoringDetail(
             generated_at=_utc(self._clock()),

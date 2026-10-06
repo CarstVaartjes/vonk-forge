@@ -817,11 +817,10 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
     assert len(projection.recipe_library(limit=1).recipes) == 1
 
 
-@pytest.mark.parametrize("total_bytes,expected_status", [(0, 200), (-1, 503)])
-def test_cached_download_progress_preserves_zero_and_rejects_negative_totals(
+@pytest.mark.parametrize("total_bytes", [0, -1])
+def test_cached_download_progress_preserves_zero_and_reads_a_negative_total_as_unknown(
     tmp_path: Path,
     total_bytes: int,
-    expected_status: int,
 ) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     engine = create_engine(f"sqlite:///{tmp_path / 'cache-progress.sqlite'}")
@@ -861,9 +860,13 @@ def test_cached_download_progress_preserves_zero_and_rejects_negative_totals(
     )
     with TestClient(app) as client:
         response = client.get("/api/model/library")
-    assert response.status_code == expected_status, response.text
-    if expected_status == 200:
-        progress = response.json()["models"][0]["local"]["preparation"]
+    # A damaged stored total never takes the listing down: the model is listed
+    # with no progress (unknown) and the damaged row is named in the log.
+    assert response.status_code == 200, response.text
+    progress = response.json()["models"][0]["local"]["preparation"]
+    if total_bytes < 0:
+        assert progress is None
+    else:
         assert progress["state"] == "succeeded"
         assert progress["total_bytes"] == 0
 

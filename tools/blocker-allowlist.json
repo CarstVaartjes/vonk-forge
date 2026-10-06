@@ -15,6 +15,7 @@
       "control/src/vonk_control/artifact_lifecycle.py",
       "control/src/vonk_control/artifact_reference_scan.py",
       "control/src/vonk_control/fleet_profiles.py",
+      "control/src/vonk_control/library_projection.py",
       "control/src/vonk_control/model_cache.py",
       "control/src/vonk_control/recipe_operations.py",
       "control/src/vonk_control/run_switch_operations.py"
@@ -53,7 +54,7 @@
   "max_debt": 9,
   "debt_ceiling": {
     "total": 203,
-    "unaudited": 402,
+    "unaudited": 382,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling only falls: re-categorize a site with a written reason, or fix it."
   },
   "categorized_raises": {
@@ -145,6 +146,22 @@
         "UnknownOutcomeError"
       ],
       "reason": "The availability claim runner records any unknown outcome through _fail, which asks the lifecycle core for the next attempt on its bounded jittered backoff (plan_failure) and releases the claim; the next claim re-reads the evidence. Only an explicit retryable=False owner decision or a security failure ends the operation."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.reconcile_cancelled_builds",
+      "catches": [
+        "BuildConsumerError"
+      ],
+      "reason": "Contention or unknown ownership of one build is logged as deferred and does not block the other eligible builds; the same scheduler pass reads every decision again in its own short transaction, so the build is neither released nor forgotten."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "function": "RecipeImageAvailabilityService._build_child_cancellation_pending",
+      "catches": [
+        "BuildConsumerError"
+      ],
+      "reason": "Unknown ownership of an issued build keeps the cancellation pending (the predicate answers True); reconcile_cancellations asks again on every pass until the ownership is known, and the build is never released on unknown ownership."
     }
   ],
   "operator_waits": [
@@ -1494,21 +1511,6 @@
       ]
     },
     {
-      "family": "library_projection.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
-      "sites": [
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._cache_progress", "persisted-cache-operation-state-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._cache_progress", "persisted-cache-progress-bytes-are-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._cache_progress", "persisted-cache-progress-total-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._database_local_state", "persisted-cache-digest-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._database_local_state", "persisted-recipe-run-model-digest-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._database_local_state", "persisted-recipe-run-state-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection.authoring_recipe_detail", "active-recipe-references-a-missing-active-model-document", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection.recipe_detail", "active-recipe-references-a-missing-active-model-document", 1]
-      ]
-    },
-    {
       "family": "library_projection.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CursorError validates a contract or request; class LibraryProjectionError validates a contract or request; class LibrarySelectorAmbiguous validates a contract or request; class RequestFault validates a contract or request; message rejects the shape or identity of a request.",
@@ -1769,18 +1771,7 @@
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: operation bookkeeping by default.",
       "sites": [
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_availability_consumer", "availability-build-consumer-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_availability_consumer", "availability-receipt-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_profile_consumer", "profile-build-consumer-child-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_profile_consumer", "profile-build-consumer-identity-is-invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_profile_consumer", "profile-build-consumer-scope-is-missing", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-identity-changed", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-workload-scope-is-invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BookkeepingUnknown", "_run_switch_consumer", "build-consumer-workload-scope-is-missing", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "current_build_consumers", "build.consumer_invalid", 2],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_profile_build_dependencies", "build.consumer_invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "read_build_intent", "build.producer_invalid", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "StoredStateTypeDamaged", "_availability_consumer", "availability-recipe-is-invalid", 1]
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_profile_build_dependencies", "build.consumer_invalid", 1]
       ]
     },
     {
@@ -3543,10 +3534,12 @@
       "category": "already-retried",
       "reason": "An unknown outcome raised on a path that a registered retry or observe loop (retry_loops, AST-proven by blocker_retries) catches and re-runs on its bounded backoff; the raise is the handoff to that loop, not a dead end.",
       "sites": [
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "current_build_consumers", "build.consumer_invalid", 2],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_availability_build_dependency", "build.consumer_invalid", 2],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.cancellation_pending", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_busy", 1],
-        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_invalid", 2]
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_invalid", 2],
+        ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "read_build_intent", "build.producer_invalid", 1]
       ]
     },
     {
