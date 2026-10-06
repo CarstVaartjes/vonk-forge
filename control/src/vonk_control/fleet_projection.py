@@ -198,7 +198,9 @@ def _install_partial_warnings(
             warnings.append(
                 ProjectionReason(
                     code=ProjectionCode.INSTALL_PARTIAL,
-                    detail=f"{value.title}: {value.projection_issue}"[:256],
+                    detail=f"{value.title or value.installation_id}: {value.projection_issue}"[
+                        :256
+                    ],
                     severity="warning",
                 )
             )
@@ -1475,7 +1477,9 @@ class FleetProjection:
                 warnings.append(
                     ProjectionReason(
                         code=ProjectionCode.RUN_DEGRADED,
-                        detail=f"{value.title}: {value.projection_issue}"[:256],
+                        detail=f"{value.title or value.installation_id}: {value.projection_issue}"[
+                            :256
+                        ],
                         severity="warning",
                     )
                 )
