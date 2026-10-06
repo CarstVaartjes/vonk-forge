@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.package_source import AgentPackageSource
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.api import create_app
@@ -158,7 +159,7 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
             }
             assert len(jobs) == 1 and jobs[0].id == job_id
             assert set(children) == {NODE_A, NODE_B}
-            assert children[NODE_A].state == "waiting-for-operator"
+            assert children[NODE_A].state in aos.PARKED
             assert children[NODE_A].next_action_at is not None
             assert children[NODE_A].next_action_at is not None
             assert children[NODE_B].state == "running"

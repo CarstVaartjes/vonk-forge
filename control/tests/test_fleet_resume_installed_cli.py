@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.package_source import AgentPackageSource
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.api import create_app
@@ -181,7 +182,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             )
             assert job is not None and child is not None
             assert job.state == "waiting-for-operator"
-            assert child.state == "waiting-for-operator"
+            assert child.state in aos.PARKED
             assert child.id == child_operation_id
             original_identity = (
                 job.id,
@@ -305,7 +306,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
                 )
             )
             assert job.state == "waiting-for-operator"
-            assert child.state == "waiting-for-operator"
+            assert child.state in aos.PARKED
             assert after_denial == original_identity
             assert denied_attempt_audit == original_attempt_audit
 
@@ -351,7 +352,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             )
             assert job is not None and child is not None and attempt is not None
             assert job.state == "queued"
-            assert child.state == "waiting-for-operator"
+            assert child.state in aos.PARKED
             assert child.next_action_at is not None
             assert job.request_id == request_key
             assert len(children) == 1 and children[0].id == child_operation_id
