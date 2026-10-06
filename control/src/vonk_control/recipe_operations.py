@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, NoReturn, Protocol
 
+from pydantic import TypeAdapter
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -5612,11 +5613,15 @@ class RecipeOperationService:
                                 actor=job.actor,
                                 request_id=cleanup_request_id,
                                 node_payloads=stop_node_payloads,
+                                # Exact relational Stop authority above already
+                                # binds every target. An unreadable role order
+                                # changes scheduling, never target membership.
                                 phases=(
                                     _role_phases(stop_order, stop_node_payloads)
                                     if stop_order is not None
                                     else None
-                                ),
+                                )
+                                or (stop_node_payloads,),
                                 authority_digest=run.plan_digest.removeprefix(
                                     "sha256:"
                                 ),
@@ -8734,13 +8739,17 @@ def _role_phases(
     match the recipe's order (the caller decides whether to order or refuse)."""
 
     by_role: dict[str, list[tuple[str, Mapping[str, object]]]] = {}
+    reader = TypeAdapter(RecipeStartPayload | RecipeStopPayload)
     for node_id, payload in node_payloads:
-        plan = payload.get("compiled_execution_plan")
-        runtime = plan.get("runtime") if isinstance(plan, Mapping) else None
-        placement = runtime.get("placement") if isinstance(runtime, Mapping) else None
-        role = placement.get("role") if isinstance(placement, Mapping) else None
-        if not isinstance(role, str):
+        try:
+            wire = reader.validate_json(canonical_message(payload))
+        except (TypeError, ValueError):
             return None
+        role = (
+            wire.role
+            if isinstance(wire, RecipeStopPayload)
+            else wire.compiled_execution_plan.runtime.placement.role
+        )
         by_role.setdefault(role, []).append((node_id, dict(payload)))
     if set(by_role) != set(order) or len(set(order)) != len(order):
         return None

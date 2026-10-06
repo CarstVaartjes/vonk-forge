@@ -95,7 +95,7 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
-    RecipeRouteError,
+    RecipeRankStopped,
     RecipeRouteNotReady,
     RecipeRouteService,
 )
@@ -2247,7 +2247,9 @@ def test_worker_death_while_owner_is_healthy_never_publishes_route(
 
     publisher = ConcurrentPublisher()
     _service, routes = bind_route_publications(sessions, service, publisher)
-    with pytest.raises(RecipeRouteError, match="every .*rank"):
+    with pytest.raises(
+        RecipeRankStopped, match="rank reports a stopped or failed workload"
+    ):
         routes.publish_run(start.owner_id)
 
     assert publisher.aliases == []
