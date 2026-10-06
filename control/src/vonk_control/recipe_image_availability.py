@@ -3930,7 +3930,9 @@ class RecipeImageAvailabilityService:
                     ),
                     now=self._clock(),
                 )
-                payload["removal_archives"] = list(current_archives)
+                payload = payload.model_copy(
+                    update={"removal_archives": list(current_archives)}
+                )
                 if has_pending_removal(
                     session,
                     (
@@ -3938,18 +3940,18 @@ class RecipeImageAvailabilityService:
                         for archive in current_archives
                     ),
                 ):
-                    payload["blockers"] = dump_blockers(
-                        [
-                            make_blocker(
-                                ArtifactLifecycleCode.DELETION_IN_PROGRESS,
-                                "Waiting for the prior image removal fence to settle",
-                                severity="info",
-                            )
-                        ]
+                    payload = payload.model_copy(
+                        update={
+                            "blockers": [
+                                make_blocker(
+                                    ArtifactLifecycleCode.DELETION_IN_PROGRESS,
+                                    "Waiting for the prior image removal fence to settle",
+                                    severity="info",
+                                )
+                            ]
+                        }
                     )
-                encoded = json.dumps(
-                    payload, sort_keys=True, separators=(",", ":")
-                ).encode()
+                encoded = canonical_message(payload)
                 self._lock_build_consumer(session, payload)
                 now = self._clock()
                 operation = self._lifecycle.new_job(
