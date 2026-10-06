@@ -4177,8 +4177,11 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
         )
         real_finish = service._finish_failed
         lost_ack = [True]
+        first_report = []
 
         def finish(*args, **kwargs):
+            if not first_report:
+                first_report.append((args, kwargs))
             real_finish(*args, **kwargs)
             if lost_ack[0]:
                 lost_ack[0] = False
@@ -4196,7 +4199,19 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
         service.tick(limit=1)  # same Future report, not another HTTP observation
         assert served["count"] == 1
         assert service.get_operation(operation.id).next_attempt_at == next_attempt
-        for _ in range(3):
+        # Even this worker's fence cannot replay the old attempt into a newly
+        # claimed attempt. The fresh claim still owns its execution unchanged.
+        assert service._claim_operations(limit=1, respect_backoff=False) == [
+            (operation.id, "download")
+        ]
+        assert service._mark_running(operation.id) is not None
+        args, kwargs = first_report[0]
+        real_finish(*args, **kwargs)
+        assert service.get_operation(operation.id).state == "running"
+        assert served["count"] == 1
+        service._run_download(operation.id, force=False)
+        assert service.get_operation(operation.id).state == "queued"
+        for _ in range(2):
             service.run_pending()
             assert service.get_operation(operation.id).state == "queued"
         service.run_pending()
