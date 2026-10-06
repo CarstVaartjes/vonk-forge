@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let RecipeOperationRequest::JobRun(request) = RecipeOperationRequest::parse(&claim)? else {
         return Err("not a job".into());
     };
-    let installed = parse_compiled_execution_plan(&doc["installed"])?;
+    let installed = parse_compiled_execution_plan(doc["installed"].to_string().as_bytes())?;
     let invocation = prepare_job_invocation(&installed, &request)?;
     let data = tempfile::tempdir()?;
     let run_id = request.job_id.to_string();

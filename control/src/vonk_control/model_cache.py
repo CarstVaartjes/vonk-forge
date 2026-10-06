@@ -47,11 +47,13 @@ from vonk_agent_protocol import (
     ModelCacheCode,
     ModelFileState,
     OperationMemberProgress,
+    ProgressPhase,
     RunState,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
+    adopt_progress_phase,
     canonical_message,
     input_state,
 )
@@ -147,7 +149,7 @@ from .model_cache_contract import (
     parse_model_cache_payload,
     parse_model_cache_result,
 )
-from .model_cache_progress import cache_phase, cache_progress
+from .model_cache_progress import PHASES, cache_phase, cache_progress
 from .model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
 from .model_cache_streams import StreamGovernor
 from .models import (
@@ -5329,11 +5331,7 @@ class ModelCacheService:
                     OperationMemberProgress(
                         member_id=spec.sha256,
                         object_sha256=spec.sha256,
-                        phase={
-                            "downloading": "download",
-                            "verifying": "verify",
-                            "completed": "completed",
-                        }.get(phase, phase),
+                        phase=PHASES[phase],
                         completed_bytes=min(spec.expected_bytes, baseline + received),
                         total_bytes=spec.expected_bytes,
                         state="succeeded"
@@ -6954,7 +6952,7 @@ class ModelCacheService:
                 if operation is not None and not force_progress:
                     prior = _operation_progress(operation).measurement
                     if (
-                        prior.phase == "download"
+                        adopt_progress_phase(prior.phase) is ProgressPhase.DOWNLOADING
                         and prior.observed_at is not None
                         and 0
                         <= (

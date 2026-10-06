@@ -19,6 +19,9 @@ from vonk_agent_protocol import (
 
 from . import vocabulary_literals as scan
 
+#: The repository parse is shared setup, not the first test's own time.
+pytestmark = pytest.mark.usefixtures("parsed_repository")
+
 REL = "control/src/vonk_control/example.py"
 
 
@@ -523,3 +526,53 @@ def test_the_standalone_route_activation_words_equal_the_gateway_contract() -> N
 
     words = set(get_args(ActivationMarker.model_fields["state"].annotation))
     assert words == {GatewayRouteState.MAINTENANCE, GatewayRouteState.PUBLISHED}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'p = OperationProgress(phase="downloading")\n',
+        'p = OperationMemberProgress(phase="a" if x else "transfer", member_id="n")\n',
+        'p = {"phase": "completed", "completed_bytes": 3}\n',
+        'p = {"phase": "download", "completed_bytes": 3}\n',
+        'ok = progress.phase == "completed"\n',
+        'ok = prior.measurement.phase in {"queued", "pending"}\n',
+        'ok = member.get("phase") != "waiting"\n',
+        'm = member.model_copy(update={"phase": "reclaiming"})\n',
+    ],
+)
+def test_a_hand_spelled_progress_phase_is_found_where_progress_is_built_or_read(
+    tmp_path: Path, source: str
+) -> None:
+    # Wrong implementation: the Controller and the agent each spelled the phase,
+    # so ``download`` and ``downloading`` named one fact in two ways.
+    counts = _python(tmp_path, source)
+
+    assert counts[(scan.PROGRESS_PHASE, REL)] >= 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "p = OperationProgress(phase=ProgressPhase.DOWNLOADING)\n",
+        'step = {"phase": "transfer", "subphase": "target-copy"}\n',
+        'ok = phase.kind == "transfer" and phase.subphase == "model-download"\n',
+        'p = OperationProgress(phase=word, kind="prepare")\n',
+        'ok = child.phase == "prepare"\n',
+        'x = {"phase": "completed"}\n',
+    ],
+)
+def test_a_phase_that_is_not_measured_progress_is_not_a_progress_phase_literal(
+    tmp_path: Path, source: str
+) -> None:
+    assert (scan.PROGRESS_PHASE, REL) not in _python(tmp_path, source)
+
+
+def test_the_scanned_phase_words_are_the_contract_members_and_their_retired_spellings() -> (
+    None
+):
+    from vonk_agent_protocol import RETIRED_PROGRESS_PHASE_SPELLINGS, ProgressPhase
+
+    assert scan.PROGRESS_PHASE_WORDS == {
+        member.value for member in ProgressPhase
+    } | set(RETIRED_PROGRESS_PHASE_SPELLINGS)

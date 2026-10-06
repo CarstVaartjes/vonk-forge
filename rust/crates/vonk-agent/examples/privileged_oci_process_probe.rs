@@ -13,6 +13,7 @@ use vonk_agent_helper::protocol::{
     AUTHORITY, GrantClaims, GrantSignature, HostOperation, SignedGrant, canonical_signing_bytes,
     read_frame, write_frame,
 };
+use vonk_agent_protocol::generated::HostHelperResponseStatus;
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, RecipeStartRequest, canonical_json,
     compiled_oci::{CompiledOciPaths, start_arguments_for_paths},
@@ -171,7 +172,7 @@ fn main() {
     println!("grant={}", String::from_utf8(grant_body).unwrap());
     println!("response={}", String::from_utf8(response).unwrap());
     if response_value.get("status").and_then(Value::as_str)
-        != Some("container-runtime-request-executed")
+        != Some(HostHelperResponseStatus::ContainerRuntimeRequestExecuted.as_str())
     {
         std::process::exit(2);
     }

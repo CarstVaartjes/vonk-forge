@@ -8,6 +8,7 @@ from vonk_agent_protocol import (
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
+    ProgressPhase,
     canonical_message,
 )
 
@@ -16,14 +17,17 @@ from .model_cache_contract import ModelCacheOperationPhase, ModelCacheOperationP
 from .operation_progress import STALE_AFTER_SECONDS, observe_progress, project_progress
 from .strict_json import read_stored_model
 
-PHASES = {
-    "queued": "queued",
-    "downloading": "download",
-    "verifying": "verify",
-    "reclaiming": "cleanup",
-    "cancelling": "waiting",
-    "completed": "completed",
-    "failed": "failed",
+#: The measured phase of each operation phase.  Both are words of the contract's
+#: ``ProgressPhase``; the measurement used to say ``download``, ``verify`` and
+#: ``cleanup``, which are read through ``adopt_progress_phase``.
+PHASES: dict[str, ProgressPhase] = {
+    "queued": ProgressPhase.QUEUED,
+    "downloading": ProgressPhase.DOWNLOADING,
+    "verifying": ProgressPhase.VERIFYING,
+    "reclaiming": ProgressPhase.RECLAIMING,
+    "cancelling": ProgressPhase.WAITING,
+    "completed": ProgressPhase.COMPLETED,
+    "failed": ProgressPhase.FAILED,
 }
 
 
@@ -148,7 +152,7 @@ def cache_phase(
         )
         result["measurement"] = observe_progress(
             measurement_document,
-            dict(measurement_document, phase="waiting"),
+            dict(measurement_document, phase=ProgressPhase.WAITING),
             now,
         )
     return json.loads(

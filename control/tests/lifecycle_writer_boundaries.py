@@ -31,6 +31,8 @@ from pathlib import Path
 
 from vonk_agent_protocol import LifecycleSubject, StateWriteKind
 
+from .parsed_sources import memoized_scan, parsed_tree
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
 CORE_PREFIX = "control/src/vonk_control/lifecycle/"
@@ -478,31 +480,40 @@ def _dict_owner_model(path: str) -> str:
     }.get(name, "Job")
 
 
-def scan_source(source: str, *, path: str) -> list[Write]:
-    """Return every lifecycle state write in one module's source."""
+def scan_source(
+    source: str, *, path: str, tree: ast.Module | None = None
+) -> list[Write]:
+    """Return every lifecycle state write in one module's source.
+
+    ``tree`` is the already parsed ``source`` (read-only) when the caller has it."""
 
     if path.startswith(CORE_PREFIX) or path == MODELS_MODULE:
         return []
-    collector = _Collector(path, ast.parse(source))
+    collector = _Collector(path, tree if tree is not None else ast.parse(source))
     return sorted(collector.writes, key=lambda write: (write.line, write.function))
 
 
-def scan_unresolved(source: str, *, path: str) -> list[tuple[str, str, int]]:
+def scan_unresolved(
+    source: str, *, path: str, tree: ast.Module | None = None
+) -> list[tuple[str, str, int]]:
     """``.state`` writes on a variable the scan could not attach to a model.
 
     Each entry is ``(function, variable, line)``."""
 
     if path.startswith(CORE_PREFIX) or path == MODELS_MODULE:
         return []
-    return _Collector(path, ast.parse(source)).unresolved
+    return _Collector(path, tree if tree is not None else ast.parse(source)).unresolved
 
 
 def scan_lifecycle_writes(root: Path = CONTROL_SOURCE_ROOT) -> list[Write]:
-    writes: list[Write] = []
-    for module in sorted(root.rglob("*.py")):
-        relative = module.relative_to(REPO_ROOT).as_posix()
-        writes.extend(scan_source(module.read_text(encoding="utf-8"), path=relative))
-    return writes
+    def compute() -> list[Write]:
+        writes: list[Write] = []
+        for module, parsed in parsed_tree(root):
+            relative = module.relative_to(REPO_ROOT).as_posix()
+            writes.extend(scan_source(parsed.source, path=relative, tree=parsed.tree))
+        return writes
+
+    return memoized_scan(("lifecycle", root), [root], compute)
 
 
 def evaluate_writer_gate(writes: Sequence[Write]) -> list[str]:

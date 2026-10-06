@@ -1826,6 +1826,15 @@ impl ::std::convert::TryFrom<::std::string::String> for ControllerErrorCode {
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct ControllerRefusalBody {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub code: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub detail: ::std::option::Option<::std::string::String>,
+}
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DesiredAssignmentState {
     #[serde(rename = "installed")]
@@ -2632,6 +2641,219 @@ pub struct FailureProperty {
     pub value: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum FailureStage {
+    #[serde(rename = "agent-restart")]
+    AgentRestart,
+    #[serde(rename = "agent-upgrade-installed")]
+    AgentUpgradeInstalled,
+    #[serde(rename = "artifact-distribution")]
+    ArtifactDistribution,
+    #[serde(rename = "base-image-import")]
+    BaseImageImport,
+    #[serde(rename = "bounded-build-process")]
+    BoundedBuildProcess,
+    #[serde(rename = "egress-address")]
+    EgressAddress,
+    #[serde(rename = "egress-image-import")]
+    EgressImageImport,
+    #[serde(rename = "egress-network-create")]
+    EgressNetworkCreate,
+    #[serde(rename = "egress-readiness")]
+    EgressReadiness,
+    #[serde(rename = "egress-service-start")]
+    EgressServiceStart,
+    #[serde(rename = "helper-runtime-reconciliation")]
+    HelperRuntimeReconciliation,
+    #[serde(rename = "helper-runtime-reconciliation-lock")]
+    HelperRuntimeReconciliationLock,
+    #[serde(rename = "image-build")]
+    ImageBuild,
+    #[serde(rename = "image-upload")]
+    ImageUpload,
+    #[serde(rename = "image-verification")]
+    ImageVerification,
+    #[serde(rename = "installation-checkpoint-storage")]
+    InstallationCheckpointStorage,
+    #[serde(rename = "installation-directory")]
+    InstallationDirectory,
+    #[serde(rename = "installation-metadata")]
+    InstallationMetadata,
+    #[serde(rename = "installation-path")]
+    InstallationPath,
+    #[serde(rename = "installation-receipt")]
+    InstallationReceipt,
+    #[serde(rename = "installation-reconciliation-lock")]
+    InstallationReconciliationLock,
+    #[serde(rename = "installation-removal")]
+    InstallationRemoval,
+    #[serde(rename = "installation-validation")]
+    InstallationValidation,
+    #[serde(rename = "job-cancel-stop")]
+    JobCancelStop,
+    #[serde(rename = "job-inputs")]
+    JobInputs,
+    #[serde(rename = "job-state")]
+    JobState,
+    #[serde(rename = "job-stop")]
+    JobStop,
+    #[serde(rename = "lifecycle-metadata")]
+    LifecycleMetadata,
+    #[serde(rename = "model-custody")]
+    ModelCustody,
+    #[serde(rename = "model-materialization")]
+    ModelMaterialization,
+    #[serde(rename = "observation-identity")]
+    ObservationIdentity,
+    #[serde(rename = "output-storage")]
+    OutputStorage,
+    #[serde(rename = "retained-container")]
+    RetainedContainer,
+    #[serde(rename = "run-storage")]
+    RunStorage,
+    #[serde(rename = "runtime-adapter")]
+    RuntimeAdapter,
+    #[serde(rename = "runtime-cache")]
+    RuntimeCache,
+    #[serde(rename = "runtime-cache-cleanup")]
+    RuntimeCacheCleanup,
+    #[serde(rename = "runtime-metadata")]
+    RuntimeMetadata,
+    #[serde(rename = "runtime-projection")]
+    RuntimeProjection,
+    #[serde(rename = "source-bundle-fetch")]
+    SourceBundleFetch,
+    #[serde(rename = "stop")]
+    Stop,
+    #[serde(rename = "stop-cleanup")]
+    StopCleanup,
+    #[serde(rename = "stop-metadata")]
+    StopMetadata,
+    #[serde(rename = "stop-plan")]
+    StopPlan,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for FailureStage {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::AgentRestart => f.write_str("agent-restart"),
+            Self::AgentUpgradeInstalled => f.write_str("agent-upgrade-installed"),
+            Self::ArtifactDistribution => f.write_str("artifact-distribution"),
+            Self::BaseImageImport => f.write_str("base-image-import"),
+            Self::BoundedBuildProcess => f.write_str("bounded-build-process"),
+            Self::EgressAddress => f.write_str("egress-address"),
+            Self::EgressImageImport => f.write_str("egress-image-import"),
+            Self::EgressNetworkCreate => f.write_str("egress-network-create"),
+            Self::EgressReadiness => f.write_str("egress-readiness"),
+            Self::EgressServiceStart => f.write_str("egress-service-start"),
+            Self::HelperRuntimeReconciliation => f.write_str("helper-runtime-reconciliation"),
+            Self::HelperRuntimeReconciliationLock => {
+                f.write_str("helper-runtime-reconciliation-lock")
+            }
+            Self::ImageBuild => f.write_str("image-build"),
+            Self::ImageUpload => f.write_str("image-upload"),
+            Self::ImageVerification => f.write_str("image-verification"),
+            Self::InstallationCheckpointStorage => f.write_str("installation-checkpoint-storage"),
+            Self::InstallationDirectory => f.write_str("installation-directory"),
+            Self::InstallationMetadata => f.write_str("installation-metadata"),
+            Self::InstallationPath => f.write_str("installation-path"),
+            Self::InstallationReceipt => f.write_str("installation-receipt"),
+            Self::InstallationReconciliationLock => f.write_str("installation-reconciliation-lock"),
+            Self::InstallationRemoval => f.write_str("installation-removal"),
+            Self::InstallationValidation => f.write_str("installation-validation"),
+            Self::JobCancelStop => f.write_str("job-cancel-stop"),
+            Self::JobInputs => f.write_str("job-inputs"),
+            Self::JobState => f.write_str("job-state"),
+            Self::JobStop => f.write_str("job-stop"),
+            Self::LifecycleMetadata => f.write_str("lifecycle-metadata"),
+            Self::ModelCustody => f.write_str("model-custody"),
+            Self::ModelMaterialization => f.write_str("model-materialization"),
+            Self::ObservationIdentity => f.write_str("observation-identity"),
+            Self::OutputStorage => f.write_str("output-storage"),
+            Self::RetainedContainer => f.write_str("retained-container"),
+            Self::RunStorage => f.write_str("run-storage"),
+            Self::RuntimeAdapter => f.write_str("runtime-adapter"),
+            Self::RuntimeCache => f.write_str("runtime-cache"),
+            Self::RuntimeCacheCleanup => f.write_str("runtime-cache-cleanup"),
+            Self::RuntimeMetadata => f.write_str("runtime-metadata"),
+            Self::RuntimeProjection => f.write_str("runtime-projection"),
+            Self::SourceBundleFetch => f.write_str("source-bundle-fetch"),
+            Self::Stop => f.write_str("stop"),
+            Self::StopCleanup => f.write_str("stop-cleanup"),
+            Self::StopMetadata => f.write_str("stop-metadata"),
+            Self::StopPlan => f.write_str("stop-plan"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for FailureStage {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "agent-restart" => Ok(Self::AgentRestart),
+            "agent-upgrade-installed" => Ok(Self::AgentUpgradeInstalled),
+            "artifact-distribution" => Ok(Self::ArtifactDistribution),
+            "base-image-import" => Ok(Self::BaseImageImport),
+            "bounded-build-process" => Ok(Self::BoundedBuildProcess),
+            "egress-address" => Ok(Self::EgressAddress),
+            "egress-image-import" => Ok(Self::EgressImageImport),
+            "egress-network-create" => Ok(Self::EgressNetworkCreate),
+            "egress-readiness" => Ok(Self::EgressReadiness),
+            "egress-service-start" => Ok(Self::EgressServiceStart),
+            "helper-runtime-reconciliation" => Ok(Self::HelperRuntimeReconciliation),
+            "helper-runtime-reconciliation-lock" => Ok(Self::HelperRuntimeReconciliationLock),
+            "image-build" => Ok(Self::ImageBuild),
+            "image-upload" => Ok(Self::ImageUpload),
+            "image-verification" => Ok(Self::ImageVerification),
+            "installation-checkpoint-storage" => Ok(Self::InstallationCheckpointStorage),
+            "installation-directory" => Ok(Self::InstallationDirectory),
+            "installation-metadata" => Ok(Self::InstallationMetadata),
+            "installation-path" => Ok(Self::InstallationPath),
+            "installation-receipt" => Ok(Self::InstallationReceipt),
+            "installation-reconciliation-lock" => Ok(Self::InstallationReconciliationLock),
+            "installation-removal" => Ok(Self::InstallationRemoval),
+            "installation-validation" => Ok(Self::InstallationValidation),
+            "job-cancel-stop" => Ok(Self::JobCancelStop),
+            "job-inputs" => Ok(Self::JobInputs),
+            "job-state" => Ok(Self::JobState),
+            "job-stop" => Ok(Self::JobStop),
+            "lifecycle-metadata" => Ok(Self::LifecycleMetadata),
+            "model-custody" => Ok(Self::ModelCustody),
+            "model-materialization" => Ok(Self::ModelMaterialization),
+            "observation-identity" => Ok(Self::ObservationIdentity),
+            "output-storage" => Ok(Self::OutputStorage),
+            "retained-container" => Ok(Self::RetainedContainer),
+            "run-storage" => Ok(Self::RunStorage),
+            "runtime-adapter" => Ok(Self::RuntimeAdapter),
+            "runtime-cache" => Ok(Self::RuntimeCache),
+            "runtime-cache-cleanup" => Ok(Self::RuntimeCacheCleanup),
+            "runtime-metadata" => Ok(Self::RuntimeMetadata),
+            "runtime-projection" => Ok(Self::RuntimeProjection),
+            "source-bundle-fetch" => Ok(Self::SourceBundleFetch),
+            "stop" => Ok(Self::Stop),
+            "stop-cleanup" => Ok(Self::StopCleanup),
+            "stop-metadata" => Ok(Self::StopMetadata),
+            "stop-plan" => Ok(Self::StopPlan),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for FailureStage {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for FailureStage {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum GatewayRouteState {
     #[serde(rename = "published")]
     Published,
@@ -3097,18 +3319,7 @@ pub struct HostHelperResponse {
     pub schema_version: u8,
     pub status: HostHelperResponseStatus,
 }
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum HostHelperResponseStatus {
     #[serde(rename = "rejected")]
     Rejected,
@@ -4594,7 +4805,9 @@ pub struct LifecycleVocabulary {
     pub error_category: ErrorCategory,
     pub event_kind: LifecycleEventKind,
     pub failure_code: FailureCode,
+    pub failure_stage: FailureStage,
     pub gateway_route_state: GatewayRouteState,
+    pub host_helper_response_status: HostHelperResponseStatus,
     pub installation_node_state: InstallationNodeState,
     pub installation_state: InstallationState,
     pub invalid_request_reason: InvalidRequestReason,
@@ -4609,6 +4822,7 @@ pub struct LifecycleVocabulary {
     pub outcome_kind: OutcomeKind,
     pub placement_install_state: PlacementInstallState,
     pub placement_load_state: PlacementLoadState,
+    pub progress_phase: ProgressPhase,
     pub reservation_state: ReservationState,
     pub resource_blocker_code: ResourceBlockerCode,
     pub route_publication_state: RoutePublicationState,
@@ -6591,6 +6805,129 @@ impl ::std::convert::TryFrom<::std::string::String> for ProfileReasonCode {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProgressPhase {
+    #[serde(rename = "queued")]
+    Queued,
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "waiting")]
+    Waiting,
+    #[serde(rename = "preparing")]
+    Preparing,
+    #[serde(rename = "downloading")]
+    Downloading,
+    #[serde(rename = "model-download")]
+    ModelDownload,
+    #[serde(rename = "verifying")]
+    Verifying,
+    #[serde(rename = "finalizing")]
+    Finalizing,
+    #[serde(rename = "building")]
+    Building,
+    #[serde(rename = "pulling")]
+    Pulling,
+    #[serde(rename = "transfer")]
+    Transfer,
+    #[serde(rename = "copying")]
+    Copying,
+    #[serde(rename = "uploading")]
+    Uploading,
+    #[serde(rename = "installing")]
+    Installing,
+    #[serde(rename = "reconciling-installation")]
+    ReconcilingInstallation,
+    #[serde(rename = "starting")]
+    Starting,
+    #[serde(rename = "stopping")]
+    Stopping,
+    #[serde(rename = "uninstalling")]
+    Uninstalling,
+    #[serde(rename = "reclaiming")]
+    Reclaiming,
+    #[serde(rename = "updating")]
+    Updating,
+    #[serde(rename = "executing")]
+    Executing,
+    #[serde(rename = "completed")]
+    Completed,
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl ::std::fmt::Display for ProgressPhase {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Queued => f.write_str("queued"),
+            Self::Pending => f.write_str("pending"),
+            Self::Waiting => f.write_str("waiting"),
+            Self::Preparing => f.write_str("preparing"),
+            Self::Downloading => f.write_str("downloading"),
+            Self::ModelDownload => f.write_str("model-download"),
+            Self::Verifying => f.write_str("verifying"),
+            Self::Finalizing => f.write_str("finalizing"),
+            Self::Building => f.write_str("building"),
+            Self::Pulling => f.write_str("pulling"),
+            Self::Transfer => f.write_str("transfer"),
+            Self::Copying => f.write_str("copying"),
+            Self::Uploading => f.write_str("uploading"),
+            Self::Installing => f.write_str("installing"),
+            Self::ReconcilingInstallation => f.write_str("reconciling-installation"),
+            Self::Starting => f.write_str("starting"),
+            Self::Stopping => f.write_str("stopping"),
+            Self::Uninstalling => f.write_str("uninstalling"),
+            Self::Reclaiming => f.write_str("reclaiming"),
+            Self::Updating => f.write_str("updating"),
+            Self::Executing => f.write_str("executing"),
+            Self::Completed => f.write_str("completed"),
+            Self::Failed => f.write_str("failed"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProgressPhase {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "queued" => Ok(Self::Queued),
+            "pending" => Ok(Self::Pending),
+            "waiting" => Ok(Self::Waiting),
+            "preparing" => Ok(Self::Preparing),
+            "downloading" => Ok(Self::Downloading),
+            "model-download" => Ok(Self::ModelDownload),
+            "verifying" => Ok(Self::Verifying),
+            "finalizing" => Ok(Self::Finalizing),
+            "building" => Ok(Self::Building),
+            "pulling" => Ok(Self::Pulling),
+            "transfer" => Ok(Self::Transfer),
+            "copying" => Ok(Self::Copying),
+            "uploading" => Ok(Self::Uploading),
+            "installing" => Ok(Self::Installing),
+            "reconciling-installation" => Ok(Self::ReconcilingInstallation),
+            "starting" => Ok(Self::Starting),
+            "stopping" => Ok(Self::Stopping),
+            "uninstalling" => Ok(Self::Uninstalling),
+            "reclaiming" => Ok(Self::Reclaiming),
+            "updating" => Ok(Self::Updating),
+            "executing" => Ok(Self::Executing),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProgressPhase {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProgressPhase {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ProjectionCode {
     #[serde(rename = "cpu.low-clock")]
     CpuLowClock,
@@ -6934,7 +7271,35 @@ impl ::std::convert::TryFrom<::std::string::String> for RecipeBuildCode {
 #[derive(Eq)]
 pub struct RecipeBuildEnvironmentArgument {
     pub name: ::std::string::String,
-    pub value: ::serde_json::Value,
+    pub value: RecipeBuildEnvironmentArgumentValue,
+}
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+#[derive(Eq)]
+pub enum RecipeBuildEnvironmentArgumentValue {
+    String(::std::string::String),
+    Int64(i64),
+    Boolean(bool),
+}
+impl ::std::fmt::Display for RecipeBuildEnvironmentArgumentValue {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match self {
+            Self::String(x) => x.fmt(f),
+            Self::Int64(x) => x.fmt(f),
+            Self::Boolean(x) => x.fmt(f),
+        }
+    }
+}
+impl ::std::convert::From<i64> for RecipeBuildEnvironmentArgumentValue {
+    fn from(value: i64) -> Self {
+        Self::Int64(value)
+    }
+}
+impl ::std::convert::From<bool> for RecipeBuildEnvironmentArgumentValue {
+    fn from(value: bool) -> Self {
+        Self::Boolean(value)
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -8031,10 +8396,31 @@ pub struct RenewRequest {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RequestValidationIssue {
-    pub loc: ::std::vec::Vec<::serde_json::Value>,
+    pub loc: ::std::vec::Vec<RequestValidationIssueLocItem>,
     pub msg: ::std::string::String,
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
+}
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+#[derive(Eq)]
+pub enum RequestValidationIssueLocItem {
+    String(::std::string::String),
+    Int64(i64),
+}
+impl ::std::fmt::Display for RequestValidationIssueLocItem {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match self {
+            Self::String(x) => x.fmt(f),
+            Self::Int64(x) => x.fmt(f),
+        }
+    }
+}
+impl ::std::convert::From<i64> for RequestValidationIssueLocItem {
+    fn from(value: i64) -> Self {
+        Self::Int64(value)
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -14811,6 +15197,28 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for ControllerRefusalBody {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ControllerRefusalBody", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub code: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub detail: ::std::option::Option<::std::string::String>,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            code: raw.code,
+            detail: raw.detail,
+        })
+    }
+}
 impl DesiredAssignmentState {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -15737,6 +16145,233 @@ impl<'de> ::serde::Deserialize<'de> for FailureProperty {
         })
     }
 }
+impl FailureStage {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AgentRestart => "agent-restart",
+            Self::AgentUpgradeInstalled => "agent-upgrade-installed",
+            Self::ArtifactDistribution => "artifact-distribution",
+            Self::BaseImageImport => "base-image-import",
+            Self::BoundedBuildProcess => "bounded-build-process",
+            Self::EgressAddress => "egress-address",
+            Self::EgressImageImport => "egress-image-import",
+            Self::EgressNetworkCreate => "egress-network-create",
+            Self::EgressReadiness => "egress-readiness",
+            Self::EgressServiceStart => "egress-service-start",
+            Self::HelperRuntimeReconciliation => "helper-runtime-reconciliation",
+            Self::HelperRuntimeReconciliationLock => "helper-runtime-reconciliation-lock",
+            Self::ImageBuild => "image-build",
+            Self::ImageUpload => "image-upload",
+            Self::ImageVerification => "image-verification",
+            Self::InstallationCheckpointStorage => "installation-checkpoint-storage",
+            Self::InstallationDirectory => "installation-directory",
+            Self::InstallationMetadata => "installation-metadata",
+            Self::InstallationPath => "installation-path",
+            Self::InstallationReceipt => "installation-receipt",
+            Self::InstallationReconciliationLock => "installation-reconciliation-lock",
+            Self::InstallationRemoval => "installation-removal",
+            Self::InstallationValidation => "installation-validation",
+            Self::JobCancelStop => "job-cancel-stop",
+            Self::JobInputs => "job-inputs",
+            Self::JobState => "job-state",
+            Self::JobStop => "job-stop",
+            Self::LifecycleMetadata => "lifecycle-metadata",
+            Self::ModelCustody => "model-custody",
+            Self::ModelMaterialization => "model-materialization",
+            Self::ObservationIdentity => "observation-identity",
+            Self::OutputStorage => "output-storage",
+            Self::RetainedContainer => "retained-container",
+            Self::RunStorage => "run-storage",
+            Self::RuntimeAdapter => "runtime-adapter",
+            Self::RuntimeCache => "runtime-cache",
+            Self::RuntimeCacheCleanup => "runtime-cache-cleanup",
+            Self::RuntimeMetadata => "runtime-metadata",
+            Self::RuntimeProjection => "runtime-projection",
+            Self::SourceBundleFetch => "source-bundle-fetch",
+            Self::Stop => "stop",
+            Self::StopCleanup => "stop-cleanup",
+            Self::StopMetadata => "stop-metadata",
+            Self::StopPlan => "stop-plan",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for FailureStage {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for FailureStage {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for FailureStage {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for FailureStage {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("FailureStage", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "agent-restart")]
+            AgentRestart,
+            #[serde(rename = "agent-upgrade-installed")]
+            AgentUpgradeInstalled,
+            #[serde(rename = "artifact-distribution")]
+            ArtifactDistribution,
+            #[serde(rename = "base-image-import")]
+            BaseImageImport,
+            #[serde(rename = "bounded-build-process")]
+            BoundedBuildProcess,
+            #[serde(rename = "egress-address")]
+            EgressAddress,
+            #[serde(rename = "egress-image-import")]
+            EgressImageImport,
+            #[serde(rename = "egress-network-create")]
+            EgressNetworkCreate,
+            #[serde(rename = "egress-readiness")]
+            EgressReadiness,
+            #[serde(rename = "egress-service-start")]
+            EgressServiceStart,
+            #[serde(rename = "helper-runtime-reconciliation")]
+            HelperRuntimeReconciliation,
+            #[serde(rename = "helper-runtime-reconciliation-lock")]
+            HelperRuntimeReconciliationLock,
+            #[serde(rename = "image-build")]
+            ImageBuild,
+            #[serde(rename = "image-upload")]
+            ImageUpload,
+            #[serde(rename = "image-verification")]
+            ImageVerification,
+            #[serde(rename = "installation-checkpoint-storage")]
+            InstallationCheckpointStorage,
+            #[serde(rename = "installation-directory")]
+            InstallationDirectory,
+            #[serde(rename = "installation-metadata")]
+            InstallationMetadata,
+            #[serde(rename = "installation-path")]
+            InstallationPath,
+            #[serde(rename = "installation-receipt")]
+            InstallationReceipt,
+            #[serde(rename = "installation-reconciliation-lock")]
+            InstallationReconciliationLock,
+            #[serde(rename = "installation-removal")]
+            InstallationRemoval,
+            #[serde(rename = "installation-validation")]
+            InstallationValidation,
+            #[serde(rename = "job-cancel-stop")]
+            JobCancelStop,
+            #[serde(rename = "job-inputs")]
+            JobInputs,
+            #[serde(rename = "job-state")]
+            JobState,
+            #[serde(rename = "job-stop")]
+            JobStop,
+            #[serde(rename = "lifecycle-metadata")]
+            LifecycleMetadata,
+            #[serde(rename = "model-custody")]
+            ModelCustody,
+            #[serde(rename = "model-materialization")]
+            ModelMaterialization,
+            #[serde(rename = "observation-identity")]
+            ObservationIdentity,
+            #[serde(rename = "output-storage")]
+            OutputStorage,
+            #[serde(rename = "retained-container")]
+            RetainedContainer,
+            #[serde(rename = "run-storage")]
+            RunStorage,
+            #[serde(rename = "runtime-adapter")]
+            RuntimeAdapter,
+            #[serde(rename = "runtime-cache")]
+            RuntimeCache,
+            #[serde(rename = "runtime-cache-cleanup")]
+            RuntimeCacheCleanup,
+            #[serde(rename = "runtime-metadata")]
+            RuntimeMetadata,
+            #[serde(rename = "runtime-projection")]
+            RuntimeProjection,
+            #[serde(rename = "source-bundle-fetch")]
+            SourceBundleFetch,
+            #[serde(rename = "stop")]
+            Stop,
+            #[serde(rename = "stop-cleanup")]
+            StopCleanup,
+            #[serde(rename = "stop-metadata")]
+            StopMetadata,
+            #[serde(rename = "stop-plan")]
+            StopPlan,
+            #[serde(rename = "unknown")]
+            Unknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::AgentRestart => Self::AgentRestart,
+            Raw::AgentUpgradeInstalled => Self::AgentUpgradeInstalled,
+            Raw::ArtifactDistribution => Self::ArtifactDistribution,
+            Raw::BaseImageImport => Self::BaseImageImport,
+            Raw::BoundedBuildProcess => Self::BoundedBuildProcess,
+            Raw::EgressAddress => Self::EgressAddress,
+            Raw::EgressImageImport => Self::EgressImageImport,
+            Raw::EgressNetworkCreate => Self::EgressNetworkCreate,
+            Raw::EgressReadiness => Self::EgressReadiness,
+            Raw::EgressServiceStart => Self::EgressServiceStart,
+            Raw::HelperRuntimeReconciliation => Self::HelperRuntimeReconciliation,
+            Raw::HelperRuntimeReconciliationLock => Self::HelperRuntimeReconciliationLock,
+            Raw::ImageBuild => Self::ImageBuild,
+            Raw::ImageUpload => Self::ImageUpload,
+            Raw::ImageVerification => Self::ImageVerification,
+            Raw::InstallationCheckpointStorage => Self::InstallationCheckpointStorage,
+            Raw::InstallationDirectory => Self::InstallationDirectory,
+            Raw::InstallationMetadata => Self::InstallationMetadata,
+            Raw::InstallationPath => Self::InstallationPath,
+            Raw::InstallationReceipt => Self::InstallationReceipt,
+            Raw::InstallationReconciliationLock => Self::InstallationReconciliationLock,
+            Raw::InstallationRemoval => Self::InstallationRemoval,
+            Raw::InstallationValidation => Self::InstallationValidation,
+            Raw::JobCancelStop => Self::JobCancelStop,
+            Raw::JobInputs => Self::JobInputs,
+            Raw::JobState => Self::JobState,
+            Raw::JobStop => Self::JobStop,
+            Raw::LifecycleMetadata => Self::LifecycleMetadata,
+            Raw::ModelCustody => Self::ModelCustody,
+            Raw::ModelMaterialization => Self::ModelMaterialization,
+            Raw::ObservationIdentity => Self::ObservationIdentity,
+            Raw::OutputStorage => Self::OutputStorage,
+            Raw::RetainedContainer => Self::RetainedContainer,
+            Raw::RunStorage => Self::RunStorage,
+            Raw::RuntimeAdapter => Self::RuntimeAdapter,
+            Raw::RuntimeCache => Self::RuntimeCache,
+            Raw::RuntimeCacheCleanup => Self::RuntimeCacheCleanup,
+            Raw::RuntimeMetadata => Self::RuntimeMetadata,
+            Raw::RuntimeProjection => Self::RuntimeProjection,
+            Raw::SourceBundleFetch => Self::SourceBundleFetch,
+            Raw::Stop => Self::Stop,
+            Raw::StopCleanup => Self::StopCleanup,
+            Raw::StopMetadata => Self::StopMetadata,
+            Raw::StopPlan => Self::StopPlan,
+            Raw::Unknown => Self::Unknown,
+        })
+    }
+}
 impl GatewayRouteState {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -16282,6 +16917,46 @@ impl ::std::cmp::PartialEq<str> for HostHelperResponseStatus {
 impl ::std::cmp::PartialEq<&str> for HostHelperResponseStatus {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HostHelperResponseStatus {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("HostHelperResponseStatus", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "rejected")]
+            Rejected,
+            #[serde(rename = "package-installed")]
+            PackageInstalled,
+            #[serde(rename = "package-activation-confirmed")]
+            PackageActivationConfirmed,
+            #[serde(rename = "container-runtime-request-executed")]
+            ContainerRuntimeRequestExecuted,
+            #[serde(rename = "container-runtime-stop-uncertain")]
+            ContainerRuntimeStopUncertain,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Rejected => Self::Rejected,
+            Raw::PackageInstalled => Self::PackageInstalled,
+            Raw::PackageActivationConfirmed => Self::PackageActivationConfirmed,
+            Raw::ContainerRuntimeRequestExecuted => Self::ContainerRuntimeRequestExecuted,
+            Raw::ContainerRuntimeStopUncertain => Self::ContainerRuntimeStopUncertain,
+        })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for HostHelperSignature {
@@ -17996,7 +18671,9 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub error_category: ErrorCategory,
             pub event_kind: LifecycleEventKind,
             pub failure_code: FailureCode,
+            pub failure_stage: FailureStage,
             pub gateway_route_state: GatewayRouteState,
+            pub host_helper_response_status: HostHelperResponseStatus,
             pub installation_node_state: InstallationNodeState,
             pub installation_state: InstallationState,
             pub invalid_request_reason: InvalidRequestReason,
@@ -18011,6 +18688,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub outcome_kind: OutcomeKind,
             pub placement_install_state: PlacementInstallState,
             pub placement_load_state: PlacementLoadState,
+            pub progress_phase: ProgressPhase,
             pub reservation_state: ReservationState,
             pub resource_blocker_code: ResourceBlockerCode,
             pub route_publication_state: RoutePublicationState,
@@ -18042,7 +18720,9 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             error_category: raw.error_category,
             event_kind: raw.event_kind,
             failure_code: raw.failure_code,
+            failure_stage: raw.failure_stage,
             gateway_route_state: raw.gateway_route_state,
+            host_helper_response_status: raw.host_helper_response_status,
             installation_node_state: raw.installation_node_state,
             installation_state: raw.installation_state,
             invalid_request_reason: raw.invalid_request_reason,
@@ -18057,6 +18737,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             outcome_kind: raw.outcome_kind,
             placement_install_state: raw.placement_install_state,
             placement_load_state: raw.placement_load_state,
+            progress_phase: raw.progress_phase,
             reservation_state: raw.reservation_state,
             resource_blocker_code: raw.resource_blocker_code,
             route_publication_state: raw.route_publication_state,
@@ -20168,6 +20849,145 @@ impl<'de> ::serde::Deserialize<'de> for ProfileReasonCode {
         })
     }
 }
+impl ProgressPhase {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Pending => "pending",
+            Self::Waiting => "waiting",
+            Self::Preparing => "preparing",
+            Self::Downloading => "downloading",
+            Self::ModelDownload => "model-download",
+            Self::Verifying => "verifying",
+            Self::Finalizing => "finalizing",
+            Self::Building => "building",
+            Self::Pulling => "pulling",
+            Self::Transfer => "transfer",
+            Self::Copying => "copying",
+            Self::Uploading => "uploading",
+            Self::Installing => "installing",
+            Self::ReconcilingInstallation => "reconciling-installation",
+            Self::Starting => "starting",
+            Self::Stopping => "stopping",
+            Self::Uninstalling => "uninstalling",
+            Self::Reclaiming => "reclaiming",
+            Self::Updating => "updating",
+            Self::Executing => "executing",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+impl ::std::ops::Deref for ProgressPhase {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProgressPhase {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProgressPhase {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProgressPhase {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("ProgressPhase", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "queued")]
+            Queued,
+            #[serde(rename = "pending")]
+            Pending,
+            #[serde(rename = "waiting")]
+            Waiting,
+            #[serde(rename = "preparing")]
+            Preparing,
+            #[serde(rename = "downloading")]
+            Downloading,
+            #[serde(rename = "model-download")]
+            ModelDownload,
+            #[serde(rename = "verifying")]
+            Verifying,
+            #[serde(rename = "finalizing")]
+            Finalizing,
+            #[serde(rename = "building")]
+            Building,
+            #[serde(rename = "pulling")]
+            Pulling,
+            #[serde(rename = "transfer")]
+            Transfer,
+            #[serde(rename = "copying")]
+            Copying,
+            #[serde(rename = "uploading")]
+            Uploading,
+            #[serde(rename = "installing")]
+            Installing,
+            #[serde(rename = "reconciling-installation")]
+            ReconcilingInstallation,
+            #[serde(rename = "starting")]
+            Starting,
+            #[serde(rename = "stopping")]
+            Stopping,
+            #[serde(rename = "uninstalling")]
+            Uninstalling,
+            #[serde(rename = "reclaiming")]
+            Reclaiming,
+            #[serde(rename = "updating")]
+            Updating,
+            #[serde(rename = "executing")]
+            Executing,
+            #[serde(rename = "completed")]
+            Completed,
+            #[serde(rename = "failed")]
+            Failed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Queued => Self::Queued,
+            Raw::Pending => Self::Pending,
+            Raw::Waiting => Self::Waiting,
+            Raw::Preparing => Self::Preparing,
+            Raw::Downloading => Self::Downloading,
+            Raw::ModelDownload => Self::ModelDownload,
+            Raw::Verifying => Self::Verifying,
+            Raw::Finalizing => Self::Finalizing,
+            Raw::Building => Self::Building,
+            Raw::Pulling => Self::Pulling,
+            Raw::Transfer => Self::Transfer,
+            Raw::Copying => Self::Copying,
+            Raw::Uploading => Self::Uploading,
+            Raw::Installing => Self::Installing,
+            Raw::ReconcilingInstallation => Self::ReconcilingInstallation,
+            Raw::Starting => Self::Starting,
+            Raw::Stopping => Self::Stopping,
+            Raw::Uninstalling => Self::Uninstalling,
+            Raw::Reclaiming => Self::Reclaiming,
+            Raw::Updating => Self::Updating,
+            Raw::Executing => Self::Executing,
+            Raw::Completed => Self::Completed,
+            Raw::Failed => Self::Failed,
+        })
+    }
+}
 impl ProjectionCode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -20671,7 +21491,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildEnvironmentArgument {
         #[derive(Eq)]
         struct Raw {
             pub name: ::std::string::String,
-            pub value: ::serde_json::Value,
+            pub value: RecipeBuildEnvironmentArgumentValue,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -22157,7 +22977,7 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationIssue {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub loc: ::std::vec::Vec<::serde_json::Value>,
+            pub loc: ::std::vec::Vec<RequestValidationIssueLocItem>,
             pub msg: ::std::string::String,
             #[serde(rename = "type")]
             pub type_: ::std::string::String,

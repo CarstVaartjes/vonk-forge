@@ -444,6 +444,91 @@ export const ModelCacheOperatorStatus = {
 } as const;
 export type ModelCacheOperatorStatus = (typeof ModelCacheOperatorStatus)[keyof typeof ModelCacheOperatorStatus];
 
+export const ProgressPhase = {
+  QUEUED: "queued",
+  PENDING: "pending",
+  WAITING: "waiting",
+  PREPARING: "preparing",
+  DOWNLOADING: "downloading",
+  MODEL_DOWNLOAD: "model-download",
+  VERIFYING: "verifying",
+  FINALIZING: "finalizing",
+  BUILDING: "building",
+  PULLING: "pulling",
+  TRANSFER: "transfer",
+  COPYING: "copying",
+  UPLOADING: "uploading",
+  INSTALLING: "installing",
+  RECONCILING_INSTALLATION: "reconciling-installation",
+  STARTING: "starting",
+  STOPPING: "stopping",
+  UNINSTALLING: "uninstalling",
+  RECLAIMING: "reclaiming",
+  UPDATING: "updating",
+  EXECUTING: "executing",
+  COMPLETED: "completed",
+  FAILED: "failed",
+} as const;
+export type ProgressPhase = (typeof ProgressPhase)[keyof typeof ProgressPhase];
+
+export const FailureStage = {
+  AGENT_RESTART: "agent-restart",
+  AGENT_UPGRADE_INSTALLED: "agent-upgrade-installed",
+  ARTIFACT_DISTRIBUTION: "artifact-distribution",
+  BASE_IMAGE_IMPORT: "base-image-import",
+  BOUNDED_BUILD_PROCESS: "bounded-build-process",
+  EGRESS_ADDRESS: "egress-address",
+  EGRESS_IMAGE_IMPORT: "egress-image-import",
+  EGRESS_NETWORK_CREATE: "egress-network-create",
+  EGRESS_READINESS: "egress-readiness",
+  EGRESS_SERVICE_START: "egress-service-start",
+  HELPER_RUNTIME_RECONCILIATION: "helper-runtime-reconciliation",
+  HELPER_RUNTIME_RECONCILIATION_LOCK: "helper-runtime-reconciliation-lock",
+  IMAGE_BUILD: "image-build",
+  IMAGE_UPLOAD: "image-upload",
+  IMAGE_VERIFICATION: "image-verification",
+  INSTALLATION_CHECKPOINT_STORAGE: "installation-checkpoint-storage",
+  INSTALLATION_DIRECTORY: "installation-directory",
+  INSTALLATION_METADATA: "installation-metadata",
+  INSTALLATION_PATH: "installation-path",
+  INSTALLATION_RECEIPT: "installation-receipt",
+  INSTALLATION_RECONCILIATION_LOCK: "installation-reconciliation-lock",
+  INSTALLATION_REMOVAL: "installation-removal",
+  INSTALLATION_VALIDATION: "installation-validation",
+  JOB_CANCEL_STOP: "job-cancel-stop",
+  JOB_INPUTS: "job-inputs",
+  JOB_STATE: "job-state",
+  JOB_STOP: "job-stop",
+  LIFECYCLE_METADATA: "lifecycle-metadata",
+  MODEL_CUSTODY: "model-custody",
+  MODEL_MATERIALIZATION: "model-materialization",
+  OBSERVATION_IDENTITY: "observation-identity",
+  OUTPUT_STORAGE: "output-storage",
+  RETAINED_CONTAINER: "retained-container",
+  RUN_STORAGE: "run-storage",
+  RUNTIME_ADAPTER: "runtime-adapter",
+  RUNTIME_CACHE: "runtime-cache",
+  RUNTIME_CACHE_CLEANUP: "runtime-cache-cleanup",
+  RUNTIME_METADATA: "runtime-metadata",
+  RUNTIME_PROJECTION: "runtime-projection",
+  SOURCE_BUNDLE_FETCH: "source-bundle-fetch",
+  STOP: "stop",
+  STOP_CLEANUP: "stop-cleanup",
+  STOP_METADATA: "stop-metadata",
+  STOP_PLAN: "stop-plan",
+  UNKNOWN: "unknown",
+} as const;
+export type FailureStage = (typeof FailureStage)[keyof typeof FailureStage];
+
+export const HostHelperResponseStatus = {
+  REJECTED: "rejected",
+  PACKAGE_INSTALLED: "package-installed",
+  PACKAGE_ACTIVATION_CONFIRMED: "package-activation-confirmed",
+  CONTAINER_RUNTIME_REQUEST_EXECUTED: "container-runtime-request-executed",
+  CONTAINER_RUNTIME_STOP_UNCERTAIN: "container-runtime-stop-uncertain",
+} as const;
+export type HostHelperResponseStatus = (typeof HostHelperResponseStatus)[keyof typeof HostHelperResponseStatus];
+
 export const AdmissionCode = {
   CAPACITY_BUSY: "admission.capacity_busy",
 } as const;

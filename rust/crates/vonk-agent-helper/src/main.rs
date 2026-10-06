@@ -22,6 +22,7 @@ use vonk_agent_helper::protocol::{
 };
 use vonk_agent_protocol::generated::{
     HelperErrorCode, HostHelperProcessLogs, HostHelperResponse as HelperResponse,
+    HostHelperResponseStatus,
 };
 
 const GRANT_KEY: &str = "/etc/vonk-forge-agent/host-helper-authority.pub";
@@ -304,7 +305,7 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         process_logs: error.process_logs.as_deref().cloned(),
         schema_version: 1,
         request_id,
-        status: "rejected".parse().expect("declared helper response status"),
+        status: HostHelperResponseStatus::Rejected,
         exit_code,
         error_code: Some(error.error_code.to_string()),
         process_running: None,
@@ -358,9 +359,7 @@ fn handle(
                 process_logs: None,
                 schema_version: 1,
                 request_id: Some(inspection.request_id),
-                status: "container-runtime-request-executed"
-                    .parse()
-                    .expect("declared helper response status"),
+                status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
                 exit_code: None,
                 error_code: None,
                 process_running: Some(running),
@@ -399,13 +398,7 @@ fn handle(
         process_logs: None,
         schema_version: 1,
         request_id: Some(request.claims.request_id),
-        status: outcome.status.parse().map_err(|_| {
-            HelperRejection::for_request(
-                &request_id,
-                HelperErrorCode::OperationFailed,
-                "invalid operation response status",
-            )
-        })?,
+        status: outcome.status,
         exit_code: outcome
             .exit_code
             .map(u32::try_from)
@@ -647,7 +640,8 @@ fn _classify_protocol_error(error: HelperError) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        HelperErrorCode, HelperRejection, HelperResponse, MAX_CONCURRENT_REQUESTS, acquire_worker,
+        HelperErrorCode, HelperRejection, HelperResponse, HostHelperResponseStatus,
+        MAX_CONCURRENT_REQUESTS, acquire_worker,
     };
     use std::sync::{
         Arc,
@@ -680,7 +674,7 @@ mod tests {
         );
         let bytes = vonk_agent_helper::protocol::read_frame(&mut client).unwrap();
         let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
-        assert_eq!(response.status, "rejected");
+        assert_eq!(response.status, HostHelperResponseStatus::Rejected);
         assert!(response.request_id.is_none());
         assert_eq!(response.error_code.as_deref(), Some("request_invalid"));
         assert_eq!(
@@ -743,7 +737,7 @@ mod tests {
             process_logs: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
-            status: "rejected".parse().expect("declared helper response status"),
+            status: HostHelperResponseStatus::Rejected,
             exit_code: None,
             error_code: Some("operation_failed".to_owned()),
             process_running: None,
@@ -763,7 +757,7 @@ mod tests {
             process_logs: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
-            status: "package-installed".parse().unwrap(),
+            status: HostHelperResponseStatus::PackageInstalled,
             exit_code: None,
             error_code: None,
             process_running: None,

@@ -73,3 +73,15 @@ class IssuedCertificateResponse(WireModel):
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise ValueError("certificate timestamps must include a timezone")
         return value
+
+
+class ControllerRefusalBody(WireModel):
+    """The refusal body an older Controller returned: a bare code and/or detail.
+
+    A current Controller answers with its bounded error response; an agent that
+    meets an older Controller still has to recognise its refusal, so this shape
+    stays declared (and generated) instead of being read as an untyped document.
+    """
+
+    code: str | None = Field(default=None, max_length=256)
+    detail: str | None = Field(default=None, max_length=256)

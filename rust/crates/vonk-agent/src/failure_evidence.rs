@@ -528,8 +528,7 @@ pub fn collect(phase: &str, code: &str, stdout: &[u8], stderr: &[u8]) -> Failure
 pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDiagnostics {
     let phase = failure
         .stage
-        .clone()
-        .unwrap_or_else(|| operation.to_string());
+        .map_or_else(|| operation.to_string(), |stage| stage.to_string());
     let code = [
         failure.code.map(|code| code.to_string()),
         failure.diagnostic.clone(),
@@ -815,10 +814,10 @@ mod tests {
                 &operation,
                 &Failure::new("failed")
                     .diagnostic("permission-denied")
-                    .stage("prepare"),
+                    .stage(vonk_agent_protocol::generated::FailureStage::RunStorage),
             );
             assert!(matches!(result.category, FailureCategory::PlatformPolicy));
-            assert_eq!(result.phase, "prepare");
+            assert_eq!(result.phase, "run-storage");
             assert!(serde_json::to_vec(&result).unwrap().len() < 8192);
         }
     }

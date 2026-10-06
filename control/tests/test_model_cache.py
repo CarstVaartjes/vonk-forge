@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, ProgressPhase
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.distribution import (
@@ -2442,7 +2442,7 @@ def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> Non
         now=NOW,
     )
     progress = ModelCacheOperationProvider._progress(value)
-    assert progress["phase"] == "download"
+    assert progress["phase"] == ProgressPhase.DOWNLOADING
     assert progress["completed_bytes"] == 12
     assert progress["total_bytes_known"] is False
     assert "eta_seconds" not in progress
@@ -2753,7 +2753,7 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
         "cache measurement",
     )
     assert verifying["completed_bytes"] == 100
-    assert verifying["phase"] == "verify"
+    assert verifying["phase"] == ProgressPhase.VERIFYING
     assert "eta_seconds" not in verifying
     assert "bytes_per_second" not in verifying
     restarted.close()

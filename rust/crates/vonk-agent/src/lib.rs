@@ -5,6 +5,7 @@ pub mod agent_upgrade;
 mod base_images;
 pub mod build_source;
 pub mod client;
+mod compose_document;
 pub mod config;
 pub mod executor;
 pub mod failure_evidence;

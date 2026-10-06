@@ -1855,6 +1855,40 @@
       "title": "ControllerErrorCode",
       "type": "string"
     },
+    "ControllerRefusalBody": {
+      "additionalProperties": false,
+      "description": "The refusal body an older Controller returned: a bare code and/or detail.\n\nA current Controller answers with its bounded error response; an agent that\nmeets an older Controller still has to recognise its refusal, so this shape\nstays declared (and generated) instead of being read as an untyped document.",
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        }
+      },
+      "title": "ControllerRefusalBody",
+      "type": "object"
+    },
     "DesiredAssignmentState": {
       "description": "What a fleet-profile assignment is asked to become on its Sparks.",
       "enum": [
@@ -2584,6 +2618,58 @@
       "title": "FailureProperty",
       "type": "object"
     },
+    "FailureStage": {
+      "description": "The step an operation stopped at: a short, stable, secret-free word.",
+      "enum": [
+        "agent-restart",
+        "agent-upgrade-installed",
+        "artifact-distribution",
+        "base-image-import",
+        "bounded-build-process",
+        "egress-address",
+        "egress-image-import",
+        "egress-network-create",
+        "egress-readiness",
+        "egress-service-start",
+        "helper-runtime-reconciliation",
+        "helper-runtime-reconciliation-lock",
+        "image-build",
+        "image-upload",
+        "image-verification",
+        "installation-checkpoint-storage",
+        "installation-directory",
+        "installation-metadata",
+        "installation-path",
+        "installation-receipt",
+        "installation-reconciliation-lock",
+        "installation-removal",
+        "installation-validation",
+        "job-cancel-stop",
+        "job-inputs",
+        "job-state",
+        "job-stop",
+        "lifecycle-metadata",
+        "model-custody",
+        "model-materialization",
+        "observation-identity",
+        "output-storage",
+        "retained-container",
+        "run-storage",
+        "runtime-adapter",
+        "runtime-cache",
+        "runtime-cache-cleanup",
+        "runtime-metadata",
+        "runtime-projection",
+        "source-bundle-fetch",
+        "stop",
+        "stop-cleanup",
+        "stop-metadata",
+        "stop-plan",
+        "unknown"
+      ],
+      "title": "FailureStage",
+      "type": "string"
+    },
     "GatewayRouteState": {
       "description": "What the inference gateway currently serves: published routes, or maintenance.\n\n``unavailable`` is the Controller's own word for a gateway whose marker it\ncannot read; the gateway never writes it.",
       "enum": [
@@ -2840,15 +2926,7 @@
           "type": "integer"
         },
         "status": {
-          "enum": [
-            "rejected",
-            "package-installed",
-            "package-activation-confirmed",
-            "container-runtime-request-executed",
-            "container-runtime-stop-uncertain"
-          ],
-          "title": "Status",
-          "type": "string"
+          "$ref": "#/$defs/HostHelperResponseStatus"
         }
       },
       "required": [
@@ -2858,6 +2936,18 @@
       ],
       "title": "HostHelperResponse",
       "type": "object"
+    },
+    "HostHelperResponseStatus": {
+      "description": "The verdict a privileged-helper reply carries.",
+      "enum": [
+        "rejected",
+        "package-installed",
+        "package-activation-confirmed",
+        "container-runtime-request-executed",
+        "container-runtime-stop-uncertain"
+      ],
+      "title": "HostHelperResponseStatus",
+      "type": "string"
     },
     "HostHelperSignature": {
       "additionalProperties": false,
@@ -4066,8 +4156,14 @@
         "failure_code": {
           "$ref": "#/$defs/FailureCode"
         },
+        "failure_stage": {
+          "$ref": "#/$defs/FailureStage"
+        },
         "gateway_route_state": {
           "$ref": "#/$defs/GatewayRouteState"
+        },
+        "host_helper_response_status": {
+          "$ref": "#/$defs/HostHelperResponseStatus"
         },
         "installation_node_state": {
           "$ref": "#/$defs/InstallationNodeState"
@@ -4110,6 +4206,9 @@
         },
         "placement_load_state": {
           "$ref": "#/$defs/PlacementLoadState"
+        },
+        "progress_phase": {
+          "$ref": "#/$defs/ProgressPhase"
         },
         "reservation_state": {
           "$ref": "#/$defs/ReservationState"
@@ -4193,7 +4292,10 @@
         "asset_availability",
         "placement_install_state",
         "placement_load_state",
-        "model_cache_operator_status"
+        "model_cache_operator_status",
+        "progress_phase",
+        "failure_stage",
+        "host_helper_response_status"
       ],
       "title": "LifecycleVocabulary",
       "type": "object"
@@ -5495,6 +5597,36 @@
         "profile.asset_reservation_unavailable"
       ],
       "title": "ProfileReasonCode",
+      "type": "string"
+    },
+    "ProgressPhase": {
+      "description": "What an operation is doing, as the measured progress names it.",
+      "enum": [
+        "queued",
+        "pending",
+        "waiting",
+        "preparing",
+        "downloading",
+        "model-download",
+        "verifying",
+        "finalizing",
+        "building",
+        "pulling",
+        "transfer",
+        "copying",
+        "uploading",
+        "installing",
+        "reconciling-installation",
+        "starting",
+        "stopping",
+        "uninstalling",
+        "reclaiming",
+        "updating",
+        "executing",
+        "completed",
+        "failed"
+      ],
+      "title": "ProgressPhase",
       "type": "string"
     },
     "ProjectionCode": {
@@ -8741,6 +8873,7 @@
     "CompiledSecurityMount": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurityMount",
     "CompiledTopology": "vonk_agent_protocol.compiled_execution_plan.CompiledTopology",
     "ConfirmPackageActivationOperation": "vonk_agent_protocol.host_helper.ConfirmPackageActivationOperation",
+    "ControllerRefusalBody": "vonk_agent_protocol.enrollment.ControllerRefusalBody",
     "DistributionAssignment": "vonk_agent_protocol.distribution.DistributionAssignment",
     "DistributionObject": "vonk_agent_protocol.distribution.DistributionObject",
     "EnrollmentBootstrapResponse": "vonk_agent_protocol.enrollment.EnrollmentBootstrapResponse",
@@ -8876,6 +9009,7 @@
     "CompiledSecurityMount": "#/$defs/CompiledSecurityMount",
     "CompiledTopology": "#/$defs/CompiledTopology",
     "ConfirmPackageActivationOperation": "#/$defs/ConfirmPackageActivationOperation",
+    "ControllerRefusalBody": "#/$defs/ControllerRefusalBody",
     "DistributionAssignment": "#/$defs/DistributionAssignment",
     "DistributionObject": "#/$defs/DistributionObject",
     "EnrollmentBootstrapResponse": "#/$defs/EnrollmentBootstrapResponse",

@@ -113,6 +113,7 @@ from .failure_diagnostics_category import FailureDiagnosticsCategory
 from .failure_evidence_bundle import FailureEvidenceBundle
 from .failure_log_tail import FailureLogTail
 from .failure_property import FailureProperty
+from .failure_stage import FailureStage
 from .fleet_action_response import FleetActionResponse
 from .fleet_action_response_action import FleetActionResponseAction
 from .fleet_change_event import FleetChangeEvent
@@ -235,6 +236,7 @@ from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from .git_hub_release_asset import GitHubReleaseAsset
 from .git_hub_release_source import GitHubReleaseSource
 from .helper_error_code import HelperErrorCode
+from .host_helper_response_status import HostHelperResponseStatus
 from .image_store_code import ImageStoreCode
 from .install_admission_code import InstallAdmissionCode
 from .install_degraded_reason import InstallDegradedReason
@@ -367,6 +369,7 @@ from .prebuilt_image_code import PrebuiltImageCode
 from .preparation_reason import PreparationReason
 from .preparation_reason_severity import PreparationReasonSeverity
 from .profile_reason_code import ProfileReasonCode
+from .progress_phase import ProgressPhase
 from .projection_code import ProjectionCode
 from .projection_reason import ProjectionReason
 from .projection_reason_severity import ProjectionReasonSeverity
@@ -733,6 +736,7 @@ __all__ = (
     "FailureEvidenceBundle",
     "FailureLogTail",
     "FailureProperty",
+    "FailureStage",
     "FleetActionResponse",
     "FleetActionResponseAction",
     "FleetChangeEvent",
@@ -855,6 +859,7 @@ __all__ = (
     "GitHubReleaseAsset",
     "GitHubReleaseSource",
     "HelperErrorCode",
+    "HostHelperResponseStatus",
     "ImageStoreCode",
     "InstallAdmissionCode",
     "InstallationNodeChange",
@@ -987,6 +992,7 @@ __all__ = (
     "PreparationReason",
     "PreparationReasonSeverity",
     "ProfileReasonCode",
+    "ProgressPhase",
     "ProjectionCode",
     "ProjectionReason",
     "ProjectionReasonSeverity",

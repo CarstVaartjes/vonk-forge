@@ -39,16 +39,21 @@ pub use operation_progress::{
 
 pub mod failure_evidence;
 
+pub mod passthrough;
+pub use passthrough::{revalidate, validate_generated};
+
 pub mod package_upgrade;
 pub use package_upgrade::{
     PackageActivationPhase, PackageActivationReceipt, PackageRollbackAuthority,
     PackageRollbackSource,
 };
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+
+#[cfg(test)]
+use serde_json::Value;
 
 use serde::{Serialize, de::DeserializeOwned};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 #[cfg(test)]
@@ -763,13 +768,8 @@ impl DistributionAssignment {
 
 impl AgentResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        if !matches!(
-            self.state.as_str(),
-            "succeeded" | "failed" | "cancelled" | "waiting-for-operator"
-        ) {
-            return Err(ProtocolError::Identity("result identity"));
-        }
-        // A typed outcome decides its own state word; the legacy state field
+        // The state is the closed `AgentResultState`, so no other word can reach
+        // here. A typed outcome decides its own state word; the legacy state field
         // must say the same thing, so the two cannot drift.
         if let Some(state) = self.result.outcome_state()
             && state != self.state
@@ -1142,11 +1142,11 @@ pub enum RecipeOperationRequest {
 
 impl RecipeJobRunResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        let manifest = serde_json::json!({
-            "schema_version": self.output_manifest.schema_version,
-            "total_bytes": self.output_manifest.total_bytes,
-            "files": self.output_manifest.files,
-        });
+        let manifest = generated::RecipeJobOutputManifestContent {
+            schema_version: self.output_manifest.schema_version,
+            total_bytes: self.output_manifest.total_bytes,
+            files: self.output_manifest.files.clone(),
+        };
         let valid = self
             .diagnostics
             .as_ref()
@@ -1785,11 +1785,11 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
             total.checked_add(u64::from(file.size_bytes))
         }) == Some(u64::from(value.input_total_bytes))
         && value.input_total_bytes <= 1024 * 1024 * 1024;
-    let manifest = serde_json::json!({
-        "schema_version": 1,
-        "total_bytes": value.input_total_bytes,
-        "files": value.inputs,
-    });
+    let manifest = generated::RecipeJobInputManifest {
+        schema_version: 1,
+        total_bytes: value.input_total_bytes,
+        files: value.inputs.clone(),
+    };
     let manifest_valid = canonical_json(&manifest)
         .ok()
         .is_some_and(|bytes| hex_sha256(&bytes) == value.input_manifest_sha256);
@@ -2093,8 +2093,7 @@ pub fn parse_strict<T: DeserializeOwned>(input: &[u8]) -> Result<T, ProtocolErro
 }
 
 pub fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>, ProtocolError> {
-    let value = serde_json::to_value(value)?;
-    Ok(serde_json::to_vec(&sort_value(value))?)
+    Ok(passthrough::WireDocument::of(value)?.canonical_bytes()?)
 }
 
 pub fn hex_sha256(value: &[u8]) -> String {
@@ -2102,21 +2101,6 @@ pub fn hex_sha256(value: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-
-fn sort_value(value: Value) -> Value {
-    match value {
-        Value::Object(values) => Value::Object(
-            values
-                .into_iter()
-                .map(|(key, value)| (key, sort_value(value)))
-                .collect::<BTreeMap<_, _>>()
-                .into_iter()
-                .collect(),
-        ),
-        Value::Array(values) => Value::Array(values.into_iter().map(sort_value).collect()),
-        other => other,
-    }
 }
 
 fn valid_node_id(value: &str) -> bool {
@@ -2133,11 +2117,7 @@ fn valid_reconciliation_identity(value: &RecipeReconciliationIdentity) -> bool {
 
 /// An empty success: an object without any non-null value.
 fn empty_result(result: &generated::AgentResultResult) -> bool {
-    serde_json::to_value(result).is_ok_and(|value| {
-        value
-            .as_object()
-            .is_some_and(|object| object.values().all(serde_json::Value::is_null))
-    })
+    passthrough::WireDocument::of(result).is_ok_and(|document| document.is_object_of_nulls())
 }
 
 fn lower_hex(value: &str, length: usize) -> bool {
@@ -2184,12 +2164,13 @@ fn valid_role(value: &str) -> bool {
         })
 }
 
-fn valid_scalar(value: &Value) -> bool {
+fn valid_scalar(value: &generated::RecipeBuildEnvironmentArgumentValue) -> bool {
     match value {
-        Value::Bool(_) => true,
-        Value::Number(number) => number.as_i64().is_some(),
-        Value::String(value) => value.len() <= 1024 && !value.contains('\0'),
-        _ => false,
+        generated::RecipeBuildEnvironmentArgumentValue::Boolean(_)
+        | generated::RecipeBuildEnvironmentArgumentValue::Int64(_) => true,
+        generated::RecipeBuildEnvironmentArgumentValue::String(value) => {
+            value.len() <= 1024 && !value.contains('\0')
+        }
     }
 }
 
@@ -2677,7 +2658,5 @@ mod distribution_tests {
 pub fn canonical_generated_json<T: Serialize + DeserializeOwned>(
     document: &T,
 ) -> Result<Vec<u8>, ProtocolError> {
-    let value = serde_json::to_value(document)?;
-    let validated: T = serde_json::from_value(value)?;
-    canonical_json(&validated)
+    canonical_json(&revalidate(document)?)
 }

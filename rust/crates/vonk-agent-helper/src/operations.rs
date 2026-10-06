@@ -17,8 +17,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::{
     CompiledExecutionPlan, ConfirmPackageActivationOperation,
-    ExecuteContainerRuntimeRequestOperation, HostHelperProcessLogs, InstallVonkDebOperation,
-    RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload,
+    ExecuteContainerRuntimeRequestOperation, HostHelperProcessLogs, HostHelperResponseStatus,
+    InstallVonkDebOperation, RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload,
 };
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeReconciliationIdentity,
@@ -469,7 +469,7 @@ mod process_command_runner_tests {
 #[serde(deny_unknown_fields)]
 pub struct OperationOutcome {
     pub schema_version: u8,
-    pub status: String,
+    pub status: HostHelperResponseStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
 }
@@ -854,7 +854,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     rollback,
                     observation_node_id.ok_or(OperationError::InvalidOperation)?,
                 )?;
-                ("package-installed", None)
+                (HostHelperResponseStatus::PackageInstalled, None)
             }
             HostOperation::ConfirmPackageActivationOperation(
                 ConfirmPackageActivationOperation {
@@ -870,7 +870,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         attempt_nonce,
                     )
                     .map_err(|_| OperationError::PackagePreflightFailed)?;
-                ("package-activation-confirmed", None)
+                (HostHelperResponseStatus::PackageActivationConfirmed, None)
             }
             HostOperation::ExecuteContainerRuntimeRequestOperation(
                 ExecuteContainerRuntimeRequestOperation {
@@ -904,10 +904,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     request_sha256,
                 );
                 let (status, exit_code) = match outcome {
-                    Ok(outcome) => ("container-runtime-request-executed", outcome.exit_code),
-                    Err(OperationError::StopUncertain) => {
-                        ("container-runtime-stop-uncertain", Some(124))
-                    }
+                    Ok(outcome) => (
+                        HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+                        outcome.exit_code,
+                    ),
+                    Err(OperationError::StopUncertain) => (
+                        HostHelperResponseStatus::ContainerRuntimeStopUncertain,
+                        Some(124),
+                    ),
                     Err(error) => return Err(error),
                 };
                 (status, exit_code)
@@ -915,7 +919,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         };
         Ok(OperationOutcome {
             schema_version: 1,
-            status: status.to_owned(),
+            status,
             exit_code,
         })
     }

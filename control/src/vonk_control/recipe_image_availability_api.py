@@ -16,6 +16,7 @@ from pydantic import (
 from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
+    ProgressPhase,
     RecipeImageCode,
     state_adopter,
 )
@@ -215,11 +216,14 @@ class RecipeOperatorResponse(StrictJSONModel):
     @model_validator(mode="after")
     def terminal_removal_evidence_is_consistent(self) -> RecipeOperatorResponse:
         if self.state == "succeeded":
-            if self.failure is not None or self.progress.phase != "completed":
+            if (
+                self.failure is not None
+                or self.progress.phase != ProgressPhase.COMPLETED
+            ):
                 raise ValueError(
                     "successful recipe removal requires completed progress and no failure"
                 )
-        elif self.progress.phase == "completed":
+        elif self.progress.phase == ProgressPhase.COMPLETED:
             raise ValueError(
                 "unfinished recipe removal cannot report completed progress"
             )

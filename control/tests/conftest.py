@@ -408,3 +408,22 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         module_namespace = getattr(getattr(item, "module", None), "__dict__", {})
         if "recipe_library_root" in module_namespace:
             item.add_marker(pytest.mark.needs_recipe_library)
+
+
+@pytest.fixture(scope="session")
+def parsed_repository() -> None:
+    """Parse the scanned source trees once, outside any one test's time budget.
+
+    The repository scanners share the parse (``parsed_sources``); requesting this
+    fixture makes the first scanner test pay nothing for it."""
+
+    from .parsed_sources import parse_file, python_files
+    from .vocabulary_literals import CODE_POSITION_ROOT, PYTHON_ROOTS, REPO_ROOT
+
+    for root in {*PYTHON_ROOTS, CODE_POSITION_ROOT}:
+        for module in python_files(REPO_ROOT / root):
+            parse_file(module)
+    from .blocker_boundaries import CONTROL_SOURCE_ROOT
+
+    for module in python_files(CONTROL_SOURCE_ROOT):
+        parse_file(module)

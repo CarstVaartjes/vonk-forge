@@ -180,3 +180,48 @@ def test_image_availability_boundary_preserves_canonical_measurements():
     original = sample(original, seconds=2, completed_bytes=15)
     projected = _progress(original)
     assert projected.model_dump(mode="json", exclude_none=True) == original
+
+
+@pytest.mark.parametrize(
+    "word",
+    [
+        "downloading",
+        "transfer",
+        "copying",
+        "uploading",
+        # The words an older agent or Controller wrote for the same phases.
+        "download",
+        "transferring",
+        "upload",
+        "distribution",
+    ],
+)
+def test_a_phase_where_bytes_move_is_rated_whether_current_or_retired(word):
+    # Wrong implementation: the set was spelled by hand, so a respelled phase
+    # silently lost its rate and ETA.
+    first = sample(phase=word, completed_bytes=10)
+    second = sample(first, seconds=2, phase=word, completed_bytes=30)
+
+    assert second["bytes_per_second"] == 10.0
+
+
+@pytest.mark.parametrize("word", ["building", "verifying", "model-download", "newer"])
+def test_a_phase_where_no_bytes_move_or_an_unknown_one_has_no_rate(word):
+    first = sample(phase=word, completed_bytes=10)
+    second = sample(first, seconds=2, phase=word, completed_bytes=30)
+
+    assert "bytes_per_second" not in second
+
+
+def test_the_aggregate_of_parallel_transfers_is_a_transfer_and_otherwise_prepares():
+    def member(node, phase):
+        return OperationMemberProgress(member_id=node, phase=phase, state="running")
+
+    assert (
+        aggregate_progress([member("a", "download"), member("b", "copying")]).phase
+        == "transfer"
+    )
+    assert (
+        aggregate_progress([member("a", "download"), member("b", "building")]).phase
+        == "preparing"
+    )
