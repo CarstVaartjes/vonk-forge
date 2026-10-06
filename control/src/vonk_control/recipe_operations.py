@@ -225,7 +225,10 @@ from .run_admission import (
 from .run_admission import (
     require_admissible as require_run_admissible,
 )
-from .run_switch_contract import RunSwitchReconciliationAuthority
+from .run_switch_contract import (
+    RunSwitchReconciliationAuthority,
+    RunSwitchReconciliationTarget,
+)
 from .source_policy import SourcePolicyReport
 from .storage_demands import StorageDemands, spark_scope
 from .strict_json import read_stored_model, serialize_json_value
@@ -335,57 +338,6 @@ class RecipeReconciliationBlocked(UnknownOutcomeError, RecipeOperationConflict):
         super().__init__(f"{code}: {detail}")
 
 
-@dataclass(frozen=True, slots=True)
-class InstallationReconciliationTarget:
-    """One installed rank and whether its cleanup already succeeded."""
-
-    node_id: str
-    rank: int
-    role: str
-    installed_bytes: int
-    state: str
-
-    def document(self) -> dict[str, object]:
-        return {
-            "node_id": self.node_id,
-            "rank": self.rank,
-            "role": self.role,
-            "installed_bytes": self.installed_bytes,
-            "state": self.state,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class InstallationReconciliationAuthority:
-    """Immutable identity-only teardown authority; never an execution plan."""
-
-    installation_id: str
-    original_plan_digest: str
-    recipe_revision_id: str
-    recipe_content_sha256: str
-    mapping_id: str
-    mapping_generation: int
-    recipe_build_id: str | None
-    image_digest: str
-    model_content_sha256: str | None
-    targets: tuple[InstallationReconciliationTarget, ...]
-
-    def document(self) -> dict[str, object]:
-        return {
-            "schema_version": 2,
-            "installation_id": self.installation_id,
-            "original_plan_digest": self.original_plan_digest,
-            "recipe_revision_id": self.recipe_revision_id,
-            "recipe_content_sha256": self.recipe_content_sha256,
-            "mapping_id": self.mapping_id,
-            "mapping_generation": self.mapping_generation,
-            "recipe_build_id": self.recipe_build_id,
-            "image_digest": self.image_digest,
-            "model_content_sha256": self.model_content_sha256,
-            "targets": [target.document() for target in self.targets],
-        }
-
-
 class RecipeArtifactJobCancellationPending(RecipeOperationConflict):
     """An issued one-shot job still needs its exact cancellation receipt."""
 
@@ -417,8 +369,6 @@ def _validated_result(kind: str, value: object) -> dict[str, object] | None:
 
     if value is None:
         return None
-    if not isinstance(value, Mapping):
-        raise RecipeRequestInvalid("recipe operation result is invalid")
     try:
         parsed = parse_recipe_lifecycle_result(kind, value)
     except (TypeError, ValueError) as error:
@@ -1554,16 +1504,16 @@ class RecipeOperationService:
         build.state = "building"
         build.error = None
         build.updated_at = now
-        payload: dict[str, object] = {
-            "schema_version": 1,
-            "owner_kind": "recipe-build",
-            "owner_id": build.id,
-            "plan_digest": plan.build_input_sha256,
-            "build_intent": intent.model_dump(mode="json"),
-            "prebuilt_image": reference,
-            "prebuilt_node_id": build.builder_node_id,
-            **({"force_rebuild": True} if force else {}),
-        }
+        payload = RecipeBuildParent(
+            schema_version=1,
+            owner_kind="recipe-build",
+            owner_id=build.id,
+            plan_digest=plan.build_input_sha256,
+            build_intent=intent,
+            prebuilt_image=reference,
+            prebuilt_node_id=build.builder_node_id,
+            force_rebuild=force,
+        )
         job = new_recipe_job(
             id=str(uuid.uuid4()),
             request_id=request_id,
@@ -1575,7 +1525,7 @@ class RecipeOperationService:
             # is created, so no agent ever claims this job.
             targets=[build.builder_node_id],
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
-            payload=payload,
+            payload=serialize_json_value(payload),
             created_at=now,
             updated_at=now,
         )
@@ -3230,13 +3180,13 @@ class RecipeOperationService:
             now=now,
         )
         settle_absent_run_in_session(session, run, nodes, now)
-        payload: dict[str, object] = {
-            "schema_version": 1,
-            "owner_kind": "run",
-            "owner_id": run.id,
-            "plan_digest": admitted.plan_digest,
-            "workload_intent_ordinal": ordinal,
-        }
+        payload = RecipeStopParent(
+            schema_version=1,
+            owner_kind="run",
+            owner_id=run.id,
+            plan_digest=admitted.plan_digest,
+            workload_intent_ordinal=ordinal,
+        )
         job = new_recipe_job(
             id=str(uuid.uuid4()),
             request_id=request_id,
@@ -3246,7 +3196,7 @@ class RecipeOperationService:
             authority_revision=admitted.authority_digest.removeprefix("sha256:"),
             targets=sorted(node.node_id for node in nodes),
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
-            payload=payload,
+            payload=serialize_json_value(payload),
             result=_validated_result("recipe.stop", {"stopped": True}),
             created_at=now,
             updated_at=now,
@@ -3546,7 +3496,7 @@ class RecipeOperationService:
         *,
         session: Session | None = None,
         allow_active_reconciliation: bool = False,
-    ) -> InstallationReconciliationAuthority:
+    ) -> RunSwitchReconciliationAuthority:
         """Bind an explicit cleanup review to accepted installation identity.
 
         This path reads the admitted installation document only as opaque JSON.
@@ -3781,7 +3731,7 @@ class RecipeOperationService:
         *,
         lock: bool,
         allow_active_reconciliation: bool = False,
-    ) -> InstallationReconciliationAuthority:
+    ) -> RunSwitchReconciliationAuthority:
         installation_statement = select(RecipeInstallation).where(
             RecipeInstallation.id == installation_id
         )
@@ -3953,7 +3903,7 @@ class RecipeOperationService:
             agent_nodes_statement = agent_nodes_statement.with_for_update(of=AgentNode)
         agent_nodes = tuple(session.scalars(agent_nodes_statement))
         agent_node_by_id = {node.node_id: node for node in agent_nodes}
-        targets: list[InstallationReconciliationTarget] = []
+        targets: list[RunSwitchReconciliationTarget] = []
         for node in all_nodes:
             agent_node = agent_node_by_id.get(node.node_id)
             if (
@@ -3968,7 +3918,7 @@ class RecipeOperationService:
             # A succeeded, fenced reconcile attempt marked the rank uninstalled;
             # that state is the proof its cleanup already happened.
             targets.append(
-                InstallationReconciliationTarget(
+                RunSwitchReconciliationTarget(
                     node_id=node.node_id,
                     rank=node.rank,
                     role=node.role,
@@ -3979,7 +3929,7 @@ class RecipeOperationService:
                 )
             )
 
-        return InstallationReconciliationAuthority(
+        return RunSwitchReconciliationAuthority(
             installation_id=installation.id,
             original_plan_digest=installation.plan_digest,
             recipe_revision_id=revision.id,
@@ -3989,7 +3939,7 @@ class RecipeOperationService:
             recipe_build_id=installation.recipe_build_id,
             image_digest=installation.image_digest,
             model_content_sha256=installation.model_content_sha256,
-            targets=tuple(targets),
+            targets=targets,
         )
 
     def _reconcile_installation_once(
@@ -4038,7 +3988,7 @@ class RecipeOperationService:
                 authority = self._reconciliation_authority_in_session(
                     session, installation_id, lock=True
                 )
-                if canonical_message(authority.document()) != canonical_message(
+                if canonical_message(authority) != canonical_message(
                     expected_authority
                 ):
                     raise RecipeRequestInvalid(
@@ -4085,7 +4035,7 @@ class RecipeOperationService:
                     now=now,
                     workload_intent_ordinal=workload_intent_ordinal,
                     job_context={
-                        "reconciliation_authority": authority.document(),
+                        "reconciliation_authority": serialize_json_value(authority),
                     },
                 )
         except AdmissionLockBusy as error:
@@ -5449,11 +5399,6 @@ class RecipeOperationService:
                     recovery_error = DistributedLifecycleError(profile_completion_note)
             RecipeOperationAdapter().finish(job, now, failed=job_failed)
             projected_result = _recorded_result(job.kind, job.result, subject=job.id)
-            final_result: dict[str, object] = {
-                "successful_nodes": successful,
-                "failed_nodes": failed,
-                "node_evidence": {},
-            }
             if isinstance(
                 projected_result,
                 (
@@ -5462,9 +5407,16 @@ class RecipeOperationService:
                     RecipeOperationCancellationResult,
                 ),
             ):
-                final_result["node_evidence"] = projected_result.node_evidence or {}
-                if projected_result.launch_evidence is not None:
-                    final_result["launch_evidence"] = projected_result.launch_evidence
+                final_result = RecipeOperationResult(
+                    successful_nodes=successful,
+                    failed_nodes=failed,
+                    node_evidence=projected_result.node_evidence or {},
+                    launch_evidence=projected_result.launch_evidence,
+                )
+            else:
+                final_result = RecipeOperationResult(
+                    successful_nodes=successful, failed_nodes=failed, node_evidence={}
+                )
             job.result = _validated_result(job.kind, final_result)
             if recovery_error is not None:
                 job.result = _validated_result(
@@ -8411,9 +8363,14 @@ class RecipeOperationService:
                 for _node_id, payload in flattened:
                     # A missing or non-mapping plan is refused by the validator
                     # itself (``CompiledExecutionPlanError``).
-                    validate_compiled_launch_payload(
-                        payload.get("compiled_execution_plan")
+                    launch = read_stored_model(
+                        RecipeInstallPayload
+                        if kind == "recipe.install"
+                        else RecipeStartPayload,
+                        canonical_message(payload),
+                        from_json=True,
                     )
+                    validate_compiled_launch_payload(launch.compiled_execution_plan)
             except (CompiledExecutionPlanError, TypeError, ValueError) as error:
                 raise RecipeRequestInvalid(
                     f"compiled execution plan is invalid: {error}"

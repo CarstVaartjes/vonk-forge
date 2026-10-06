@@ -116,7 +116,7 @@ def test_postgres_reconcile_lock_excludes_concurrent_group_start(
         cleanup = workers.submit(
             lifecycle.reconcile_installation,
             installation.owner_id,
-            expected_authority=authority.document(),
+            expected_authority=authority,
             run_switch_plan_digest=authority.original_plan_digest,
             actor="admin",
             request_id=cleanup_request_id,

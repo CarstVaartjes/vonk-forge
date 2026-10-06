@@ -413,7 +413,7 @@
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
-      "count": 23
+      "count": 18
     },
     {
       "path": "control/src/vonk_control/recipe_packages.py",
