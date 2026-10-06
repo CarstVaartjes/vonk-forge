@@ -48,7 +48,6 @@ from vonk_agent_protocol import (
     ProfileReasonCode,
     ReservationState,
     ResourceBlockerCode,
-    ResourcePlanningCode,
     RouteState,
     RunAdmissionCode,
     RunState,
@@ -241,6 +240,7 @@ from .recovery_policy import (
 from .resource_planning import (
     PLATFORM_MEMORY_FLOOR_BYTES,
     ResourceDemand,
+    ResourceReason,
     installation_disk_requirement,
     memory_capacity_snapshot,
     memory_requirement,
@@ -832,16 +832,14 @@ def _required_int(value: object) -> int | None:
 
 
 def _resource_reason(
-    reason: object, *, node_ids: Sequence[str] = ()
+    reason: ResourceReason, *, node_ids: Sequence[str] = ()
 ) -> RunSwitchReason:
-    node_id = getattr(reason, "node_id", None)
+    node_id = reason.node_id
     return _as_reason(
-        run_switch_code(getattr(reason, "code", ResourcePlanningCode.EVIDENCE_UNKNOWN)),
-        str(getattr(reason, "detail", "Resource planning evidence is unavailable.")),
+        run_switch_code(reason.code),
+        reason.detail,
         scope="node" if isinstance(node_id, str) else "operation",
-        severity=_REASON_SEVERITY_ADAPTER.validate_python(
-            getattr(reason, "severity", "blocker"), strict=True
-        ),
+        severity=reason.severity,
         node_ids=(node_id,) if isinstance(node_id, str) else node_ids,
     )
 
@@ -7573,12 +7571,16 @@ class RunSwitchOperationService:
                             job.updated_at = now
                             return True
                         return False
-                    retry_due_at = getattr(child, "retry_due_at", None)
+                    retry_due_at = (
+                        child.retry_due_at
+                        if isinstance(child, RecipeOperationView)
+                        else None
+                    )
                     if child.state == "queued" and isinstance(retry_due_at, datetime):
                         progress.observation_due_at = _aware(retry_due_at)
                     else:
                         progress.observation_due_at = None
-                    child_reason = getattr(child, "status_reason", None)
+                    child_reason = child_progress.status_reason
                     status_reason = (
                         child_reason[:512] if isinstance(child_reason, str) else None
                     )
@@ -7671,7 +7673,7 @@ class RunSwitchOperationService:
                         ):
                             return False
                         child_reason = (
-                            getattr(child, "status_reason", None)
+                            _child_progress_payload(child).status_reason
                             or "Lifecycle effect is uncertain; exact child remains pending"
                         )[:400]
                         _ADAPTER.retry(
@@ -9029,22 +9031,22 @@ class RunSwitchOperationProvider:
         return _OPERATION_KINDS
 
     def list_operations(self, query: OperationQuery) -> OperationListPage:
-        limit = getattr(query, "limit", None)
+        limit = query.limit
         if type(limit) is not int or not 1 <= limit <= 101:
             raise InvalidValue(
                 "operation provider page limit is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
-        state = getattr(query, "state", None)
+        state = query.state
         if state is not None and not isinstance(state, str):
             raise InvalidValue("operation provider state filter is invalid")
-        node_id = getattr(query, "node_id", None)
+        node_id = query.node_id
         if node_id is not None and not isinstance(node_id, str):
             raise InvalidValue("operation provider node filter is invalid")
-        request_id = getattr(query, "request_id", None)
+        request_id = query.request_id
         if request_id is not None and not isinstance(request_id, str):
             raise InvalidValue("operation provider request filter is invalid")
-        after = getattr(query, "after", None)
+        after = query.after
         with self._service._sessions() as session:
             base_filters: list[ColumnElement[bool]] = [Job.kind.in_(_OPERATION_KINDS)]
             if state is not None:
@@ -9133,7 +9135,7 @@ class RunSwitchOperationProvider:
                 "node_ids": node_ids,
                 "kind": "run-switch-unreadable",
                 "state": "unavailable",
-                "attempt": max(0, int(getattr(job, "current_attempt", 0) or 0)),
+                "attempt": max(0, job.current_attempt or 0),
                 "progress": None,
                 "created_at": _aware(job.created_at).isoformat(),
                 "updated_at": _aware(job.updated_at).isoformat(),
@@ -9166,7 +9168,7 @@ class RunSwitchOperationProvider:
             "node_ids": node_ids,
             "kind": operation.kind,
             "state": operation.state,
-            "attempt": max(1, int(getattr(job, "current_attempt", 0) or 0)),
+            "attempt": max(1, job.current_attempt or 0),
             "progress": _activity_progress(operation),
             "created_at": _aware(job.created_at).isoformat(),
             "updated_at": _aware(job.updated_at).isoformat(),
