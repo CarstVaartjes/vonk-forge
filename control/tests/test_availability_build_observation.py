@@ -50,7 +50,9 @@ def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
         with sessions() as session:
             row = session.get(Job, parent.id)
             assert row is not None
-            payload = read_stored_model(row.payload, AvailabilityJobPayload)
+            payload = read_stored_model(
+                AvailabilityJobPayload, row.payload, from_json=True
+            )
             assert isinstance(payload, AvailabilityJobPayload)
             runtime = payload.runtime
             assert runtime is not None
@@ -188,7 +190,9 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
                     row.payload["build_dependency"], "dependency"
                 )
                 assert dependency["operation_id"] == child_id
-                payload = read_stored_model(row.payload, AvailabilityJobPayload)
+                payload = read_stored_model(
+                    AvailabilityJobPayload, row.payload, from_json=True
+                )
                 assert isinstance(payload, AvailabilityJobPayload)
                 assert payload.claim_owner is None
                 retry = require_mapping(row.payload["retry"], "retry")
