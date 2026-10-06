@@ -8454,7 +8454,7 @@ export interface components {
          * @description Recipe operation conflicts.
          * @enum {string}
          */
-        RecipeOperationCode: "recipe.operation_conflict";
+        RecipeOperationCode: "recipe.operation_conflict" | "recipe.evidence_unproven";
         /**
          * RecipeOperationProgressResult
          * @description Partial evidence retained while a multi-node operation is running.
