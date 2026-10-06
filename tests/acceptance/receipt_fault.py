@@ -93,7 +93,13 @@ class LostStartReceipt:
         if not blocked:
             _write(blocked_path, receipt)
             blocked = dict(receipt)
-        if receipt["fence"] == blocked.get("fence"):
+        # A retry may arrive while the harness probes the still-serving effect.
+        # Keep every Start receipt out of Controller ingress until journal loss
+        # and the real agent restart have actually completed.
+        if (
+            receipt["fence"] == blocked.get("fence")
+            or not (self.root / "recovered.json").is_file()
+        ):
             await send({"type": "http.response.start", "status": 503, "headers": []})
             await send(
                 {

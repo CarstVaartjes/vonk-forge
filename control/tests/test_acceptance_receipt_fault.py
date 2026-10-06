@@ -65,6 +65,9 @@ def test_start_receipt_is_lost_before_controller_then_exact_retry_is_accepted(
     assert accepted == []
     assert not (tmp_path / "replayed.json").exists()
     receipt["fence"] = "22222222-2222-4222-8222-222222222222"
+    assert _post(relay, receipt)[0] == 503
+    assert accepted == []
+    (tmp_path / "recovered.json").write_text("{}")
     assert _post(relay, receipt)[0] == 204
     assert len(accepted) == 1
     assert json.loads((tmp_path / "replayed.json").read_text()) == {

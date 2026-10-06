@@ -1580,7 +1580,7 @@ class SparkLifecycle:
         if self.lost_start_proof is not None:
             return
         root = self.bundle / "acceptance-receipts"
-        for name in ("blocked.json", "replayed.json"):
+        for name in ("blocked.json", "replayed.json", "recovered.json"):
             if (root / name).exists():
                 raise LifecycleError("lost Start receipt acceptance state is not fresh")
         (root / "armed.json").write_text(
@@ -1757,6 +1757,9 @@ class SparkLifecycle:
             cwd=self.temporary_root,
             timeout=30,
         )
+        recovered = bundle / "acceptance-receipts/recovered.json"
+        recovered.write_text(json.dumps({"fence": fence}), encoding="utf-8")
+        os.chmod(recovered, 0o644)
         self.lost_start_proof = LostStartProof(
             operation_id,
             payload_digest,
