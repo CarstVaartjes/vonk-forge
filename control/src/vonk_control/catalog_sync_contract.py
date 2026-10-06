@@ -12,7 +12,7 @@ class StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
-_SEMVER = (
+SEMVER_PATTERN = (
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
@@ -27,7 +27,9 @@ class ManagedCatalogSyncProblem(StrictModel):
 class ManagedCatalogWithdrawnRecipe(StrictModel):
     recipe_id: UuidId
     recipe_uri: str | None = Field(default=None, max_length=256)
-    release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
+    release_version: str | None = Field(
+        default=None, pattern=SEMVER_PATTERN, max_length=64
+    )
 
 
 class ManagedCatalogStaleRecipe(StrictModel):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -19,7 +20,7 @@ from vonk_agent_protocol import canonical_message
 
 from .bounded_json import require_integer, require_sequence
 from .catalog_service import CatalogService
-from .catalog_sync_contract import ManagedCatalogSyncResult
+from .catalog_sync_contract import SEMVER_PATTERN, ManagedCatalogSyncResult
 from .models import RecipeLibrarySyncRun
 from .recipe_library_types import (
     RecipeLibraryError,
@@ -202,7 +203,9 @@ class ManagedRecipeCatalogSyncService:
             if callable(prepare):
                 prepare(snapshot)
             self._initialize(run.id, snapshot)
-            self._finish(run.id, self._apply(run.id, snapshot, actor=actor))
+            self._finish(
+                run.id, self._apply(run.id, snapshot, actor=actor, trigger=trigger)
+            )
         except Exception as error:
             # Whatever went wrong, never leave the run "running": it would
             # block every later sync until its lease expired.
@@ -382,7 +385,12 @@ class ManagedRecipeCatalogSyncService:
             )
 
     def _apply(
-        self, run_id: str, snapshot: RecipeLibrarySnapshot, *, actor: str
+        self,
+        run_id: str,
+        snapshot: RecipeLibrarySnapshot,
+        *,
+        actor: str,
+        trigger: str = "automatic",
     ) -> dict[str, object]:
         result = _empty_result()
         self._catalog.refresh_build_policy()
@@ -521,8 +529,11 @@ class ManagedRecipeCatalogSyncService:
         # Newest only: a recipe the published library no longer lists stops
         # being offered.  Installed and running revisions are untouched.  A
         # snapshot with skipped documents or no recipes may be incomplete, so
-        # it retracts nothing; the next complete sync does.
-        if snapshot.items and not snapshot.problems:
+        # it retracts nothing; the next complete sync does.  Only the
+        # Controller's own automatic sync of the published library retracts: a
+        # manual or fixture sync (an operator import, the Spark canary) carries
+        # a deliberately partial view and must never withdraw the rest.
+        if trigger == "automatic" and snapshot.items and not snapshot.problems:
             retracted = self._catalog.retract_recipes_absent_from(
                 [(item.publisher, item.slug) for item in snapshot.items]
             )
@@ -530,7 +541,12 @@ class ManagedRecipeCatalogSyncService:
             assert isinstance(withdrawn, list)
             for revision in retracted:
                 entry: dict[str, object] = {"recipe_id": revision.recipe_id}
-                if revision.release_version is not None:
+                # The catalog accepts looser release labels than the result
+                # contract's semantic versions; the label is informative, so
+                # one outside the contract is left out, never stored.
+                if revision.release_version is not None and re.fullmatch(
+                    SEMVER_PATTERN, revision.release_version
+                ):
                     entry["release_version"] = revision.release_version
                 withdrawn.append(entry)
             result["withdrawn_count"] = len(retracted)
@@ -739,13 +755,31 @@ def catalog_sync_failure_reason(error: Exception) -> str:
     return f"{type(error).__name__} ({str(code)[:128]})" + (f": {text}" if text else "")
 
 
+# An unreadable record is neither current nor failed: the next sync redoes it.
+_UNREAD_OUTCOME = "partial"
+
+
 def _result(value: object) -> ManagedCatalogSyncResult:
+    """Read a stored sync result; one that cannot be read is unknown, never fatal.
+
+    The result is bookkeeping.  A damaged or foreign-version record reads as a
+    partial result with one problem, so the sync that sees it is retried by the
+    next automatic sync and overwrites the record; it never fails a sync or an
+    install.
+    """
     try:
         return ManagedCatalogSyncResult.model_validate_json(canonical_message(value))
-    except (TypeError, ValueError) as error:
-        raise CatalogSyncError(
-            "catalog.sync_result_invalid", "stored catalog sync result is invalid"
-        ) from error
+    except (TypeError, ValueError):
+        unknown = _empty_result()
+        unknown["state"] = _UNREAD_OUTCOME
+        unknown["problems"] = [
+            {
+                "recipe_uri": None,
+                "code": "catalog.sync_result_unreadable",
+                "detail": "stored catalog sync result was unreadable; it is re-synced",
+            }
+        ]
+        return ManagedCatalogSyncResult.model_validate_json(canonical_message(unknown))
 
 
 def _empty_result() -> dict[str, object]:

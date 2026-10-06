@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import vonk_control.catalog_entities as catalog_entities_module
+import vonk_control.catalog_service as catalog_service_module
 import vonk_control.catalog_sync as catalog_sync_module
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
@@ -746,7 +747,7 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(
 @pytest.mark.parametrize(
     "damage", ["missing-problems", "string-count", "null", "invalid-problem", "extra"]
 )
-def test_sync_round_trip_rejects_malformed_persisted_result(tmp_path, damage):
+def test_sync_heals_an_unreadable_stored_result_by_resync(tmp_path, damage):
     sessions, service, reader, _item = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)
     result = sync.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
@@ -765,10 +766,108 @@ def test_sync_round_trip_rejects_malformed_persisted_result(tmp_path, damage):
         else:
             damaged["undeclared"] = None
         row.result = damaged
-    with pytest.raises(CatalogSyncError, match="stored catalog sync result is invalid"):
-        sync.get(result.id)
-    with pytest.raises(CatalogSyncError, match="stored catalog sync result is invalid"):
-        sync.automatic()
+    # Reading never fails: the record is unknown, so it reads as partial.
+    assert sync.get(result.id).state == "partial"
+    # The next automatic sync does not trust it, re-syncs and overwrites it.
+    healed = sync.automatic()
+    assert healed.id != result.id
+    assert healed.state == "current"
+    assert sync.get(healed.id).state == "current"
+
+
+def test_old_and_new_stored_results_both_read(tmp_path):
+    sessions, service, reader, _item = _fixture(tmp_path)
+    sync = _sync(sessions, service, reader)
+    result = sync.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
+    recipe_id = str(uuid.uuid4())
+    for withdrawn in (
+        [{"recipe_id": recipe_id}],
+        [{"recipe_id": recipe_id, "release_version": "1.2.3"}],
+        [{"recipe_id": recipe_id, "release_version": "1.2.3-rc.1"}],
+    ):
+        with sessions.begin() as session:
+            row = session.get(RecipeLibrarySyncRun, result.id)
+            stored = dict(row.result)
+            stored["withdrawn_count"] = len(withdrawn)
+            stored["withdrawn_recipes"] = withdrawn
+            row.result = stored
+        view = sync.get(result.id)
+        assert view.state == "current"
+        assert list(view.withdrawn_recipes) == withdrawn
+
+
+def test_retraction_leaves_out_a_release_label_outside_the_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions, catalog, reader, original = _fixture(tmp_path)
+    sync = _sync(sessions, catalog, reader)
+    other_document = deepcopy(original.document)
+    _document_section(other_document, "identity")["slug"] = "deleted-upstream"
+    other = replace(
+        _item_with_document(original, other_document), slug="deleted-upstream"
+    )
+
+    def apply(items, commit):
+        items = tuple(replace(item, library_commit=commit) for item in items)
+        reader.snapshot = replace(reader.snapshot, commit=commit, items=items)
+        return sync.sync(
+            request_key=str(uuid.uuid4()),
+            trigger="automatic",
+            actor="test",
+            expected_commit=commit,
+        )
+
+    apply((original, other), "1" * 40)
+    original_release = catalog.recipe_catalog_local_revisions(
+        [(other.publisher, other.slug)]
+    )[(other.publisher, other.slug)]
+    # The catalog accepts release labels that are not semantic versions.
+    monkeypatch.setattr(
+        catalog_service_module,
+        "_release_version",
+        lambda document: "prebuilt-vllm-current",
+    )
+    retracted = apply((original,), "2" * 40)
+    assert retracted.state == "current"
+    assert retracted.withdrawn_count == 1
+    assert retracted.withdrawn_recipes == ({"recipe_id": original_release.recipe_id},)
+
+
+def test_manual_and_empty_syncs_never_retract(tmp_path: Path) -> None:
+    sessions, catalog, reader, original = _fixture(tmp_path)
+    sync = _sync(sessions, catalog, reader)
+    other_document = deepcopy(original.document)
+    _document_section(other_document, "identity")["slug"] = "installed-earlier"
+    other = replace(
+        _item_with_document(original, other_document), slug="installed-earlier"
+    )
+    library = LibraryProjection(
+        sessions, cursors=catalog._cursors, clock=catalog._clock
+    )
+
+    def apply(items, commit, trigger):
+        items = tuple(replace(item, library_commit=commit) for item in items)
+        reader.snapshot = replace(reader.snapshot, commit=commit, items=items)
+        return sync.sync(
+            request_key=str(uuid.uuid4()),
+            trigger=trigger,
+            actor="test",
+            expected_commit=commit,
+        )
+
+    def offered() -> set[str]:
+        return {recipe.identity.slug for recipe in library.recipe_library().recipes}
+
+    # A clean first sync of a library imports and retracts nothing.
+    first = apply((original, other), "1" * 40, "automatic")
+    assert first.withdrawn_count == 0
+    # A manual or fixture snapshot holding one recipe withdraws nothing else.
+    fixture = apply((original,), "2" * 40, "manual")
+    assert fixture.withdrawn_count == 0
+    assert offered() == {original.slug, other.slug}
+    # An empty snapshot, even an automatic one, never retracts.
+    assert apply((), "3" * 40, "automatic").withdrawn_count == 0
+    assert offered() == {original.slug, other.slug}
 
 
 def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
@@ -1063,7 +1162,7 @@ def test_sync_retracts_recipes_absent_from_the_published_library(
         reader.snapshot = replace(reader.snapshot, commit=commit, items=items)
         return sync.sync(
             request_key=str(uuid.uuid4()),
-            trigger="manual",
+            trigger="automatic",
             actor="test",
             expected_commit=commit,
         )
