@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     MAX_DOCUMENT_BYTES,
     AgentClaim,
+    AgentEvidenceCode,
     AgentOperation,
     AgentProgress,
     AgentProtocolError,
@@ -270,15 +271,19 @@ def test_typed_result_uri_exceptions_do_not_apply_to_claims_or_progress() -> Non
 
     with pytest.raises(AgentProtocolError):
         AgentClaim.parse(claim_with_payload({"endpoint": endpoint}))
-    with pytest.raises(ValidationError):
-        AgentProgress(**valid_attempt(), progress={"endpoint": endpoint})
+    # Progress is optional evidence: an invalid document is dropped and named,
+    # so the lease heartbeat it rides on is never refused.
+    progress = AgentProgress(**valid_attempt(), progress={"endpoint": endpoint})
+    assert progress.progress is None
+    assert progress.evidence_warnings == (AgentEvidenceCode.PROGRESS_DROPPED,)
 
 
 def test_direct_progress_construction_enforces_protocol_boundary() -> None:
     raw = valid_attempt()
 
-    with pytest.raises(ValidationError, match="unsafe"):
-        AgentProgress(**raw, progress={"authorization": "unsafe"})
+    progress = AgentProgress(**raw, progress={"authorization": "unsafe"})
+    assert progress.progress is None
+    assert progress.evidence_warnings == (AgentEvidenceCode.PROGRESS_DROPPED,)
 
 
 @pytest.mark.parametrize(
