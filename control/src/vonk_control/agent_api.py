@@ -971,11 +971,13 @@ def install_agent_routes(
         fabric_address = body.fabric_address
         fabric_bandwidth_mbps = body.fabric_bandwidth_mbps
         if fabric_address is not None:
-            try:
-                if required.fabric_policy is None:
-                    raise PresenceError("direct fabric is not configured")
-                required.fabric_policy.validate(fabric_address)
-            except PresenceError:
+            accepted = required.fabric_policy is not None
+            if required.fabric_policy is not None:
+                try:
+                    required.fabric_policy.validate(fabric_address)
+                except PresenceError:
+                    accepted = False
+            if not accepted:
                 fabric_address = None
                 fabric_bandwidth_mbps = None
                 _log_evidence_dropped(

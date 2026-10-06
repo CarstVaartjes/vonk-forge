@@ -2795,7 +2795,6 @@
         ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "cannot-enqueue-an-agent-operation-beneath-a-terminal-parent", 1],
         ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "workload-operation-requires-a-bound-intent", 1],
         ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.heartbeat", "lease-must-be-positive", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.heartbeat", "operation-progress-is-invalid", 1],
         ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.record_boundary_refusal", "agent-boundary-is-invalid", 1],
         ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.request_superseded_workload_cancellation_in_session", "workload-cancellation-scope-is-invalid", 1],
         ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "authorize_operator_resume_in_session", "job-has-no-current-authorized-resume-action", 1],
