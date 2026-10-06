@@ -129,15 +129,19 @@ def test_sql_removal_gate_with_missing_owner_is_detected(owner_kind):
 
 
 def test_real_view_blocker_codes_and_service_release_callback_are_supported():
-    from types import SimpleNamespace
+    @dataclass
+    class Blocker:
+        code: str
 
-    old = SimpleNamespace(state="running", request_key="old")
-    ended = SimpleNamespace(
-        state="failed",
-        request_key="old",
-        blockers=[SimpleNamespace(code="runtime.exited")],
-    )
-    admitted = SimpleNamespace(state="observing", request_key="new", blockers=[])
+    @dataclass
+    class View:
+        state: str
+        request_key: str
+        blockers: list[Blocker] = field(default_factory=list)
+
+    old = View("running", "old")
+    ended = View("failed", "old", [Blocker("runtime.exited")])
+    admitted = View("observing", "new")
     checked = []
     result = assert_ended_without_blocking(
         None,
@@ -151,11 +155,14 @@ def test_real_view_blocker_codes_and_service_release_callback_are_supported():
 
 
 def test_failed_end_checks_typed_child_evidence_through_service_callback():
-    from types import SimpleNamespace
+    @dataclass
+    class JobView:
+        state: str
+        request_id: str
 
-    old = SimpleNamespace(state="running", request_id="old")
-    ended = SimpleNamespace(state="failed", request_id="old")
-    admitted = SimpleNamespace(state="queued", request_id="new")
+    old = JobView("running", "old")
+    ended = JobView("failed", "old")
+    admitted = JobView("queued", "new")
     checked = []
     assert_ended_without_blocking(
         None,
