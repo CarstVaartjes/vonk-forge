@@ -1446,7 +1446,17 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
 
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize(
-    "damage", ("document", "digest", "candidate", "mapping", "rank", "state", "labels")
+    "damage",
+    (
+        "document",
+        "digest",
+        "candidate",
+        "mapping",
+        "mapping_rank",
+        "rank",
+        "state",
+        "labels",
+    ),
 )
 def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     damage: str,
@@ -1682,6 +1692,12 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
                 .where(ClusterMapping.id == mapping_id)
                 .values(node_count=-1)
             )
+        elif damage == "mapping_rank":
+            session.execute(
+                update(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == mapping_id)
+                .values(rank=-1)
+            )
         elif damage == "rank":
             session.execute(
                 update(InstallationNode)
@@ -1753,7 +1769,7 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
         assert recovered.json()["nodes"][0]["labels"] == {"role": "inference"}
         assert not recovered.json()["nodes"][0].get("projection_issues")
         return
-    if damage in {"mapping", "rank", "state"}:
+    if damage in {"mapping", "mapping_rank", "rank", "state"}:
         assert (
             next(
                 value
@@ -1783,6 +1799,11 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
             update(ClusterMapping)
             .where(ClusterMapping.id == mapping_id)
             .values(node_count=1)
+        )
+        session.execute(
+            update(ClusterMappingNode)
+            .where(ClusterMappingNode.mapping_id == mapping_id)
+            .values(rank=0)
         )
         session.execute(
             update(InstallationNode)

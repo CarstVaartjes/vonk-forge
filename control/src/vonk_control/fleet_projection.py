@@ -145,6 +145,7 @@ Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 Text200 = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 Text256 = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 Rank = Annotated[int, Field(ge=0, le=_MAX_FLEET_NODES - 1)]
+_MEMBER_COORDINATES = TypeAdapter(tuple[Rank, Text64])
 
 AgentState = Literal["unregistered", "pending", "active", "retired", "revoked"]
 # Database rows and decoded JSON carry these closed values as plain strings, so
@@ -922,6 +923,10 @@ class FleetProjection:
         actual: Sequence[InstallationNode | RunNode],
         fleet_node_ids: frozenset[str],
     ) -> str | None:
+        # Invalid persisted coordinates are unknown evidence, not a proven
+        # missing rank. The owning group catches validation and retains members.
+        for value in (*expected, *actual):
+            _MEMBER_COORDINATES.validate_python((value.rank, value.role), strict=True)
         if any(value.node_id not in fleet_node_ids for value in (*expected, *actual)):
             return InstallDegradedReason.EXTERNAL_MEMBER
         expected_ranks = [value.rank for value in expected]
