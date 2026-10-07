@@ -496,10 +496,12 @@ class ModelCacheAdapter:
                     Effect.NONE: "Cancellation ended; no writer effect was observed.",
                     Effect.STOPPED: "Cancellation ended after the writer was confirmed stopped.",
                 }
-                observation = ModelCacheCancellationObservation(
-                    effect=after.effect,
-                    observed_at=now.isoformat(),
-                    detail=details[after.effect],
+                observation = ModelCacheCancellationObservation.model_validate(
+                    {
+                        "effect": after.effect,
+                        "observed_at": now.isoformat(),
+                        "detail": details[after.effect],
+                    }
                 )
                 self._store_payload(
                     operation,
