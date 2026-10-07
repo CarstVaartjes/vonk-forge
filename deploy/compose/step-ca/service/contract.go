@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -132,13 +133,27 @@ func (b Binding) validateLeaf(leaf *x509.Certificate, p Policy, signed bool) err
 	if err != nil {
 		return err
 	}
-	if leaf.SerialNumber == nil || leaf.SerialNumber.String() != b.Serial || leaf.Subject.CommonName != b.NodeID || len(leaf.Subject.Names) != 1 || !leaf.NotBefore.Equal(nb) || !leaf.NotAfter.Equal(na) || leaf.IsCA || leaf.KeyUsage != x509.KeyUsageDigitalSignature || len(leaf.ExtKeyUsage) != 1 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth || len(leaf.URIs) != 1 || leaf.URIs[0].String() != "spiffe://vonk-forge.local/node/"+b.NodeID || len(leaf.DNSNames) != 0 || len(leaf.IPAddresses) != 0 || len(leaf.EmailAddresses) != 0 {
+	if leaf.SerialNumber == nil || leaf.SerialNumber.String() != b.Serial || !nodeSubject(leaf.Subject, b.NodeID) || !leaf.NotBefore.Equal(nb) || !leaf.NotAfter.Equal(na) || leaf.IsCA || leaf.KeyUsage != x509.KeyUsageDigitalSignature || len(leaf.ExtKeyUsage) != 1 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth || len(leaf.URIs) != 1 || leaf.URIs[0].String() != "spiffe://vonk-forge.local/node/"+b.NodeID || len(leaf.DNSNames) != 0 || len(leaf.IPAddresses) != 0 || len(leaf.EmailAddresses) != 0 {
 		return errors.New("certificate leaf differs from accepted request")
 	}
 	if signed && (!bytes.Equal(leaf.RawIssuer, p.Issuer.RawSubject) || leaf.CheckSignatureFrom(p.Issuer) != nil) {
 		return errors.New("certificate leaf issuer is invalid")
 	}
 	return nil
+}
+
+// Names is populated by ASN.1 decoding, while Authority's generated template
+// contains the typed CommonName before DER exists. Validate the same exact
+// subject in both representations, retaining checks for decoded unknown OIDs.
+func nodeSubject(subject pkix.Name, node string) bool {
+	rdns := subject.ToRDNSequence()
+	if len(rdns) != 1 || len(rdns[0]) != 1 || rdns[0][0].Type.String() != "2.5.4.3" || rdns[0][0].Value != node {
+		return false
+	}
+	if len(subject.Names) != 0 && (len(subject.Names) != 1 || subject.Names[0].Type.String() != "2.5.4.3" || subject.Names[0].Value != node) {
+		return false
+	}
+	return true
 }
 
 func sameBinding(a, b Binding) bool {
