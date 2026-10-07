@@ -3,7 +3,7 @@ import {webcrypto} from "node:crypto";
 import {Blob as NativeBlob} from "node:buffer";
 import {contractEqual} from "./contract-numeric";
 import {validateComponent} from "./contract-json";
-import {readObservationTransfer} from "./observation-transfer";
+import {ObservationUnavailable, readObservationTransfer} from "./observation-transfer";
 import {stringifyContractJson} from "./contract-numeric";
 
 beforeEach(() => { vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("Blob", NativeBlob); });
@@ -59,4 +59,16 @@ test.runIf(Boolean(fixturePath))("actual Python producer transfers preserve wide
     const observed = await readObservationTransfer(new Response(transport, {headers: {"Content-Type": item.media_type}}), item.path);
     expect(contractEqual(observed, validateComponent(item.payload_component, item.payload_json))).toBe(true);
   }
+});
+
+test("retains the canonical terminal owner cause", async () => {
+  const values = await records();
+  await expect(readObservationTransfer(response([values[0], {type: "error", transfer_id,
+    reason_code: "observation.transfer_unavailable", detail: "Capture serialization unavailable"}]), "/api/fleet"))
+    .rejects.toEqual(new ObservationUnavailable("observation.transfer_unavailable", "Capture serialization unavailable"));
+});
+test("rejects a record UTF-8 BOM instead of removing it", async () => {
+  const values = await records();
+  const body = new Uint8Array([239, 187, 191, ...new TextEncoder().encode(values.map(value => stringifyContractJson(value) + "\n").join(""))]);
+  await expect(readObservationTransfer(new Response(body, {headers: {"Content-Type": "application/x-vonk-observation+ndjson"}}), "/api/fleet")).rejects.toThrow();
 });

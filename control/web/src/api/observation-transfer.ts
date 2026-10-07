@@ -4,6 +4,12 @@ import {ContractViolation, validateComponent, validateControlBody} from "./contr
 import {formatWire} from "./contract-numeric";
 
 type Record = components["schemas"]["ObservationTransferRecord"];
+export class ObservationUnavailable extends Error {
+  constructor(readonly reason_code: Extract<Record, {type: "error"}>["reason_code"], readonly detail: string) {
+    super(`${reason_code}: ${detail}`);
+    this.name = "ObservationUnavailable";
+  }
+}
 const MEDIA = "application/x-vonk-observation+ndjson";
 
 /** A record allocation does not cap the completed model or the browser heap. */
@@ -15,7 +21,7 @@ export async function readObservationTransfer(response: Response, path: string):
   if (response.status !== 200 || response.headers.get("content-type")?.split(";")[0].trim() !== MEDIA
       || !limit || !payload || !response.body) throw invalid();
   const reader = response.body.getReader();
-  const decoder = new TextDecoder("utf-8", {fatal: true});
+  const decoder = new TextDecoder("utf-8", {fatal: true, ignoreBOM: true});
   let pending: Uint8Array[] = [];
   let pendingBytes = 0;
   let transferId: string | undefined;
@@ -48,7 +54,8 @@ export async function readObservationTransfer(response: Response, path: string):
     } else if (value.type === "complete") {
       if (BigInt(formatWire(value.chunks)) !== ordinal || BigInt(formatWire(value.bytes)) !== bytes) throw invalid();
       complete = value;
-    } else throw invalid();
+    } else if (value.type === "error") throw new ObservationUnavailable(value.reason_code, value.detail);
+    else throw invalid();
   }
   try {
     while (true) {
