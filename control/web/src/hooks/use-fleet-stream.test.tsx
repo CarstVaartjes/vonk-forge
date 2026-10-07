@@ -481,3 +481,29 @@ test("aborts and stops an in-flight periodic live reconciliation on unmount", as
   expect(visualFleet).toHaveBeenCalledTimes(2);
   expect(vi.getTimerCount()).toBe(0);
 });
+
+test("keeps the last completed roster through a refresh notice and failed capture, then recovers", async () => {
+  vi.useFakeTimers();
+  const visualFleet = vi.fn()
+    .mockResolvedValueOnce(snapshot(5, 50))
+    .mockRejectedValueOnce(new Error("observation.transfer_unavailable: capture interrupted"))
+    .mockResolvedValueOnce(snapshot(7, 70));
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeEventSource.instances[0];
+  act(() => {
+    stream.emit("fleet-refresh", {reset_reason: "retention-gap", event_cursor: 6}, "6");
+    stream.emit("node-telemetry", {node_id: NODE_A, sample: point(99)}, "7");
+  });
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("50");
+  act(() => vi.advanceTimersByTime(100));
+  await flush();
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("50");
+  act(() => vi.advanceTimersByTime(1100));
+  await flush();
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("70");
+  expect(visualFleet).toHaveBeenCalledTimes(3);
+});
