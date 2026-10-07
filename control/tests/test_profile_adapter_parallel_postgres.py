@@ -7,7 +7,16 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    AgentResult,
+    AgentResultState,
+    LifecycleState,
+    OutcomeDone,
+    OutcomeKind,
+    RecipeStopResult,
+    canonical_message,
+)
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
     FleetProfileSwitchAdapterState,
@@ -30,6 +39,7 @@ from vonk_control.models import (
 from vonk_control.run_switch_contract import RunSwitchMemberProgress
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .agent_fences import fenced_operation
 from .test_fleet_profiles import (
     NOW,
     _node_id,
@@ -42,7 +52,12 @@ from .test_profile_continuity_postgres import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )
-from .test_recipe_operations import installed_recipe, setup_services, started_recipe
+from .test_recipe_operations import (
+    _issue_exact_stop_grant,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
 from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 
@@ -348,24 +363,13 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
         "_observed_child",
         lambda identity: children.get(identity) or native_observe(identity),
     )
-    with sessions() as session:
-        row = session.get(FleetProfileApplication, app.id)
-        assert row is not None
-        intended = _persisted_profile_progress(row).intended_profile
-        assert intended is not None
-        assignments = tuple(intended.assignments)
-    adapter.start(
-        application_id=app.id,
-        assignments=assignments,
-        scope_node_ids=(nodes[0], _node_id(2)),
-        actor="admin",
-        request_id=_uuid(18604),
-    )
-    # Tick the real durable Stop until its exact per-node operation exists;
-    # its missing physical receipt must not prevent the unrelated dispatch.
+    # The saved-profile worker establishes the accepted parent's current
+    # authority and derives its canonical child request. A direct adapter start
+    # while the application is queued cannot authorize destructive cleanup.
+    profiles._switch_adapter = adapter
     for _ in range(8):
+        profiles.tick()
         coordinator.tick()
-        adapter.advance(app.id)
     before = _stored(sessions, app.id)
     stop_index = next(
         index for index, item in enumerate(before.queue) if item.kind == "stop"
@@ -430,10 +434,24 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
             session.scalar(select(Job.id).where(Job.request_id == stop_key)) == stop_id
         )
 
-    # Recovery supplies the original Stop receipt. Reconnect closes that queue
-    # index and keeps the already dispatched healthy load under its own ID.
-    for parent_id in exact_parents:
-        lifecycle.record_node_result(parent_id, nodes[0], succeeded=True, evidence={})
+    # Recovery claims the SAME native Stop and obtains its production signed
+    # exact-plan grant before accepting the fenced agent receipt. It does not
+    # mark the parent complete through the unfenced fixture projection helper.
+    claim, stop_plan, _grant = _issue_exact_stop_grant(
+        sessions, node_id=nodes[0], certificate_serial="serial-0"
+    )
+    assert stop_plan.run_id == run.owner_id
+    issued = fenced_operation(sessions, claim)
+    assert issued.id in exact_ids and issued.parent_job_id in exact_parents
+    restarted_jobs = AgentJobService(sessions, clock=lambda: NOW)
+    restarted_jobs.set_result_consumer(lifecycle.consume_agent_result)
+    restarted_jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.SUCCEEDED,
+            result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
+        )
+    )
     for _ in range(3):
         restarted_coordinator.tick()
         restarted.advance(app.id)
