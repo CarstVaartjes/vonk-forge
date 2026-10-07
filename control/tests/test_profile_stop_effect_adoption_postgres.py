@@ -41,6 +41,7 @@ from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.stored_json import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .profile_stop_readmission_support import start_on_released_gang
 from .test_fleet_profiles import NOW, _node_id, _uuid
 from .test_profile_adapter_continuity import _running_child
 from .test_profile_adapter_parallel_postgres import _stored
@@ -461,6 +462,17 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
                 select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
             )
         } == {native_id}
+
+    sibling_claims = _claims(sessions, _node_id(2))
+    start_on_released_gang(
+        sessions,
+        lifecycle,
+        before.queue[stop_index].id,
+        nodes,
+        clock=lambda: clock[0],
+        request_id=_uuid(18719),
+    )
+    assert _claims(sessions, _node_id(2)) == sibling_claims
 
 
 @pytest.mark.parametrize(

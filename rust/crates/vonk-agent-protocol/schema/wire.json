@@ -1195,6 +1195,14 @@
       "title": "CatalogSyncState",
       "type": "string"
     },
+    "CertificateCode": {
+      "description": "Owned certificate issuance admission refusals.",
+      "enum": [
+        "certificate.response_unrepresentable"
+      ],
+      "title": "CertificateCode",
+      "type": "string"
+    },
     "CertificateState": {
       "description": "The standing of a node's client certificate, as the fleet projection shows it.",
       "enum": [
@@ -4244,6 +4252,11 @@
           "title": "Api",
           "type": "string"
         },
+        "ca": {
+          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
+          "title": "Ca",
+          "type": "string"
+        },
         "hermes": {
           "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
           "title": "Hermes",
@@ -4264,7 +4277,8 @@
         "api",
         "worker",
         "hermes",
-        "litellm"
+        "litellm",
+        "ca"
       ],
       "title": "InstallerReleaseImages",
       "type": "object"
@@ -6775,6 +6789,10 @@
       "description": "Warnings and attention items of the fleet and library projections.",
       "enum": [
         "cpu.low-clock",
+        "fleet.frame_budget_exceeded",
+        "fleet.frame_encoding_unavailable",
+        "fleet.stored_event_payload_unavailable",
+        "observation.transfer_unavailable",
         "install.partial",
         "inventory.missing",
         "inventory.stale",
@@ -6813,6 +6831,9 @@
         },
         "catalog_sync_code": {
           "$ref": "#/$defs/CatalogSyncCode"
+        },
+        "certificate_code": {
+          "$ref": "#/$defs/CertificateCode"
         },
         "cluster_mapping_code": {
           "$ref": "#/$defs/ClusterMappingCode"
@@ -6931,6 +6952,7 @@
         "agent_evidence_code",
         "artifact_lifecycle_code",
         "cache_reference_reason",
+        "certificate_code",
         "catalog_code",
         "catalog_sync_code",
         "cluster_mapping_code",

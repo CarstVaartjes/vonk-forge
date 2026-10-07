@@ -8,15 +8,21 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import select
 from vonk_agent_protocol import OperationProgress, canonical_message
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.execution_plan_service import (
+    ControllerExecutionPlanService,
+    _build_package,
+)
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfileInput,
 )
-from vonk_control.fleet_profiles import _persisted_profile_progress
+from vonk_control.fleet_profiles import (
+    _persisted_profile_progress,
+    build_production_fleet_profile_service,
+)
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -32,10 +38,28 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     FleetProfileApplication,
     Job,
+    RecipeBuild,
 )
 from vonk_control.operation_progress import aggregate_progress, member_progress
 from vonk_control.recipe_operations import RecipeOperationService, _stored_phases
-from vonk_control.run_switch_operations import _stored_result
+from vonk_control.recipe_runtime_specs import (
+    compile_runtime_spec,
+    resolve_recipe_entities,
+    split_option_choices,
+)
+from vonk_control.run_switch_contract import (
+    RunSwitchOperationResult,
+    RunSwitchPhase,
+    RunSwitchPlan,
+)
+from vonk_control.run_switch_observation_contract import RunSwitchObservedEvidence
+from vonk_control.run_switch_operations import (
+    PhaseExecution,
+    RunSwitchOperationService,
+    _merge_progress_evidence,
+    _stored_job_plan,
+    _stored_result,
+)
 from vonk_control.stored_json import write_guard_mode
 
 from cluster_profiles.control_client import validate_control_document
@@ -46,9 +70,96 @@ from .test_fleet_profile_api import _client, _headers
 from .test_profile_installed_execution import (
     _apply,
     _installed_profile,
-    _profile_service,
 )
 from .test_recipe_operations import NOW, installed_recipe, setup_services
+from .test_run_switch_operations import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+    _fixture_execution,
+)
+
+
+class _PreparedImageExecutor(RecordingArtifactExecutor):
+    """Use the fixture's real managed-image producer before native installation."""
+
+    def __init__(self, sessions, lifecycle: RecipeOperationService) -> None:
+        super().__init__()
+        self.sessions = sessions
+        provider = lifecycle._install_admission._compiled_plan_provider
+        execution_plans = getattr(provider, "__self__", None)
+        assert isinstance(execution_plans, ControllerExecutionPlanService)
+        self.preparer = execution_plans._runtime_image_preparer
+        assert self.preparer is not None
+
+    def execute(
+        self,
+        plan: RunSwitchPlan,
+        phase: RunSwitchPhase,
+        *,
+        item_index: int,
+        actor: str,
+        request_key: str,
+        progress: RunSwitchOperationResult,
+    ) -> PhaseExecution:
+        if phase.kind != "prepare" or phase.subphase != "runtime-image":
+            return super().execute(
+                plan,
+                phase,
+                item_index=item_index,
+                actor=actor,
+                request_key=request_key,
+                progress=progress,
+            )
+        with self.sessions() as session:
+            revision = session.get(CatalogDocumentRevision, plan.recipe_revision_id)
+            build = session.get(RecipeBuild, plan.recipe_build_id)
+            assert revision is not None and build is not None
+            resolved = resolve_recipe_entities(session, revision.document)
+            document = revision.document
+        # Managed storage preparation is outside the SQL read transaction.
+        choices, settings = split_option_choices(
+            plan.mapping.parameters if plan.mapping is not None else None
+        )
+        target = plan.spark_group.nodes[0]
+        runtime = compile_runtime_spec(
+            resolved.recipe,
+            recipe_digest=resolved.recipe_digest,
+            models=resolved.models,
+            package_handle=_build_package(build),
+            parameters=settings,
+            option_choices=choices,
+            role=target.role,
+            rank=target.rank,
+        )
+        assert self.preparer is not None
+        receipt = self.preparer(document, runtime, build)
+        return _fixture_execution(
+            plan,
+            phase,
+            result={
+                "runtime_image": receipt.to_mapping(),
+                "image_digest": receipt.image_digest,
+                "oci_layout_sha256": receipt.oci_archive_sha256,
+                "image_bytes": receipt.image_bytes,
+            },
+        )
+
+
+def _measured_profile_service(sessions, lifecycle):
+    planner = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=_PreparedImageExecutor(sessions, lifecycle),
+        memory_floor_bytes=0,
+    )
+    return (
+        build_production_fleet_profile_service(
+            sessions, clock=lifecycle._clock, run_switch_operations=planner
+        ),
+        planner,
+    )
 
 
 def _follow_saved_due(sessions, service, application_id, clock):
@@ -117,7 +228,31 @@ def _drive_install(sessions, service, planner, application_id, clock, count):
             )
         if len(identities) == count:
             return identities
-    raise AssertionError(f"Expected {count} exact native installs, found {identities}")
+    observed = service.application(application_id)
+    journal = observed.progress.switch_adapter
+    child_observations = []
+    if journal is not None:
+        for child in journal.pending_children:
+            operation = planner.get(child.operation_id)
+            child_observations.append(
+                {
+                    "queue_index": child.queue_index,
+                    "operation_id": operation.operation_id,
+                    "kind": operation.kind,
+                    "state": operation.state,
+                    "status_reason": operation.status_reason,
+                    "current_phase": operation.current_phase,
+                    "next_attempt_at": operation.next_attempt_at,
+                    "request_key": operation.request_key,
+                }
+            )
+    raise AssertionError(
+        f"Expected {count} exact native installs, found {identities}; "
+        f"now={clock[0]}, state={observed.state}, "
+        f"reason={observed.status_reason}, due={observed.progress.retry_due_at}, "
+        f"ordinal={observed.progress.workload_intent_ordinal}, "
+        f"children={child_observations}"
+    )
 
 
 def test_wide_measurements_roundtrip_without_losing_integer_precision() -> None:
@@ -143,10 +278,37 @@ def test_wide_measurements_roundtrip_without_losing_integer_precision() -> None:
     assert restored.members[0].completed_bytes == completed
 
 
+def _assert_plain_install_measurement(
+    plan: RunSwitchPlan, phase: RunSwitchPhase, now
+) -> None:
+    """Rejects both cross-budget counting and dropping plain phase samples."""
+    assert phase.kind == "prepare" and phase.subphase == "runtime-install"
+    progress = RunSwitchOperationResult(total_bytes=0, total_bytes_known=True)
+    for completed, observed in ((32, now - timedelta(seconds=2)), (48, now)):
+        _merge_progress_evidence(
+            progress,
+            plan,
+            phase,
+            RunSwitchObservedEvidence(completed_bytes=completed, total_bytes=64),
+            observed,
+        )
+    assert progress.completed_bytes == 0
+    assert progress.total_bytes == 0 and progress.total_bytes_known
+    assert progress.operation_phase_index == phase.index
+    measured = progress.operation
+    assert measured is not None and measured.phase == phase.kind
+    assert measured.completed_bytes == 48 and measured.total_bytes == 64
+    assert measured.observed_at == now.isoformat()
+    assert measured.bytes_per_second == 8 and measured.eta_seconds == 2
+    restored = RunSwitchOperationResult.model_validate_json(
+        canonical_message(progress), strict=True
+    )
+    assert restored.operation == measured
+
+
 def test_live_agent_progress_reaches_recipe_switch_and_profile(
     tmp_path: Path, postgres_engine
 ) -> None:
-    signer = Ed25519PrivateKey.generate()
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=postgres_engine
     )
@@ -155,7 +317,7 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     lifecycle._clock = lambda: clock[0]
     jobs = AgentJobService(sessions, clock=lambda: clock[0])
     lifecycle._agent_jobs = jobs
-    service, planner = _profile_service(sessions, lifecycle)
+    service, planner = _measured_profile_service(sessions, lifecycle)
     profile = _installed_profile(service, sessions, nodes)
     application = _apply(service, profile)
     (install_id,) = _drive_install(sessions, service, planner, application.id, clock, 1)
@@ -169,9 +331,6 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
         runtime_identity={
             **PACKAGED_RUNTIME_IDENTITY,
             "architecture": "linux-arm64",
-            "observation_receipt_public_key": signer.public_key()
-            .public_bytes_raw()
-            .hex(),
         },
     )
     assert claim is not None
@@ -284,9 +443,22 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
         )
         assert switch_job is not None
         switch_id = switch_job.id
+        plan = _stored_job_plan(switch_job)
+        result = _stored_result(switch_job.result)
+        assert (
+            plan is not None and result is not None and not isinstance(result, Residue)
+        )
+        phase = plan.phases[result.phase_index]
+    _assert_plain_install_measurement(plan, phase, clock[0])
     _follow_saved_due(sessions, service, application.id, clock)
     assert planner.tick()
     switch = planner.get(switch_id)
+    # The native install's 48 measured bytes are separate from this accepted
+    # zero-byte distribution; observing them must not corrupt its journal.
+    assert switch.result is not None
+    assert switch.result.completed_bytes == 0
+    assert switch.result.total_bytes == 0
+    assert switch.result.total_bytes_known
     assert switch.progress is not None and switch.progress.operation is not None
     assert switch.progress.operation.completed_bytes == 48
     assert [member.member_id for member in switch.progress.operation.members] == list(
@@ -403,7 +575,7 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
     lifecycle._clock = lambda: now[0]
     jobs = AgentJobService(sessions, clock=lambda: now[0])
     lifecycle._agent_jobs = jobs
-    service, planner = _profile_service(sessions, lifecycle)
+    service, planner = _measured_profile_service(sessions, lifecycle)
     profile = service.create(
         FleetProfileInput.model_validate(
             {
@@ -426,7 +598,6 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
     measured = {all_nodes[0]: (32, 64), second: (16, 128)}
     claims = []
     for node, serial in zip(all_nodes, ("serial-0", "serial-b"), strict=True):
-        key = Ed25519PrivateKey.generate()
         claim = claim_agent(
             jobs,
             node,
@@ -435,9 +606,6 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
             runtime_identity={
                 **PACKAGED_RUNTIME_IDENTITY,
                 "architecture": "linux-arm64",
-                "observation_receipt_public_key": key.public_key()
-                .public_bytes_raw()
-                .hex(),
             },
         )
         assert claim is not None
@@ -461,7 +629,7 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
         agent_jobs=jobs,
         clock=lambda: now[0],
     )
-    recovered_service, recovered_planner = _profile_service(
+    recovered_service, recovered_planner = _measured_profile_service(
         sessions, recovered_lifecycle
     )
     for _ in range(4):

@@ -44,6 +44,7 @@ from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.stored_json import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .profile_stop_readmission_support import start_on_released_gang
 from .test_fleet_profile_cancel import (
     _agent_result,
     _agent_service_and_target_claim,
@@ -230,6 +231,14 @@ def test_postgres_unrelated_damaged_parked_evidence_does_not_starve_exact_gang_c
         retained = session.get(FleetProfileApplication, parked.id)
         assert retained is not None and retained.plan == damaged
         assert retained.state != LifecycleState.FAILED
+    start_on_released_gang(
+        sessions,
+        lifecycle,
+        run.owner_id,
+        nodes,
+        clock=lambda: now[0],
+        request_id=_uuid(18812),
+    )
 
 
 def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gang_claims(

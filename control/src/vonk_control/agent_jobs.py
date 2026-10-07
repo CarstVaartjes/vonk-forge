@@ -1203,13 +1203,13 @@ def _exact_service_stop_receipt_covers_start(
             select(Job)
             .where(
                 Job.kind == "recipe.stop",
-                Job.state == "succeeded",
+                Job.state == LifecycleState.SUCCEEDED,
                 Job.payload["owner_id"].as_string() == run.id,
                 Job.id.in_(
                     select(StoredOperation.parent_job_id).where(
                         StoredOperation.node_id == source.node_id,
                         StoredOperation.kind == AgentOperation.RECIPE_STOP.value,
-                        StoredOperation.state == "succeeded",
+                        StoredOperation.state == LifecycleState.SUCCEEDED,
                         StoredOperation.workload_intent_ordinal
                         > source.workload_intent_ordinal,
                         StoredOperation.workload_intent_ordinal <= current_ordinal,
@@ -1289,13 +1289,13 @@ def _exact_service_stop_receipt_covers_start(
                 )
                 if (
                     child.kind != AgentOperation.RECIPE_STOP.value
-                    or child.state != "succeeded"
+                    or child.state != LifecycleState.SUCCEEDED
                     or child.current_attempt < 1
                     or child.workload_intent_ordinal != ordinal
                     or child.authority_revision != stop_parent.authority_revision
                     or child.created_at < source.created_at
                     or attempt is None
-                    or attempt.state != "succeeded"
+                    or attempt.state != LifecycleState.SUCCEEDED
                     or child.payload_digest
                     != hashlib.sha256(canonical_message(child.payload)).hexdigest()
                     or canonical_message(child.payload)
@@ -1317,7 +1317,7 @@ def _exact_service_stop_receipt_covers_start(
                     break
             if proven:
                 return True
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, UnknownOutcomeError):
         return False
     return False
 
@@ -2834,6 +2834,34 @@ class AgentJobService:
             ),
         )
 
+    @staticmethod
+    def _refresh_parent_claim_refusal(
+        session: Session, operation: StoredOperation, now: datetime
+    ) -> None:
+        """Replace a recovered claim's stale note with a live sibling's cause."""
+
+        job = session.get(Job, operation.parent_job_id)
+        if (
+            job is None
+            or not isinstance(job.status_reason, str)
+            or not job.status_reason.startswith(_CLAIM_REFUSAL_PREFIX)
+        ):
+            return
+        sibling_reason = session.scalar(
+            select(StoredOperation.status_reason)
+            .where(
+                StoredOperation.parent_job_id == job.id,
+                StoredOperation.id != operation.id,
+                StoredOperation.state.not_in(_CONCLUDED_OUTCOMES),
+                StoredOperation.status_reason.is_not(None),
+            )
+            .order_by(StoredOperation.node_id, StoredOperation.id)
+            .limit(1)
+        )
+        if job.status_reason != sibling_reason:
+            job.status_reason = sibling_reason
+            job.updated_at = now
+
     def record_boundary_refusal(
         self,
         fence: str,
@@ -3733,6 +3761,7 @@ class AgentJobService:
             )
             if attempt is None:
                 return None  # the core refuses a claim the predicate let through
+            self._refresh_parent_claim_refusal(session, operation, now)
             if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
                 # Every attempt is issued with a fresh grant, as the first one
                 # was: a retry that waited out the grant's hour (a parked

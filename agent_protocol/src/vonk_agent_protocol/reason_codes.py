@@ -80,6 +80,12 @@ class CacheReferenceReason(WireEnum):
     SAVED_PROFILE = "saved-profile"
 
 
+class CertificateCode(WireEnum):
+    """Owned certificate issuance admission refusals."""
+
+    RESPONSE_UNREPRESENTABLE = "certificate.response_unrepresentable"
+
+
 class CatalogCode(WireEnum):
     """Refusals of the recipe catalog and the recipe library documents."""
 
@@ -535,6 +541,10 @@ class ProjectionCode(WireEnum):
     """Warnings and attention items of the fleet and library projections."""
 
     CPU_LOW_CLOCK = "cpu.low-clock"
+    FLEET_FRAME_BUDGET_EXCEEDED = "fleet.frame_budget_exceeded"
+    FLEET_FRAME_ENCODING_UNAVAILABLE = "fleet.frame_encoding_unavailable"
+    FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE = "fleet.stored_event_payload_unavailable"
+    OBSERVATION_TRANSFER_UNAVAILABLE = "observation.transfer_unavailable"
     INSTALL_PARTIAL = "install.partial"
     INVENTORY_MISSING = "inventory.missing"
     INVENTORY_STALE = "inventory.stale"
@@ -1357,6 +1367,7 @@ REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (
     AgentEvidenceCode,
     ArtifactLifecycleCode,
     CacheReferenceReason,
+    CertificateCode,
     CatalogCode,
     CatalogSyncCode,
     ClusterMappingCode,
@@ -1533,6 +1544,7 @@ class ReasonCodeVocabulary(WireModel):
     agent_evidence_code: AgentEvidenceCode
     artifact_lifecycle_code: ArtifactLifecycleCode
     cache_reference_reason: CacheReferenceReason
+    certificate_code: CertificateCode
     catalog_code: CatalogCode
     catalog_sync_code: CatalogSyncCode
     cluster_mapping_code: ClusterMappingCode
@@ -1584,6 +1596,7 @@ __all__ = [
     "CacheReferenceReason",
     "CatalogCode",
     "CatalogSyncCode",
+    "CertificateCode",
     "ClusterMappingCode",
     "ControllerErrorCode",
     "DistributionCode",

@@ -570,6 +570,11 @@ export const CacheReferenceReason = {
 } as const;
 export type CacheReferenceReason = (typeof CacheReferenceReason)[keyof typeof CacheReferenceReason];
 
+export const CertificateCode = {
+  RESPONSE_UNREPRESENTABLE: "certificate.response_unrepresentable",
+} as const;
+export type CertificateCode = (typeof CertificateCode)[keyof typeof CertificateCode];
+
 export const CatalogCode = {
   ACTOR: "catalog.actor",
   CANDIDATE_EXISTS: "catalog.candidate_exists",
@@ -984,6 +989,10 @@ export type ProfileReasonCode = (typeof ProfileReasonCode)[keyof typeof ProfileR
 
 export const ProjectionCode = {
   CPU_LOW_CLOCK: "cpu.low-clock",
+  FLEET_FRAME_BUDGET_EXCEEDED: "fleet.frame_budget_exceeded",
+  FLEET_FRAME_ENCODING_UNAVAILABLE: "fleet.frame_encoding_unavailable",
+  FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE: "fleet.stored_event_payload_unavailable",
+  OBSERVATION_TRANSFER_UNAVAILABLE: "observation.transfer_unavailable",
   INSTALL_PARTIAL: "install.partial",
   INVENTORY_MISSING: "inventory.missing",
   INVENTORY_STALE: "inventory.stale",

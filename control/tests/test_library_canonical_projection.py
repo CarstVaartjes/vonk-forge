@@ -379,6 +379,12 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert {model["identity"]["content_sha256"] for model in payload["models"]} == set(
         expected_models
     )
+    for row in payload["models"]:
+        expected = expected_models[row["identity"]["content_sha256"]]
+        assert (
+            ModelDefinition.model_validate_json(json.dumps(row["document"])) == expected
+        )
+        assert row["document"] == serialize_json_value(expected)
     assert all(
         "recipes" not in model and "source_kind" not in model
         for model in payload["models"]
@@ -410,9 +416,16 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert {
         recipe["identity"]["recipe_id"] for recipe in recipe_payload["recipes"]
     } == recipe_ids
+    for row in recipe_payload["recipes"]:
+        expected = expected_recipes[row["identity"]["content_sha256"]]
+        assert (
+            RecipeDefinition.model_validate_json(json.dumps(row["document"]))
+            == expected
+        )
+        assert row["document"] == serialize_json_value(expected)
     first_recipe = recipe_payload["recipes"][0]
     first_expected = expected_recipes[first_recipe["identity"]["content_sha256"]]
-    assert first_recipe["document"] == first_expected.model_dump(mode="json")
+    assert first_recipe["document"] == serialize_json_value(first_expected)
     assert first_recipe["document"]["runtime"]["engine"] == (
         first_expected.runtime.engine
     )
@@ -423,10 +436,10 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
         first_expected.topology.node_count
     )
     assert first_recipe["document"]["topology"]["roles"][0]["resources"] == (
-        first_expected.topology.roles[0].resources.model_dump(mode="json")
+        serialize_json_value(first_expected.topology.roles[0].resources)
     )
     assert first_recipe["document"]["models"] == [
-        selection.model_dump(mode="json") for selection in first_expected.models
+        serialize_json_value(selection) for selection in first_expected.models
     ]
     recipe_selector = first_recipe["selector"]
     detail = client.get(f"/api/recipe/{recipe_selector}")
@@ -439,16 +452,20 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert "visual_recipe" not in detail_payload
     assert "VisualRecipeDocument" not in app.openapi()["components"]["schemas"]
     expected_recipe = expected_recipes[detail_payload["identity"]["content_sha256"]]
-    assert detail_payload["document"] == expected_recipe.model_dump(mode="json")
-    assert detail_payload["document"]["runtime"] == expected_recipe.runtime.model_dump(
-        mode="json"
+    assert (
+        RecipeDefinition.model_validate_json(json.dumps(detail_payload["document"]))
+        == expected_recipe
+    )
+    assert detail_payload["document"] == serialize_json_value(expected_recipe)
+    assert detail_payload["document"]["runtime"] == serialize_json_value(
+        expected_recipe.runtime
     )
     assert detail_payload["document"][
         "topology"
-    ] == expected_recipe.topology.model_dump(mode="json")
+    ] == serialize_json_value(expected_recipe.topology)
     assert detail_payload["document"][
         "settings"
-    ] == expected_recipe.settings.model_dump(mode="json")
+    ] == serialize_json_value(expected_recipe.settings)
     assert (
         detail_payload["identity"]["recipe_revision_id"]
         == recipe_revision_ids[detail_payload["identity"]["content_sha256"]]
@@ -470,11 +487,11 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert multi_model_detail.status_code == 200
     multi_model_payload = multi_model_detail.json()
     expected_model_documents = [
-        expected_models[selection.model.content_sha256].model_dump(mode="json")
+        serialize_json_value(expected_models[selection.model.content_sha256])
         for selection in multi_model_recipe.models
     ]
     assert [entry["selection"] for entry in multi_model_payload["model_documents"]] == [
-        selection.model_dump(mode="json") for selection in multi_model_recipe.models
+        serialize_json_value(selection) for selection in multi_model_recipe.models
     ]
     assert [
         entry["model_document"] for entry in multi_model_payload["model_documents"]

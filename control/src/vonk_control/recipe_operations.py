@@ -8085,7 +8085,7 @@ class RecipeOperationService:
             for child in children
         }
         if len(child_by_identity) != len(children) or any(
-            child.state != "succeeded" for child in children
+            child.state != LifecycleState.SUCCEEDED for child in children
         ):
             return unproven(
                 BookkeepingReason.EVIDENCE_UNAVAILABLE,
@@ -8134,7 +8134,7 @@ class RecipeOperationService:
                     AgentOperationAttempt.attempt == child.current_attempt,
                 )
             )
-            if attempt is None or attempt.state != "succeeded":
+            if attempt is None or attempt.state != LifecycleState.SUCCEEDED:
                 return unproven(
                     BookkeepingReason.EVIDENCE_UNAVAILABLE,
                     "profile JobRun Stop result does not prove absence",

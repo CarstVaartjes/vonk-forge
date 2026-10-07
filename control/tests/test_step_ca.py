@@ -24,6 +24,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.api import build_agent_services
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.models import Base
 from vonk_control.presence import AgentPresenceService
 
@@ -85,8 +86,8 @@ class _Material(TypedDict):
 class _SignRequestBody(TypedDict):
     csr: str
     ott: str
-    notBefore: str
-    notAfter: str
+    request: dict[str, object]
+    mode: str
 
 
 class _SignExchange(TypedDict):
@@ -264,6 +265,30 @@ def _provider(
     return provider, material
 
 
+def _issue(provider: StepCertificateAuthority, node_id: str, csr: bytes, now: datetime):
+    binding = provider.prepare_request(
+        node_id, csr, now, purpose="enrollment", source_serial=None, generation=1
+    )
+    return provider.issue_node(node_id, csr, now, request=binding)
+
+
+def _renew(
+    provider: StepCertificateAuthority,
+    node_id: str,
+    csr: bytes,
+    now: datetime,
+    *,
+    request_id: str,
+):
+    binding = provider.prepare_request(
+        node_id, csr, now, purpose="rotation", source_serial="1", generation=2
+    )
+    binding = CertificateIssuanceBinding.model_validate(
+        {**binding.model_dump(mode="json"), "request_id": request_id}
+    )
+    return provider.renew_node(node_id, csr, now, request=binding)
+
+
 def _helper_key(path: Path) -> Path:
     path.write_bytes(
         ed25519.Ed25519PrivateKey.generate().private_bytes(
@@ -319,7 +344,12 @@ def _success_response(
 ) -> httpx2.Response:
     body = json.loads(request.content)
     seen.append({"request": request, "body": body})
-    leaf = _leaf(body["csr"].encode(), material, serial=serial)
+    leaf = _leaf(
+        body["csr"].encode(),
+        material,
+        serial=int(body["request"]["serial"]),
+        now=datetime.fromisoformat(body["request"]["not_before"]),
+    )
     leaf_pem = leaf.public_bytes(serialization.Encoding.PEM).decode()
     intermediate_pem = (
         material["intermediate"].public_bytes(serialization.Encoding.PEM).decode()
@@ -327,6 +357,8 @@ def _success_response(
     return httpx2.Response(
         201,
         json={
+            "state": "issued",
+            "request": body["request"],
             "crt": leaf_pem,
             "ca": intermediate_pem,
             "certChain": [leaf_pem, intermediate_pem],
@@ -346,17 +378,17 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     provider, material = _provider(tmp_path, handler)
     holder["material"] = material
     request_pem = _csr()
-    issued = provider.issue_node(NODE_ID, request_pem, NOW)
+    issued = _issue(provider, NODE_ID, request_pem, NOW)
 
     assert issued.node_id == NODE_ID
     assert len(seen) == 1
     request = seen[0]["request"]
-    assert request.url == f"{CA_URL}/1.0/sign"
+    assert request.url == f"{CA_URL}/1.0/vonk/sign"
     assert request.headers["content-type"] == "application/json"
-    assert set(seen[0]["body"]) == {"csr", "ott", "notBefore", "notAfter"}
+    assert seen[0]["body"]["mode"] == "issue"
     assert seen[0]["body"]["csr"] == request_pem.decode()
-    assert seen[0]["body"]["notBefore"] == "2026-08-04T12:00:00Z"
-    assert seen[0]["body"]["notAfter"] == "2026-09-03T12:00:00Z"
+    assert seen[0]["body"]["request"]["not_before"] == "2026-08-04T12:00:00Z"
+    assert seen[0]["body"]["request"]["not_after"] == "2026-09-03T12:00:00Z"
     token = seen[0]["body"]["ott"]
     header = jwt.get_unverified_header(token)
     claims = jwt.decode(token, options={"verify_signature": False})
@@ -373,49 +405,7 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     assert issued.fingerprint == certificate.fingerprint(hashes.SHA256()).hex()
 
 
-def test_sign_uses_and_validates_configured_certificate_lifetime(
-    tmp_path: Path,
-) -> None:
-    seen: list[_SignRequestBody] = []
-    holder: dict[str, _Material] = {}
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        body = json.loads(request.content)
-        seen.append(body)
-        leaf = _leaf(
-            body["csr"].encode(),
-            holder["material"],
-            lifetime_seconds=90,
-        )
-        leaf_pem = leaf.public_bytes(serialization.Encoding.PEM).decode()
-        intermediate_pem = (
-            holder["material"]["intermediate"]
-            .public_bytes(serialization.Encoding.PEM)
-            .decode()
-        )
-        return httpx2.Response(
-            201,
-            json={
-                "crt": leaf_pem,
-                "ca": intermediate_pem,
-                "certChain": [leaf_pem, intermediate_pem],
-            },
-        )
-
-    provider, material = _provider(
-        tmp_path,
-        handler,
-        certificate_lifetime_seconds=90,
-    )
-    holder["material"] = material
-
-    issued = provider.issue_node(NODE_ID, _csr(), NOW)
-
-    assert seen[0]["notAfter"] == "2026-08-04T12:01:30Z"
-    assert issued.not_after - issued.not_before == timedelta(seconds=90)
-
-
-@pytest.mark.parametrize("lifetime", (True, 89, 2592001))
+@pytest.mark.parametrize("lifetime", (True, 89, 90, 2592001))
 def test_rejects_invalid_configured_certificate_lifetime(
     tmp_path: Path,
     lifetime: int,
@@ -439,7 +429,8 @@ def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
     holder["material"] = material
     request_pem = _csr()
     request_id = "r" * 43
-    issued = provider.renew_node(
+    issued = _renew(
+        provider,
         NODE_ID,
         request_pem,
         NOW,
@@ -448,8 +439,9 @@ def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
 
     assert seen[0]["body"]["csr"] == request_pem.decode()
     claims = jwt.decode(seen[0]["body"]["ott"], options={"verify_signature": False})
-    assert claims["jti"] == request_id
-    assert issued.serial == "5678"
+    assert claims["jti"] != request_id
+    assert claims["vonk"]["request_id"] == request_id
+    assert issued.serial != "1"
 
 
 def test_revocation_is_authenticated_passive_and_idempotent_in_effect(
@@ -673,14 +665,21 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(
                 material["root"].public_bytes(serialization.Encoding.PEM).decode()
             )
         return httpx2.Response(
-            201, json={"crt": leaf_pem, "ca": ca_pem, "certChain": chain}
+            201,
+            json={
+                "state": "issued",
+                "request": body["request"],
+                "crt": leaf_pem,
+                "ca": ca_pem,
+                "certChain": chain,
+            },
         )
 
     (tmp_path / "other").mkdir(exist_ok=True)
     provider, material = _provider(tmp_path, handler)
     holder["material"] = material
     with pytest.raises(StepCAError):
-        provider.issue_node(NODE_ID, _csr(), NOW)
+        _issue(provider, NODE_ID, _csr(), NOW)
 
 
 def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
@@ -697,16 +696,52 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
 
     provider, _ = _provider(tmp_path, redirect)
     with pytest.raises(StepCAError) as caught:
-        provider.issue_node(NODE_ID, _csr(), NOW)
+        _issue(provider, NODE_ID, _csr(), NOW)
     assert len(requests) == 1 and requests[0].url.host == "step-ca"
     assert "eyJ" not in str(caught.value)
 
-    def oversized(_: httpx2.Request) -> httpx2.Response:
+    def oversized(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
         return httpx2.Response(201, content=b"{" + b"x" * 2048 + b"}")
 
     bounded, _ = _provider(tmp_path / "bounded", oversized, max_response_bytes=1024)
+    with pytest.raises(
+        StepCAError, match="configured CA sign response reader"
+    ) as caught:
+        _issue(bounded, NODE_ID, _csr(), NOW)
+    assert caught.value.reason_code == "certificate.response_unrepresentable"
+    assert len(requests) == 1  # The small reader refuses before another HTTP effect.
+
+
+def test_sign_wire_budget_stays_bounded_with_larger_crl_transport_budget(
+    tmp_path: Path,
+) -> None:
+    holder: dict[str, _Material] = {}
+    seen: list[_SignExchange] = []
+    fail_sign = True
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/1.0/crl":
+            return httpx2.Response(200, content=b"x" * (70 * 1024))
+        if fail_sign:
+            return httpx2.Response(201, content=b"x" * (64 * 1024 + 1))
+        return _success_response(request, holder["material"], seen)
+
+    provider, material = _provider(tmp_path, handler, max_response_bytes=1024 * 1024)
+    holder["material"] = material
+    assert (
+        len(provider._request("GET", "/1.0/crl", None, accept="application/pkix-crl"))
+        == 70 * 1024
+    )
+    csr = _csr()
+    binding = provider.prepare_request(
+        NODE_ID, csr, NOW, purpose="enrollment", source_serial=None, generation=1
+    )
     with pytest.raises(StepCAError, match="too large"):
-        bounded.issue_node(NODE_ID, _csr(), NOW)
+        provider.issue_node(NODE_ID, csr, NOW, request=binding)
+    fail_sign = False
+    issued = provider.issue_node(NODE_ID, csr, NOW, request=binding)
+    assert issued.serial == binding.serial
 
 
 @pytest.mark.parametrize(
@@ -883,14 +918,20 @@ def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation
     }
 
 
-# Slow by design: it runs the exact pinned step-ca image twice (fixture PKI,
-# then the CA itself) and waits for the server to become healthy.
+# Slow by design: fixture PKI uses the pinned step CLI, then the candidate
+# journal CA serves the existing keys and persistent database.
 @pytest.mark.slow(30)
 @pytest.mark.lane  # Starts the pinned step-ca container.
 def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Exercise the tracked public config against the exact production image."""
+    """Exercise the tracked config against the built journal CA runtime."""
+    journal_image = os.environ.get("VONK_JOURNAL_CA_TEST_IMAGE")
+    if not journal_image:
+        reason = "the built journal CA image is required for the CA integration test"
+        if os.environ.get("CI"):
+            pytest.fail(reason)
+        pytest.skip(reason)
     if (
         shutil.which("docker") is None
         or subprocess.run(
@@ -976,38 +1017,113 @@ step crypto jwk thumbprint < agent-ca-public.jwk
     database.mkdir(mode=0o777)
     database.chmod(0o777)
     container = f"vonk-step-ca-test-{uuid.uuid4().hex}"
+    # The current private endpoint must refuse a stock CA during a Compose
+    # replacement. Exercise the actual old image before opening its same DB
+    # with the journal service, and retain the original exact request.
+    real_getaddrinfo = socket.getaddrinfo
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, *args, **kwargs: real_getaddrinfo(
+            "127.0.0.1" if host == "step-ca" else host, *args, **kwargs
+        ),
+    )
+
+    def authority(mapped_port: str) -> StepCertificateAuthority:
+        return StepCertificateAuthority(
+            ca_url=f"https://step-ca:{mapped_port}",
+            root_certificate_path=root,
+            intermediate_certificate_path=intermediate,
+            provisioner_name="vonk-forge-agent",
+            provisioner_kid=kid,
+            credential_path=private_jwk,
+            provisioner_public_jwk_path=public_jwk,
+            timeout_seconds=2.0,
+        )
+
+    container_args = [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        container,
+        "-p",
+        "127.0.0.1::9000",
+        "-v",
+        f"{generated_config}:/home/step/config/ca.json:ro",
+        "-v",
+        f"{root}:/run/vonk-normalized-secrets/step-ca/root-certificate:ro",
+        "-v",
+        f"{intermediate}:/run/vonk-normalized-secrets/step-ca/intermediate-certificate:ro",
+        "-v",
+        f"{intermediate_key}:/run/vonk-normalized-secrets/step-ca/intermediate-key:ro",
+        "-v",
+        f"{intermediate_password}:/run/vonk-normalized-secrets/step-ca/password:ro",
+        "-v",
+        f"{database}:/home/step/db",
+        "--entrypoint",
+        "vonk-step-ca",
+        journal_image,
+        "--config",
+        "/home/step/config/ca.json",
+        "--password-file",
+        "/run/vonk-normalized-secrets/step-ca/password",
+    ]
+    stock_container = f"vonk-step-ca-stock-test-{uuid.uuid4().hex}"
+    stock_args = list(container_args)
+    stock_args[stock_args.index("--name") + 1] = stock_container
+    entrypoint = stock_args.index("--entrypoint")
+    stock_args[entrypoint + 1] = "step-ca"
+    stock_args[entrypoint + 2] = STEP_CA_IMAGE
+    stock_args.remove("--config")
+    subprocess.run(stock_args, check=True, capture_output=True, text=True, timeout=30)
+    try:
+        stock_port = (
+            subprocess.run(
+                ["docker", "port", stock_container, "9000/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            .stdout.strip()
+            .rsplit(":", 1)[1]
+        )
+        stock_provider = authority(stock_port)
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                stock_provider.check_health()
+                break
+            except StepCAError:
+                if time.monotonic() >= deadline:
+                    pytest.fail("stock CA did not become healthy for rollout proof")
+                time.sleep(0.1)
+        retained_csr = _csr()
+        accepted = stock_provider.prepare_request(
+            NODE_ID,
+            retained_csr,
+            datetime.now(UTC).replace(microsecond=0),
+            purpose="enrollment",
+            source_serial=None,
+            generation=1,
+        )
+        with pytest.raises(StepCAError, match="status 404"):
+            stock_provider.issue_node(
+                NODE_ID,
+                retained_csr,
+                datetime.now(UTC).replace(microsecond=0),
+                request=accepted,
+            )
+    finally:
+        subprocess.run(
+            ["docker", "rm", "--force", stock_container],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
     subprocess.run(
-        [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            container,
-            "-p",
-            "127.0.0.1::9000",
-            "-v",
-            f"{generated_config}:/home/step/config/ca.json:ro",
-            "-v",
-            f"{root}:/run/vonk-normalized-secrets/step-ca/root-certificate:ro",
-            "-v",
-            f"{intermediate}:/run/vonk-normalized-secrets/step-ca/intermediate-certificate:ro",
-            "-v",
-            f"{intermediate_key}:/run/vonk-normalized-secrets/step-ca/intermediate-key:ro",
-            "-v",
-            f"{intermediate_password}:/run/vonk-normalized-secrets/step-ca/password:ro",
-            "-v",
-            f"{database}:/home/step/db",
-            "--entrypoint",
-            "step-ca",
-            STEP_CA_IMAGE,
-            "/home/step/config/ca.json",
-            "--password-file",
-            "/run/vonk-normalized-secrets/step-ca/password",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
+        container_args, check=True, capture_output=True, text=True, timeout=30
     )
     try:
         port_output = subprocess.run(
@@ -1018,27 +1134,6 @@ step crypto jwk thumbprint < agent-ca-public.jwk
             timeout=10,
         ).stdout.strip()
         port = port_output.rsplit(":", 1)[1]
-        real_getaddrinfo = socket.getaddrinfo
-        monkeypatch.setattr(
-            socket,
-            "getaddrinfo",
-            lambda host, *args, **kwargs: real_getaddrinfo(
-                "127.0.0.1" if host == "step-ca" else host, *args, **kwargs
-            ),
-        )
-
-        def authority(mapped_port: str) -> StepCertificateAuthority:
-            return StepCertificateAuthority(
-                ca_url=f"https://step-ca:{mapped_port}",
-                root_certificate_path=root,
-                intermediate_certificate_path=intermediate,
-                provisioner_name="vonk-forge-agent",
-                provisioner_kid=kid,
-                credential_path=private_jwk,
-                provisioner_public_jwk_path=public_jwk,
-                timeout_seconds=2.0,
-            )
-
         provider = authority(port)
         deadline = time.monotonic() + 15
         while True:
@@ -1056,7 +1151,8 @@ step crypto jwk thumbprint < agent-ca-public.jwk
                     pytest.fail(f"pinned step-ca did not become healthy: {logs}")
                 time.sleep(0.1)
         now = datetime.now(UTC).replace(microsecond=0)
-        issued = provider.issue_node(NODE_ID, _csr(), now)
+        assert provider.observe_node(retained_csr, now, request=accepted) is None
+        issued = provider.issue_node(NODE_ID, retained_csr, now, request=accepted)
         certificate = x509.load_pem_x509_certificate(issued.certificate_pem)
         extensions = {extension.oid: extension for extension in certificate.extensions}
         assert ExtensionOID.BASIC_CONSTRAINTS not in extensions
@@ -1065,14 +1161,28 @@ step crypto jwk thumbprint < agent-ca-public.jwk
         assert extensions[
             ExtensionOID.EXTENDED_KEY_USAGE
         ].value == x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH])
-        renewed = provider.renew_node(
+        renewal_csr = _csr()
+        renewal_now = datetime.now(UTC).replace(microsecond=0)
+        renewal_request = provider.prepare_request(
             NODE_ID,
-            _csr(),
-            datetime.now(UTC).replace(microsecond=0),
-            request_id="r" * 43,
+            renewal_csr,
+            renewal_now,
+            purpose="rotation",
+            source_serial=issued.serial,
+            generation=2,
+        )
+        renewed = provider.renew_node(
+            NODE_ID, renewal_csr, renewal_now, request=renewal_request
         )
         assert renewed.serial != issued.serial
         provider.revoke_node(issued.serial, datetime.now(UTC).replace(microsecond=0))
+        recovered = provider.observe_node(
+            renewal_csr,
+            datetime.now(UTC).replace(microsecond=0),
+            request=renewal_request,
+        )
+        assert recovered is not None
+        assert recovered.certificate_pem == renewed.certificate_pem
         crl = x509.load_pem_x509_crl(
             provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))
         )

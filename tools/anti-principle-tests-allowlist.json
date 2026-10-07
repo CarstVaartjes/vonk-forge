@@ -2477,28 +2477,20 @@
   ],
   "exceptions": [
     {
-      "path": "control/tests/test_profile_jobrun_host_grant.py",
-      "function": "test_selected_profile_stop_issues_signed_exact_job_target_grant",
-      "kind": "ending-without-fresh-request",
+      "path": "control/tests/export_artifact_workspace_fixture.py",
+      "function": "export",
+      "kind": "refused-read-assertion",
       "count": 1,
-      "reason": "security-edge",
-      "justification": "Tests the actual signed grant for an issued selected-profile exact JobRun target and refusal of a forged target. The Stop remains issued with uncertain work retained; this authority test does not acknowledge the effect, end the lifecycle or claim released capacity."
+      "reason": "service-absent",
+      "justification": "GET Fleet succeeds; POST artifact create has no installed artifact service and deliberately returns503. No read refusal or lifecycle completion."
     },
     {
-      "path": "control/tests/test_profile_jobrun_host_wire_bridge.py",
-      "function": "test_selected_profile_job_target_grant_is_accepted_by_rust_helper",
-      "kind": "ending-without-fresh-request",
-      "count": 1,
-      "reason": "security-edge",
-      "justification": "Tests the native Rust verifier accepting the unchanged signed grant produced for an issued selected-profile exact JobRun Stop. Verification authorizes only that target; it does not execute or acknowledge Stop, end the lifecycle or claim released capacity."
-    },
-    {
-      "path": "control/tests/test_artifact_job_lifecycle.py",
-      "function": "test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt",
-      "kind": "ending-without-fresh-request",
-      "count": 1,
-      "reason": "security-edge",
-      "justification": "Tests that a stored typed lease-expiry failure with no explicit active-scope flag remains unknown and issues only a running exact-target Stop, retaining physical authority until acknowledgement. The fixture deliberately supplies failed stored rows and never proves absence or release; the connected real-producer exact-Stop-to-fresh-admission test separately proves recovery."
+      "path": "control/tests/export_observation_transfer_fixtures.py",
+      "function": "_export_peer_response_errors",
+      "kind": "refused-read-assertion",
+      "count": 2,
+      "reason": "input-validation",
+      "justification": "Exports auth401, invalidinteger422 and mocked dependency503 exactbytes for other language consumers; no durable effect or read-recovery claim."
     },
     {
       "path": "control/tests/test_artifact_job_lifecycle.py",
@@ -2507,6 +2499,22 @@
       "count": 2,
       "reason": "security-edge",
       "justification": "An issued irreversible artifact job has an unobserved effect after lease expiry; replaying it or releasing its reservation would duplicate user work. The connected test retains ownership across Controller restart until the superseding Stop receives the exact old fenced cancellation acknowledgement, then proves same-key Stop replay, SQL hold release, fresh inventory, and fresh same-scope run/job admission with an actual agent claim."
+    },
+    {
+      "path": "control/tests/test_cli_update_contract.py",
+      "function": "test_authenticated_contract_complete_membership_fault_recovery",
+      "kind": "refused-read-assertion",
+      "count": 1,
+      "reason": "dependency-unavailable",
+      "justification": "All257 heartbeat identities persisted; malformed stored identity gives retry503, same row repaired then same authenticated read compatible; mixed-process TTL repair also verified."
+    },
+    {
+      "path": "control/tests/test_consumer_corpus_boundaries.py",
+      "function": "test_real_state_writer_restart_replay_shares_leaf_with_job_response",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "recipe_stop_payload is construction only; Rust StateStore finish/reopen/replay preservesdiagnostics and actual job API200. It does not end a production workload."
     },
     {
       "path": "control/tests/test_fleet_profile_continuity.py",
@@ -2541,6 +2549,38 @@
       "reason": "dependency-unavailable"
     },
     {
+      "path": "control/tests/test_observation_capture_postgres.py",
+      "function": "test_real_sql_capture_timeout_is_retryable_and_same_read_repairs",
+      "kind": "refused-read-assertion",
+      "count": 1,
+      "reason": "dependency-unavailable",
+      "justification": "Real PG ACCESS EXCLUSIVE dependency lock causes retry503, unrelated read200, rollback then exact original authenticated read200 and typed complete identity."
+    },
+    {
+      "path": "control/tests/test_observation_transfer.py",
+      "function": "test_global_validation_error_bytes_match_streamed_route_and_cli_contract",
+      "kind": "refused-read-assertion",
+      "count": 2,
+      "reason": "input-validation",
+      "justification": "Invalid integer input deliberately422; validates actual global problem schema and CLI exception. No valid request is refused."
+    },
+    {
+      "path": "control/tests/test_observation_transfer.py",
+      "function": "test_platform_capture_failure_bytes_preserve_retry_through_cli",
+      "kind": "refused-read-assertion",
+      "count": 1,
+      "reason": "dependency-unavailable",
+      "justification": "Mock capture raises canonical retry503; proves exact API schema/RetryAfter and CLI ControlUnavailable. Real SQL restoration proof is separate index4."
+    },
+    {
+      "path": "control/tests/test_operation_response_budget_installed_cli.py",
+      "function": "test_installed_activity_byte_continuation_and_aggregate_fact_recovery",
+      "kind": "refused-read-assertion",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "Protected large optional progress becomes unknown200; same detail repairs. Indivisible identity allocation503 obeys existing byte owner; exact continuation resumes after field repair with same IDs/total."
+    },
+    {
       "path": "control/tests/test_profile_adapter_continuity.py",
       "function": "test_selected_cancel_observes_borrowed_agent_receipt_before_completion",
       "kind": "ending-without-fresh-request",
@@ -2549,12 +2589,76 @@
       "justification": "Tests exact cancellation acknowledgement while a borrowed effect remains live; its mocked observation seam cannot prove fresh product admission."
     },
     {
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "function": "test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retries",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Setup helper _retained_stop triggers lexical ending regex; test retains live owner/rawjournal/reservations on7 ambiguous authority damages and retries due conversion without invented terminal state. No workload ended."
+    },
+    {
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "function": "test_postgres_future_deferred_journals_do_not_starve_an_untouched_valid_row",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "legacy-alias-read",
+      "justification": "Setup helper _retained_stop triggers regex;20 future-deferred journals do not starve untouched valid conversion. Valid owner remains live; no Stop result consumed."
+    },
+    {
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "function": "test_postgres_startup_converts_real_stop_and_continuation_is_idempotent",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "legacy-alias-read",
+      "justification": "Startup converts existing journal; restarted adapter observes same original Stop/request/claims, no dispatch/result or workload end."
+    },
+    {
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "function": "test_retained_exact_stop_conversion_reconnects_without_another_request",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "legacy-alias-read",
+      "justification": "Converts live exact Stop checkpoint and repeats converter/read, preserves child request/id/reservations. No Stop result or capacity release occurs."
+    },
+    {
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "function": "test_retained_unknown_projection_preserves_outer_metadata_and_original_journal",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "legacy-alias-read",
+      "justification": "Read-only projection of legacy/malformed journal retains rawbytes and unknown; setup helper causes lexical ending finding. No workload end."
+    },
+    {
       "path": "control/tests/test_profile_continuity_postgres.py",
       "function": "test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cleanup",
       "kind": "ending-without-fresh-request",
       "count": 1,
       "reason": "security-edge",
       "justification": "Tests retaining live authorized adopted work across aggregate failure and releasing only replaced exact effects; the final lost-child observation intentionally preserves adopted authority."
+    },
+    {
+      "path": "control/tests/test_profile_jobrun_host_grant.py",
+      "function": "test_selected_profile_stop_issues_signed_exact_job_target_grant",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Helper issues exact Stop grant and verifies signature; wrong runtime target refuses. Does not execute Stop or consume result."
+    },
+    {
+      "path": "control/tests/test_profile_jobrun_host_wire_bridge.py",
+      "function": "test_selected_profile_job_target_grant_is_accepted_by_rust_helper",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Same real signed grant parsed by actual Rust helper and echoed byteexact; no Stop execution or terminal capacity claim."
+    },
+    {
+      "path": "control/tests/test_profile_stop_effect_adoption_postgres.py",
+      "function": "test_postgres_stop_adoption_loses_authority_on_exact_refusal",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Selected cancellation or exact child identity corruption must revoke inherited cleanup authority; original workload not ended. Wrong request/payload must never gain authority by retry/fresh dummy."
     },
     {
       "path": "control/tests/test_recipe_image_availability_bookkeeping.py",
@@ -2574,6 +2678,14 @@
     },
     {
       "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_role_phases_use_exact_stop_identity_without_launch_history",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "Pure canonical Stop payload and role-order parser test; calls only payload construction and _role_phases, with no operation execution, ending, effect acknowledgement, capacity release or fresh-admission claim."
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
       "function": "test_stop_works_without_start_jobs_and_with_unreadable_launch_plan",
       "kind": "ending-without-fresh-request",
       "count": 1,
@@ -2589,12 +2701,36 @@
       "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission."
     },
     {
-      "path": "control/tests/test_recipe_operation_bookkeeping.py",
-      "function": "test_role_phases_use_exact_stop_identity_without_launch_history",
+      "path": "tests/scripts/test_retry_dependency_fetch.py",
+      "function": "test_unbounded_pip_install_is_refused_before_real_child",
       "kind": "ending-without-fresh-request",
       "count": 1,
-      "reason": "input-validation",
-      "justification": "Pure canonical Stop payload and role-order parser test; calls only payload construction and _role_phases, with no operation execution, ending, effect acknowledgement, capacity release or fresh-admission claim."
+      "reason": "security-edge",
+      "justification": "Invalid pip locked-command provenance/hashes/cache/venv returns64 before any realchild; fetcher state unchanged. No resource/workload end."
+    },
+    {
+      "path": "control/tests/test_profile_jobrun_host_grant.py",
+      "function": "test_selected_profile_stop_issues_signed_exact_job_target_grant",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests the actual signed grant for an issued selected-profile exact JobRun target and refusal of a forged target. The Stop remains issued with uncertain work retained; this authority test does not acknowledge the effect, end the lifecycle or claim released capacity."
+    },
+    {
+      "path": "control/tests/test_profile_jobrun_host_wire_bridge.py",
+      "function": "test_selected_profile_job_target_grant_is_accepted_by_rust_helper",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests the native Rust verifier accepting the unchanged signed grant produced for an issued selected-profile exact JobRun Stop. Verification authorizes only that target; it does not execute or acknowledge Stop, end the lifecycle or claim released capacity."
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests that a stored typed lease-expiry failure with no explicit active-scope flag remains unknown and issues only a running exact-target Stop, retaining physical authority until acknowledgement. The fixture deliberately supplies failed stored rows and never proves absence or release; the connected real-producer exact-Stop-to-fresh-admission test separately proves recovery."
     },
     {
       "path": "control/tests/test_recipe_operations.py",

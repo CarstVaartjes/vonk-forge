@@ -93,8 +93,8 @@ class FleetEvent:
     expires_at: datetime
 
 
-class FleetStoredEventUnavailable(ValueError):
-    """A durable event cursor is known but its saved change is unreadable."""
+class _FleetStoredEventGap(Exception):
+    """Unwind only replay into its owning typed refresh notice, never a refusal."""
 
     def __init__(self, event_cursor: int) -> None:
         super().__init__("Fleet stored event payload is unavailable")
@@ -379,7 +379,7 @@ class FleetEventRepository:
                     row[3], row[5], row[6], row[4], row[7]
                 )
             except ValueError as error:
-                raise FleetStoredEventUnavailable(row[2]) from error
+                raise _FleetStoredEventGap(row[2]) from error
             events.append(
                 FleetEvent(
                     id=row[2],

@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import Field
+from vonk_agent_protocol import LifecycleState
 
 from .fleet_profile_contract import (
     FleetProfileSwitchChildKind,
@@ -31,7 +32,9 @@ class ProfileAdapterConversionOutcome(StrictModel):
 class _RetainedChild(StrictModel):
     operation_id: UuidId
     kind: FleetProfileSwitchChildKind
-    state: Literal["succeeded", "failed", "cancelled"]
+    state: Literal[
+        LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+    ]
     result: FleetProfileSwitchChildResult | None = None
 
 

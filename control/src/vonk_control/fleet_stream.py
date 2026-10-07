@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel
+from vonk_agent_protocol.reason_codes import ProjectionCode
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -18,7 +19,7 @@ from .fleet_events import (
     FleetEvent,
     FleetEventRepository,
     FleetReplayBatch,
-    FleetStoredEventUnavailable,
+    _FleetStoredEventGap,
 )
 from .fleet_projection import telemetry_point
 from .fleet_stream_contract import (
@@ -85,7 +86,7 @@ def _event_frame(
                 measured += len(piece.encode("utf-8"))
                 if measured > MAX_CONTROL_DOCUMENT_BYTES:
                     issue = FleetFrameIssue(
-                        reason_code="fleet.frame_budget_exceeded",
+                        reason_code=ProjectionCode.FLEET_FRAME_BUDGET_EXCEEDED,
                         observed_bytes_at_least=measured,
                         budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
                     )
@@ -95,7 +96,7 @@ def _event_frame(
                 break
     except (TypeError, ValueError, OverflowError, UnicodeError):
         issue = FleetFrameIssue(
-            reason_code="fleet.frame_encoding_unavailable",
+            reason_code=ProjectionCode.FLEET_FRAME_ENCODING_UNAVAILABLE,
             observed_bytes_at_least=None,
             budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
         )
@@ -166,7 +167,7 @@ class FleetStream:
                 last_poll = self._monotonic()
                 try:
                     replay = self._events.replay_after(current_cursor, now, limit=128)
-                except FleetStoredEventUnavailable as error:
+                except _FleetStoredEventGap as error:
                     yield _event_frame(
                         error.event_cursor,
                         "fleet-refresh",
@@ -174,7 +175,7 @@ class FleetStream:
                             reset_reason="frame-unavailable",
                             event_cursor=error.event_cursor,
                             issue=FleetFrameIssue(
-                                reason_code="fleet.stored_event_payload_unavailable",
+                                reason_code=ProjectionCode.FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE,
                                 observed_bytes_at_least=None,
                                 budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
                             ),

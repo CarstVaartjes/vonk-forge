@@ -64,6 +64,11 @@ jobs:
       - parallel:
           - name: Set up Docker Buildx
             uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+            with:
+              # This GitHub-hosted VM is disposable. Cleanup still stops and
+              # removes its builder; VM teardown discards the local state volume.
+              # Cross-run reuse uses the verified GHA caches, never this volume.
+              keep-state: true
 
           - name: Install Skopeo from Ubuntu
             shell: bash
@@ -92,7 +97,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for role in hermes litellm; do
+          for role in hermes litellm ca; do
             scripts/dev-image-inputs prepare "$role" "$GITHUB_SHA" \
               "$RUNNER_TEMP/image-contexts/$role" >> "$GITHUB_OUTPUT"
           done
@@ -109,6 +114,12 @@ jobs:
             with:
               path: ${{ runner.temp }}/accepted-image-cache/litellm
               key: accepted-litellm-${{ steps.image_inputs.outputs.litellm_key }}
+
+          - name: Restore accepted ca digest and signed evidence
+            uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+            with:
+              path: ${{ runner.temp }}/accepted-image-cache/ca
+              key: accepted-ca-${{ steps.image_inputs.outputs.ca_key }}
 
       - parallel:
           - name: Revalidate accepted hermes image for reuse
@@ -131,6 +142,17 @@ jobs:
               scripts/reuse-development-image litellm "$GITHUB_SHA" \
                 "$RUNNER_TEMP/accepted-image-cache/litellm" \
                 "$RUNNER_TEMP/litellm.role-receipt.json" \
+                "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+          - name: Revalidate accepted ca image for reuse
+            id: reuse_ca
+            shell: bash
+            env:
+              GH_TOKEN: ${{ github.token }}
+            run: |
+              scripts/reuse-development-image ca "$GITHUB_SHA" \
+                "$RUNNER_TEMP/accepted-image-cache/ca" \
+                "$RUNNER_TEMP/ca.role-receipt.json" \
                 "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
       - name: Log in for digest-only image staging
@@ -224,6 +246,25 @@ jobs:
               cache-from: type=gha,scope=vonk-forge-litellm
               cache-to: type=gha,mode=max,scope=vonk-forge-litellm
 
+          - name: Build CA once to local OCI and exact registry digest
+            id: build_ca
+            if: steps.reuse_ca.outputs.digest == ''
+            uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+            with:
+              context: ${{ runner.temp }}/image-contexts/ca
+              file: ${{ runner.temp }}/image-contexts/ca/deploy/compose/step-ca/Dockerfile
+              platforms: linux/amd64,linux/arm64
+              outputs: |
+                type=oci,dest=${{ runner.temp }}/vonk-forge-ca.oci.tar
+                type=image,name=ghcr.io/carstvaartjes/vonk-forge-ca,push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=true
+              sbom: true
+              provenance: mode=max
+              labels: |
+                org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+                org.opencontainers.image.revision=${{ github.sha }}
+              cache-from: type=gha,scope=vonk-forge-ca
+              cache-to: type=gha,mode=max,scope=vonk-forge-ca
+
       # Each image built here is scanned by its pushed digest (amd64; the
       # arm64 variant is built from the same packages) before acceptance.
       - name: Scan the api image for fixable vulnerabilities
@@ -264,6 +305,17 @@ jobs:
         with:
           image: ghcr.io/carstvaartjes/vonk-forge-litellm@${{ steps.build_litellm.outputs.digest }}
           category: development-litellm
+          # An upstream application release with a thin layer of ours.
+          gate: "false"
+
+      - name: Scan the ca image for fixable vulnerabilities
+        if: steps.reuse_ca.outputs.digest == ''
+        uses: ./.github/actions/image-scan
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image: ghcr.io/carstvaartjes/vonk-forge-ca@${{ steps.build_ca.outputs.digest }}
+          category: development-ca
           # An upstream application release with a thin layer of ours.
           gate: "false"
 
@@ -352,6 +404,17 @@ jobs:
                 "${{ steps.build_litellm.outputs.digest }}" \
                 "$RUNNER_TEMP/litellm.role-receipt.json"
 
+          - name: Deep-scan exact CA build and bind its remote digest
+            if: steps.reuse_ca.outputs.digest == ''
+            shell: bash
+            run: |
+              scripts/accept-development-image-archive \
+                ca "$RUNNER_TEMP/vonk-forge-ca.oci.tar" \
+                "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+                ghcr.io/carstvaartjes/vonk-forge-ca \
+                "${{ steps.build_ca.outputs.digest }}" \
+                "$RUNNER_TEMP/ca.role-receipt.json"
+
       - parallel:
           - name: Upload exact API acceptance receipt
             uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -385,6 +448,14 @@ jobs:
               retention-days: 1
               path: ${{ runner.temp }}/litellm.role-receipt.json
 
+          - name: Upload exact CA acceptance receipt
+            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+            with:
+              name: development-role-receipt-ca-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+              if-no-files-found: error
+              retention-days: 1
+              path: ${{ runner.temp }}/ca.role-receipt.json
+
       - name: Validate accepted image evidence
         id: images
         shell: bash
@@ -400,6 +471,7 @@ jobs:
           API_DIGEST: ${{ steps.images.outputs.api_digest }}
           HERMES_DIGEST: ${{ steps.images.outputs.hermes_digest }}
           LITELLM_DIGEST: ${{ steps.images.outputs.litellm_digest }}
+          CA_DIGEST: ${{ steps.images.outputs.ca_digest }}
           WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
         run: |
           set -euo pipefail
@@ -410,6 +482,7 @@ jobs:
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$WORKER_DIGEST" \
             --hermes-image "ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$HERMES_DIGEST" \
             --litellm-image "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-$GITHUB_SHA@$LITELLM_DIGEST" \
+            --ca-image "ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-$GITHUB_SHA@$CA_DIGEST" \
             --channel pinned
           scripts/render-dev-compose --template deploy/compose/compose.yaml \
             --output "$RUNNER_TEMP/accepted/docker-compose.dev.yml" \
@@ -417,6 +490,7 @@ jobs:
             --worker-image ghcr.io/carstvaartjes/vonk-forge-worker:dev \
             --hermes-image "ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$HERMES_DIGEST" \
             --litellm-image "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-$GITHUB_SHA@$LITELLM_DIGEST" \
+            --ca-image "ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-$GITHUB_SHA@$CA_DIGEST" \
             --channel dev
           docker compose --env-file deploy/compose/tests/test.env \
             -f "$RUNNER_TEMP/accepted/docker-compose.pinned.yml" config -q
@@ -461,6 +535,13 @@ jobs:
               ghcr.io/carstvaartjes/vonk-forge-litellm
               "${{ steps.images.outputs.litellm_digest }}" - "$GITHUB_SHA"
 
+          - name: Verify exact digest-only CA manifest and attestations
+            shell: bash
+            run: >-
+              scripts/verify-published-image ca
+              ghcr.io/carstvaartjes/vonk-forge-ca
+              "${{ steps.images.outputs.ca_digest }}" - "$GITHUB_SHA"
+
       - name: Confirm accepted inputs
         shell: bash
         run: |
@@ -480,7 +561,7 @@ jobs:
             "$RUNNER_TEMP/accepted/acceptance-receipt.json" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             "$RUNNER_TEMP/accepted"
-          for role in api worker hermes litellm; do
+          for role in api worker hermes litellm ca; do
             accepted_digest=$(jq -er \
               --arg role "$role" \
               '.roles[$role].manifest_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
@@ -548,12 +629,23 @@ jobs:
                 "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" \
                 "$RUNNER_TEMP/litellm.accepted-digest"
 
+          - name: Publish immutable tested CA image
+            shell: bash
+            env:
+              IMAGE: ghcr.io/carstvaartjes/vonk-forge-ca
+              DIGEST: ${{ steps.accepted.outputs.ca_digest }}
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
+            run: |
+              scripts/publish-immutable-image ca \
+                "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" \
+                "$RUNNER_TEMP/ca.accepted-digest"
+
       - name: Collect immutable tested image digests
         id: publish
         shell: bash
         run: |
           set -euo pipefail
-          for identity in api worker hermes litellm; do
+          for identity in api worker hermes litellm ca; do
             digest_file="$RUNNER_TEMP/$identity.accepted-digest"
             [[ -f "$digest_file" && ! -L "$digest_file" ]]
             digest=$(tr -d '\r\n' < "$digest_file")
@@ -594,6 +686,14 @@ jobs:
               IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: scripts/verify-published-image litellm "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
 
+          - name: Verify immutable CA manifest and attestations
+            shell: bash
+            env:
+              DIGEST: ${{ steps.publish.outputs.ca_digest }}
+              IMAGE: ghcr.io/carstvaartjes/vonk-forge-ca
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
+            run: scripts/verify-published-image ca "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
+
       - name: Recheck main before signing
         shell: bash
         run: |
@@ -631,6 +731,14 @@ jobs:
             with:
               subject-name: ghcr.io/carstvaartjes/vonk-forge-litellm
               subject-digest: ${{ steps.publish.outputs.litellm_digest }}
+              push-to-registry: true
+
+          - name: Sign accepted CA image provenance
+            id: sign_ca
+            uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+            with:
+              subject-name: ghcr.io/carstvaartjes/vonk-forge-ca
+              subject-digest: ${{ steps.publish.outputs.ca_digest }}
               push-to-registry: true
 
       - parallel:
@@ -672,6 +780,26 @@ jobs:
               scripts/reuse-development-image litellm "$GITHUB_SHA" \
                 "$RUNNER_TEMP/accepted-image-cache/litellm" \
                 "$RUNNER_TEMP/litellm.cache-check.json" \
+                "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+
+          - name: Retain signed ca acceptance for identical future inputs
+            if: steps.reuse_ca.outputs.digest == ''
+            shell: bash
+            env:
+              GH_TOKEN: ${{ github.token }}
+              BUNDLE: ${{ steps.sign_ca.outputs.bundle-path }}
+              DIGEST: ${{ steps.publish.outputs.ca_digest }}
+            run: |
+              set -euo pipefail
+              install -d -m 0700 "$RUNNER_TEMP/accepted-image-cache/ca"
+              jq -n --arg digest "$DIGEST" --arg build_commit "$GITHUB_SHA" \
+                '{digest: $digest, build_commit: $build_commit}' \
+                > "$RUNNER_TEMP/accepted-image-cache/ca/image.json"
+              cp -- "$BUNDLE" "$RUNNER_TEMP/accepted-image-cache/ca/provenance.json"
+              # Exercise the real signed-cache consumer before saving a new entry.
+              scripts/reuse-development-image ca "$GITHUB_SHA" \
+                "$RUNNER_TEMP/accepted-image-cache/ca" \
+                "$RUNNER_TEMP/ca.cache-check.json" \
                 "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
 
       - name: Upload Compose artifact

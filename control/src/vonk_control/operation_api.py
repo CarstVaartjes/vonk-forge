@@ -1181,8 +1181,12 @@ def _response_bytes(response: StrictModel) -> int:
     return len(canonical_message(serialize_json_value(response)))
 
 
-class OperationResponseTooLarge(RuntimeError):
-    """A genuinely indivisible observation cannot fit the owning reader."""
+class _OperationResponseTooLarge(Exception):
+    """Internal unwind to the owning prefix/detail response, never lifecycle state.
+
+    Only the fixed reader allocation is enforced. A later list row preserves
+    its fitting prefix; an indivisible first row is a declared read failure.
+    """
 
     def __init__(self, observed_bytes: int) -> None:
         super().__init__(
@@ -1229,7 +1233,7 @@ def bounded_operation_detail(
         if _response_bytes(detail) + envelope_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
             return detail
     # Never truncate identity or authority to manufacture a fitting observation.
-    raise OperationResponseTooLarge(_response_bytes(detail) + envelope_bytes)
+    raise _OperationResponseTooLarge(_response_bytes(detail) + envelope_bytes)
 
 
 def bounded_operations_response(
@@ -1272,7 +1276,7 @@ def bounded_operations_response(
         envelope = _response_bytes(single) - _response_bytes(detail)
         try:
             projected_detail = bounded_operation_detail(detail, envelope_bytes=envelope)
-        except OperationResponseTooLarge:
+        except _OperationResponseTooLarge:
             if not projected:
                 raise
             # This row remains the first boundary of a later page. It cannot
@@ -1298,7 +1302,7 @@ def bounded_operations_response(
             operations=[], total=page.total, next_cursor=page.next_cursor
         )
     if best_count == 0:
-        raise OperationResponseTooLarge(cursorless_envelope + prefix_bytes)
+        raise _OperationResponseTooLarge(cursorless_envelope + prefix_bytes)
     return OperationsResponse(
         operations=projected[:best_count], total=page.total, next_cursor=best_cursor
     )

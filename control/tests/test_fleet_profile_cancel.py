@@ -495,11 +495,13 @@ def _agent_service_and_target_claim(
         node = session.get(AgentNode, node_id)
         assert node is not None
         identity = {**PACKAGED_RUNTIME_IDENTITY, "architecture": node.architecture}
+        fingerprint = node.preflight_fingerprint
     claim = claim_agent(
         jobs,
         node_id,
         f"serial-{index}",
         runtime_identity=identity,
+        preflight_fingerprint=fingerprint,
     )
     return jobs, claim
 

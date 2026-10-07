@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::io::{self, BufRead};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -93,7 +94,7 @@ fn persist_binding(
     let _ = start_plan;
     let evidence = recipe_start_result(&input.request);
     let binding = runtime
-        .recipe_run_inspection_plans()?
+        .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))?
         .into_iter()
         .find(|plan| plan.run_id == input.request.run_id)
         .map(|plan| {

@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -21,7 +22,7 @@ from vonk_agent_protocol import canonical_message
 from vonk_control import db, observation_transfer
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_projection import FleetProjection, FleetSnapshot
+from vonk_control.fleet_projection import FleetNode, FleetProjection, FleetSnapshot
 from vonk_control.models import AgentNode, AgentNodeProfile, Base
 from vonk_control.observation_transfer import ObservationTransferRecord
 from vonk_control.platform_observation import PlatformObservation, PlatformObserver
@@ -115,6 +116,7 @@ def _received(body: bytes, resource: str):
         io.BytesIO(body),
         resource=resource,
         record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+        deadline=time.monotonic() + 10,
         validate_record=validate_record,
         validate_payload=validate_payload,
     )
@@ -310,7 +312,12 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
 
 @pytest.mark.parametrize(
     "resource,table",
-    [("fleet", "agent_nodes"), ("platform", "control_process_heartbeats")],
+    [
+        ("fleet", "agent_nodes"),
+        (f"fleet/{NODE}", "agent_nodes"),
+        ("platform", "control_process_heartbeats"),
+        ("cli/contract", "control_process_heartbeats"),
+    ],
 )
 def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
     postgres_engine, monkeypatch, resource, table
@@ -338,6 +345,7 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
             response = peer.get(f"/api/{resource}", headers=headers)
             assert response.status_code == 503
             assert response.headers["retry-after"] == "5"
+            assert response.headers["cache-control"] == "no-store"
             assert response.headers["content-type"] == "application/json"
             assert response.json()["context"]["code"] == "observation-unavailable"
             assert response.json()["context"]["retryable"] is True
@@ -345,13 +353,26 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
             # The lock applies only to this observation's dependency; unrelated
             # work does not wait behind the failed capture transaction.
             other = peer.get(
-                "/api/platform" if resource == "fleet" else "/api/fleet",
+                "/api/platform" if table == "agent_nodes" else "/api/fleet",
                 headers=headers,
             )
             assert other.status_code == 200
             locker.rollback()
         repaired = peer.get(f"/api/{resource}", headers=headers)
         assert repaired.status_code == 200
+        if resource == f"fleet/{NODE}":
+            assert (
+                FleetNode.model_validate_json(repaired.content, strict=True).id == NODE
+            )
+            return
+        if resource == "cli/contract":
+            from vonk_control.cli_update_contract import CliUpdateContract
+
+            contract = CliUpdateContract.model_validate_json(
+                repaired.content, strict=True
+            )
+            assert contract.worker_count == 1
+            return
         document = observation_document(repaired)
         if resource == "fleet":
             assert (

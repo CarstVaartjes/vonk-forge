@@ -51,6 +51,7 @@ from vonk_control.agent_api import (
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, AgentSource, TokenCodec
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.host_helper_authority import (
@@ -75,12 +76,13 @@ from vonk_control.models import (
     RecipeSourceBundle,
     RunNode,
 )
-from vonk_control.pki import CertificateAuthority, IssuedCertificate
+from vonk_control.pki import IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .ca_test_authority import FixtureCertificateAuthority
 from .stored_documents_support import valid_policy_report
 
 NODE_A = "spk_" + "a" * 32
@@ -254,21 +256,27 @@ class CopyBoundedChunk(bytes):
         raise AssertionError("an incoming ASGI chunk must never be concatenated whole")
 
 
-class Authority(CertificateAuthority):
+class Authority(FixtureCertificateAuthority):
     def __init__(self) -> None:
         self.fail_revoke = False
 
     def issue_node(
-        self, node_id: str, public_key_pem: bytes, now: datetime
+        self,
+        node_id: str,
+        public_key_pem: bytes,
+        now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         return IssuedCertificate(
             node_id,
             b"certificate",
             b"chain",
-            "issued-serial",
+            "1",
             "e" * 64,
-            now,
-            now + timedelta(days=1),
+            datetime.fromisoformat(request.not_before),
+            datetime.fromisoformat(request.not_after),
+            generation=request.generation,
         )
 
     def renew_node(
@@ -277,9 +285,9 @@ class Authority(CertificateAuthority):
         public_key_pem: bytes,
         now: datetime,
         *,
-        request_id: str,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
-        return self.issue_node(node_id, public_key_pem, now)
+        return self.issue_node(node_id, public_key_pem, now, request=request)
 
     def revocation_bundle(self, now: datetime) -> bytes:
         return b""
@@ -2445,13 +2453,19 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
     client, services, _, _ = agent_system
     calls = 0
 
-    def fail_issue(*_args: object, **_kwargs: object) -> IssuedCertificate:
+    def fail_issue(
+        _node_id: str,
+        _csr: bytes,
+        _now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
+    ) -> IssuedCertificate:
         nonlocal calls
+        services.enrollment._authority._begin(request)
         calls += 1
         raise RuntimeError("provider response lost")
 
     monkeypatch.setattr(services.enrollment._authority, "issue_node", fail_issue)
-    monkeypatch.setattr(services.enrollment, "_issuance_replay_wait_seconds", 0)
     body = json.loads(valid_enrollment_body(enrollment_grant(services)))
 
     first = client.post("/agent/enroll", json=body)
@@ -2586,15 +2600,20 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
+    with services.enrollment._sessions.begin() as session:
+        source = session.get(AgentCertificate, "serial-a")
+        assert source is not None
+        source.serial = "101"
+        source.fingerprint = "fingerprint-101"
     csr = _csr_for(NODE_A)
     first = client.post(
         "/agent/renew",
-        headers=agent_headers(NODE_A, "serial-a"),
+        headers=agent_headers(NODE_A, "101"),
         json={"node_id": NODE_A, "csr": csr.decode()},
     )
     replay = client.post(
         "/agent/renew",
-        headers=agent_headers(NODE_A, "serial-a"),
+        headers=agent_headers(NODE_A, "101"),
         json={"node_id": NODE_A, "csr": csr.decode()},
     )
     assert first.status_code == replay.status_code == 200
@@ -2646,14 +2665,12 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
         == 204
     )
     assert (
-        client.post(
-            "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
-        ).status_code
+        client.post("/agent/claim", headers=agent_headers(NODE_A, "101")).status_code
         == 401
     )
     assert client.post("/agent/claim", headers=staged_headers).status_code == 204
     with services.sessions() as session:
-        old = session.get(AgentCertificate, "serial-a")
+        old = session.get(AgentCertificate, "101")
         new = session.get(AgentCertificate, issued["serial"])
         assert old is not None and old.state == "revoked" and old.revoked_at is not None
         assert new is not None and new.state == "active" and new.revoked_at is None
@@ -2672,9 +2689,9 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         "a" * 64,
         STOP_PAYLOAD,
     )
-    claim = client.post(
-        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
-    ).json()
+    claimed = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert claimed.status_code == 200
+    claim = claimed.json()
     result = {key: claim[key] for key in ("fence",)} | {
         "state": "failed",
         "result": {"status": "failed", "error_code": "stop_failed"},
@@ -2749,9 +2766,9 @@ def test_failed_result_error_code_obeys_the_shared_contract_rule(
         "a" * 64,
         STOP_PAYLOAD,
     )
-    claim = client.post(
-        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
-    ).json()
+    claimed = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert claimed.status_code == 200
+    claim = claimed.json()
     result = {key: claim[key] for key in ("fence",)} | {
         "state": "failed",
         "result": failure,
@@ -3770,3 +3787,34 @@ def test_reenrollment_refuses_an_unprivileged_actor_before_node_lookup(agent_sys
         json={"request_key": str(uuid.uuid4())},
     )
     assert response.status_code == 403
+
+
+def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial(
+    agent_system, monkeypatch
+) -> None:
+    from vonk_agent_protocol.reason_codes import CertificateCode
+    from vonk_control.step_ca import StepCAError
+
+    client, services, _, _ = agent_system
+    original_issue = services.enrollment._authority.issue_node
+
+    def refuse_capacity(*_args: object, **_kwargs: object) -> IssuedCertificate:
+        raise StepCAError(
+            "capacity refused before commit",
+            reason_code=CertificateCode.RESPONSE_UNREPRESENTABLE,
+        )
+
+    monkeypatch.setattr(services.enrollment._authority, "issue_node", refuse_capacity)
+    body = json.loads(valid_enrollment_body(enrollment_grant(services)))
+    response = client.post("/agent/enroll", json=body)
+    assert response.status_code == 422
+    assert (
+        response.json()["detail"]["reason_code"]
+        == "certificate.response_unrepresentable"
+    )
+    # A repaired capacity policy resumes the accepted grant and CSR rather than
+    # consuming its failure as an authority denial or requiring fresh consent.
+    monkeypatch.setattr(services.enrollment._authority, "issue_node", original_issue)
+    repaired = client.post("/agent/enroll", json=body)
+    assert repaired.status_code == 200
+    assert repaired.json()["node_id"] == NODE_C

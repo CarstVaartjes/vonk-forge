@@ -16,6 +16,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, RootModel, field_validator
 from starlette.responses import StreamingResponse
+from vonk_agent_protocol.reason_codes import ProjectionCode
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -85,7 +86,7 @@ class ObservationTransferComplete(StrictModel):
 class ObservationTransferError(StrictModel):
     type: Literal["error"]
     transfer_id: TransferId
-    reason_code: Literal["observation.transfer_unavailable"]
+    reason_code: Literal[ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE]
     detail: Annotated[str, Field(min_length=1, max_length=256)]
 
 
@@ -217,7 +218,7 @@ def observation_response(
                 ObservationTransferError(
                     type="error",
                     transfer_id=transfer_id,
-                    reason_code="observation.transfer_unavailable",
+                    reason_code=ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE,
                     detail="The frozen observation could not be encoded completely; retry observation.",
                 )
             )
