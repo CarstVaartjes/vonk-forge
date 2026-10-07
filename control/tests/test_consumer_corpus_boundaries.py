@@ -245,6 +245,7 @@ def test_real_state_writer_restart_replay_shares_leaf_with_job_response(
         (503, False, "error-503"),
         (422, False, "error-422-loc-18446744073709551617"),
         (422, False, "error-422-loc-200-digits"),
+        (422, False, "error-422-loc-private-number-object"),
         (200, False, "heartbeat-progress-18446744073709551617"),
         (200, False, "heartbeat-progress-200-digits"),
     ],
@@ -326,8 +327,10 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
         observed = json.loads(result.stdout)
         assert observed["status"] == status
         if status == 422:
-            assert (observed["summary"] is not None) != oversized
-            if not oversized:
+            assert (observed["summary"] is not None) == (
+                not oversized and selected["accepted"]
+            )
+            if not oversized and selected["accepted"]:
                 location = json.loads(selected["text"])["issues"][0]["loc"][2]
                 # The actual reader bounds summaries; huge loc is either represented
                 # faithfully or explicitly clipped by its published summary bound.
