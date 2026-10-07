@@ -15,6 +15,12 @@ from vonk_agent_protocol import (
     InstallationState,
     RecipeStopResult,
     RecipeUninstallResult,
+    RuntimePreflightFindingCode,
+)
+from vonk_agent_protocol.runtime_preflight import (
+    RuntimePreflightFinding,
+    RuntimePreflightRequest,
+    RuntimePreflightResult,
 )
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -31,6 +37,7 @@ from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
+    AgentOperationAttempt,
     AgentPresence,
     CatalogDocumentRevision,
     FleetProfileApplication,
@@ -46,6 +53,7 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.runtime_preflight import mandatory_capabilities
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .preflight_fixtures import record_passing_preflight
@@ -371,6 +379,8 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         assert author is not None
         author.disabled_at = None
         author.role = "administrator"
+    preflight_receipts = []
+    uninstall_fences = []
     # The stored retry deadline, not another load or changed plan, resumes cleanup.
     assert current.next_attempt_at is not None
     for _ in range(16):
@@ -380,14 +390,67 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         worker.tick()
         claim = claim_agent(jobs, node_b, "serial-b")
         if claim is not None:
-            assert claim.operation.value == "recipe.uninstall"
-            jobs.record_result(
-                AgentResult(
-                    fence=claim.fence,
-                    state=AgentResultState.SUCCEEDED,
-                    result=RecipeUninstallResult(),
+            if claim.operation.value == "runtime.preflight.v1":
+                # Uninstall's real phase owner refreshes required runtime evidence
+                # before admission; complete only that exact accepted prerequisite.
+                assert isinstance(claim.payload, RuntimePreflightRequest)
+                cleanup = next(
+                    c
+                    for c in _journal(sessions, accepted.id).pending_children
+                    if c.kind == "cleanup"
                 )
-            )
+                child = coordinator.get(cleanup.operation_id)
+                assert (
+                    child.action == "cleanup"
+                    and child.installation_id == installed_b.owner_id
+                )
+                assert child.node_ids == [node_b]
+                assert child.result is not None and child.result.preflight is not None
+                with sessions() as session:
+                    operation = session.scalar(
+                        select(AgentOperation)
+                        .join(
+                            AgentOperationAttempt,
+                            AgentOperationAttempt.operation_id == AgentOperation.id,
+                        )
+                        .where(AgentOperationAttempt.fence == claim.fence)
+                    )
+                    assert operation is not None and operation.node_id == node_b
+                    assert (
+                        operation.parent_job_id == child.result.preflight.pending_job_id
+                    )
+                    node = session.get(AgentNode, node_b)
+                    assert node is not None and node.preflight_fingerprint is not None
+                    fingerprint = node.preflight_fingerprint
+                jobs.record_result(
+                    AgentResult(
+                        fence=claim.fence,
+                        state=AgentResultState.SUCCEEDED,
+                        result=RuntimePreflightResult(
+                            fingerprint=fingerprint,
+                            observed_at=int(clock[0].timestamp()),
+                            findings=[
+                                RuntimePreflightFinding(
+                                    capability=value,
+                                    status="passed",
+                                    code=RuntimePreflightFindingCode.AVAILABLE.value,
+                                )
+                                for value in mandatory_capabilities(claim.payload)
+                            ],
+                        ),
+                    )
+                )
+                preflight_receipts.append(claim.fence)
+            else:
+                assert claim.operation.value == "recipe.uninstall"
+                jobs.record_result(
+                    AgentResult(
+                        fence=claim.fence,
+                        state=AgentResultState.SUCCEEDED,
+                        result=RecipeUninstallResult(),
+                    )
+                )
+                uninstall_fences.append(claim.fence)
         if profiles.application(accepted.id).state == "succeeded":
             break
     assert profiles.application(accepted.id).state == "succeeded"
@@ -407,6 +470,9 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         row = session.get(FleetProfileApplication, accepted.id)
         assert row is not None
         assert (row.id, row.request_key, row.plan_digest) == accepted_identity
+    assert uninstall_fences, (
+        "the original accepted cleanup must reach its exact uninstall receipt"
+    )
     assert due_checks, "proof must actually reconnect across persisted retry deadlines"
     if output := os.environ.get("VONK_AUTHOR_CONTINUITY_PROOF_OUTPUT"):
         directory = Path(output)
@@ -420,6 +486,8 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
                     "request_key": accepted_identity[1],
                     "plan_digest": accepted_identity[2],
                     "stop_fence": stop_claim.fence,
+                    "cleanup_preflight_fences": preflight_receipts,
+                    "uninstall_fences": uninstall_fences,
                     "selection": selection,
                     "persisted_due_checks": due_checks,
                     "same_intent_succeeded": True,
