@@ -2,11 +2,83 @@
 //!
 //! No field rules live here: bounds, presence, nullability, defaults and tagged
 //! unions come from the checked-in export of the canonical Pydantic graph.
-use serde_json::Value;
+use serde::{
+    Deserialize, Deserializer,
+    de::{Error, MapAccess, Visitor},
+};
+use serde_json::{Value, value::RawValue};
 use std::{
     collections::BTreeMap,
     sync::{Arc, LazyLock, Mutex},
 };
+
+/// Preserve original JSON kinds before schema validation. Serde's
+/// arbitrary-precision Value visitor recognizes a private number-object marker;
+/// a real input object must remain an object rather than acquire numeric authority.
+/// RawValue also works for nested/from_value deserializers, so there is one path.
+pub(crate) fn deserialize_original_value<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Value, D::Error> {
+    let raw = Box::<RawValue>::deserialize(deserializer)?;
+    original_value(&raw, 0).map_err(D::Error::custom)
+}
+
+pub(crate) fn deserialize_integer_number<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<serde_json::Number, D::Error> {
+    match deserialize_original_value(deserializer)? {
+        Value::Number(number) if !number.to_string().contains(['.', 'e', 'E']) => Ok(number),
+        _ => Err(D::Error::custom("expected an integer token")),
+    }
+}
+
+fn original_value(raw: &RawValue, depth: usize) -> Result<Value, String> {
+    // Retain serde_json's existing nesting resource limit independently of
+    // mathematical integer width. Each raw subtree still uses its JSON parser.
+    if depth >= 128 {
+        return Err("JSON recursion limit exceeded".to_owned());
+    }
+    match raw.get().trim_start().as_bytes().first() {
+        Some(b'{') => {
+            let mut deserializer = serde_json::Deserializer::from_str(raw.get());
+            Deserializer::deserialize_map(&mut deserializer, OriginalObject { depth })
+                .map_err(|error| error.to_string())
+        }
+        Some(b'[') => {
+            let members: Vec<Box<RawValue>> =
+                serde_json::from_str(raw.get()).map_err(|error| error.to_string())?;
+            members
+                .iter()
+                .map(|member| original_value(member, depth + 1))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::Array)
+        }
+        // Only actual scalar tokens reach this visitor. Arbitrary-precision
+        // numeric lexemes remain exact; an input map cannot imitate its marker.
+        _ => serde_json::from_str(raw.get()).map_err(|error| error.to_string()),
+    }
+}
+
+struct OriginalObject {
+    depth: usize,
+}
+
+impl<'de> Visitor<'de> for OriginalObject {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON object")
+    }
+
+    fn visit_map<M: MapAccess<'de>>(self, mut members: M) -> Result<Value, M::Error> {
+        let mut object = serde_json::Map::new();
+        while let Some((key, raw)) = members.next_entry::<String, Box<RawValue>>()? {
+            let value = original_value(&raw, self.depth + 1).map_err(M::Error::custom)?;
+            object.insert(key, value);
+        }
+        Ok(Value::Object(object))
+    }
+}
 
 static SCHEMA: LazyLock<Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../schema/wire.json"))
@@ -149,6 +221,83 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
+// A canonical float owner validates the finite IEEE754 value produced by its
+// parser, not the mathematical value of an arbitrary-precision JSON lexeme.
+// Integer owners keep exact tokens and bounds; no machine cap is introduced.
+fn materialize_float_numbers(pointer: &str, value: &mut Value) -> Result<(), String> {
+    let schema = SCHEMA
+        .pointer(pointer.trim_start_matches('#'))
+        .ok_or("unknown wire schema path")?;
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        return materialize_float_numbers(reference, value);
+    }
+    for keyword in ["anyOf", "oneOf"] {
+        if let Some(variants) = schema.get(keyword).and_then(Value::as_array) {
+            let integer_token = value
+                .as_number()
+                .is_some_and(|number| !number.to_string().contains(['.', 'e', 'E']));
+            let integer_branches: Vec<_> = variants
+                .iter()
+                .enumerate()
+                .filter(|(_, variant)| {
+                    variant.get("type").and_then(Value::as_str) == Some("integer")
+                })
+                .map(|(index, _)| index)
+                .collect();
+            if integer_token && !integer_branches.is_empty() {
+                // Preserve the canonical strict integer branch, including
+                // rejection of an out-of-range token instead of float fallback.
+                return Ok(());
+            }
+            for (index, _) in variants.iter().enumerate() {
+                let branch = format!("{pointer}/{keyword}/{index}");
+                let mut candidate = value.clone();
+                if materialize_float_numbers(&branch, &mut candidate).is_ok()
+                    && validator(&branch)?.is_valid(&candidate)
+                {
+                    *value = candidate;
+                    return Ok(());
+                }
+            }
+            return Ok(());
+        }
+    }
+    if schema.get("type").and_then(Value::as_str) == Some("number") && value.is_number() {
+        let float = value
+            .as_f64()
+            .filter(|number| number.is_finite())
+            .ok_or("floating wire value must be finite")?;
+        *value = Value::Number(
+            serde_json::Number::from_f64(float).ok_or("floating wire value must be finite")?,
+        );
+        return Ok(());
+    }
+    if let Some(object) = value.as_object_mut() {
+        let properties = schema.get("properties").and_then(Value::as_object);
+        for (name, child) in object {
+            if properties.is_some_and(|properties| properties.contains_key(name)) {
+                materialize_float_numbers(
+                    &format!("{pointer}/properties/{}", pointer_component(name)),
+                    child,
+                )?;
+            } else if schema
+                .get("additionalProperties")
+                .is_some_and(Value::is_object)
+            {
+                materialize_float_numbers(&format!("{pointer}/additionalProperties"), child)?;
+            }
+        }
+    }
+    if schema.get("items").is_some()
+        && let Some(array) = value.as_array_mut()
+    {
+        for child in array {
+            materialize_float_numbers(&format!("{pointer}/items"), child)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SchemaTransform {
     ReadAliases,
@@ -221,6 +370,7 @@ pub(crate) fn validate_and_materialize(name: &str, value: &mut Value) -> Result<
     {
         object.retain(|key, _| properties.contains_key(key));
     }
+    materialize_float_numbers(&pointer, value)?;
     let validator = validator(&pointer)?;
     if let Err(error) = validator.validate(&*value) {
         // Only the model and structural path are exposed, never the instance
@@ -243,5 +393,45 @@ mod raw_integer_shape_tests {
     fn generated_tail_rejects_private_number_objects_at_raw_json_boundary() {
         let raw = br#"{"text":"tail","truncated":false,"dropped_bytes":{"$serde_json::private::Number":"2"},"dropped_lines":null}"#;
         assert!(crate::parse_strict::<FailureLogTail>(raw).is_err());
+    }
+
+    #[test]
+    fn scalar_integer_rejects_original_object_and_preserves_wide_number() {
+        let spoof = br#"{"$serde_json::private::Number":"18446744073709551616"}"#;
+        assert!(crate::parse_strict::<crate::integer::Integer>(spoof).is_err());
+        let wide = "9".repeat(200);
+        let value = crate::parse_strict::<crate::integer::Integer>(wide.as_bytes()).unwrap();
+        assert_eq!(value.to_string(), wide);
+        let zero = crate::parse_strict::<crate::integer::Integer>(b"-0").unwrap();
+        assert_eq!(zero, crate::integer::Integer::from(0_u64));
+        assert_eq!(zero.to_string(), "0");
+        assert_eq!(serde_json::to_string(&zero).unwrap(), "0");
+        for invalid in ["1.0", "1e0", "true", "null", "\"2\""] {
+            assert!(crate::parse_strict::<crate::integer::Integer>(invalid.as_bytes()).is_err());
+        }
+    }
+
+    #[test]
+    fn original_kind_is_preserved_for_nested_and_value_deserializers() {
+        // The marker is a legitimate object key when an object is expected;
+        // do not replace shape preservation with a global key blacklist.
+        let raw = r#"{"nested":[{"$serde_json::private::Number":"18446744073709551616"}]}"#;
+        let mut decoder = serde_json::Deserializer::from_str(raw);
+        let value = super::deserialize_original_value(&mut decoder).unwrap();
+        assert!(value["nested"][0].is_object());
+        assert_eq!(
+            value["nested"][0]["$serde_json::private::Number"].as_str(),
+            Some("18446744073709551616")
+        );
+        let through_value = super::deserialize_original_value(value.clone()).unwrap();
+        assert_eq!(through_value, value);
+
+        let raw = r#"{"text":"tail","truncated":false,"dropped_bytes":18446744073709551615,"dropped_lines":null}"#;
+        let tail = crate::parse_strict::<FailureLogTail>(raw.as_bytes()).unwrap();
+        assert_eq!(tail.dropped_bytes, Some(u64::MAX));
+        assert_eq!(
+            crate::passthrough::revalidate::<FailureLogTail>(&tail).unwrap(),
+            tail
+        );
     }
 }

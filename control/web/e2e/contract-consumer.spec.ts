@@ -19,7 +19,7 @@ test("Chromium exercises both actual HTTP consumers with the same canonical body
   const item = cases.find(item => item.id === "job-diagnostics-numeric-envelope" && item.accepted && item.consumers.includes("browser") && item.browserGeneratedMethod === "job" && item.http?.status === 200);
   expect(item, "Hosted canonical producer must supply a real Job response").toBeDefined();
   const http = item!.http!;
-  await page.route(`**${http.path}`, route => route.fulfill({status: http.status, contentType: "application/json", body: http.text}));
+  await page.route(url => url.pathname === http.path, route => route.fulfill({status: http.status, contentType: "application/json", body: http.text}));
   await page.goto("/");
   const exported = await page.evaluate(async ({path}) => {
     const clientPath = "/src/api/client.ts", numericPath = "/src/api/contract-numeric.ts";

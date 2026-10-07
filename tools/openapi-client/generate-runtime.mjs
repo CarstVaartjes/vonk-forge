@@ -152,7 +152,10 @@ const code = standalone(ajv, exports).replace(/require\("([^"]+)"\)\.default/g, 
   return runtimeImports.get(module);
 });
 if (/\brequire\(/.test(code)) throw new Error("Compiled validators contain an unresolved CommonJS runtime dependency");
-const runtimeCode = [...runtimeImports].map(([module, name]) => `import ${name} from ${JSON.stringify(module)};\n`).join("");
+const runtimeCode = [...runtimeImports].map(([module, name]) =>
+  `import ${name}Module from ${JSON.stringify(module)};\n` +
+  `const ${name} = typeof ${name}Module === "function" ? ${name}Module : ${name}Module.default;\n`
+).join("");
 const provenance = `// Generated from canonical OpenAPI SHA256 ${crypto.createHash("sha256").update(raw).digest("hex")}. Do not edit.\n`;
 if (schemaOnly) {
   fs.writeFileSync(process.argv[4], provenance + imports + runtimeCode + code + "\nexport {componentSuite as validateSchema};\n");

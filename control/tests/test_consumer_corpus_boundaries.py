@@ -16,7 +16,13 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from pydantic import ValidationError
-from vonk_agent_protocol import AgentClaim, AgentDirective, AgentProgress, AgentResult
+from vonk_agent_protocol import (
+    AgentClaim,
+    AgentDirective,
+    AgentProgress,
+    AgentResult,
+    OperationProgress,
+)
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control.operation_api import (
@@ -25,6 +31,7 @@ from vonk_control.operation_api import (
     OperationApiServices,
     OperationPage,
 )
+from vonk_control.operation_item_contract import OperationItem, OperationResultFacts
 
 from cluster_profiles.generated_control.api.default import get_job
 from cluster_profiles.generated_control.client import AuthenticatedClient
@@ -44,7 +51,7 @@ from .cross_language_consumer_corpus import (
 )
 from .recipe_stop_fixtures import recipe_stop_payload
 from .test_agent_restart_recovery_wire_bridge import _certificate_files
-from .test_operation_api import EnqueuedJob, _client
+from .test_operation_api import EnqueuedJob, Jobs, _client
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
@@ -117,7 +124,13 @@ def test_lossy_numeric_mutation_is_detected() -> None:
 
 
 def job_diagnostics(job: JobDetailResponse) -> FailureDiagnostics:
-    assert job.operations is not None
+    assert job.state == "failed" and job.kind == "recipe.stop"
+    assert job.targets == [NODE]
+    assert job.projection_issue is None
+    assert job.operations is not None and len(job.operations) == 1
+    assert job.operations[0].id == OPERATION
+    assert job.operations[0].node_id == NODE
+    assert job.operations[0].state == "failed"
     failure = job.operations[0].failure
     assert isinstance(failure, AgentFailureResult)
     assert failure.diagnostics is not None
@@ -127,24 +140,29 @@ def job_diagnostics(job: JobDetailResponse) -> FailureDiagnostics:
 def api_with_diagnostic(leaf: dict):
     # Only the observation source is injected; production create_app, projection,
     # authentication, response serialization, generated HTTP and CLI all execute.
-    item = {
-        "id": OPERATION,
-        "parent_id": EnqueuedJob.id,
-        "node_ids": [NODE],
-        "kind": "recipe.stop",
-        "state": "failed",
-        "attempt": 1,
-        "created_at": "2026-10-07T01:00:00Z",
-        "updated_at": None,
-        "progress": {"phase": "stop", "completed_bytes": 9007199254740993},
-        "result": {
-            "status": "failed",
-            "error_code": "recipe_stop_failed",
-            "reason": "runtime stop failed",
-            "diagnostics": leaf,
-        },
-        "supported_actions": ["inspect"],
-    }
+    jobs = Jobs()
+    jobs.job = EnqueuedJob(state="failed", kind="recipe.stop", targets=(NODE,))
+    failure = AgentFailureResult(
+        status="failed",
+        error_code="recipe_stop_failed",
+        reason="runtime stop failed",
+        diagnostics=FailureDiagnostics.model_validate(leaf),
+    )
+    item = OperationItem(
+        id=OPERATION,
+        job_id=jobs.job.id,
+        parent_id=jobs.job.id,
+        node_id=NODE,
+        node_ids=[NODE],
+        kind="recipe.stop",
+        state="failed",
+        attempt=1,
+        created_at="2026-10-07T01:00:00Z",
+        progress=OperationProgress(phase="stop", completed_bytes=9007199254740993),
+        result=OperationResultFacts.of(failure),
+        agent_receipt=failure,
+        supported_actions=["inspect"],
+    )
     services = OperationApiServices(
         agents=lambda: (),
         job_operations=lambda _id, _cursor, _limit: OperationPage(
@@ -152,7 +170,7 @@ def api_with_diagnostic(leaf: dict):
         ),
         resume_job=lambda _id: None,
     )
-    return _client(operations=services)[:2]
+    return _client(operations=services, jobs=jobs)[:2]
 
 
 @pytest.mark.lane
@@ -245,6 +263,7 @@ def test_real_state_writer_restart_replay_shares_leaf_with_job_response(
         (503, False, "error-503"),
         (422, False, "error-422-loc-18446744073709551617"),
         (422, False, "error-422-loc-200-digits"),
+        (422, False, "error-422-loc-private-number-object"),
         (200, False, "heartbeat-progress-18446744073709551617"),
         (200, False, "heartbeat-progress-200-digits"),
     ],
@@ -326,8 +345,10 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
         observed = json.loads(result.stdout)
         assert observed["status"] == status
         if status == 422:
-            assert (observed["summary"] is not None) != oversized
-            if not oversized:
+            assert (observed["summary"] is not None) == (
+                not oversized and selected["accepted"]
+            )
+            if not oversized and selected["accepted"]:
                 location = json.loads(selected["text"])["issues"][0]["loc"][2]
                 # The actual reader bounds summaries; huge loc is either represented
                 # faithfully or explicitly clipped by its published summary bound.

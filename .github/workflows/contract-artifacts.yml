@@ -43,6 +43,12 @@ jobs:
         run: |
           uv build --project agent_protocol --wheel --out-dir inventory/wheels
           python3 scripts/refresh-protocol-wheel-lock
+      - name: Bootstrap canonical packaged resource from locked dependencies
+        env:
+          PYTHONPATH: control/src:agent_protocol/src:src
+        run: |
+          scripts/retry-dependency-fetch uv sync --project control --frozen --no-install-project --no-install-package vonk-cluster-profiles
+          control/.venv/bin/python scripts/generate-control-clients --cli-update-schema-only
       - name: Prepare locked Python environment
         uses: ./.github/actions/python-env
       - name: Install pinned Rust toolchain

@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
+    AgentResultState,
     InstallationState,
-    LifecycleState,
     RecipeStopResult,
     RecipeUninstallResult,
 )
@@ -291,7 +291,7 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
     jobs.record_result(
         AgentResult(
             fence=stop_claim.fence,
-            state=LifecycleState.SUCCEEDED,
+            state=AgentResultState.SUCCEEDED,
             result=RecipeStopResult(),
         )
     )
@@ -334,7 +334,7 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
             jobs.record_result(
                 AgentResult(
                     fence=claim.fence,
-                    state=LifecycleState.SUCCEEDED,
+                    state=AgentResultState.SUCCEEDED,
                     result=RecipeUninstallResult(),
                 )
             )
