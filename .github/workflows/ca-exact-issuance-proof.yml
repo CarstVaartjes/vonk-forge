@@ -157,7 +157,8 @@ jobs:
               'test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der',
               'test_postgres_controller_process_death_adopts_the_committed_https_leaf',
           }
-          assert expected <= {case.get('name') for case in cases}
+          # JUnit appends parameter IDs; require the test families and check every outcome below.
+          assert expected <= {case.attrib['name'].partition('[')[0] for case in cases}
           assert all(case.find(tag) is None for case in cases for tag in ('skipped', 'failure', 'error'))
           PY
       - name: Upload proofs or dependency locks

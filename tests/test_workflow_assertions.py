@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import re
 import textwrap
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -244,3 +245,46 @@ def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None
     assert "--collect-only" in suite
     assert "not lane" not in run["run"]
     assert "--markers" not in run["run"]
+
+
+@pytest.mark.parametrize(
+    "outcome", [None, "skipped", "failure", "error", "missing", "empty"]
+)
+def test_ca_provider_outcomes_accept_parameters_but_require_success(
+    tmp_path, monkeypatch, outcome: str | None
+) -> None:
+    """Catch bare-name comparisons and acceptance of incomplete CA evidence."""
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/ca-exact-issuance-proof.yml").read_text()
+    )
+    [step] = [
+        step
+        for step in workflow["jobs"]["connected-proof"]["steps"]
+        if step["name"] == "Require named Controller provider outcomes"
+    ]
+    [block] = list(_PYTHON_HEREDOC.finditer(step["run"]))
+    suite = ET.Element("testsuite")
+    if outcome != "empty":
+        for name in (
+            "test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl",
+            "test_postgres_controller_process_death_adopts_the_committed_https_leaf",
+            "test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der[enrollment]",
+            "test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der[rotation]",
+            "test_additional_regression",
+        ):
+            if outcome == "missing" and "dual_restart" in name:
+                continue
+            case = ET.SubElement(suite, "testcase", name=name)
+            if outcome in {"skipped", "failure", "error"} and "[rotation]" in name:
+                ET.SubElement(case, outcome)
+    output = tmp_path / "artifacts/ca-proof/controller-provider.xml"
+    output.parent.mkdir(parents=True)
+    ET.ElementTree(suite).write(output)
+    monkeypatch.chdir(tmp_path)
+    source = compile(textwrap.dedent(block.group(2)), step["name"], "exec")
+    # Execute the checked-in assertion itself so its behavior cannot drift from this guard.
+    if outcome is None:
+        exec(source, {})  # noqa: S102 - trusted repository workflow, no external input
+    else:
+        with pytest.raises(AssertionError):
+            exec(source, {})  # noqa: S102 - trusted repository workflow, no external input
