@@ -487,6 +487,7 @@ def postgres_after_runtime_asset_restart(tmp_path_factory, postgres_image: str):
         )
 
 
+@pytest.mark.timeout(300)
 def test_real_compose_restart_recovers_after_runtime_assets_arrive(
     postgres_after_runtime_asset_restart,
 ):
