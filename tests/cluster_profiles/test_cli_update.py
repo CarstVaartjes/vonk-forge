@@ -147,6 +147,20 @@ def _signed_publication(
     prefix = f"artifacts/{channel}/releases/{generation}"
     wheel_path = f"{prefix}/cli/{wheel_name}"
     descriptor = {"path": f"{prefix}/example", "sha256": "a" * 64, "size": 1}
+    # CLI proofs do not execute either native installer, but every signed
+    # pointer field must bind actual immutable bytes rather than placeholders.
+    bootstrap_objects = {
+        "nas": b"#!/bin/sh\n# CLI fixture does not install a NAS.\nexit 64\n",
+        "spark": b"#!/bin/sh\n# CLI fixture does not install a Spark.\nexit 64\n",
+    }
+    bootstraps = {
+        kind: {
+            "path": f"{prefix}/bootstraps/{kind}",
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "size": len(content),
+        }
+        for kind, content in bootstrap_objects.items()
+    }
     artifacts = {
         name: dict(descriptor)
         for name in (
@@ -184,7 +198,7 @@ def _signed_publication(
             for name in ("api", "worker", "hermes", "litellm", "ca")
         },
         "artifacts": artifacts,
-        "bootstraps": {"nas": dict(descriptor), "spark": dict(descriptor)},
+        "bootstraps": bootstraps,
     }
     if omit_images:
         del release["images"]
@@ -203,7 +217,10 @@ def _signed_publication(
         f"release_sha256={hashlib.sha256(release_raw).hexdigest()}\n"
         f"release_signature_path={prefix}/release.sig\n"
         f"release_signature_sha256={hashlib.sha256(release_sig).hexdigest()}\n"
-        "nas_path=unused\nnas_sha256=unused\nspark_path=unused\nspark_sha256=unused\n"
+        f"nas_path={bootstraps['nas']['path']}\n"
+        f"nas_sha256={bootstraps['nas']['sha256']}\n"
+        f"spark_path={bootstraps['spark']['path']}\n"
+        f"spark_sha256={bootstraps['spark']['sha256']}\n"
     ).encode()
     pointer = (
         claims
@@ -216,6 +233,10 @@ def _signed_publication(
         f"https://install.vonkforge.ai/{prefix}/release.json": release_raw,
         f"https://install.vonkforge.ai/{prefix}/release.sig": release_sig,
         f"https://install.vonkforge.ai/{wheel_path}": wheel,
+        **{
+            f"https://install.vonkforge.ai/{prefix}/bootstraps/{kind}": content
+            for kind, content in bootstrap_objects.items()
+        },
     }
 
 
