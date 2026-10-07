@@ -26,7 +26,9 @@ use vonk_agent_protocol::{
         CompiledOciError, CompiledOciPaths, ExecInvocationLimits, measure_exec_invocation,
         start_arguments_for_paths,
     },
-    hex_sha256, parse_strict,
+    hex_sha256,
+    integer::Integer,
+    parse_strict,
 };
 use wait_timeout::ChildExt;
 
@@ -3667,10 +3669,9 @@ fn validate_docker_run_with_archive(
                     crate::runtime_fabric::ENVIRONMENT_NAMES.contains(&name)
                 });
                 if let Some(value) = value.strip_prefix("VONK_WORLD_SIZE=") {
-                    let parsed = value
-                        .parse::<u32>()
+                    let parsed: Integer = parse_strict(value.as_bytes())
                         .map_err(|_| OperationError::InvalidOperation)?;
-                    if parsed == 0 || world_size.replace(parsed).is_some() {
+                    if parsed <= 0 || world_size.replace(parsed).is_some() {
                         return Err(OperationError::InvalidOperation);
                     }
                 }
@@ -3708,11 +3709,9 @@ fn validate_docker_run_with_archive(
                     }
                 }
                 if let Some(value) = value.strip_prefix("VONK_RANK=") {
-                    let parsed = value
-                        .parse::<u32>()
-                        .ok()
-                        .ok_or(OperationError::InvalidOperation)?;
-                    if rank.replace(parsed).is_some() {
+                    let parsed: Integer = parse_strict(value.as_bytes())
+                        .map_err(|_| OperationError::InvalidOperation)?;
+                    if parsed < 0 || rank.replace(parsed).is_some() {
                         return Err(OperationError::InvalidOperation);
                     }
                 }
@@ -6836,6 +6835,22 @@ mod tests {
             .map(str::to_owned),
         );
         assert!(validate_docker_run(&arguments, &roots, None).is_ok());
+        let world_size_index = arguments
+            .iter()
+            .position(|arg| arg == "VONK_WORLD_SIZE=2")
+            .unwrap();
+        // These are decimal environment arguments, not machine-sized indexes.
+        // Preserve the exact canonical topology domain before native launch.
+        for world_size in ["18446744073709551616".to_owned(), "9".repeat(200)] {
+            let mut wide = arguments.clone();
+            wide[world_size_index] = format!("VONK_WORLD_SIZE={world_size}");
+            assert!(validate_docker_run(&wide, &roots, None).is_ok());
+        }
+        for invalid in ["-1", "0", "1.0", "1e0", "true"] {
+            let mut invalid_shape = arguments.clone();
+            invalid_shape[world_size_index] = format!("VONK_WORLD_SIZE={invalid}");
+            assert!(validate_docker_run(&invalid_shape, &roots, None).is_err());
+        }
         let mut nonzero_owner = arguments.clone();
         let rank = nonzero_owner
             .iter()
