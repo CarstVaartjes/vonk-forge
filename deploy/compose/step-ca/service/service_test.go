@@ -123,6 +123,28 @@ func TestAuthorityNativeRevocationRemainsEffectiveForJournalObservation(t *testi
  if !found{t.Fatal("fresh CRL omitted journal certificate revocation")}
 }
 
+func TestRuntimeTLSRetainsAuthenticatedClientSelfRevocation(t *testing.T) {
+ f:=newAuthorityFixture(t)
+ _,key,err:=ed25519.GenerateKey(rand.Reader);if err!=nil{t.Fatal(err)}
+ der,err:=x509.CreateCertificateRequest(rand.Reader,&x509.CertificateRequest{Subject:f.csr.Subject,URIs:f.csr.URIs},key);if err!=nil{t.Fatal(err)}
+ f.csr,err=x509.ParseCertificateRequest(der);if err!=nil{t.Fatal(err)};f.binding.CSRSHA256=digest(der)
+ response:=f.call(t,f.binding,f.token(t,f.binding,nil),"issue")
+ leaf:=issuedLeaf(t,response)
+ var issued issuedReply;if err:=json.Unmarshal(response.Body.Bytes(),&issued);err!=nil{t.Fatal(err)}
+ private,err:=x509.MarshalPKCS8PrivateKey(key);if err!=nil{t.Fatal(err)}
+ clientCertificate,err:=tls.X509KeyPair([]byte(strings.Join(issued.Chain,"")),pem.EncodeToMemory(&pem.Block{Type:"PRIVATE KEY",Bytes:private}));if err!=nil{t.Fatal(err)}
+ initial,err:=f.auth.GetTLSCertificate();if err!=nil{t.Fatal(err)}
+ renewer,err:=ca.NewTLSRenewer(initial,f.auth.GetTLSCertificate);if err!=nil{t.Fatal(err)}
+ server:=httptest.NewUnstartedServer(f.handler);server.TLS=serverTLS(f.auth,&config.Config{},renewer);server.StartTLS();defer server.Close()
+ pool:=x509.NewCertPool();pool.AddCert(f.c.Policy.Issuer)
+ client:=&http.Client{Transport:&http.Transport{TLSClientConfig:&tls.Config{MinVersion:tls.VersionTLS12,ServerName:"step-ca",RootCAs:pool,Certificates:[]tls.Certificate{clientCertificate}}},Timeout:5*time.Second}
+ defer client.CloseIdleConnections()
+ raw,_:=json.Marshal(map[string]any{"serial":leaf.SerialNumber.String(),"passive":true,"reasonCode":0})
+ revoked,err:=client.Post(server.URL+"/1.0/revoke","application/json",bytes.NewReader(raw));if err!=nil{t.Fatal(err)};defer revoked.Body.Close()
+ if revoked.StatusCode!=200{t.Fatalf("authenticated client self-revocation failed: %d",revoked.StatusCode)}
+ if observed:=f.call(t,f.binding,f.token(t,f.binding,nil),"observe");observed.Code!=403{t.Fatal("mTLS revocation did not fence journal replay")}
+}
+
 func TestAuthorityHTTPStorageFaultAndLostHTTPRecoverWithoutNewIdentity(t *testing.T) {
  f:=newAuthorityFixture(t)
  f.j.BeforeCommit=func()error{return errors.New("injected real commit boundary failure")}
