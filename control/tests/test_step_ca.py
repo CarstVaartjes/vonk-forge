@@ -700,12 +700,17 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
     assert len(requests) == 1 and requests[0].url.host == "step-ca"
     assert "eyJ" not in str(caught.value)
 
-    def oversized(_: httpx2.Request) -> httpx2.Response:
+    def oversized(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
         return httpx2.Response(201, content=b"{" + b"x" * 2048 + b"}")
 
     bounded, _ = _provider(tmp_path / "bounded", oversized, max_response_bytes=1024)
-    with pytest.raises(StepCAError, match="too large"):
+    with pytest.raises(
+        StepCAError, match="configured CA sign response reader"
+    ) as caught:
         _issue(bounded, NODE_ID, _csr(), NOW)
+    assert caught.value.reason_code == "certificate.response_unrepresentable"
+    assert len(requests) == 1  # The small reader refuses before another HTTP effect.
 
 
 def test_sign_wire_budget_stays_bounded_with_larger_crl_transport_budget(

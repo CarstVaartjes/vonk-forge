@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import (
+from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.enrollment import (
+    MAX_ENROLLMENT_RESPONSE_BYTES,
     EnrollmentBootstrapResponse,
     IssuedCertificateResponse,
-    canonical_message,
 )
-from vonk_agent_protocol.enrollment import MAX_ENROLLMENT_RESPONSE_BYTES
 
 
 @pytest.mark.parametrize("bootstrap", [True, False])

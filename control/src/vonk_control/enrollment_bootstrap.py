@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from vonk_agent_protocol import EnrollmentBootstrapResponse
+from vonk_agent_protocol.enrollment import EnrollmentBootstrapResponse
 
 # The published installer channels. The response contract and the bootstrap
 # configuration both use this one set, and the runtime check derives from it.
