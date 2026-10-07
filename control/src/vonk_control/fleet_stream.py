@@ -88,7 +88,7 @@ def _event_frame(
                 parts.append(piece)
             if issue is not None:
                 break
-    except (ValueError, OverflowError, UnicodeError):
+    except (TypeError, ValueError, OverflowError, UnicodeError):
         issue = FleetFrameIssue(
             reason_code="fleet.frame_encoding_unavailable",
             observed_bytes_at_least=None,

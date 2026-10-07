@@ -1,3 +1,4 @@
+import {FleetEventConnection} from "./fleet-event-connection";
 import {readObservationTransfer} from "./observation-transfer";
 import createClient, {createQuerySerializer} from "openapi-fetch";
 import {ContractResponse, readControlResponse, serializeControlBody, validateControlBody, validateControlParameters} from "./contract-json";
@@ -298,6 +299,10 @@ export class ApiClient implements ControlApi {
       return resultData<unknown>({response, error: value});
     }
     return readObservationTransfer(response, path);
+  }
+
+  fleetEvents(appliedCursor: () => string): FleetEventConnection {
+    return new FleetEventConnection(appliedCursor, response => this.requireAuthentication(response));
   }
 
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {

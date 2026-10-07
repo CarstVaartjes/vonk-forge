@@ -86,7 +86,7 @@ jobs:
           VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
           VONK_OBSERVATION_TRANSFERS: ${{ github.workspace }}/artifacts/observation-transfers/observation-transfers.json
           VONK_CONSUMER_OUTPUT: ${{ github.workspace }}/artifacts/consumer-corpus/browser-exports.json
-        run: npm exec -- vitest run src/api/contract-json.test.ts src/api/observation-transfer.test.ts src/api/client.test.ts src/api/consumer-corpus.test.ts src/api/official-schema.generated.test.ts src/hooks/fleet-stream-state.test.ts src/hooks/use-fleet-stream.test.tsx
+        run: npm exec -- vitest run src/api/contract-json.test.ts src/api/observation-transfer.test.ts src/api/fleet-event-connection.test.ts src/api/client.test.ts src/api/consumer-corpus.test.ts src/api/official-schema.generated.test.ts src/hooks/fleet-stream-state.test.ts src/hooks/use-fleet-stream.test.tsx
         working-directory: control/web
       - name: Verify browser exports through their actual canonical Python owners
         if: ${{ !cancelled() && steps.corpus.outcome == 'success' }}

@@ -1,3 +1,4 @@
+import type {FleetEventStream} from "./fleet-event-connection";
 import type {WireNumber} from "./contract-numeric";
 import type {components, paths} from "./generated";
 
@@ -180,6 +181,7 @@ export interface ControlApi extends LibraryApi {
   profileEndpoints(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
   profileDefinition(number: FleetProfileNumber, signal?: AbortSignal): Promise<ProfileDefinition>;
   cancelProfileApplication(applicationId: string, profileNumber: FleetProfileNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  fleetEvents(appliedCursor: () => string): FleetEventStream;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
   fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode>;

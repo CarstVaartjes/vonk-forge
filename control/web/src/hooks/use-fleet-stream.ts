@@ -1,5 +1,5 @@
 import {LosslessNumber} from "lossless-json";
-import {compareWire, type WireNumber} from "../api/contract-numeric";
+import {compareWire, formatWire, type WireNumber} from "../api/contract-numeric";
 import {validateComponent} from "../api/contract-json";
 import {useCallback, useEffect, useReducer, useRef, useState} from "react";
 import type {
@@ -224,9 +224,7 @@ export function useFleetStream(api: ControlApi) {
 
     currentRefresh.current = signal => requestSnapshot("refresh", signal);
     void requestSnapshot("initial");
-    const source = typeof EventSource === "function"
-      ? new EventSource("/api/fleet/stream")
-      : undefined;
+    const source = api.fleetEvents(() => compareWire(appliedCursor, 0) >= 0 ? formatWire(appliedCursor) : "");
     if (source) {
       source.addEventListener("open", onOpen);
       source.addEventListener("error", onError);
@@ -235,8 +233,6 @@ export function useFleetStream(api: ControlApi) {
       source.addEventListener("node-profile", onSparse);
       source.addEventListener("recipe-state", onSparse);
       source.addEventListener("operation-state", onSparse);
-    } else {
-      onError();
     }
 
     return () => {
