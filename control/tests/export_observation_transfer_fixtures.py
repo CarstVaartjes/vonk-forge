@@ -8,13 +8,96 @@ import json
 import tempfile
 from pathlib import Path
 
+from sqlalchemy import update
+from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_stream import FleetStream
+from vonk_control.models import AgentNode, FleetStreamEvent
 from vonk_control.observation_transfer import (
     ObservationTransferResponse,
     observation_response,
 )
 from vonk_control.strict_json import serialize_json_value
+from vonk_control.telemetry import TelemetryRepository
 
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from tests.test_fleet_stream import (
+    NODE_ID,
+    NOW,
+    _events,
+    _operation_draft,
+    _production_stream_store,
+)
 from tests.test_observation_transfer import _large_snapshot
+
+
+async def _collect(response: ObservationTransferResponse) -> str:
+    pieces: list[bytes] = []
+    async for part in response.body_iterator:
+        pieces.append(part.encode() if isinstance(part, str) else bytes(part))
+    return b"".join(pieces).decode("utf-8", errors="strict")
+
+
+def _export_saved_event_recovery(output: Path) -> None:
+    engine, sessions, repository = _production_stream_store()
+    try:
+        with sessions.begin() as session:
+            session.add(AgentNode(node_id=NODE_ID, state="active", last_seen_at=NOW))
+            event = repository.append_in_session(session, _operation_draft(1))
+            payload = _operation_draft(1).payload.model_dump(mode="json")
+            # Healthy writes are bounded at 8KiB. This models damage to optional
+            # saved outbox decoration, preserving the actual event identity.
+            payload["kind"] = "x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)
+            session.execute(
+                update(FleetStreamEvent)
+                .where(FleetStreamEvent.id == event.id)
+                .values(payload=payload)
+            )
+        stream = FleetStream(
+            repository, TelemetryRepository(sessions, clock=lambda: NOW)
+        )
+
+        async def first_frame() -> str:
+            generator = _events(stream, 0)
+            try:
+                return await anext(generator)
+            finally:
+                await generator.aclose()
+
+        notice = asyncio.run(first_frame())
+        snapshot = FleetProjection(
+            sessions, events=repository, clock=lambda: NOW
+        ).read()
+        assert snapshot.event_cursor == event.id
+        assert snapshot.nodes[0].id == NODE_ID
+        response = observation_response(snapshot, resource="fleet")
+        body = asyncio.run(_collect(response))
+        with sessions.begin() as session:
+            session.execute(
+                update(FleetStreamEvent)
+                .where(FleetStreamEvent.id == event.id)
+                .values(payload=_operation_draft(1).payload.model_dump(mode="json"))
+            )
+        repaired_frame = asyncio.run(first_frame())
+        document = {
+            "notice": notice,
+            "repaired_frame": repaired_frame,
+            "event_cursor": event.id,
+            "path": "/api/fleet",
+            "media_type": response.media_type,
+            "body": body,
+            "payload_json": json.dumps(
+                serialize_json_value(snapshot),
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        }
+        (output / "sparse-event-recovery.json").write_text(
+            json.dumps(document, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+    finally:
+        engine.dispose()
 
 
 def export(output: Path) -> None:
@@ -36,20 +119,12 @@ def export(output: Path) -> None:
             )
             response = observation_response(snapshot, resource="fleet")
 
-            async def collect(response: ObservationTransferResponse) -> str:
-                pieces: list[bytes] = []
-                async for part in response.body_iterator:
-                    pieces.append(
-                        part.encode() if isinstance(part, str) else bytes(part)
-                    )
-                return b"".join(pieces).decode("utf-8", errors="strict")
-
             records.append(
                 {
                     "name": name,
                     "path": "/api/fleet",
                     "media_type": response.media_type,
-                    "body": asyncio.run(collect(response)),
+                    "body": asyncio.run(_collect(response)),
                     "payload_component": "FleetSnapshot",
                     "payload_json": expected,
                 }
@@ -59,6 +134,8 @@ def export(output: Path) -> None:
         json.dumps(records, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+    _export_saved_event_recovery(output)
 
 
 if __name__ == "__main__":

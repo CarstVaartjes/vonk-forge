@@ -40,14 +40,34 @@ test("Chromium rejects an oversized SSE peer frame and later reads a bounded can
   });
   expect(refused).toEqual({refused: true, dispatched: 0});
   await page.unroute(url => url.pathname === path);
-  await page.route(url => url.pathname === path, route => route.fulfill({status: 200, contentType: "text/event-stream", body: 'id: 7\nevent: fleet-refresh\ndata: {"event_cursor":7,"reset_reason":"frame-unavailable","issue":{"reason_code":"fleet.frame_budget_exceeded","observed_bytes_at_least":1048577,"budget_bytes":1048576}}\n\n'}));
-  const recovered = await page.evaluate(async () => {
-    const modulePath = "/src/api/fleet-event-connection.ts", contractPath = "/src/api/contract-json.ts";
+  const recoveryFile = fixtureFile?.replace(/observation-transfers\.json$/, "sparse-event-recovery.json");
+  expect(recoveryFile).toBeDefined();
+  const recovery: {notice: string; repaired_frame: string; event_cursor: number; path: string; media_type: string; body: string; payload_json: string} = JSON.parse(readFileSync(recoveryFile!, "utf8"));
+  await page.route(url => url.pathname === path, route => route.fulfill({status: 200, contentType: "text/event-stream", body: recovery.notice}));
+  await page.route(url => url.pathname === recovery.path, route => route.fulfill({status: 200, contentType: recovery.media_type, body: recovery.body}));
+  const recovered = await page.evaluate(async ({expected}) => {
+    const modulePath = "/src/api/fleet-event-connection.ts", contractPath = "/src/api/contract-json.ts", clientPath = "/src/api/client.ts", numericPath = "/src/api/contract-numeric.ts";
     const {readFleetEvents} = await import(modulePath), {validateComponent} = await import(contractPath);
+    const {ApiClient} = await import(clientPath), {contractEqual} = await import(numericPath);
     const values: unknown[] = [];
     await readFleetEvents(await fetch("/api/fleet/stream"), event => values.push(validateComponent("FleetRefreshEvent", event.data)), () => undefined);
-    return values;
+    // The notice carries no roster. Only the completed transfer may publish it.
+    const snapshot = await new ApiClient().visualFleet();
+    return {values, equal: contractEqual(snapshot, validateComponent("FleetSnapshot", expected)), cursor: snapshot.event_cursor};
+  }, {expected: recovery.payload_json});
+  expect(recovered.values).toHaveLength(1);
+  expect(recovered.values[0]).toMatchObject({event_cursor: recovery.event_cursor, reset_reason: "frame-unavailable", issue: {reason_code: "fleet.frame_budget_exceeded"}});
+  expect(recovered.equal).toBe(true);
+  expect(recovered.cursor).toBe(recovery.event_cursor);
+  await page.unroute(url => url.pathname === path);
+  await page.route(url => url.pathname === path, route => route.fulfill({status: 200, contentType: "text/event-stream", body: recovery.repaired_frame}));
+  const repaired = await page.evaluate(async () => {
+    const modulePath = "/src/api/fleet-event-connection.ts", contractPath = "/src/api/contract-json.ts";
+    const {readFleetEvents} = await import(modulePath), {validateComponent} = await import(contractPath);
+    const events: {type: string; id: string; data: unknown}[] = [];
+    await readFleetEvents(await fetch("/api/fleet/stream"), event => events.push({type: event.type, id: event.lastEventId, data: validateComponent("FleetChangeEvent", event.data)}), () => undefined);
+    return events;
   });
-  expect(recovered).toHaveLength(1);
-  expect(recovered[0]).toMatchObject({event_cursor: 7, reset_reason: "frame-unavailable", issue: {reason_code: "fleet.frame_budget_exceeded"}});
+  expect(repaired).toHaveLength(1);
+  expect(repaired[0]).toMatchObject({type: "operation-state", id: String(recovery.event_cursor), data: {change: {fields: {kind: "deploy"}}}});
 });
