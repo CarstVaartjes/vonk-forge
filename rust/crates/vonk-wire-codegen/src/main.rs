@@ -443,18 +443,14 @@ fn untagged_deserialize_impl(item: &mut syn::ItemEnum, schema_name: Option<&str>
             }
         }
     });
-    let validation = schema_name.map(|schema_name| {
-        quote! {
-            crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
-                .map_err(::serde::de::Error::custom)?;
-        }
-    });
+    let schema_owner = match schema_name {
+        Some(schema_name) => quote! { Some(#schema_name) },
+        None => quote! { None },
+    };
     let implementation = parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                #[allow(unused_mut)]
-                let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
-                #validation
+                let value = crate::wire_schema::deserialize_wire_value(deserializer, #schema_owner)?;
                 #(#branches)*
                 Err(::serde::de::Error::custom(concat!("invalid canonical union ", stringify!(#ident))))
             }
@@ -553,9 +549,7 @@ fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
     Some(parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
-                crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
-                    .map_err(::serde::de::Error::custom)?;
+                let value = crate::wire_schema::deserialize_wire_value(deserializer, Some(#schema_name))?;
                 #raw
                 // An empty message constructs itself without reading `raw`.
                 #[allow(unused_variables)]
