@@ -7484,7 +7484,7 @@ class RecipeOperationService:
                 BookkeepingReason.EVIDENCE_MISMATCH,
                 "profile JobRun Stop reachable run membership changed",
             )
-        reason = "runtime stopped by the newer accepted profile intent"
+        reason = "runtime stopped by the newer accepted workload intent"
         for _target, artifact, source_job, source_operation in proven:
             # The exact Stop receipt proves the runtime absent: a definite,
             # confirmed cancellation of the job and of its order.
