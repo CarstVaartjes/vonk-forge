@@ -40,6 +40,7 @@ from .artifact_lifecycle import (
     require_reference_open,
 )
 from .artifact_reference_scan import require_model_sets_open
+from .compiled_execution_plan import DistributionObjectReceipt, VerifiedModelObject
 from .distribution_assignment import NodeDistributionAssignment
 from .models import (
     ArtifactDistributionAssignment,
@@ -261,7 +262,7 @@ class ModelCacheObjectSource:
     # verified-object service is not importable from this module.
     _service: object
     _manifests: dict[str, tuple[DistributionObject, ...]]
-    _receipts: dict[str, tuple[dict[str, object], ...]]
+    _receipts: dict[str, tuple[VerifiedModelObject, ...]]
     _paths: dict[str, tuple[str, str, object]]
     _open_object: Callable[[str, int], OpenedObject]
 
@@ -274,7 +275,7 @@ class ModelCacheObjectSource:
         self._metadata_guard = Lock()
         self._paths = {}
         self._manifests = dict(manifests)
-        self._receipts: dict[str, tuple[dict[str, object], ...]] = {}
+        self._receipts: dict[str, tuple[VerifiedModelObject, ...]] = {}
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         return self._open_object(digest, expected_bytes)
@@ -315,7 +316,7 @@ class ModelCacheObjectSource:
         self, digest: str, requested: object = None
     ) -> tuple[
         tuple[DistributionObject, ...],
-        tuple[dict[str, object], ...],
+        tuple[VerifiedModelObject, ...],
         dict[str, tuple[str, str, object]],
     ]:
         try:
@@ -357,28 +358,33 @@ class ModelCacheObjectSource:
                     kind="model",
                 )
                 path = descriptor["file"]
+                objects.append(item)
+                paths[item.sha256] = (digest, item.name, path)
+                file_id = descriptor.get("file_id")
+                model_content_sha256 = descriptor.get("model_content_sha256")
+                roles = descriptor.get("roles")
+                if isinstance(file_id, str) and isinstance(model_content_sha256, str):
+                    receipts.append(
+                        VerifiedModelObject(
+                            model_content_sha256=model_content_sha256,
+                            file_id=file_id,
+                            path=item.name,
+                            sha256=item.sha256,
+                            bytes=item.bytes,
+                            roles=list(roles) if isinstance(roles, list) else [],
+                            distribution_object=DistributionObjectReceipt(
+                                name=item.name,
+                                sha256=item.sha256,
+                                bytes=item.bytes,
+                                kind="model",
+                            ),
+                        )
+                    )
             except (KeyError, TypeError, ValueError) as error:
                 raise DistributionError(
                     DistributionCode.MODEL_SET_MISMATCH,
                     "NAS cache manifest is malformed",
                 ) from error
-            objects.append(item)
-            paths[item.sha256] = (digest, item.name, path)
-            file_id = descriptor.get("file_id")
-            model_content_sha256 = descriptor.get("model_content_sha256")
-            roles = descriptor.get("roles")
-            if isinstance(file_id, str) and isinstance(model_content_sha256, str):
-                receipts.append(
-                    {
-                        "model_content_sha256": model_content_sha256,
-                        "file_id": file_id,
-                        "path": item.name,
-                        "sha256": item.sha256,
-                        "bytes": item.bytes,
-                        "roles": list(roles) if isinstance(roles, list) else [],
-                        "distribution_object": item.to_mapping(),
-                    }
-                )
         return tuple(objects), tuple(receipts), paths
 
     def _open_cache_object(self, digest: str, expected_bytes: int) -> OpenedObject:
@@ -445,7 +451,7 @@ class ModelCacheObjectSource:
 
     def verified_model_objects_for_set(
         self, artifact_set_sha256: str, manifest: object = None
-    ) -> tuple[dict[str, object], ...]:
+    ) -> tuple[VerifiedModelObject, ...]:
         """Return receipts keyed by canonical model identity and file ID.
 
         With the caller's resolved ``manifest``, the shared verified set is
@@ -509,16 +515,19 @@ class CompositeObjectSource:
 
     def verified_model_objects_for_set(
         self, artifact_set_sha256: str, manifest: object = None
-    ) -> tuple[dict[str, object], ...]:
+    ) -> tuple[VerifiedModelObject, ...]:
         resolver = getattr(self.model_source, "verified_model_objects_for_set", None)
         if resolver is None:
             raise DistributionError(
                 DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "NAS cache source lacks canonical model-file identity",
             )
-        if manifest is None:
-            return resolver(artifact_set_sha256)
-        return resolver(artifact_set_sha256, manifest)
+        receipts = (
+            resolver(artifact_set_sha256)
+            if manifest is None
+            else resolver(artifact_set_sha256, manifest)
+        )
+        return tuple(VerifiedModelObject.model_validate(item) for item in receipts)
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         # Both sources are content addressed. Probe the model cache first so a

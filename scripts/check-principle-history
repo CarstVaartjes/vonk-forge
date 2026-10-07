@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""CI-only history comparison; unit ratchets consume the current allowlists."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from control.tests.principle_guards import ALLOWLISTS, history_gate, load_allowlist
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base", required=True)
+    args = parser.parse_args()
+    # Validate the ref first: a missing checkout must never disable the ratchet.
+    subprocess.run(
+        ["git", "rev-parse", "--verify", args.base],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    messages = []
+    for stem in ALLOWLISTS.values():
+        relative = f"tools/{stem}-allowlist.json"
+        previous = subprocess.run(
+            ["git", "show", f"{args.base}:{relative}"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if previous.returncode:
+            # Only first introduction is exempt. An unreadable existing blob
+            # (rather than a genuinely absent path) is a CI failure.
+            exists = subprocess.run(
+                ["git", "ls-tree", args.base, "--", relative],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            )
+            if exists.stdout.strip():
+                raise RuntimeError(
+                    f"cannot read baseline {relative}: {previous.stderr}"
+                )
+            continue
+        messages.extend(
+            f"{relative}: {message}"
+            for message in history_gate(
+                load_allowlist(ROOT / relative), json.loads(previous.stdout)
+            )
+        )
+    for message in messages:
+        print(message, file=sys.stderr)
+    return int(bool(messages))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
