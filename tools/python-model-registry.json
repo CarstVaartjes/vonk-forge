@@ -220,6 +220,10 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/fleet_profile_adapter_conversion_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/fleet_profile_contract.py",
       "kind": "controller-contract"
     },
