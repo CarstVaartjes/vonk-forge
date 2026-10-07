@@ -807,6 +807,21 @@ class FleetProfilePendingEffect(StrictModel):
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
 
 
+class FleetProfileAdoptedStopEffect(StrictModel):
+    """Exact original cleanup, retained by a newer whole-fleet decision."""
+
+    effect: FleetProfileRunEffect
+    queue_index: int = Field(ge=0)
+    operation_id: UuidId
+    request_key: UuidId
+
+    @model_validator(mode="after")
+    def is_stop(self) -> FleetProfileAdoptedStopEffect:
+        if self.effect.action != "stop":
+            raise ValueError("adopted cleanup must be an exact Stop effect")
+        return self
+
+
 class FleetProfileAdoptedApplicationEffect(StrictModel):
     """An exact continuing executor authorized by the newer reviewed snapshot."""
 
@@ -814,10 +829,19 @@ class FleetProfileAdoptedApplicationEffect(StrictModel):
     plan_digest: Digest
     workload_intent_ordinal: int = Field(ge=1)
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
-    assignment_ids: list[UuidId] = Field(min_length=1, max_length=64)
+    assignment_ids: list[UuidId] = Field(default_factory=list, max_length=64)
+    stops: list[FleetProfileAdoptedStopEffect] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def scope_is_canonical(self) -> FleetProfileAdoptedApplicationEffect:
+        if not self.assignment_ids and not self.stops:
+            raise ValueError("adoption requires an assignment or exact cleanup")
+        if len({stop.effect.run_id for stop in self.stops}) != len(self.stops):
+            raise ValueError("adopted cleanup identities must be unique")
+        if any(
+            not set(stop.effect.node_ids) <= set(self.node_ids) for stop in self.stops
+        ):
+            raise ValueError("adopted cleanup must retain its complete topology")
         if self.node_ids != sorted(set(self.node_ids)):
             raise ValueError("adopted effect nodes must be sorted and unique")
         if self.assignment_ids != sorted(set(self.assignment_ids)):
@@ -880,10 +904,21 @@ class FleetProfileSwitchQueueItem(StrictModel):
         return self
 
 
+class FleetProfileSwitchPendingChild(StrictModel):
+    """An issued queue child whose exact outcome remains to be observed."""
+
+    queue_index: int = Field(ge=0)
+    operation_id: UuidId
+    original_operation_id: UuidId | None = None
+    kind: FleetProfileSwitchChildKind
+
+
 class FleetProfileSwitchChildState(StrictModel):
     """Terminal receipt for a child already completed by the adapter."""
 
+    queue_index: int = Field(ge=0)
     operation_id: UuidId
+    original_operation_id: UuidId | None = None
     kind: FleetProfileSwitchChildKind
     state: Literal["succeeded", "failed", "cancelled"]
     result: FleetProfileSwitchChildResult | None = None
@@ -919,8 +954,8 @@ class FleetProfileSwitchAdapterState(StrictModel):
     assignments: list[FleetProfileAssignment] = Field(max_length=64)
     queue: list[FleetProfileSwitchQueueItem] = Field(max_length=128)
     position: int = Field(default=0, ge=0, le=128)
-    active_operation_id: UuidId | None = None
-    active_kind: FleetProfileSwitchChildKind | None = None
+    pending_children: list[FleetProfileSwitchPendingChild] = Field(default_factory=list)
+    skipped_indices: list[int] = Field(default_factory=list)
     children: list[FleetProfileSwitchChildState] = Field(
         default_factory=list, max_length=128
     )
@@ -944,10 +979,19 @@ class FleetProfileSwitchAdapterState(StrictModel):
             raise ValueError("profile switch scope node IDs must be sorted and unique")
         if self.assignment_ids != [assignment.id for assignment in self.assignments]:
             raise ValueError("profile switch assignments must match assignment IDs")
-        if self.active_kind is None and self.active_operation_id is not None:
-            raise ValueError("profile switch active operation must have a kind")
-        if self.active_kind is not None and self.active_operation_id is None:
-            raise ValueError("profile switch active kind must have an operation")
+        indices = [
+            child.queue_index for child in (*self.pending_children, *self.children)
+        ]
+        indices.extend(self.skipped_indices)
+        if len(indices) != len(set(indices)):
+            raise ValueError("queue child identities must be unique")
+        if self.position > len(self.queue) or any(
+            index < 0 or index >= len(self.queue) for index in indices
+        ):
+            raise ValueError("queue child index is outside the immutable queue")
+        for child in (*self.pending_children, *self.children):
+            if child.kind != self.queue[child.queue_index].kind:
+                raise ValueError("queue child kind differs from its reviewed item")
         return self
 
 
@@ -1038,9 +1082,31 @@ class FleetProfileApplicationCancellationView(StrictModel):
     deadline_at: datetime | None = None
 
 
+class FleetProfileEffectProgress(StrictModel):
+    """Observational receipt for one immutable accepted queue effect."""
+
+    effect_id: str
+    application_id: UuidId
+    plan_digest: Digest
+    workload_intent_ordinal: int = Field(ge=1)
+    queue_index: int = Field(ge=0)
+    kind: FleetProfileSwitchChildKind
+    target_id: UuidId
+    node_ids: list[NodeId]
+    request_key: UuidId
+    operation_id: UuidId | None = None
+    original_operation_id: UuidId | None = None
+    state: Literal[
+        "not-issued", "pending", "succeeded", "failed", "cancelled", "unknown"
+    ]
+    result: FleetProfileSwitchChildResult | None = None
+    stop_effect: FleetProfileRunEffect | None = None
+
+
 class FleetProfileApplicationProgress(StrictModel):
     """Typed progress tree persisted with every profile application."""
 
+    effects: list[FleetProfileEffectProgress] = Field(default_factory=list)
     attempt: int = Field(default=1, ge=1)
     retry_due_at: datetime | None = None
     retry_of_application_id: UuidId | None = None
