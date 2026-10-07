@@ -15,14 +15,46 @@
       "control/src/vonk_control/artifact_jobs.py",
       "control/src/vonk_control/artifact_lifecycle.py",
       "control/src/vonk_control/artifact_reference_scan.py",
+      "control/src/vonk_control/availability_production.py",
+      "control/src/vonk_control/catalog_entities.py",
+      "control/src/vonk_control/catalog_revision_contract.py",
+      "control/src/vonk_control/catalog_service.py",
+      "control/src/vonk_control/catalog_sync.py",
+      "control/src/vonk_control/compiled_execution_plan.py",
+      "control/src/vonk_control/contract_graph.py",
+      "control/src/vonk_control/distribution.py",
+      "control/src/vonk_control/enrollment.py",
+      "control/src/vonk_control/execution_plan_service.py",
       "control/src/vonk_control/fleet_profiles.py",
       "control/src/vonk_control/gateway_keys.py",
+      "control/src/vonk_control/harnesses/canonical.py",
+      "control/src/vonk_control/harnesses/common.py",
       "control/src/vonk_control/image_store_collection.py",
+      "control/src/vonk_control/install_admission.py",
       "control/src/vonk_control/library_projection.py",
       "control/src/vonk_control/model_cache.py",
+      "control/src/vonk_control/model_cache_api.py",
+      "control/src/vonk_control/model_cache_ranges.py",
+      "control/src/vonk_control/oci_image_store.py",
+      "control/src/vonk_control/operation_api.py",
+      "control/src/vonk_control/presence.py",
+      "control/src/vonk_control/profile_capacity.py",
+      "control/src/vonk_control/recipe_build_cancellation.py",
+      "control/src/vonk_control/recipe_builds.py",
+      "control/src/vonk_control/recipe_execution_contract.py",
+      "control/src/vonk_control/recipe_image_availability.py",
       "control/src/vonk_control/recipe_operation_phases.py",
       "control/src/vonk_control/recipe_operations.py",
-      "control/src/vonk_control/run_switch_operations.py"
+      "control/src/vonk_control/recipe_packages.py",
+      "control/src/vonk_control/recipe_routes.py",
+      "control/src/vonk_control/recipe_runtime_specs.py",
+      "control/src/vonk_control/recipe_stop_payloads.py",
+      "control/src/vonk_control/recipe_update_batches.py",
+      "control/src/vonk_control/route_runtime.py",
+      "control/src/vonk_control/run_switch_operations.py",
+      "control/src/vonk_control/runtime_image_preparation.py",
+      "control/src/vonk_control/source_bundles.py",
+      "control/src/vonk_control/topology.py"
     ],
     "guard_paths": [
       "control/src/vonk_control/lifecycle/",
@@ -57,8 +89,8 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 59,
-    "unaudited": 240,
+    "total": 275,
+    "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
   "categorized_raises": {
@@ -1018,7 +1050,7 @@
     {
       "family": "catalog_entities.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.model_artifact_missing", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.model_reference_missing", 1],
@@ -1047,7 +1079,7 @@
     {
       "family": "catalog_revision_contract.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/catalog_revision_contract.py", "CatalogRevisionContractError", "_json", "catalog-persisted-value-is-not-json", 1]
       ]
@@ -1065,7 +1097,7 @@
     {
       "family": "catalog_service.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/catalog_service.py", "CatalogError", "CatalogService.store_source_bundle", "bundle.storage_unavailable", 1],
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "CatalogService._select_imported_recipe_head", "catalog.document_missing", 1],
@@ -1095,20 +1127,20 @@
     {
       "family": "catalog_sync.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_actor_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_commit_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_trigger_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_repository_changed", 1]
       ]
     },
     {
       "family": "catalog_sync.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request. Rejects an empty or oversized actor before scheduling. Rejects a malformed caller-supplied expected commit before scheduling. Rejects an invalid sync trigger before scheduling.",
       "sites": [
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_actor_invalid", 1],
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_commit_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_request_invalid", 2],
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_trigger_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_request_reused", 1]
       ]
     },
@@ -1137,7 +1169,7 @@
     {
       "family": "compiled_execution_plan.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "_verified_model_object", "verified-model-object-receipt-is-invalid", 1],
         ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-execution-plan-receipts-are-inconsistent", 1]
@@ -1170,25 +1202,18 @@
       ]
     },
     {
-      "family": "contract_graph.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
-      "sites": [
-        ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "_routes", "missing-openapi-operation", 1],
-        ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "discover_contracts", "missing-parameter-contract", 1],
-        ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "discover_contracts", "missing-success-contract", 1]
-      ]
-    },
-    {
       "family": "contract_graph.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ContractGraphError validates a contract or request.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ContractGraphError validates a contract or request. Rejects an application contract missing its OpenAPI operation at discovery. Rejects an application contract missing a declared parameter schema at discovery. Rejects an application contract missing a success response at discovery.",
       "sites": [
+        ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "_routes", "missing-openapi-operation", 1],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "_routes", "unregistered-hidden-route", 1],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "_routes", "unregistered-mounted-transport", 1],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "_routes", "unregistered-transport", 2],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "discover_contracts", "duplicate-mounted-operation", 1],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "discover_contracts", "json-request-has-no-canonical-binding", 1],
+        ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "discover_contracts", "missing-parameter-contract", 1],
+        ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "discover_contracts", "missing-success-contract", 1],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "discover_contracts", "no-content-response-declares-a-body", 1],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "discover_contracts", "raw-json-declaration-differs-from-canonical-model", 1],
         ["control/src/vonk_control/contract_graph.py", "ContractGraphError", "discover_contracts", "response-has-no-canonical-or-exact-byte-binding", 1],
@@ -1205,34 +1230,32 @@
     {
       "family": "distribution.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/distribution.py", "DistributionError", "CompositeObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.expired", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.unassigned", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.wrong_node", 2],
         ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._register_row", "distribution.assignment_conflict", 1],
         ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._register_row", "message", 1],
         ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.open_object", "distribution.model_set_mismatch", 1],
         ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.open_object", "distribution.object_unavailable", 2],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.open_object", "distribution.unassigned", 1],
         ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.register", "distribution.assignment_conflict", 1],
         ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.register", "distribution.model_set_mismatch", 1],
         ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.register", "distribution.runtime_image_mismatch", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "FilesystemObjectSource.open_object", "distribution.object_invalid", 2],
         ["control/src/vonk_control/distribution.py", "DistributionError", "FilesystemObjectSource.open_object", "distribution.object_unavailable", 2],
         ["control/src/vonk_control/distribution.py", "DistributionError", "MemoryObjectSource.open_object", "distribution.object_unavailable", 1],
         ["control/src/vonk_control/distribution.py", "DistributionError", "ModelCacheObjectSource._describe", "distribution.model_set_mismatch", 2],
         ["control/src/vonk_control/distribution.py", "DistributionError", "ModelCacheObjectSource._open_cache_object", "distribution.object_unavailable", 3],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "ModelCacheObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 4],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "RecipeBuildObjectSource.open_object", "distribution.object_unavailable", 1]
+        ["control/src/vonk_control/distribution.py", "DistributionError", "ModelCacheObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 4]
       ]
     },
     {
       "family": "distribution.security-edge",
       "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check. Refuses distribution access after the grant expires. Refuses distribution access without a grant. Refuses a node requesting another node's distribution grant. Refuses bytes not covered by this node's distribution grant.",
       "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.expired", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.unassigned", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.wrong_node", 2],
+        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.open_object", "distribution.unassigned", 1],
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "DistributionService._authorize_uncached", "distribution.revoked", 1],
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "forbidden", 1],
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "permission-denied", 1],
@@ -1251,7 +1274,7 @@
     {
       "family": "execution_plan_service.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "runtime-image-receipt-does-not-match-the-compiled-runtime-im", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "verified-oci-archive-receipt-is-unavailable-for-the-selected", 1],
@@ -1406,7 +1429,7 @@
     {
       "family": "canonical.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/harnesses/canonical.py", "HarnessCompileError", "_image", "built-image-receipt-reference-does-not-match-its-digest", 1],
         ["control/src/vonk_control/harnesses/canonical.py", "HarnessCompileError", "_image", "source-build-recipe-requires-an-exact-built-image-receipt", 1]
@@ -1450,7 +1473,7 @@
     {
       "family": "common.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/harnesses/common.py", "HarnessCompileError", "validate_projection", "built-in-harness-telemetry-is-missing", 1]
       ]
@@ -1621,7 +1644,7 @@
     {
       "family": "model_cache_api.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/model_cache_api.py", "OperationProjectionError", "ModelCacheOperationProvider._next_cursor", "operation-cursor-projection-unavailable", 1]
       ]
@@ -1637,7 +1660,7 @@
     {
       "family": "model_cache_ranges.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/model_cache_ranges.py", "RangeTruncatedError", "download_ranges._transfer_body", "range-response-ended-before-requested-bytes-arrived", 1]
       ]
@@ -1656,14 +1679,6 @@
       ]
     },
     {
-      "family": "oci_image_store.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
-      "sites": [
-        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.import_reference", "image_store.reference_unpinned", 1]
-      ]
-    },
-    {
       "family": "oci_image_store.security-edge",
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class OciImageStoreError verifies content at its ingress.",
@@ -1678,7 +1693,7 @@
     {
       "family": "operation_api.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/operation_api.py", "OperationProjectionError", "_global_get_operation", "operation-projection-unavailable", 1],
         ["control/src/vonk_control/operation_api.py", "OperationProjectionError", "_global_list_operations", "operation-cursor-projection-unavailable", 1],
@@ -1731,7 +1746,7 @@
     {
       "family": "presence.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/presence.py", "PresenceError", "AgentPresenceService.latest_in_session", "management-address-presence-is-unavailable", 1]
       ]
@@ -1771,7 +1786,7 @@
     {
       "family": "profile_capacity.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/profile_capacity.py", "ProfileHandoffInconsistent", "prepared_profile_installation", "the-profile-s-active-disk-claims-name-different-owners", 1]
       ]
@@ -1779,7 +1794,7 @@
     {
       "family": "recipe_build_cancellation.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_availability_build_dependency", "build.consumer_invalid", 2],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.cancellation_pending", 1],
@@ -1790,7 +1805,7 @@
     {
       "family": "recipe_builds.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.persist_plan_in_session", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildResolution.build_input_for_builder", "build.plan_invalid", 1],
@@ -1835,7 +1850,7 @@
     {
       "family": "recipe_execution_contract.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/recipe_execution_contract.py", "RecipeExecutionContractError", "parse_stored_build_plan", "stored-recipe-build-plan-is-invalid", 1]
       ]
@@ -1851,7 +1866,7 @@
     {
       "family": "recipe_image_availability.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._current_model_child", "recipe_image.model_cache_invalid", 2],
         ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._ensure_model_child", "recipe_image.model_cache_invalid", 3],
@@ -1905,9 +1920,8 @@
     {
       "family": "recipe_packages.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
-        ["control/src/vonk_control/recipe_packages.py", "RecipePackageError", "RecipePackageClient.__init__", "recipe_package.url_insecure", 1],
         ["control/src/vonk_control/recipe_packages.py", "RecipePackageError", "RecipePackageClient._cached_package", "recipe_package.unavailable", 1],
         ["control/src/vonk_control/recipe_packages.py", "RecipePackageError", "RecipePackageClient._download_library", "recipe_package.unavailable", 1],
         ["control/src/vonk_control/recipe_packages.py", "RecipePackageError", "RecipePackageClient._fetch_release", "recipe_package.unavailable", 1],
@@ -1922,9 +1936,10 @@
     {
       "family": "recipe_packages.security-edge",
       "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class RecipePackageError verifies content at its ingress.",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class RecipePackageError verifies content at its ingress. Requires HTTPS for nonlocal package ingress.",
       "sites": [
         ["control/src/vonk_control/recipe_packages.py", "RecipePackageError", "RecipePackageClient.__init__", "recipe_package.release_invalid", 1],
+        ["control/src/vonk_control/recipe_packages.py", "RecipePackageError", "RecipePackageClient.__init__", "recipe_package.url_insecure", 1],
         ["control/src/vonk_control/recipe_packages.py", "RecipePackageError", "RecipePackageClient.__init__", "recipe_package.url_invalid", 2],
         ["control/src/vonk_control/recipe_packages.py", "RecipePackageError", "RecipePackageClient._asset_redirect", "recipe_package.response_invalid", 1],
         ["control/src/vonk_control/recipe_packages.py", "RecipePackageError", "RecipePackageClient._decode_package", "recipe_package.document_incompatible", 1],
@@ -1960,7 +1975,7 @@
     {
       "family": "recipe_routes.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/recipe_routes.py", "RecipeRecoveryDeadlineError", "RecipeRouteService._enforce_recovery_publication_deadline", "message", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService._claim_run_publication", "recipe-run-is-absent-from-route-candidate", 1],
@@ -1995,7 +2010,7 @@
     {
       "family": "recipe_runtime_specs.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "compile_runtime_spec", "canonical-harness-binding-is-missing", 1],
         ["control/src/vonk_control/recipe_runtime_specs.py", "RecipeRuntimeSpecError", "compile_runtime_spec", "canonical-harness-telemetry-is-missing", 1]
@@ -2036,7 +2051,7 @@
     {
       "family": "recipe_stop_payloads.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/recipe_stop_payloads.py", "BookkeepingUnknown", "stop_payload_from_job_run", "job-run-generation-is-missing", 1],
         ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-stop-identity-is-stale", 1],
@@ -2055,7 +2070,7 @@
     {
       "family": "route_runtime.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "litellm-validation-rejected-the-staged-bundle", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "route-bundle-activation-failed-previous-activation-retained", 1],
@@ -2066,25 +2081,18 @@
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._identity", "reconciliation-id-is-invalid", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._identity", "reconciliation-id-is-not-canonical", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._locked", "route-publication-lock-is-unavailable", 2],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._locked", "route-publication-lock-is-unsafe", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._require_supervisor_ack", "live-litellm-supervisor-acknowledgement-is-unavailable", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._stage", "staged-route-generation-conflicts-with-existing-bytes", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._stage", "staged-route-generation-is-unsafe", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._validate_marker", "route-activation-marker-directory-binding-is-invalid", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher.inspect", "active-route-marker-does-not-match-expected-publication", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "FileSupervisorAcknowledger.__call__", "live-litellm-supervisor-acknowledgement-timed-out", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "FileSupervisorAcknowledger.__init__", "supervisor-acknowledgement-bounds-are-invalid", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_aware", "message", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_parse_time", "activation", 2],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-document-is-invalid", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-file-is-unreadable", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-file-is-unsafe", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-is-unavailable", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "no-route-bundle-is-active", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-fields-are-invalid", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-not-canonical", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-unreadable", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-unsafe", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "verify_active_route_bundle", "route-generation-root-is-unavailable", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "verify_active_route_bundle", "route-runtime-root-is-unavailable", 1]
       ]
@@ -2092,12 +2100,18 @@
     {
       "family": "route_runtime.security-edge",
       "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check. Rejects a nonregular lock file before route publication effects. Prevents replacing unsafe or different existing immutable generation bytes. Rejects a symlink or non-directory staging destination before writing. Binds the activation directory to the generation and manifest digest before resolving its path. Rejects unsafe generation files before consuming the active bundle. Rejects a symlink or non-file activation marker.",
       "sites": [
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher.__init__", "route-generation-root-must-not-be-a-symlink", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher.__init__", "route-runtime-root-must-not-be-a-symlink", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._atomic_write", "route-runtime-target-must-not-be-a-symlink", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-checksum-mismatch", 1]
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._locked", "route-publication-lock-is-unsafe", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._stage", "staged-route-generation-conflicts-with-existing-bytes", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._stage", "staged-route-generation-is-unsafe", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._validate_marker", "route-activation-marker-directory-binding-is-invalid", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-checksum-mismatch", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-file-is-unsafe", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-unsafe", 1]
       ]
     },
     {
@@ -2148,7 +2162,7 @@
     {
       "family": "runtime_image_preparation.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage._stored_image", "runtime_image.archive_unavailable", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.existing_archive", "runtime_image.cache_missing", 1],
@@ -2215,13 +2229,12 @@
     {
       "family": "source_bundles.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: operation bookkeeping by default.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.not_found", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.not_found", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_generated_bundle", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.put", "bundle.storage_unavailable", 1]
       ]
@@ -2229,8 +2242,9 @@
     {
       "family": "source_bundles.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request. Rejects a nonbinary caller-provided bundle stream at ingress.",
       "sites": [
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_too_long", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "_read_archive", "bundle.empty", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "generate_source_bundle", "bundle.empty", 1]
@@ -2275,7 +2289,7 @@
     {
       "family": "topology.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/topology.py", "TopologyError", "validate_topology", "topology.runtime_capability_missing", 1]
       ]
@@ -3117,7 +3131,7 @@
     {
       "family": "availability_production.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "_cached_build_receipt", "recipe_image.build_invalid", 1],
         ["control/src/vonk_control/availability_production.py", "AvailabilityUnsettled", "build_recipe_image_availability.authority", "observation-unavailable", 1]
@@ -3142,7 +3156,7 @@
     {
       "family": "install_admission.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/install_admission.py", "BookkeepingUnknown", "InstallAdmissionService.plan_install", "exact-recipe-dependencies-are-unavailable", 1],
         ["control/src/vonk_control/install_admission.py", "StoredInstallIdentityDamaged", "_node_digest_document", "stored-installation-node-identity-is-incomplete", 1],
@@ -3168,7 +3182,7 @@
     {
       "family": "recipe_update_batches.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeUpdateClaimLost", "RecipeUpdateBatches._owned", "recipe_update.claim_lost", 2]
       ]
@@ -3494,7 +3508,7 @@
     {
       "family": "enrollment.bookkeeping-debt",
       "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: class EnrollmentIssuanceUncertain is an uncertain outcome: observe, do not park; class RemoteRevocationUncertain is an uncertain outcome: observe, do not park; class RenewalConflictRevocationUncertain is an uncertain outcome: observe, do not park; class RenewalIssuanceUncertain is an uncertain outcome: observe, do not park.",
+      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
         ["control/src/vonk_control/enrollment.py", "EnrollmentIssuanceUncertain", "EnrollmentService._issue_enrollment_claim", "certificate-issuance-is-uncertain-retry-exact-request-obser", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentIssuanceUncertain", "EnrollmentService._issue_enrollment_claim", "certificate-persistence-failed-retry-exact-request-observat", 1],
@@ -3852,6 +3866,31 @@
       "sites": [
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "RunStopScope.membership_is_exact", "stop-run-membership-is-ambiguous", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "JobRunStopScope.targets_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1]
+      ]
+    },
+    {
+      "family": "distribution.input-validation",
+      "category": "input-validation",
+      "reason": "Code-reviewed boundary:  Rejects a malformed requested object digest before opening storage. Rejects an invalid requested object length before opening storage. Rejects archive download for a runtime image; this source only supports layered pulls.",
+      "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionError", "FilesystemObjectSource.open_object", "distribution.object_invalid", 2],
+        ["control/src/vonk_control/distribution.py", "DistributionError", "RecipeBuildObjectSource.open_object", "distribution.object_unavailable", 1]
+      ]
+    },
+    {
+      "family": "oci_image_store.input-validation",
+      "category": "input-validation",
+      "reason": "Code-reviewed boundary:  Rejects an unpinned caller-supplied image reference before copying.",
+      "sites": [
+        ["control/src/vonk_control/oci_image_store.py", "OciImageStoreError", "OciImageStore.import_reference", "image_store.reference_unpinned", 1]
+      ]
+    },
+    {
+      "family": "route_runtime.input-validation",
+      "category": "input-validation",
+      "reason": "Code-reviewed boundary:  Rejects invalid configured acknowledgement timeout, age and polling bounds.",
+      "sites": [
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "FileSupervisorAcknowledger.__init__", "supervisor-acknowledgement-bounds-are-invalid", 1]
       ]
     }
   ]
