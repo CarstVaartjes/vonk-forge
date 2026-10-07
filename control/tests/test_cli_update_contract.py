@@ -85,11 +85,22 @@ def test_authenticated_contract_complete_membership_fault_recovery(
     assert complete["worker_compatibility"] == "compatible"
     damaged_identity = "unreadable-stored-worker"
     original_identity = f"{256:064x}"
-    with sessions.begin() as session:
-        session.execute(
-            update(ControlProcessHeartbeat)
-            .where(ControlProcessHeartbeat.process_instance_id == original_identity)
-            .values(process_instance_id=damaged_identity)
+    # Simulate damaged stored bytes in this isolated SQLite fixture, not an
+    # authorized write through the production constraints. Restore constraint
+    # enforcement before either capture or the subsequent repair observes it.
+    with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA ignore_check_constraints = ON")
+        try:
+            connection.execute(
+                update(ControlProcessHeartbeat)
+                .where(ControlProcessHeartbeat.process_instance_id == original_identity)
+                .values(process_instance_id=damaged_identity)
+            )
+        finally:
+            connection.exec_driver_sql("PRAGMA ignore_check_constraints = OFF")
+        assert (
+            connection.exec_driver_sql("PRAGMA ignore_check_constraints").scalar_one()
+            == 0
         )
     for endpoint in ("/api/cli/contract", "/api/platform"):
         failure = peer.get(endpoint, headers={"Authorization": f"Bearer {token}"})
