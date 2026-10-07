@@ -240,6 +240,8 @@ export class ApiClient implements ControlApi {
     const headers = new Headers({Accept: "application/json"});
     headers.set("X-CSRF-Token", await this.requiredCsrfToken());
     const response = await fetch("/api/auth/logout", {method: "POST", headers, credentials: "same-origin"});
+    try { await readControlResponse(response, "POST", "/api/auth/logout"); }
+    catch (cause) { this.requireAuthentication(response, cause); throw cause; }
     this.requireAuthentication(response);
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`, requestIdOf(response));
   }
@@ -248,10 +250,11 @@ export class ApiClient implements ControlApi {
     const headers = new Headers({Accept: "text/plain"});
     headers.set("X-CSRF-Token", await this.requiredCsrfToken());
     const response = await fetch("/api/auth/cli-token", {method: "POST", headers, credentials: "same-origin"});
-    this.requireAuthentication(response);
     if (!response.ok) {
       let problem: unknown;
-      try { problem = await response.json(); } catch { problem = null; }
+      try { problem = await readControlResponse(response, "POST", "/api/auth/cli-token"); }
+      catch (cause) { this.requireAuthentication(response, cause); throw cause; }
+      this.requireAuthentication(response);
       const detail = typeof problem === "object" && problem !== null && "detail" in problem
         ? formatApiDetail(problem.detail)
         : "request failed";
@@ -567,7 +570,7 @@ export class ApiClient implements ControlApi {
       const abort = () => request.abort();
       const finish = () => signal?.removeEventListener("abort", abort);
       request.open("PUT", path);
-      request.responseType = "json";
+      request.responseType = "text";
       request.withCredentials = true;
       request.setRequestHeader("Accept", "application/json");
       request.setRequestHeader("Content-Type", file.media_type);
@@ -578,14 +581,22 @@ export class ApiClient implements ControlApi {
       request.onerror = () => { finish(); reject(new ApiError(0, "Artifact upload failed before the controller responded")); };
       request.onload = () => {
         finish();
-        try { this.requireAuthentication(new Response(null, {status: request.status})); }
-        catch (error) { reject(error); return; }
+        const response = new Response(null, {status: request.status});
+        let value: unknown;
+        try {
+          value = validateControlBody("PUT", path, request.status, request.getResponseHeader("Content-Type") ?? "", request.responseText);
+        } catch (cause) {
+          try { this.requireAuthentication(response, cause); } catch (error) { reject(error); return; }
+          reject(cause); return;
+        }
+        try { this.requireAuthentication(response); } catch (error) { reject(error); return; }
         if (request.status < 200 || request.status >= 300) {
-          const response = request.response as {detail?: unknown} | null;
-          reject(new ApiError(request.status, response?.detail === undefined ? `Control API returned ${request.status}` : formatApiDetail(response.detail), requestIdOf(request)));
+          const detail = typeof value === "object" && value !== null && "detail" in value ? formatApiDetail(value.detail) : "request failed";
+          reject(new ApiError(request.status, `Control API returned ${request.status}: ${detail}`, requestIdOf(request)));
           return;
         }
-        resolve(request.response as ArtifactJob);
+        // The sole cast is the declared, runtime-validated network DTO boundary.
+        resolve(value as ArtifactJob);
       };
       if (signal?.aborted) { request.abort(); return; }
       signal?.addEventListener("abort", abort, {once: true});

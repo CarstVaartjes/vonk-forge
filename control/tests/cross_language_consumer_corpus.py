@@ -10,9 +10,18 @@ import json
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
-from vonk_agent_protocol import AgentProgress, AgentResult, OperationProgress
+from vonk_agent_protocol import (
+    AgentProgress,
+    AgentResult,
+    OperationProgress,
+    RecipeStartPayload,
+)
 from vonk_agent_protocol.build_import import RecipeBuildEnvironmentArgument
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_control.fleet_profile_contract import (
+    FleetProfileDefinitionView,
+    FleetProfileInput,
+)
 from vonk_control.operation_api import (
     BoundedErrorResponse,
     JobDetailResponse,
@@ -25,6 +34,9 @@ JOB = "22222222-2222-4222-8222-222222222222"
 OPERATION = "33333333-3333-4333-8333-333333333333"
 MODELS: dict[str, type[BaseModel]] = {
     "FailureDiagnostics": FailureDiagnostics,
+    "FleetProfileInput": FleetProfileInput,
+    "FleetProfileDefinitionView": FleetProfileDefinitionView,
+    "RecipeStartPayload": RecipeStartPayload,
     "AgentResult": AgentResult,
     "AgentProgress": AgentProgress,
     "RecipeBuildEnvironmentArgument": RecipeBuildEnvironmentArgument,
@@ -131,6 +143,48 @@ def corpus() -> dict:
                 "consumers": consumers or ["python", "rust", "browser"],
             }
         )
+
+    # Neighbors come from the canonical owner schema, not another bound table.
+    profile_documents = (
+        ("FleetProfileInput", "expected_revision", {}, ["python", "browser"]),
+        (
+            "FleetProfileDefinitionView",
+            "number",
+            {"id": None, "revision": 0, "definition": {}},
+            ["python", "browser"],
+        ),
+    )
+    start_document = {
+        "run_id": JOB,
+        "installation_id": OPERATION,
+        "recipe_revision_id": FENCE,
+        "mapping_id": JOB,
+        "plan_digest": "a" * 64,
+        "compiled_execution_plan": json.loads(
+            (Path(__file__).parent / "fixtures/compiled_workload_v2.json").read_text()
+        ),
+    }
+    for component, field, document, consumers in (
+        *profile_documents,
+        ("RecipeStartPayload", "run_generation", start_document, ["python", "rust"]),
+    ):
+        schema = MODELS[component].model_json_schema()["properties"][field]
+        for edge in ("minimum", "maximum"):
+            boundary = schema[edge]
+            for offset in (-1, 0, 1):
+                add(
+                    f"owner-bound-{component}-{field}-{edge}-{offset:+d}",
+                    component,
+                    json.dumps({**document, field: boundary + offset}),
+                    consumers=consumers,
+                )
+
+    add(
+        "start-generation-above-u32",
+        "RecipeStartPayload",
+        json.dumps({**start_document, "run_generation": 2**32 + 1}),
+        consumers=["python", "rust"],
+    )
 
     base = diagnostic()
     add("diagnostics-producer", "FailureDiagnostics", json.dumps(base))
@@ -357,6 +411,9 @@ def corpus() -> dict:
         "cases": cases,
         "nonoverlap": {
             "OperationProgress": "Rust agent protocol/heartbeat consumer covered; no Rust Controller API response parser is claimed.",
+            "FleetProfileInput": "Canonical input component validation only; no browser HTTP write or Rust API parser is claimed.",
+            "FleetProfileDefinitionView": "Canonical projection component validation only; no invented route or Rust parser is claimed.",
+            "RecipeStartPayload": "Actual generated Rust Agent payload decoder; no browser route exists.",
             "CompiledExecutionPlan": "Agent/helper wire only; no browser route exists.",
             "RecipeStopPayload": "Agent/helper wire only; no browser route exists.",
             "RecipeBuildEnvironmentArgument": "Actual Rust generated request scalar decoder; real builder rendering covered by owning Rust tests, no browser route.",

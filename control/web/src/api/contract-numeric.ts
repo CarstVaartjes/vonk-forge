@@ -1,8 +1,9 @@
 import {LosslessNumber, parse} from "lossless-json";
 
 /** The raw numeric token is retained until its canonical schema accepts it. */
-export type ExactInteger = LosslessNumber;
-export type WireNumber = number | ExactInteger;
+export type ExactNumber = LosslessNumber;
+export type ExactInteger = ExactNumber;
+export type WireNumber = number | ExactNumber;
 
 function unsignedCompare(a: string, b: string): number {
   a = a.replace(/^0+/, "") || "0"; b = b.replace(/^0+/, "") || "0";
@@ -164,6 +165,7 @@ export function numericMultiple(value: unknown, divisor: string): boolean {
 export function parseContractJson(text: string): unknown { return parse(text, undefined, {onDuplicateKey: ({newValue}) => newValue}); }
 export interface NormalizationShape {
   type?: string | string[];
+  preserveIntegerFloat?: boolean;
   ref?: string;
   alternatives?: {validate: (value: unknown) => boolean; shape: NormalizationShape}[];
   allOf?: NormalizationShape[];
@@ -190,6 +192,10 @@ export function normalizeValidated(value: unknown, shape: NormalizationShape, de
     if (types.includes("number")) {
       const number = Number(value.value);
       if (!Number.isFinite(number)) throw new Error("Non-finite contract number");
+      if (Number.isInteger(number) && shapes.some(item => item.preserveIntegerFloat)) {
+        const token = Object.is(number, -0) ? "-0.0" : String(number);
+        return new LosslessNumber(/[.eE]/.test(token) ? token : `${token}.0`);
+      }
       return number;
     }
     return materialize(value);

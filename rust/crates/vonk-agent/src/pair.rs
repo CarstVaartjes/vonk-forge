@@ -144,7 +144,9 @@ async fn bounded_pairing_body(mut response: reqwest::Response) -> Result<Vec<u8>
             observed_bytes: length,
         });
     }
-    let mut body = Vec::with_capacity(response.content_length().unwrap_or(0) as usize);
+    // Reserve this physical body budget once. Geometric Vec growth from an
+    // arbitrary first chunk could otherwise reserve beyond the byte ceiling.
+    let mut body = Vec::with_capacity(MAX_RESPONSE_BYTES);
     while let Some(chunk) = response.chunk().await? {
         // The declared length is only an early refusal. Check actual bytes
         // before growing the retained body, including chunked responses.
@@ -387,6 +389,7 @@ mod tests {
         let recovered = bounded_pairing_body(response).await.unwrap();
         peer.abort();
         assert_eq!(recovered, body);
+        assert!(recovered.capacity() <= MAX_RESPONSE_BYTES);
         assert_eq!(
             validate_enrollment_response(200, &recovered, node)
                 .unwrap()

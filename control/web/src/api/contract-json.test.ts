@@ -44,6 +44,12 @@ describe("canonical numeric boundary", () => {
     expect(validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":"retry"}')).toEqual({detail: "retry"});
     expect(() => validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":"retry","private":true}')).toThrow();
   });
+  test.each(["1000.0", "-0.0", "1.00000000000000001", "-1e-400"])("scalar export retains its canonical float branch: %s", token => {
+    const result = validateComponent("RecipeSetting", `{"value":${token},"change_effect":"restart"}`);
+    const exported = stringifyContractJson(result);
+    expect(exported).toMatch(/"value":(?:1000\.0|-0\.0|1\.0)/);
+    expect(() => validateComponent("RecipeSetting", exported)).not.toThrow();
+  });
   test("only a declared bodyless response accepts an empty document", () => {
     expect(validateControlBody("POST", "/api/auth/logout", 204, "", "")).toBeUndefined();
     expect(() => validateControlBody("GET", "/api/jobs/known", 204, "", "")).toThrow();

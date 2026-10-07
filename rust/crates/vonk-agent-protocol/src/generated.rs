@@ -3,7 +3,7 @@
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct ActivateRequest {
-    pub generation: u64,
+    pub generation: u32,
     pub node_id: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -1763,10 +1763,10 @@ pub struct CompiledPlacement {
     pub memory_floor_bytes: u64,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub port: ::std::option::Option<u16>,
-    pub rank: u64,
+    pub rank: crate::integer::Integer,
     pub reserved_memory_bytes: u64,
     pub role: ::std::string::String,
-    pub world_size: u64,
+    pub world_size: crate::integer::Integer,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1917,7 +1917,7 @@ impl ::std::convert::TryFrom<::std::string::String> for CompiledSecurityNetworkM
 #[derive(Eq)]
 pub struct CompiledTopology {
     pub name: ::std::string::String,
-    pub node_count: u64,
+    pub node_count: crate::integer::Integer,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -2541,7 +2541,7 @@ pub struct ExecuteContainerRuntimeRequestOperation {
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_generation: ::std::option::Option<u32>,
+    pub run_generation: ::std::option::Option<u64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -3636,7 +3636,7 @@ pub struct HostRuntimeGrantRequest {
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_generation: ::std::option::Option<u32>,
+    pub run_generation: ::std::option::Option<u64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -3741,7 +3741,7 @@ pub struct HostRuntimeRequest {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_generation: ::std::option::Option<u32>,
+    pub run_generation: ::std::option::Option<u64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub start_plan: ::std::option::Option<RecipeStartPayload>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -4778,7 +4778,7 @@ pub struct IssuedCertificateResponse {
     pub certificate_pem: ::std::string::String,
     pub chain_pem: ::std::string::String,
     pub fingerprint: ::std::string::String,
-    pub generation: u64,
+    pub generation: u32,
     pub node_id: ::std::string::String,
     pub not_after: ::std::string::String,
     pub not_before: ::std::string::String,
@@ -6224,7 +6224,7 @@ pub struct OperationCheckpoint {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub digest: ::std::option::Option<::std::string::String>,
     pub key: ::std::string::String,
-    pub sequence: u64,
+    pub sequence: crate::integer::Integer,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum OperationFailureCode {
@@ -6232,12 +6232,17 @@ pub enum OperationFailureCode {
     FleetProfileApplicationFailed,
     #[serde(rename = "artifact_process_failed")]
     ArtifactProcessFailed,
+    #[serde(rename = "stored_operation_result_unreadable")]
+    StoredOperationResultUnreadable,
 }
 impl ::std::fmt::Display for OperationFailureCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::FleetProfileApplicationFailed => f.write_str("fleet_profile_application_failed"),
             Self::ArtifactProcessFailed => f.write_str("artifact_process_failed"),
+            Self::StoredOperationResultUnreadable => {
+                f.write_str("stored_operation_result_unreadable")
+            }
         }
     }
 }
@@ -6247,6 +6252,7 @@ impl ::std::str::FromStr for OperationFailureCode {
         match value {
             "fleet_profile_application_failed" => Ok(Self::FleetProfileApplicationFailed),
             "artifact_process_failed" => Ok(Self::ArtifactProcessFailed),
+            "stored_operation_result_unreadable" => Ok(Self::StoredOperationResultUnreadable),
             _ => Err("invalid value".into()),
         }
     }
@@ -6272,9 +6278,9 @@ pub struct OperationMemberProgress {
     pub activity: ::std::option::Option<OperationMemberProgressActivity>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub bytes_per_second: ::std::option::Option<f64>,
-    pub completed_bytes: u64,
+    pub completed_bytes: crate::integer::Integer,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub completed_items: ::std::option::Option<u64>,
+    pub completed_items: ::std::option::Option<crate::integer::Integer>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub elapsed_seconds: ::std::option::Option<f64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -6293,9 +6299,9 @@ pub struct OperationMemberProgress {
     pub smoothed_bytes_per_second: ::std::option::Option<f64>,
     pub state: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub total_bytes: ::std::option::Option<u64>,
+    pub total_bytes: ::std::option::Option<crate::integer::Integer>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub total_items: ::std::option::Option<u64>,
+    pub total_items: ::std::option::Option<crate::integer::Integer>,
 }
 #[derive(
     ::serde::Deserialize,
@@ -6360,9 +6366,9 @@ pub struct OperationProgress {
     pub bytes_per_second: ::std::option::Option<f64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub checkpoint: ::std::option::Option<OperationCheckpoint>,
-    pub completed_bytes: u64,
+    pub completed_bytes: crate::integer::Integer,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub completed_items: ::std::option::Option<u64>,
+    pub completed_items: ::std::option::Option<crate::integer::Integer>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub elapsed_seconds: ::std::option::Option<f64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -6380,10 +6386,10 @@ pub struct OperationProgress {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub smoothed_bytes_per_second: ::std::option::Option<f64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub total_bytes: ::std::option::Option<u64>,
+    pub total_bytes: ::std::option::Option<crate::integer::Integer>,
     pub total_bytes_known: bool,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub total_items: ::std::option::Option<u64>,
+    pub total_items: ::std::option::Option<crate::integer::Integer>,
 }
 #[derive(
     ::serde::Deserialize,
@@ -7806,21 +7812,21 @@ pub struct RecipeBuildEnvironmentArgument {
 #[derive(Eq)]
 pub enum RecipeBuildEnvironmentArgumentValue {
     String(::std::string::String),
-    Int64(i64),
+    VonkInteger(crate::integer::Integer),
     Boolean(bool),
 }
 impl ::std::fmt::Display for RecipeBuildEnvironmentArgumentValue {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match self {
             Self::String(x) => x.fmt(f),
-            Self::Int64(x) => x.fmt(f),
+            Self::VonkInteger(x) => x.fmt(f),
             Self::Boolean(x) => x.fmt(f),
         }
     }
 }
-impl ::std::convert::From<i64> for RecipeBuildEnvironmentArgumentValue {
-    fn from(value: i64) -> Self {
-        Self::Int64(value)
+impl ::std::convert::From<crate::integer::Integer> for RecipeBuildEnvironmentArgumentValue {
+    fn from(value: crate::integer::Integer) -> Self {
+        Self::VonkInteger(value)
     }
 }
 impl ::std::convert::From<bool> for RecipeBuildEnvironmentArgumentValue {
@@ -8418,7 +8424,7 @@ pub struct RecipeJobRunRequest {
     pub output_mappings: ::std::vec::Vec<RecipeJobOutputMapping>,
     pub plan_digest: ::std::string::String,
     pub recipe_revision_id: ::uuid::Uuid,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub run_id: ::uuid::Uuid,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -8649,7 +8655,7 @@ pub struct RecipeRunObservationWire {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub endpoint_ready: ::std::option::Option<bool>,
     pub process_running: bool,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub run_id: ::uuid::Uuid,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -8674,7 +8680,7 @@ pub struct RecipeStartPayload {
     pub phase: ::std::option::Option<RecipeStartPayloadPhase>,
     pub plan_digest: ::std::string::String,
     pub recipe_revision_id: ::uuid::Uuid,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub run_id: ::uuid::Uuid,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub start_deadline: ::std::option::Option<::std::string::String>,
@@ -8744,11 +8750,11 @@ pub struct RecipeStopPayload {
     pub installation_id: ::uuid::Uuid,
     pub mapping_id: ::uuid::Uuid,
     pub plan_digest: ::std::string::String,
-    pub rank: u64,
+    pub rank: crate::integer::Integer,
     pub recipe_content_sha256: ::std::string::String,
     pub recipe_revision_id: ::uuid::Uuid,
     pub role: ::std::string::String,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub run_id: ::uuid::Uuid,
     pub stop_timeout_seconds: u32,
     pub target_runtime_id: ::uuid::Uuid,
@@ -8957,19 +8963,19 @@ pub struct RequestValidationIssue {
 #[derive(Eq)]
 pub enum RequestValidationIssueLocItem {
     String(::std::string::String),
-    Int64(i64),
+    VonkInteger(crate::integer::Integer),
 }
 impl ::std::fmt::Display for RequestValidationIssueLocItem {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match self {
             Self::String(x) => x.fmt(f),
-            Self::Int64(x) => x.fmt(f),
+            Self::VonkInteger(x) => x.fmt(f),
         }
     }
 }
-impl ::std::convert::From<i64> for RequestValidationIssueLocItem {
-    fn from(value: i64) -> Self {
-        Self::Int64(value)
+impl ::std::convert::From<crate::integer::Integer> for RequestValidationIssueLocItem {
+    fn from(value: crate::integer::Integer) -> Self {
+        Self::VonkInteger(value)
     }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -9594,7 +9600,7 @@ pub struct RunLifecycleRecord {
     pub installation_id: ::std::string::String,
     pub placement: CompiledPlacement,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_generation: ::std::option::Option<u32>,
+    pub run_generation: ::std::option::Option<u64>,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum RunState {
@@ -10970,7 +10976,7 @@ impl ::std::convert::TryFrom<::std::string::String> for RunSwitchCode {
 #[derive(Eq)]
 pub struct RuntimeGenerationFence {
     pub cancelled: bool,
-    pub highest_generation: u32,
+    pub highest_generation: u64,
     pub installation_id: ::uuid::Uuid,
     pub runtime_id: ::uuid::Uuid,
     pub schema_version: u8,
@@ -13412,7 +13418,7 @@ impl ::std::convert::TryFrom<::std::string::String> for SupersedeCode {
 pub struct SupervisorAcknowledgement {
     pub acknowledged_at: ::std::string::String,
     pub activation_sha256: ::std::string::String,
-    pub child_pid: u64,
+    pub child_pid: u32,
     pub generation: u64,
     pub litellm_sha256: ::std::string::String,
     pub schema_version: u8,
@@ -13865,7 +13871,7 @@ impl<'de> ::serde::Deserialize<'de> for ActivateRequest {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub generation: u64,
+            pub generation: u32,
             pub node_id: ::std::string::String,
         }
         #[allow(unused_variables)]
@@ -16062,10 +16068,10 @@ impl<'de> ::serde::Deserialize<'de> for CompiledPlacement {
             pub memory_floor_bytes: u64,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub port: ::std::option::Option<u16>,
-            pub rank: u64,
+            pub rank: crate::integer::Integer,
             pub reserved_memory_bytes: u64,
             pub role: ::std::string::String,
-            pub world_size: u64,
+            pub world_size: crate::integer::Integer,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -16239,7 +16245,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledTopology {
         #[derive(Eq)]
         struct Raw {
             pub name: ::std::string::String,
-            pub node_count: u64,
+            pub node_count: crate::integer::Integer,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -17034,7 +17040,7 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_generation: ::std::option::Option<u32>,
+            pub run_generation: ::std::option::Option<u64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -18287,7 +18293,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_generation: ::std::option::Option<u32>,
+            pub run_generation: ::std::option::Option<u64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -18389,7 +18395,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_generation: ::std::option::Option<u32>,
+            pub run_generation: ::std::option::Option<u64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub start_plan: ::std::option::Option<RecipeStartPayload>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -19626,7 +19632,7 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
             pub certificate_pem: ::std::string::String,
             pub chain_pem: ::std::string::String,
             pub fingerprint: ::std::string::String,
-            pub generation: u64,
+            pub generation: u32,
             pub node_id: ::std::string::String,
             pub not_after: ::std::string::String,
             pub not_before: ::std::string::String,
@@ -21477,7 +21483,7 @@ impl<'de> ::serde::Deserialize<'de> for OperationCheckpoint {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub digest: ::std::option::Option<::std::string::String>,
             pub key: ::std::string::String,
-            pub sequence: u64,
+            pub sequence: crate::integer::Integer,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -21494,6 +21500,7 @@ impl OperationFailureCode {
         match self {
             Self::FleetProfileApplicationFailed => "fleet_profile_application_failed",
             Self::ArtifactProcessFailed => "artifact_process_failed",
+            Self::StoredOperationResultUnreadable => "stored_operation_result_unreadable",
         }
     }
 }
@@ -21535,12 +21542,15 @@ impl<'de> ::serde::Deserialize<'de> for OperationFailureCode {
             FleetProfileApplicationFailed,
             #[serde(rename = "artifact_process_failed")]
             ArtifactProcessFailed,
+            #[serde(rename = "stored_operation_result_unreadable")]
+            StoredOperationResultUnreadable,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::FleetProfileApplicationFailed => Self::FleetProfileApplicationFailed,
             Raw::ArtifactProcessFailed => Self::ArtifactProcessFailed,
+            Raw::StoredOperationResultUnreadable => Self::StoredOperationResultUnreadable,
         })
     }
 }
@@ -21556,9 +21566,9 @@ impl<'de> ::serde::Deserialize<'de> for OperationMemberProgress {
             pub activity: ::std::option::Option<OperationMemberProgressActivity>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub bytes_per_second: ::std::option::Option<f64>,
-            pub completed_bytes: u64,
+            pub completed_bytes: crate::integer::Integer,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub completed_items: ::std::option::Option<u64>,
+            pub completed_items: ::std::option::Option<crate::integer::Integer>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub elapsed_seconds: ::std::option::Option<f64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -21577,9 +21587,9 @@ impl<'de> ::serde::Deserialize<'de> for OperationMemberProgress {
             pub smoothed_bytes_per_second: ::std::option::Option<f64>,
             pub state: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub total_bytes: ::std::option::Option<u64>,
+            pub total_bytes: ::std::option::Option<crate::integer::Integer>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub total_items: ::std::option::Option<u64>,
+            pub total_items: ::std::option::Option<crate::integer::Integer>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -21642,9 +21652,9 @@ impl<'de> ::serde::Deserialize<'de> for OperationProgress {
             pub bytes_per_second: ::std::option::Option<f64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub checkpoint: ::std::option::Option<OperationCheckpoint>,
-            pub completed_bytes: u64,
+            pub completed_bytes: crate::integer::Integer,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub completed_items: ::std::option::Option<u64>,
+            pub completed_items: ::std::option::Option<crate::integer::Integer>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub elapsed_seconds: ::std::option::Option<f64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -21662,10 +21672,10 @@ impl<'de> ::serde::Deserialize<'de> for OperationProgress {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub smoothed_bytes_per_second: ::std::option::Option<f64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub total_bytes: ::std::option::Option<u64>,
+            pub total_bytes: ::std::option::Option<crate::integer::Integer>,
             pub total_bytes_known: bool,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub total_items: ::std::option::Option<u64>,
+            pub total_items: ::std::option::Option<crate::integer::Integer>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -24120,7 +24130,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
             pub output_mappings: ::std::vec::Vec<RecipeJobOutputMapping>,
             pub plan_digest: ::std::string::String,
             pub recipe_revision_id: ::uuid::Uuid,
-            pub run_generation: u32,
+            pub run_generation: u64,
             pub run_id: ::uuid::Uuid,
         }
         #[allow(unused_variables)]
@@ -24446,7 +24456,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub endpoint_ready: ::std::option::Option<bool>,
             pub process_running: bool,
-            pub run_generation: u32,
+            pub run_generation: u64,
             pub run_id: ::uuid::Uuid,
         }
         #[allow(unused_variables)]
@@ -24499,7 +24509,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
             pub phase: ::std::option::Option<RecipeStartPayloadPhase>,
             pub plan_digest: ::std::string::String,
             pub recipe_revision_id: ::uuid::Uuid,
-            pub run_generation: u32,
+            pub run_generation: u64,
             pub run_id: ::uuid::Uuid,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub start_deadline: ::std::option::Option<::std::string::String>,
@@ -24575,11 +24585,11 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopPayload {
             pub installation_id: ::uuid::Uuid,
             pub mapping_id: ::uuid::Uuid,
             pub plan_digest: ::std::string::String,
-            pub rank: u64,
+            pub rank: crate::integer::Integer,
             pub recipe_content_sha256: ::std::string::String,
             pub recipe_revision_id: ::uuid::Uuid,
             pub role: ::std::string::String,
-            pub run_generation: u32,
+            pub run_generation: u64,
             pub run_id: ::uuid::Uuid,
             pub stop_timeout_seconds: u32,
             pub target_runtime_id: ::uuid::Uuid,
@@ -25656,7 +25666,7 @@ impl<'de> ::serde::Deserialize<'de> for RunLifecycleRecord {
             pub installation_id: ::std::string::String,
             pub placement: CompiledPlacement,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_generation: ::std::option::Option<u32>,
+            pub run_generation: ::std::option::Option<u64>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -26870,7 +26880,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimeGenerationFence {
         #[derive(Eq)]
         struct Raw {
             pub cancelled: bool,
-            pub highest_generation: u32,
+            pub highest_generation: u64,
             pub installation_id: ::uuid::Uuid,
             pub runtime_id: ::uuid::Uuid,
             pub schema_version: u8,
@@ -29412,7 +29422,7 @@ impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
         struct Raw {
             pub acknowledged_at: ::std::string::String,
             pub activation_sha256: ::std::string::String,
-            pub child_pid: u64,
+            pub child_pid: u32,
             pub generation: u64,
             pub litellm_sha256: ::std::string::String,
             pub schema_version: u8,

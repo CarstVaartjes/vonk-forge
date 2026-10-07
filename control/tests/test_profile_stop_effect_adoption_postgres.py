@@ -33,6 +33,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.stored_json import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .test_fleet_profiles import NOW, _node_id, _uuid
@@ -451,7 +452,7 @@ def test_postgres_stop_adoption_loses_authority_on_exact_refusal(pending_stop, f
     else:
         # Deliberately corrupt only the exact queued child identity; inference
         # from its matching run/node must never grant continuing authority.
-        with sessions.begin() as session:
+        with write_guard_mode(strict=False), sessions.begin() as session:
             stop = session.get(Job, stop_id)
             assert stop is not None
             if fault == "wrong-child-request":

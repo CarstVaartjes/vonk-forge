@@ -45,7 +45,7 @@ function transform(value) {
   if (Object.keys(objectRules).length) (result.allOf ??= []).push({if: {vonkType: ["object"]}, then: objectRules});
   return result;
 }
-const ajv = new Ajv2020({strict: false, allErrors: false, inlineRefs: false, code: {source: true, esm: true, formats: new _Code("fullFormats")}, validateFormats: true});
+const ajv = new Ajv2020({strict: false, allErrors: false, inlineRefs: false, ownProperties: true, code: {source: true, esm: true, formats: new _Code("fullFormats")}, validateFormats: true});
 addFormats(ajv);
 for (const [keyword, helper] of [["vonkType", "contractType"], ["vonkEnum", "contractEnum"], ["vonkMultiple", "numericMultiple"]]) {
   ajv.addKeyword({keyword, code(context) {
@@ -81,7 +81,10 @@ function shape(schema) {
   if (schema.type) result.type = schema.type;
   if (schema.anyOf || schema.oneOf) result.alternatives = (schema.anyOf ?? schema.oneOf).map(option => {
     const name = `normalize${index++}`; register(option, name);
-    const descriptor = shape(option); normalization[name] = descriptor;
+    const descriptor = shape(option);
+    // Canonical scalar unions distinguish strict integers from IEEE floats.
+    if (option.type === "number" && (schema.anyOf ?? schema.oneOf).some(branch => branch.type === "integer")) descriptor.preserveIntegerFloat = true;
+    normalization[name] = descriptor;
     return {validate: name, shape: descriptor};
   });
   if (schema.allOf) result.allOf = schema.allOf.map(shape);
@@ -97,7 +100,7 @@ for (const [route, item] of Object.entries(document.paths)) {
     for (const location of ["path", "query"]) {
       const declared = [...(item.parameters ?? []), ...(operation.parameters ?? [])].filter(parameter => parameter.in === location && parameter.schema);
       if (!declared.length) continue;
-      const name = `validate${index++}`;
+      const name = `contract${index++}`;
       const schema = {type: "object", properties: Object.fromEntries(declared.map(parameter => [parameter.name, parameter.schema])), required: declared.filter(parameter => parameter.required).map(parameter => parameter.name), additionalProperties: false};
       register(schema, name); normalization[name] = shape(schema); parameters[location] = name;
     }
@@ -105,14 +108,14 @@ for (const [route, item] of Object.entries(document.paths)) {
       responses[status] = {};
       for (const [media, content] of Object.entries(response.content ?? {})) {
       if (!content.schema) continue;
-      const name = `validate${index++}`; register(content.schema, name);
+      const name = `contract${index++}`; register(content.schema, name);
       normalization[name] = shape(content.schema);
       responses[status][media] = name;
       }
     }
     for (const [media, content] of Object.entries(operation.requestBody?.content ?? {})) {
       if (!content.schema) continue;
-      const name = `validate${index++}`; register(content.schema, name); requests[media] = name;
+      const name = `contract${index++}`; register(content.schema, name); requests[media] = name;
       normalization[name] = shape(content.schema);
     }
     routes.push({route, method: method.toUpperCase(), responses, requests, parameters});
@@ -135,7 +138,7 @@ if (schemaOnly) {
 // annotations or suppressing TypeScript errors in a generated .ts file.
 fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>}[];\n');
 // Route tables refer to the actual exported functions, never string names.
-const routeCode = JSON.stringify(routes).replace(/"(validate[0-9]+)"/g, "$1");
+const routeCode = JSON.stringify(routes).replace(/"(contract[0-9]+)"/g, "$1");
 const destination = path.join(out, "runtime.generated.js");
 const descriptor = value => JSON.stringify(value).replace(/"validate":"(normalize[0-9]+)"/g, '"validate":$1');
 const normalizers = `\nconst shapes = ${descriptor(shapes)};\n` + Object.entries(normalization).map(([name, node]) => `Object.assign(${name}, {normalize: value => normalizeValidated(value, ${descriptor(node)}, shapes)});`).join("\n");
@@ -145,6 +148,6 @@ const ast = await openapiTS(JSON.parse(raw), {transform(schema) {
   if (schema.type !== "integer" && schema.type !== "number") return;
   const lower = schema.minimum ?? schema.exclusiveMinimum, upper = schema.maximum ?? schema.exclusiveMaximum;
   if (typeof lower === "number" && typeof upper === "number" && Number.isSafeInteger(lower) && Number.isSafeInteger(upper)) return;
-  return node.createUnionTypeNode([node.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword), node.createTypeReferenceNode("ExactInteger")]);
+  return node.createUnionTypeNode([node.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword), node.createTypeReferenceNode("ExactNumber")]);
 }});
-fs.writeFileSync(path.join(out, "generated.d.ts"), provenance + 'import type {ExactInteger} from "./contract-numeric";\n' + astToString(ast));
+fs.writeFileSync(path.join(out, "generated.d.ts"), provenance + 'import type {ExactNumber} from "./contract-numeric";\n' + astToString(ast));

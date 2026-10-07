@@ -2,9 +2,10 @@ import {useCallback, useEffect, useMemo, useState} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import {addWire, compareWire, displayRatio, formatWire, isWireNumber, materialize, parseContractJson} from "../api/contract-numeric";
 import type {WireNumber} from "../api/contract-numeric";
+import {validateControlParameters} from "../api/contract-json";
 import {ApiError} from "../api/client";
 import {canonicalRecipeSelector, readableProfile} from "../api/types";
-import type {ControlApi, FleetProfile, FleetProfileRead, FleetProfileApplicationView, FleetProfileEndpoints, FleetProfileInput, FleetProfilePreview, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, FleetProfile, FleetProfileNumber, FleetProfileRead, FleetProfileApplicationView, FleetProfileEndpoints, FleetProfileInput, FleetProfilePreview, VisualFleetSnapshot} from "../api/types";
 import {formatBytes, nodeDisplayName} from "../lib/fleet";
 import type {LibraryRecipeRecord} from "./library-workcell";
 import {CancelOperation} from "./cancel-operation";
@@ -32,8 +33,8 @@ type AssignmentDraft = {
   optionChoices: OptionChoices;
 };
 type ProfileDraft = {
-  number?: WireNumber;
-  revision?: WireNumber;
+  number?: FleetProfileNumber;
+  revision?: FleetProfile["revision"];
   name: string;
   description: string;
   favorite: boolean;
@@ -97,11 +98,13 @@ function isDirty(draft: ProfileDraft, profile: FleetProfile | undefined): boolea
   if (draft.number === undefined) return draft.assignments.length > 0 || comparable(draft) !== comparable(blankDraft());
   return !profile || comparable(draft) !== comparable(draftFromProfile(profile));
 }
-const requestedProfile = (): WireNumber | undefined => {
+const requestedProfile = (): FleetProfileNumber | undefined => {
   const token = new URLSearchParams(location.search).get("profile");
   if (!token || !/^[1-9][0-9]*$/.test(token)) return undefined;
   const value = materialize(parseContractJson(token));
-  return isWireNumber(value) ? value : undefined;
+  validateControlParameters("GET", `/api/profile/${token}`, {path: {number: value}});
+  if (typeof value !== "number") throw new Error("The profile number cannot be represented by the profile contract.");
+  return value;
 };
 const sameNumber = (left: WireNumber, right: WireNumber | undefined) => right !== undefined && compareWire(left, right) === 0;
 
@@ -149,7 +152,7 @@ function isAmbiguousLoadFailure(error: unknown): boolean {
 
 async function submitProfileLoad(
   api: ControlApi,
-  number: WireNumber,
+  number: FleetProfileNumber,
   pending: PendingProfileLoad,
 ): Promise<FleetProfileApplicationView> {
   // The load names the effects the operator reviewed, so a plan that changed since
@@ -221,7 +224,7 @@ export function cacheSummaryText(summary: Record<string, unknown> | undefined): 
 
 export function LibraryProfilesView({api, entries, fleet, initialCreate = false, onBusyChange, onNavigate}: {api: ControlApi; entries: LibraryRecipeRecord[]; fleet?: VisualFleetSnapshot; initialCreate?: boolean; onBusyChange?(busy: boolean): void; onNavigate: Navigate}) {
   const [profiles, setProfiles] = useState<FleetProfileRead[]>([]);
-  const [selectedNumber, setSelectedNumber] = useState<WireNumber>();
+  const [selectedNumber, setSelectedNumber] = useState<FleetProfileNumber>();
   const [draft, setDraft] = useState<ProfileDraft>();
   const [editing, setEditing] = useState(initialCreate);
   const [loading, setLoading] = useState(true);
@@ -349,7 +352,10 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     setSaving(true); setError("");
     try {
       const savedKey = draftKey(draft);
-      const number = draft.number ?? addWire(profiles.reduce<WireNumber>((largest, profile) => compareWire(profile.number, largest) > 0 ? profile.number : largest, 0), 1);
+      const candidate = draft.number ?? addWire(profiles.reduce<WireNumber>((largest, profile) => compareWire(profile.number, largest) > 0 ? profile.number : largest, 0), 1);
+      validateControlParameters("PUT", `/api/profile/${formatWire(candidate)}`, {path: {number: candidate}});
+      if (typeof candidate !== "number") throw new Error("The profile number cannot be represented by the profile contract.");
+      const number: FleetProfileNumber = candidate;
       const result = await api.autosaveProfile(number, inputFromDraft(draft, optionsBySelector));
       setProfiles(current => [...current.filter(profile => compareWire(profile.number, result.number) !== 0), result].sort((left, right) => compareWire(left.number, right.number)));
       unsavedDrafts.delete(savedKey);

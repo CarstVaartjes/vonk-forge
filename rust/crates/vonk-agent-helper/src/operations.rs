@@ -26,7 +26,9 @@ use vonk_agent_protocol::{
         CompiledOciError, CompiledOciPaths, ExecInvocationLimits, measure_exec_invocation,
         start_arguments_for_paths,
     },
-    hex_sha256, parse_strict,
+    hex_sha256,
+    integer::Integer,
+    parse_strict,
 };
 use wait_timeout::ChildExt;
 
@@ -3667,10 +3669,19 @@ fn validate_docker_run_with_archive(
                     crate::runtime_fabric::ENVIRONMENT_NAMES.contains(&name)
                 });
                 if let Some(value) = value.strip_prefix("VONK_WORLD_SIZE=") {
-                    let parsed = value
-                        .parse::<u32>()
+                    // This argv member must be a decimal token, not a Serde
+                    // private arbitrary-precision number object.
+                    if !value
+                        .strip_prefix('-')
+                        .unwrap_or(value)
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit())
+                    {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                    let parsed: Integer = parse_strict(value.as_bytes())
                         .map_err(|_| OperationError::InvalidOperation)?;
-                    if parsed == 0 || world_size.replace(parsed).is_some() {
+                    if parsed <= 0 || world_size.replace(parsed).is_some() {
                         return Err(OperationError::InvalidOperation);
                     }
                 }
@@ -3708,11 +3719,19 @@ fn validate_docker_run_with_archive(
                     }
                 }
                 if let Some(value) = value.strip_prefix("VONK_RANK=") {
-                    let parsed = value
-                        .parse::<u32>()
-                        .ok()
-                        .ok_or(OperationError::InvalidOperation)?;
-                    if rank.replace(parsed).is_some() {
+                    // This argv member must be a decimal token, not a Serde
+                    // private arbitrary-precision number object.
+                    if !value
+                        .strip_prefix('-')
+                        .unwrap_or(value)
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit())
+                    {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                    let parsed: Integer = parse_strict(value.as_bytes())
+                        .map_err(|_| OperationError::InvalidOperation)?;
+                    if parsed < 0 || rank.replace(parsed).is_some() {
                         return Err(OperationError::InvalidOperation);
                     }
                 }
@@ -6836,6 +6855,29 @@ mod tests {
             .map(str::to_owned),
         );
         assert!(validate_docker_run(&arguments, &roots, None).is_ok());
+        let world_size_index = arguments
+            .iter()
+            .position(|arg| arg == "VONK_WORLD_SIZE=2")
+            .unwrap();
+        // These are decimal environment arguments, not machine-sized indexes.
+        // Preserve the exact canonical topology domain before native launch.
+        for world_size in ["18446744073709551616".to_owned(), "9".repeat(200)] {
+            let mut wide = arguments.clone();
+            wide[world_size_index] = format!("VONK_WORLD_SIZE={world_size}");
+            assert!(validate_docker_run(&wide, &roots, None).is_ok());
+        }
+        for invalid in [
+            "-1",
+            "0",
+            "1.0",
+            "1e0",
+            "true",
+            r#"{"$serde_json::private::Number":"2"}"#,
+        ] {
+            let mut invalid_shape = arguments.clone();
+            invalid_shape[world_size_index] = format!("VONK_WORLD_SIZE={invalid}");
+            assert!(validate_docker_run(&invalid_shape, &roots, None).is_err());
+        }
         let mut nonzero_owner = arguments.clone();
         let rank = nonzero_owner
             .iter()
@@ -6843,6 +6885,23 @@ mod tests {
             .unwrap();
         nonzero_owner[rank] = "VONK_RANK=1".to_owned();
         assert!(validate_docker_run(&nonzero_owner, &roots, None).is_ok());
+        let mut wide_rank = arguments.clone();
+        wide_rank[world_size_index] = format!("VONK_WORLD_SIZE={}", "9".repeat(200));
+        wide_rank[rank] = format!("VONK_RANK={}", "8".repeat(200));
+        assert!(validate_docker_run(&wide_rank, &roots, None).is_ok());
+        wide_rank[rank] = format!("VONK_RANK={}", "9".repeat(200));
+        assert!(validate_docker_run(&wide_rank, &roots, None).is_err());
+        for invalid in [
+            "-1",
+            "1.0",
+            "1e0",
+            "true",
+            r#"{"$serde_json::private::Number":"1"}"#,
+        ] {
+            let mut invalid_shape = arguments.clone();
+            invalid_shape[rank] = format!("VONK_RANK={invalid}");
+            assert!(validate_docker_run(&invalid_shape, &roots, None).is_err());
+        }
         let mut worker = arguments.clone();
         let local = worker
             .iter()
