@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
     OutcomeDone,
+    OutcomeKind,
     RecipeStopResult,
 )
 from vonk_control.fleet_profiles import RunSwitchFleetProfileAdapter
@@ -328,7 +329,7 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         receipt = AgentResult(
             fence=claim.fence,
             state=AgentResultState.SUCCEEDED,
-            result=OutcomeDone(result=RecipeStopResult()),
+            result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
         )
         jobs.record_result(AgentResult.model_validate_json(receipt.model_dump_json()))
         coordinator = _service(

@@ -466,7 +466,7 @@ fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
     Some(parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+                let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
                 crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
                     .map_err(::serde::de::Error::custom)?;
                 #raw

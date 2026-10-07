@@ -3,7 +3,7 @@
 //! Fields with proven physical/owner limits retain their canonical bounds.
 //! This scalar is used when the schema has no finite machine domain; schema
 //! validation still applies any declared minimum at the model boundary.
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Number;
 use std::cmp::Ordering;
 use std::fmt;
@@ -61,11 +61,7 @@ impl PartialOrd<u64> for Integer {
 
 impl<'de> Deserialize<'de> for Integer {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let number = Number::deserialize(deserializer)?;
-        if number.to_string().contains(['.', 'e', 'E']) {
-            return Err(D::Error::custom("expected an integer token"));
-        }
-        Ok(Self(number))
+        crate::wire_schema::deserialize_integer_number(deserializer).map(Self)
     }
 }
 
