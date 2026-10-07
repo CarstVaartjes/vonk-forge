@@ -3785,6 +3785,7 @@ def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial
     from vonk_control.step_ca import StepCAError
 
     client, services, _, _ = agent_system
+    original_issue = services.enrollment._authority.issue_node
 
     def refuse_capacity(*_args: object, **_kwargs: object) -> IssuedCertificate:
         raise StepCAError(
@@ -3800,3 +3801,9 @@ def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial
         response.json()["detail"]["reason_code"]
         == "certificate.response_unrepresentable"
     )
+    # A repaired capacity policy resumes the accepted grant and CSR rather than
+    # consuming its failure as an authority denial or requiring fresh consent.
+    monkeypatch.setattr(services.enrollment._authority, "issue_node", original_issue)
+    repaired = client.post("/agent/enroll", json=body)
+    assert repaired.status_code == 200
+    assert repaired.json()["node_id"] == NODE_C
