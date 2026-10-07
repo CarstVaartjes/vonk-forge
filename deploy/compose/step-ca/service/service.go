@@ -1,6 +1,7 @@
 package main
 
 import (
+ "bytes"
  "crypto/x509"
  "encoding/json"
  "encoding/pem"
@@ -11,6 +12,7 @@ import (
  "github.com/smallstep/certificates/api"
  "github.com/smallstep/certificates/authority"
  "github.com/smallstep/certificates/authority/provisioner"
+ "github.com/smallstep/certificates/db"
 )
 
 type Service struct { Authority *authority.Authority; CAS *JournalCAS; Journal *JournalDB; Policy Policy }
@@ -80,7 +82,20 @@ func (s *Service) sign(w http.ResponseWriter,r *http.Request) {
   if err!=nil{failReply(w,err);return}
  }
  chain,err:=s.Journal.ReadCommitted(*attempt);if err!=nil{failReply(w,err);return}
+ if err:=s.validateCommitted(binding,csr,chain);err!=nil{failReply(w,err);return}
  encoded:=make([]string,len(chain))
  for i,certificate:=range chain {encoded[i]=string(pem.EncodeToMemory(&pem.Block{Type:"CERTIFICATE",Bytes:certificate.Raw}))}
  jsonReply(w,201,issuedReply{"issued",binding,encoded[0],encoded[1],encoded})
+}
+
+func (s *Service) validateCommitted(binding Binding,csr *x509.CertificateRequest,chain []*x509.Certificate) error {
+ if len(chain)!=2 || !bytes.Equal(chain[1].Raw,s.Policy.Issuer.Raw){return errors.New("committed issuer chain differs from current policy")}
+ if err:=binding.validateLeaf(chain[0],s.Policy,true);err!=nil{return err}
+ public,err:=x509.MarshalPKIXPublicKey(chain[0].PublicKey);if err!=nil{return err}
+ expected,err:=x509.MarshalPKIXPublicKey(csr.PublicKey);if err!=nil || !bytes.Equal(public,expected){return errors.New("committed certificate key differs from CSR")}
+ raw,err:=s.Journal.Get(certsDataTable,[]byte(binding.Serial));if err!=nil{return err}
+ var metadata db.CertificateData
+ if err:=json.Unmarshal(raw,&metadata);err!=nil{return err}
+ if metadata.Provisioner==nil || metadata.Provisioner.ID!=s.Policy.ProvisionerID || metadata.Provisioner.Name!=s.Policy.ProvisionerName || metadata.Provisioner.Type!="JWK"{return errors.New("committed certificate metadata differs from current policy")}
+ return nil
 }
