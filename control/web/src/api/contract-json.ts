@@ -1,5 +1,5 @@
 import * as generated from "./runtime.generated.js";
-import {parseContractJson, stringifyContractJson} from "./contract-numeric";
+import {parseContractJson, stringifyContractJson, UnsupportedContractRuntime} from "./contract-numeric";
 
 export class ContractViolation extends Error {
   readonly path: string;
@@ -22,7 +22,10 @@ export function validateControlBody(method: string, path: string, status: number
   const validator = responses?.[media.split(";")[0].trim().toLowerCase()];
   if (!validator) throw new ContractViolation(method, path, status);
   let value: unknown;
-  try { value = parseContractJson(text); } catch { throw new ContractViolation(method, path, status); }
+  try { value = parseContractJson(text); } catch (cause) {
+    if (cause instanceof UnsupportedContractRuntime) throw cause;
+    throw new ContractViolation(method, path, status);
+  }
   if (!validator(value)) throw new ContractViolation(method, path, status);
   return validator.normalize(value);
 }

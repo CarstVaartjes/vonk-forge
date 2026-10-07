@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import threading
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from email.message import Message
@@ -771,9 +772,30 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
         "request_key": str(uuid4()),
     }
     prefix = f"SELECT {locked_model.__tablename__}."
+    lock_statements: list[str] = []
+    request_backend: list[int] = []
 
-    def before_lock(_connection, _cursor, statement, _parameters, _context, _many):
-        if statement.startswith(prefix) and "FOR UPDATE" in statement:
+    def names_locked_owner(value: object) -> bool:
+        if isinstance(value, str):
+            return value == locked_id
+        if isinstance(value, Mapping):
+            return any(names_locked_owner(item) for item in value.values())
+        if isinstance(value, tuple | list):
+            return any(names_locked_owner(item) for item in value)
+        return False
+
+    def before_lock(connection, _cursor, statement, parameters, _context, _many):
+        if (
+            statement.startswith(prefix)
+            and "FOR UPDATE" in statement
+            and names_locked_owner(parameters)
+        ):
+            # Capture parameterless SQL and the exact requesting backend. A
+            # failure must identify the wait rather than guess from its owner.
+            lock_statements.append(statement[:512])
+            request_backend[:] = [
+                connection.connection.driver_connection.info.backend_pid
+            ]
             attempted.set()
 
     locker = sessions()
@@ -800,7 +822,21 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
                 # The lock is still held. Admission must park the reviewed
                 # intent now, not wait for the worker whose effects it is
                 # trying to supersede.
-                response = future.result(timeout=1)
+                try:
+                    response = future.result(timeout=1)
+                except TimeoutError:
+                    with postgres_engine.connect() as diagnostic:
+                        wait = diagnostic.execute(
+                            text(
+                                "SELECT wait_event_type, wait_event, pg_blocking_pids(pid) "
+                                "FROM pg_stat_activity WHERE pid = :pid"
+                            ),
+                            {"pid": request_backend[0]},
+                        ).one_or_none()
+                    pytest.fail(
+                        f"admission waited while {locked_model.__name__} stayed locked; "
+                        f"SQL={lock_statements!r}; backend_wait={wait!r}"
+                    )
                 assert response.status_code == 202, response.text
                 with sessions() as session:
                     parked = session.scalar(select(FleetProfileApplication))

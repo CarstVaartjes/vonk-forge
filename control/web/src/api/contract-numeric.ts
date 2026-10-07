@@ -1,4 +1,4 @@
-import {LosslessNumber, parse} from "lossless-json";
+import {LosslessNumber} from "lossless-json";
 
 /** The raw numeric token is retained until its canonical schema accepts it. */
 export type ExactNumber = LosslessNumber;
@@ -162,7 +162,19 @@ export function numericMultiple(value: unknown, divisor: string): boolean {
 }
 // Ordinary Controller/CLI JSON ingress uses last-key wins. Duplicate rejection
 // belongs to an explicitly stricter owning boundary, not this browser parser.
-export function parseContractJson(text: string): unknown { return parse(text, undefined, {onDuplicateKey: ({newValue}) => newValue}); }
+export class UnsupportedContractRuntime extends Error {
+  constructor() {
+    super("This browser cannot preserve JSON numeric source tokens. Update your browser to use the Control API.");
+    this.name = "UnsupportedContractRuntime";
+  }
+}
+export function parseContractJson(text: string): unknown {
+  return JSON.parse(text, (_key: string, value: unknown, context?: {source?: string}) => {
+    if (typeof value !== "number") return value;
+    if (typeof context?.source !== "string") throw new UnsupportedContractRuntime();
+    return new LosslessNumber(context.source);
+  });
+}
 export interface NormalizationShape {
   type?: string | string[];
   preserveIntegerFloat?: boolean;
@@ -206,7 +218,7 @@ export function normalizeValidated(value: unknown, shape: NormalizationShape, de
   }
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => {
-      const properties = shapes.map(candidate => candidate.properties?.[key]).filter((candidate): candidate is NormalizationShape => candidate !== undefined);
+      const properties = shapes.map(candidate => candidate.properties && Object.hasOwn(candidate.properties, key) ? candidate.properties[key] : undefined).filter((candidate): candidate is NormalizationShape => candidate !== undefined);
       const additional = shapes.map(candidate => candidate.additionalProperties).filter((candidate): candidate is NormalizationShape => candidate !== undefined);
       return [key, normalizeValidated(item, {allOf: properties.length ? properties : additional}, definitions)];
     }));
