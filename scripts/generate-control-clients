@@ -202,6 +202,11 @@ def main() -> None:
         action="store_true",
         help="regenerate only the tracked OpenAPI document without Node tooling",
     )
+    parser.add_argument(
+        "--cli-update-schema-only",
+        action="store_true",
+        help="emit the canonical CLI compatibility resource before package installation",
+    )
     arguments = parser.parse_args()
     from vonk_control.cli_update_contract import cli_update_contract_schema
 
@@ -209,6 +214,8 @@ def main() -> None:
         cli_update_contract_schema(),
         path=ROOT / "src/cluster_profiles/schemas/cli-update-contract.schema.json",
     )
+    if arguments.cli_update_schema_only:
+        return
 
     if arguments.schema_only:
         _write_openapi(_schema(include_browser_auth=True))

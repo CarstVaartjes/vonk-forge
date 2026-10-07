@@ -33,6 +33,12 @@ jobs:
         run: |
           uv build --project agent_protocol --wheel --out-dir inventory/wheels
           python3 scripts/refresh-protocol-wheel-lock
+      - name: Bootstrap canonical packaged resource from locked dependencies
+        env:
+          PYTHONPATH: control/src:agent_protocol/src:src
+        run: |
+          scripts/retry-dependency-fetch uv sync --project control --frozen --no-install-project --no-install-package vonk-cluster-profiles
+          control/.venv/bin/python scripts/generate-control-clients --cli-update-schema-only
       - uses: ./.github/actions/python-env
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
