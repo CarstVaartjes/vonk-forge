@@ -96,3 +96,26 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
         for name, unit in report["security_units"].items()
         if name != "vonk-forge-package-upgrade-recover.service"
     )
+
+
+def test_agent_orders_driver_and_coldplug_before_private_device_namespace():
+    from configparser import ConfigParser
+
+    unit = ConfigParser(interpolation=None, strict=False)
+    unit.read(ROOT / "packaging/systemd/vonk-forge-agent.service")
+    after = unit["Unit"]["After"].split()
+    wants = unit["Unit"]["Wants"].split()
+    assert {"nvidia-persistenced.service", "systemd-udev-trigger.service"} <= set(
+        wants
+    ) & set(after)
+    assert {
+        "dev-nvidia0.device",
+        "dev-nvidiactl.device",
+        r"dev-nvidia\x2duvm.device",
+    } <= set(after)
+    assert unit["Service"]["ExecStartPre"] == "/usr/bin/udevadm settle --timeout=30"
+    assert unit["Service"]["PrivateDevices"] == "yes"
+    assert unit["Service"]["DevicePolicy"] == "closed"
+    assert unit["Service"]["Restart"] == "on-failure"
+    assert unit["Service"]["RestartSec"] == "30s"
+    assert unit["Service"]["RestartPreventExitStatus"] == "78"

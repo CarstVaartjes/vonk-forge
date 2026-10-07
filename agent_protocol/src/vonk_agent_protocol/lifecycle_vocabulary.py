@@ -368,7 +368,11 @@ def _aliases(
     subject: LifecycleSubject, kind: str | None
 ) -> Mapping[StateAlias, AdoptedState]:
     rows = STATE_ALIASES.get(subject, {})
-    if subject is LifecycleSubject.JOB and kind in JOB_KIND_ALIASES:
+    if (
+        subject is LifecycleSubject.JOB
+        and kind is not None
+        and kind in JOB_KIND_ALIASES
+    ):
         return {**rows, **JOB_KIND_ALIASES[kind]}
     return rows
 
@@ -605,6 +609,8 @@ class SecurityRefusalReason(WireEnum):
     HTTP_403 = "403"
     AGENT_CERTIFICATE_ROTATION_CONFLICT = "agent.certificate.rotation.conflict"
     AGENT_ENROLLMENT_SUBMIT_REJECTED = "agent.enrollment.submit.rejected"
+    AGENT_EXPIRED_RENEWAL_REFUSED = "agent.expired_renewal_refused"
+    AGENT_EXPIRED_RENEWAL_GRACE_EXHAUSTED = "agent.expired_renewal_grace_exhausted"
     AGENT_IDENTITY_MISMATCH = "agent.identity_mismatch"
     AGENT_TOMBSTONE_FENCED = "agent.tombstone_fenced"
     CATALOG_AUTHENTICATION_REQUIRED = "catalog.authentication_required"

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
@@ -28,8 +29,13 @@ from vonk_agent_protocol import (
     CertificateCode,
     EnrollmentGrantState,
     InvalidRequestError,
+    SecurityRefusalReason,
 )
-from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, EnrollmentEvidence
+from vonk_agent_protocol.enrollment import (
+    MAX_CSR_BYTES,
+    EnrollmentEvidence,
+    ExpiredRenewRequest,
+)
 
 from .ca_issuance_contract import CertificateIssuanceBinding
 from .enrollment_contract import ENROLLMENT_ID_PATTERN, EnrollmentGrantStatus
@@ -58,6 +64,12 @@ _ROTATION_ISSUANCE_TIMEOUT = timedelta(minutes=5)
 
 class EnrollmentDenied(RuntimeError):
     """Enrollment input or state does not authorize the requested operation."""
+
+
+class ExpiredRenewalGraceExhausted(EnrollmentDenied):
+    """The enrolled key no longer authorizes unattended certificate recovery."""
+
+    reason_code = SecurityRefusalReason.AGENT_EXPIRED_RENEWAL_GRACE_EXHAUSTED
 
 
 class EnrollmentIssuanceUncertain(EnrollmentDenied):
@@ -570,7 +582,52 @@ class EnrollmentService:
             )
         return self._issue_enrollment_claim(claim, now)
 
-    def renew(self, node_id: str, serial: str, csr: bytes) -> IssuedCertificate:
+    def renew_expired(self, proof: ExpiredRenewRequest) -> IssuedCertificate:
+        """Authenticate the stored active key; never relax work/activation mTLS.
+
+        Fresh proofs bind a durable CSR, so replay uses the existing journal
+        and cannot choose another key or issue another generation.
+        """
+        now = _utc(self._clock())
+        with self._transaction() as session:
+            node = session.get(AgentNode, proof.node_id)
+            certificate = session.get(AgentCertificate, proof.serial)
+            if (
+                node is None
+                or node.state != "active"
+                or node.revoked_at is not None
+                or certificate is None
+                or certificate.node_id != proof.node_id
+                or certificate.state != "active"
+                or certificate.revoked_at is not None
+                or certificate.certificate_pem is None
+            ):
+                raise EnrollmentDenied("expired renewal identity is removed or revoked")
+            expiry = _stored_utc(certificate.not_after)
+            if now < expiry or now > expiry + timedelta(days=30):
+                raise ExpiredRenewalGraceExhausted(
+                    "expired renewal grace exhausted; re-enrollment required"
+                )
+            if abs(int(now.timestamp()) - proof.signed_at) > 300:
+                raise EnrollmentDenied("expired renewal proof is stale")
+            public_key = x509.load_pem_x509_certificate(
+                certificate.certificate_pem.encode("ascii")
+            ).public_key()
+            if not isinstance(public_key, ed25519.Ed25519PublicKey):
+                raise EnrollmentDenied("expired renewal key is not Ed25519")
+            try:
+                public_key.verify(bytes.fromhex(proof.signature), proof.proof_bytes())
+            except (InvalidSignature, ValueError, UnicodeEncodeError):
+                raise EnrollmentDenied("expired renewal proof is invalid") from None
+        # Admission rechecks removal/revocation and grace under the existing
+        # node/certificate locks. No transaction spans provider I/O.
+        return self.recover_rotation(
+            proof.node_id, proof.serial, proof.csr.encode("ascii"), expired=True
+        )
+
+    def renew(
+        self, node_id: str, serial: str, csr: bytes, *, expired: bool = False
+    ) -> IssuedCertificate:
         _validate_node_id(node_id)
         if not serial.strip():
             raise ValueError("certificate serial is required")
@@ -583,6 +640,7 @@ class EnrollmentService:
                 normalized_csr,
                 csr_fingerprint,
                 now,
+                expired=expired,
             )
         except IntegrityError:
             # SQLite does not implement SELECT FOR UPDATE. A node-unique row
@@ -593,6 +651,7 @@ class EnrollmentService:
                 normalized_csr,
                 csr_fingerprint,
                 now,
+                expired=expired,
             )
         if isinstance(claim, IssuedCertificate):
             return claim
@@ -605,7 +664,7 @@ class EnrollmentService:
         return self._issue_rotation_claim(claim, now)
 
     def recover_rotation(
-        self, node_id: str, serial: str, csr: bytes
+        self, node_id: str, serial: str, csr: bytes, *, expired: bool = False
     ) -> IssuedCertificate:
         """Recover an unactivated staged certificate for the durable pending CSR.
 
@@ -626,9 +685,10 @@ class EnrollmentService:
             normalized_csr,
             csr_fingerprint,
             now,
+            expired=expired,
         )
         if recovery is None:
-            return self.renew(node_id, serial, normalized_csr)
+            return self.renew(node_id, serial, normalized_csr, expired=expired)
         try:
             self._authority.revoke_node(recovery.retiring_serial, now)
         except RuntimeError as error:
@@ -642,7 +702,7 @@ class EnrollmentService:
             now,
         )
         if not owns_issuance:
-            return self.renew(node_id, serial, normalized_csr)
+            return self.renew(node_id, serial, normalized_csr, expired=expired)
         return self._issue_rotation_claim(recovery.claim, now)
 
     def _prepare_rotation_recovery(
@@ -652,6 +712,8 @@ class EnrollmentService:
         normalized_csr: bytes,
         csr_fingerprint: str,
         now: datetime,
+        *,
+        expired: bool = False,
     ) -> _RotationRecoveryClaim | None:
         with self._transaction() as session:
             node = session.scalar(
@@ -681,7 +743,7 @@ class EnrollmentService:
                 or source.revoked_at is not None
                 or source.state != "active"
                 or _stored_utc(source.not_before) > now
-                or _stored_utc(source.not_after) <= now
+                or not _rotation_source_valid(source, now, expired=expired)
             ):
                 raise EnrollmentDenied("node identity is retired or revoked")
 
@@ -862,6 +924,8 @@ class EnrollmentService:
         normalized_csr: bytes,
         csr_fingerprint: str,
         now: datetime,
+        *,
+        expired: bool = False,
     ) -> _RotationClaim | IssuedCertificate:
         with self._transaction() as session:
             node = session.scalar(
@@ -893,9 +957,8 @@ class EnrollmentService:
                 raise EnrollmentDenied("node identity is retired or revoked")
             if certificate.state != "active":
                 raise EnrollmentDenied("certificate is not active")
-            if (
-                _stored_utc(certificate.not_before) > now
-                or _stored_utc(certificate.not_after) <= now
+            if _stored_utc(certificate.not_before) > now or not _rotation_source_valid(
+                certificate, now, expired=expired
             ):
                 raise EnrollmentDenied("certificate is not currently valid")
             staged = next(
@@ -1769,3 +1832,10 @@ def _require_issuance_binding(
     """The same exact accepted binding fences admission and result adoption."""
     if _issuance_binding(stored) != expected:
         raise EnrollmentDenied("enrollment issuance binding changed")
+
+
+def _rotation_source_valid(
+    certificate: AgentCertificate, now: datetime, *, expired: bool
+) -> bool:
+    expiry = _stored_utc(certificate.not_after)
+    return expiry <= now <= expiry + timedelta(days=30) if expired else now < expiry

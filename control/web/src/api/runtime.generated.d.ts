@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 504d9c6b820e2c8c4f818ea5c173ee6ddac886f22ad310947221ca5d582d8e1e. Do not edit.
+// Generated from canonical OpenAPI SHA256 52f2dd60d4e1fe06eaf7abe283cd0cc6d1ab392258d29f4a92746106460464ea. Do not edit.
 export interface NormalizationShape {
   type?: string | string[];
   preserveIntegerFloat?: boolean;

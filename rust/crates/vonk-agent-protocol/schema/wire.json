@@ -2618,6 +2618,48 @@
       "title": "ExecuteContainerRuntimeRequestOperation",
       "type": "object"
     },
+    "ExpiredRenewRequest": {
+      "additionalProperties": false,
+      "description": "Proof of possession, bound to the exact durable replacement CSR.",
+      "properties": {
+        "csr": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Csr",
+          "type": "string"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "serial": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Serial",
+          "type": "string"
+        },
+        "signature": {
+          "pattern": "^[0-9a-f]{128}$",
+          "title": "Signature",
+          "type": "string"
+        },
+        "signed_at": {
+          "minimum": 0,
+          "title": "Signed At",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "csr",
+        "node_id",
+        "serial",
+        "signed_at",
+        "signature"
+      ],
+      "title": "ExpiredRenewRequest",
+      "type": "object"
+    },
     "FailureCode": {
       "description": "Closed codes of a definite failed outcome reported by the agent.",
       "enum": [
@@ -9597,6 +9639,8 @@
         "403",
         "agent.certificate.rotation.conflict",
         "agent.enrollment.submit.rejected",
+        "agent.expired_renewal_refused",
+        "agent.expired_renewal_grace_exhausted",
         "agent.identity_mismatch",
         "agent.tombstone_fenced",
         "catalog.authentication_required",
@@ -10604,6 +10648,9 @@
     "ActivationMarker": [
       "ActivationManifest"
     ],
+    "ExpiredRenewRequest": [
+      "RenewRequest"
+    ],
     "InstallerAcceptanceBaselineRelease": [
       "InstallerReleaseIdentity"
     ],
@@ -10677,6 +10724,7 @@
     "EnrollmentSubmitRequest": "vonk_agent_protocol.enrollment.EnrollmentSubmitRequest",
     "ErrorCatalog": "vonk_agent_protocol.outcome.ErrorCatalog",
     "ExecuteContainerRuntimeRequestOperation": "vonk_agent_protocol.host_helper.ExecuteContainerRuntimeRequestOperation",
+    "ExpiredRenewRequest": "vonk_agent_protocol.enrollment.ExpiredRenewRequest",
     "FailureDiagnostics": "vonk_agent_protocol.failure_evidence.FailureDiagnostics",
     "FailureLogTail": "vonk_agent_protocol.failure_evidence.FailureLogTail",
     "FailureProperty": "vonk_agent_protocol.failure_evidence.FailureProperty",
@@ -10853,6 +10901,7 @@
     "EnrollmentSubmitRequest": "#/$defs/EnrollmentSubmitRequest",
     "ErrorCatalog": "#/$defs/ErrorCatalog",
     "ExecuteContainerRuntimeRequestOperation": "#/$defs/ExecuteContainerRuntimeRequestOperation",
+    "ExpiredRenewRequest": "#/$defs/ExpiredRenewRequest",
     "FailureDiagnostics": "#/$defs/FailureDiagnostics",
     "FailureLogTail": "#/$defs/FailureLogTail",
     "FailureProperty": "#/$defs/FailureProperty",

@@ -2664,6 +2664,16 @@ impl ::std::convert::TryFrom<::std::string::String>
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct ExpiredRenewRequest {
+    pub csr: ::std::string::String,
+    pub node_id: ::std::string::String,
+    pub serial: ::std::string::String,
+    pub signature: ::std::string::String,
+    pub signed_at: crate::integer::Integer,
+}
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum FailureCode {
     #[serde(rename = "operation_failed")]
@@ -12296,6 +12306,10 @@ pub enum SecurityRefusalReason {
     AgentCertificateRotationConflict,
     #[serde(rename = "agent.enrollment.submit.rejected")]
     AgentEnrollmentSubmitRejected,
+    #[serde(rename = "agent.expired_renewal_refused")]
+    AgentExpiredRenewalRefused,
+    #[serde(rename = "agent.expired_renewal_grace_exhausted")]
+    AgentExpiredRenewalGraceExhausted,
     #[serde(rename = "agent.identity_mismatch")]
     AgentIdentityMismatch,
     #[serde(rename = "agent.tombstone_fenced")]
@@ -12396,6 +12410,10 @@ impl ::std::fmt::Display for SecurityRefusalReason {
                 f.write_str("agent.certificate.rotation.conflict")
             }
             Self::AgentEnrollmentSubmitRejected => f.write_str("agent.enrollment.submit.rejected"),
+            Self::AgentExpiredRenewalRefused => f.write_str("agent.expired_renewal_refused"),
+            Self::AgentExpiredRenewalGraceExhausted => {
+                f.write_str("agent.expired_renewal_grace_exhausted")
+            }
             Self::AgentIdentityMismatch => f.write_str("agent.identity_mismatch"),
             Self::AgentTombstoneFenced => f.write_str("agent.tombstone_fenced"),
             Self::CatalogAuthenticationRequired => f.write_str("catalog.authentication_required"),
@@ -12476,6 +12494,8 @@ impl ::std::str::FromStr for SecurityRefusalReason {
             "403" => Ok(Self::X403),
             "agent.certificate.rotation.conflict" => Ok(Self::AgentCertificateRotationConflict),
             "agent.enrollment.submit.rejected" => Ok(Self::AgentEnrollmentSubmitRejected),
+            "agent.expired_renewal_refused" => Ok(Self::AgentExpiredRenewalRefused),
+            "agent.expired_renewal_grace_exhausted" => Ok(Self::AgentExpiredRenewalGraceExhausted),
             "agent.identity_mismatch" => Ok(Self::AgentIdentityMismatch),
             "agent.tombstone_fenced" => Ok(Self::AgentTombstoneFenced),
             "catalog.authentication_required" => Ok(Self::CatalogAuthenticationRequired),
@@ -17431,6 +17451,31 @@ impl ::std::cmp::PartialEq<str> for ExecuteContainerRuntimeRequestOperationActio
 impl ::std::cmp::PartialEq<&str> for ExecuteContainerRuntimeRequestOperationAction {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ExpiredRenewRequest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ExpiredRenewRequest"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub csr: ::std::string::String,
+            pub node_id: ::std::string::String,
+            pub serial: ::std::string::String,
+            pub signature: ::std::string::String,
+            pub signed_at: crate::integer::Integer,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            csr: raw.csr,
+            node_id: raw.node_id,
+            serial: raw.serial,
+            signature: raw.signature,
+            signed_at: raw.signed_at,
+        })
     }
 }
 impl FailureCode {
@@ -28656,6 +28701,8 @@ impl SecurityRefusalReason {
             Self::X403 => "403",
             Self::AgentCertificateRotationConflict => "agent.certificate.rotation.conflict",
             Self::AgentEnrollmentSubmitRejected => "agent.enrollment.submit.rejected",
+            Self::AgentExpiredRenewalRefused => "agent.expired_renewal_refused",
+            Self::AgentExpiredRenewalGraceExhausted => "agent.expired_renewal_grace_exhausted",
             Self::AgentIdentityMismatch => "agent.identity_mismatch",
             Self::AgentTombstoneFenced => "agent.tombstone_fenced",
             Self::CatalogAuthenticationRequired => "catalog.authentication_required",
@@ -28757,6 +28804,10 @@ impl<'de> ::serde::Deserialize<'de> for SecurityRefusalReason {
             AgentCertificateRotationConflict,
             #[serde(rename = "agent.enrollment.submit.rejected")]
             AgentEnrollmentSubmitRejected,
+            #[serde(rename = "agent.expired_renewal_refused")]
+            AgentExpiredRenewalRefused,
+            #[serde(rename = "agent.expired_renewal_grace_exhausted")]
+            AgentExpiredRenewalGraceExhausted,
             #[serde(rename = "agent.identity_mismatch")]
             AgentIdentityMismatch,
             #[serde(rename = "agent.tombstone_fenced")]
@@ -28855,6 +28906,8 @@ impl<'de> ::serde::Deserialize<'de> for SecurityRefusalReason {
             Raw::X403 => Self::X403,
             Raw::AgentCertificateRotationConflict => Self::AgentCertificateRotationConflict,
             Raw::AgentEnrollmentSubmitRejected => Self::AgentEnrollmentSubmitRejected,
+            Raw::AgentExpiredRenewalRefused => Self::AgentExpiredRenewalRefused,
+            Raw::AgentExpiredRenewalGraceExhausted => Self::AgentExpiredRenewalGraceExhausted,
             Raw::AgentIdentityMismatch => Self::AgentIdentityMismatch,
             Raw::AgentTombstoneFenced => Self::AgentTombstoneFenced,
             Raw::CatalogAuthenticationRequired => Self::CatalogAuthenticationRequired,
@@ -30512,6 +30565,14 @@ impl<'de> ::serde::Deserialize<'de> for WaitVerdict {
             Raw::FixAction => Self::FixAction,
             Raw::Derived => Self::Derived,
         })
+    }
+}
+impl From<&ExpiredRenewRequest> for RenewRequest {
+    fn from(value: &ExpiredRenewRequest) -> Self {
+        Self {
+            csr: value.csr.clone(),
+            node_id: value.node_id.clone(),
+        }
     }
 }
 impl From<&InstallerCandidateBootstraps> for InstallerBaselineBootstraps {

@@ -3577,7 +3577,12 @@
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-is-not-staged-for-activation", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-serial-does-not-identify-node", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_require_issuance_binding", "enrollment-issuance-binding-changed", 1]
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_require_issuance_binding", "enrollment-issuance-binding-changed", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-identity-is-removed-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-key-is-not-ed25519", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-proof-is-invalid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-proof-is-stale", 1],
+        ["control/src/vonk_control/enrollment.py", "ExpiredRenewalGraceExhausted", "EnrollmentService.renew_expired", "expired-renewal-grace-exhausted-re-enrollment-required", 1]
       ]
     },
     {

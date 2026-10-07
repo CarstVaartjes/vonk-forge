@@ -779,7 +779,7 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
             sort_keys=True,
         ),
         json.dumps(
-            [{"method": ["POST"], "path": ["/agent/enroll"]}],
+            [{"method": ["POST"], "path": ["/agent/enroll", "/agent/renew/expired"]}],
             sort_keys=True,
         ),
     }
@@ -831,7 +831,12 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     }
     assert any(
         route.get("match")
-        == [{"not": [{"path": ["/agent/enroll"]}], "path": ["/agent/*"]}]
+        == [
+            {
+                "not": [{"path": ["/agent/enroll", "/agent/renew/expired"]}],
+                "path": ["/agent/*"],
+            }
+        ]
         for route in agent_routes
     )
     mappings = []
@@ -1268,15 +1273,20 @@ def test_caddy_serves_the_file_the_controller_names_and_nothing_else(
             .rsplit(":", 1)[1]
         )
 
-        def get(query: str, **headers: str) -> http.client.HTTPResponse:
+        class BufferedResponse(http.client.HTTPResponse):
+            body: bytes
+
+        def get(query: str, **headers: str) -> BufferedResponse:
             for _ in range(50):
                 try:
                     connection = http.client.HTTPConnection(
                         "127.0.0.1", port, timeout=5
                     )
+                    connection.response_class = BufferedResponse
                     connection.request("GET", "/x?" + query, headers=headers)
                     response = connection.getresponse()
-                    response.body = response.read()  # type: ignore[attr-defined]
+                    assert isinstance(response, BufferedResponse)
+                    response.body = response.read()
                     return response
                 except (ConnectionError, http.client.RemoteDisconnected):
                     time.sleep(0.1)
