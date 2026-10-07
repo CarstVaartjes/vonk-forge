@@ -468,3 +468,19 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     assert {item.operation_id for item in recovered.pending_children} == {_uuid(18603)}
     assert len(healthy_dispatches) == 1
     assert recovered.queue == before.queue
+
+    # The old physical gang is free even while the disjoint load stays pending.
+    # Exercise normal admission and a fenced native Start on that exact gang.
+    from .profile_stop_readmission_support import start_on_released_gang
+
+    fresh_run_id = start_on_released_gang(
+        sessions,
+        lifecycle,
+        run.owner_id,
+        nodes,
+        clock=lifecycle._clock,
+        request_id=_uuid(18604),
+    )
+    assert fresh_run_id != run.owner_id
+    assert _stored(sessions, app.id).pending_children == recovered.pending_children
+    assert len(healthy_dispatches) == 1

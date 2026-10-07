@@ -1882,12 +1882,6 @@
     },
     {
       "path": "control/tests/test_recipe_operations.py",
-      "function": "test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
       "function": "test_postgres_failed_start_cleanup_stop_grant_uses_the_queued_run_plan",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -1949,12 +1943,6 @@
     {
       "path": "control/tests/test_recipe_operations.py",
       "function": "test_stop_preview_is_stable_exact_and_defers_capacity_release",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
-      "function": "test_stop_replans_when_the_submitted_digest_is_old",
       "kind": "ending-without-fresh-request",
       "count": 1
     },
@@ -2179,18 +2167,6 @@
       "function": "test_a_stop_killed_while_withdrawing_resumes_from_the_claim",
       "kind": "ending-without-fresh-request",
       "count": 1
-    },
-    {
-      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
-      "function": "test_a_stop_never_retried_gets_its_route_back_without_a_client",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
-      "function": "test_a_stop_never_retried_gets_its_route_back_without_a_client",
-      "kind": "observation-withdrawal-assertion",
-      "count": 4
     },
     {
       "path": "control/tests/test_route_withdrawal_before_dispatch.py",
@@ -2779,6 +2755,38 @@
       "count": 1,
       "reason": "security-edge",
       "justification": "Unknown observations and deleted Start history preserve the healthy route and active claims until an explicitly reviewed exact Stop is accepted. Withdrawal is that accepted command effect; restart then records a fenced Stop receipt before releasing claims and completing a real fresh Start."
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_refuses_changed_review_before_withdrawal_or_admission",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "The caller supplies an unreviewed digest. The test proves refusal before withdrawal, a new Job, or any node ordinal change; the original run remains owned. No Stop effect occurs and no released capacity or finished lifecycle is claimed."
+    },
+    {
+      "path": "control/tests/test_profile_memory_claims.py",
+      "function": "test_replacement_stop_retains_current_root_after_withdrawal_response_loss",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Checks the immutable accepted Root request, linked child, current phase and retry generation across withdrawal-response loss, and refusal of forged identity fields. The positive branch resumes only to issued native Stop phases; it consumes no Stop acknowledgement and claims no physical completion, released memory or admissible fresh run."
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_accepted_stop_continues_without_client_and_never_republishes",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "dependency-unavailable",
+      "justification": "A lost withdrawal acknowledgement leaves the exact accepted Stop pending. With the client gone, the worker resumes the same root and issues its native phases; the run remains stopping, awaiting the actual agent receipt. This publication/dispatch boundary neither finishes physical Stop nor claims free capacity."
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_accepted_stop_continues_without_client_and_never_republishes",
+      "kind": "observation-withdrawal-assertion",
+      "count": 5,
+      "reason": "security-edge",
+      "justification": "Withdrawal is bound to the explicit accepted exact Stop and retained root before the simulated publication process dies. The five assertions preserve that authorized withdrawal through grace expiry and same-owner worker dispatch; they do not withdraw a healthy route merely because an observation is missing or grant a new destructive scope."
     }
   ]
 }
