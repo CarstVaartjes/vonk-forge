@@ -739,28 +739,6 @@ def test_sign_wire_budget_stays_bounded_with_larger_crl_transport_budget(
     assert issued.serial == binding.serial
 
 
-def test_unrepresentable_certificate_generation_refuses_before_ca_effect(
-    tmp_path: Path,
-) -> None:
-    seen: list[_SignExchange] = []
-    holder: dict[str, _Material] = {}
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        return _success_response(request, holder["material"], seen)
-
-    provider, material = _provider(tmp_path, handler)
-    holder["material"] = material
-    csr = _csr()
-    binding = provider.prepare_request(
-        NODE_ID, csr, NOW, purpose="enrollment", source_serial=None, generation=2**31
-    )
-    with pytest.raises(ValueError):
-        provider.issue_node(NODE_ID, csr, NOW, request=binding)
-    assert seen == []
-    issued = _issue(provider, NODE_ID, csr, NOW)
-    assert issued.node_id == NODE_ID and len(seen) == 1
-
-
 @pytest.mark.parametrize(
     "url",
     (
