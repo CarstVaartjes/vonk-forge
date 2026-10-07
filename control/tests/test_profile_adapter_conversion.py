@@ -10,6 +10,7 @@ from sqlalchemy import Engine, Table, select, update
 from vonk_control.db import initialize_database
 from vonk_control.fleet_profile_adapter_conversion import (
     conversion_observation,
+    conversion_progress,
     convert_due_retained_applications,
     needs_conversion,
     try_convert_application,
@@ -146,6 +147,30 @@ def test_retained_exact_stop_conversion_reconnects_without_another_request(tmp_p
         } == claims
 
 
+def test_retained_unknown_projection_preserves_outer_metadata_and_original_journal(
+    tmp_path,
+):
+    """Catches destructive old-field projection or invented metadata after damage."""
+    sessions, _lifecycle, _switches, application, _run, _stop_id, original, _claims = (
+        _retained_stop(tmp_path)
+    )
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        projected = conversion_progress(row)
+        assert projected is not None
+        assert projected.attempt == original["attempt"]
+        assert projected.completed_steps == original["completed_steps"]
+        assert projected.intended_profile is not None
+        assert projected.switch_adapter is None
+        assert row.progress == original and needs_conversion(row)
+        malformed = deepcopy(original)
+        malformed["attempt"] = "unreadable"
+        _persist_retained(session, row, malformed)
+        assert conversion_progress(row) is None
+        assert row.progress == malformed and needs_conversion(row)
+
+
 def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp_path):
     """Catches assigning terminal receipts by list order or losing their result."""
     sessions, lifecycle, switches, app, _run, stop_id, _original, _claims = (
@@ -162,9 +187,7 @@ def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp
         with sessions() as session:
             effects = tuple(
                 session.scalars(
-                    select(AgentOperation).where(
-                        AgentOperation.kind == "recipe.stop"
-                    )
+                    select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
                 )
             )
         for effect in effects:
