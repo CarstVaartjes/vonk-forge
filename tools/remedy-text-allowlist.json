@@ -63,13 +63,13 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService._open_http_response",
+      "path": "control/src/vonk_control/model_cache/http.py",
+      "function": "HttpMixin._open_http_response_once",
       "kind": "imperative-remedy",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/model_cache.py",
+      "path": "control/src/vonk_control/model_cache/errors.py",
       "function": "_retry_after_seconds",
       "kind": "imperative-remedy",
       "count": 1

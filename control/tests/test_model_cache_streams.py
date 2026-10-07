@@ -203,11 +203,12 @@ def test_huggingface_429_and_5xx_back_off_the_streams(cache, tmp_path) -> None: 
 
 
 def test_ranged_download_scans_the_bytes_once(cache, tmp_path, monkeypatch) -> None:  # noqa: F811
-    import vonk_control.model_cache as module
 
     _existing, sessions = cache
     payload = bytes(range(256)) * 256
-    monkeypatch.setattr(module, "_PARALLEL_RANGE_MIN_BYTES", 1)
+    monkeypatch.setattr(
+        "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 1
+    )
 
     def handler(request):
         start, end = map(
