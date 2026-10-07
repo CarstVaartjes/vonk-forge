@@ -884,7 +884,9 @@ def _required_node_ids(value: object) -> list[NodeIdentifier]:
 
 
 def _result_uncertain(item: OperationItem) -> bool:
-    return item.result is not None and item.result.is_uncertain
+    return item.result_unreadable or (
+        item.result is not None and item.result.is_uncertain
+    )
 
 
 def _job_operation_response(item: OperationItem) -> JobOperationResponse:
@@ -1055,7 +1057,12 @@ def _item_failure(item: OperationItem) -> OperationFailure | None:
         if item.state not in {"failed", *agent_operation_states.PARKED}:
             return None
         if item.result_unreadable:
-            raise ValueError("agent result is not a valid failure receipt")
+            return OperationFailureEvidence(
+                error_code=OperationFailureCode.STORED_RESULT_UNREADABLE,
+                summary="Stored operation result is unreadable",
+                detail="The durable operation identity and state remain known; its failure receipt cannot be verified.",
+                uncertain=True,
+            )
         parsed = item.agent_receipt
         if parsed is None:
             return None
@@ -1110,7 +1117,11 @@ def _operation_item(
         node_ids=[operation.node_id],
         parent_id=operation.parent_job_id,
         progress=progress,
-        result=None if result is None else OperationResultFacts.model_validate(result),
+        result=(
+            None
+            if result is None or unreadable
+            else OperationResultFacts.model_validate(result)
+        ),
         agent_receipt=receipt,
         result_unreadable=unreadable,
         supported_actions=(
