@@ -17322,6 +17322,21 @@
               }
             ]
           },
+          "projection_issues": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/OperationProjectionIssue"
+                },
+                "maxItems": 2,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Issues"
+          },
           "recovery": {
             "anyOf": [
               {
@@ -17866,6 +17881,43 @@
           "phase"
         ],
         "title": "OperationProgress",
+        "type": "object"
+      },
+      "OperationProjectionIssue": {
+        "additionalProperties": false,
+        "description": "One optional fact unavailable within this response's reader allocation.",
+        "properties": {
+          "budget_bytes": {
+            "minimum": 1,
+            "title": "Budget Bytes",
+            "type": "integer"
+          },
+          "field": {
+            "enum": [
+              "progress",
+              "cancellation"
+            ],
+            "title": "Field",
+            "type": "string"
+          },
+          "observed_bytes": {
+            "minimum": 1,
+            "title": "Observed Bytes",
+            "type": "integer"
+          },
+          "reason": {
+            "const": "response-budget-exceeded",
+            "default": "response-budget-exceeded",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "observed_bytes",
+          "budget_bytes"
+        ],
+        "title": "OperationProjectionIssue",
         "type": "object"
       },
       "OperationRecovery": {
@@ -37726,7 +37778,8 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Model Library"
+        "summary": "Model Library",
+        "x-vonk-response-max-bytes": 1048576
       }
     },
     "/api/model/operations/{operation_id}": {
@@ -38545,7 +38598,8 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Operations View"
+        "summary": "Operations View",
+        "x-vonk-response-max-bytes": 1048576
       }
     },
     "/api/operations/{operation_id}": {
@@ -38624,7 +38678,8 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Operation View"
+        "summary": "Operation View",
+        "x-vonk-response-max-bytes": 1048576
       }
     },
     "/api/operations/{operation_id}/evidence": {
@@ -40367,7 +40422,8 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Recipe Library"
+        "summary": "Recipe Library",
+        "x-vonk-response-max-bytes": 1048576
       }
     },
     "/api/recipe/operations/{operation_id}": {
