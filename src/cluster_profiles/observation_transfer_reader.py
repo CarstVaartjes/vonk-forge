@@ -48,15 +48,15 @@ def check_observation_deadline(deadline: float) -> None:
         raise TimeoutError("observation attempt deadline elapsed")
 
 
-def receive_observation(
+def receive_observation[Receipt](
     stream: ObservationStream,
     *,
     resource: str,
     record_max_bytes: int,
     deadline: float,
     validate_record: Callable[[object], None],
-    validate_payload: Callable[[object], dict[str, object]],
-) -> dict[str, object]:
+    validate_payload: Callable[[object], Receipt],
+) -> Receipt:
     """Return the original full payload only after verified receipt and EOF.
 
     Callers validate status/media against their explicit source contract before
