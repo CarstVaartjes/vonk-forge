@@ -59,7 +59,7 @@ if [[ $1 == merge-base ]]; then [[ ${ON_MAIN:-1} == 1 ]]; fi
             {
                 "images": {
                     role: f"ghcr.io/carstvaartjes/vonk-forge-{role}:dev-sha-{SOURCE}@sha256:{'c' * 64}"
-                    for role in ("api", "worker", "hermes", "litellm")
+                    for role in ("api", "worker", "hermes", "litellm", "ca")
                 }
             }
         )

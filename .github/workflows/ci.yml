@@ -560,9 +560,19 @@ jobs:
           load: true
           tags: ${{ env.IMAGE_PREFIX }}-hermes:${{ env.IMAGE_TAG }}
           cache-from: type=gha,scope=vonk-forge-hermes
+      - name: Build the managed CA image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/compose/step-ca/Dockerfile
+          target: runtime
+          load: true
+          tags: ${{ env.IMAGE_PREFIX }}-ca:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=vonk-forge-ca
       - name: Render the installer payload and the local image overlay
         run: |
           set -euo pipefail
+          ca_digest=$(docker image inspect --format '{{.Id}}' "$IMAGE_PREFIX-ca:$IMAGE_TAG")
           out="$RUNNER_TEMP/nas-local"
           install -d -m 0700 "$out"
           scripts/render-dev-compose --channel pinned \
@@ -570,7 +580,8 @@ jobs:
             --api-image "$IMAGE_PREFIX-api:$IMAGE_TAG" \
             --worker-image "$IMAGE_PREFIX-worker:$IMAGE_TAG" \
             --hermes-image "$IMAGE_PREFIX-hermes:$IMAGE_TAG" \
-            --litellm-image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
+            --litellm-image "$IMAGE_PREFIX-litellm:$IMAGE_TAG" \
+            --ca-image "$IMAGE_PREFIX-ca:$IMAGE_TAG@$ca_digest"
           uv run --project control --frozen python scripts/build-nas-compose-bundle \
             --compose "$out/docker-compose.pinned.yml" --channel dev \
             --output "$out/payload.json"
@@ -579,7 +590,7 @@ jobs:
           {
             echo services:
             for pair in control-api:api control-worker:worker hermes-agent:hermes \
-              litellm:litellm hermes-litellm-key-provisioner:litellm; do
+              step-ca:ca litellm:litellm hermes-litellm-key-provisioner:litellm; do
               printf '  %s:\n    image: %s-%s:%s\n    pull_policy: never\n' \
                 "${pair%%:*}" "$IMAGE_PREFIX" "${pair##*:}" "$IMAGE_TAG"
             done
@@ -1107,6 +1118,8 @@ jobs:
       worker_dev_source: ${{ steps.release.outputs.worker_dev_source }}
       hermes_image: ${{ steps.release.outputs.hermes_image }}
       litellm_image: ${{ steps.release.outputs.litellm_image }}
+      ca_image: ${{ steps.release.outputs.ca_image }}
+      ca_dev_source: ${{ steps.release.outputs.ca_dev_source }}
       litellm_dev_source: ${{ steps.release.outputs.litellm_dev_source }}
       tag_oid: ${{ steps.authority.outputs.tag_oid }}
     steps:
@@ -1210,6 +1223,7 @@ jobs:
       api_digest: ${{ steps.api.outputs.digest }}
       worker_digest: ${{ steps.worker.outputs.digest }}
       litellm_digest: ${{ steps.litellm.outputs.digest }}
+      ca_digest: ${{ steps.ca.outputs.digest }}
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1384,6 +1398,40 @@ jobs:
             exit 1
           fi
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Validate accepted CA image
+        id: ca
+        shell: bash
+        env:
+          DEV_SOURCE: ${{ needs.release-metadata.outputs.ca_dev_source }}
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          STEP_CA_IMAGE: ${{ needs.release-metadata.outputs.ca_image }}
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh attestation verify "oci://$STEP_CA_IMAGE@$digest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/ca-attestation.json"
+          scripts/verify-published-image ca "$STEP_CA_IMAGE" "$digest" - "$GITHUB_SHA"
+          inspect_error="$RUNNER_TEMP/ca-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$STEP_CA_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$digest" ]] || {
+              echo "refusing to overwrite immutable CA release tag" >&2
+              exit 1
+            }
+          elif ! grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            echo "CA release tag lookup failed" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
 
   publish-images:
     name: Publish public container images
@@ -1405,6 +1453,7 @@ jobs:
       worker_digest: ${{ steps.worker.outputs.digest }}
       hermes_digest: ${{ steps.hermes.outputs.digest }}
       litellm_digest: ${{ steps.litellm.outputs.digest }}
+      ca_digest: ${{ steps.ca.outputs.digest }}
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1561,6 +1610,34 @@ jobs:
           [[ $(skopeo inspect --format '{{.Digest}}' \
             "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
           printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Promote accepted CA image
+        id: ca
+        shell: bash
+        env:
+          DIGEST: ${{ needs.validate-release-images.outputs.ca_digest }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          STEP_CA_IMAGE: ${{ needs.release-metadata.outputs.ca_image }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          inspect_error="$RUNNER_TEMP/ca-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$STEP_CA_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$DIGEST" ]] || {
+              echo "refusing to overwrite immutable CA release tag" >&2
+              exit 1
+            }
+          elif grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            docker buildx imagetools create \
+              --tag "$STEP_CA_IMAGE:$IMAGE_VERSION_TAG" "$STEP_CA_IMAGE@$DIGEST"
+          else
+            echo "CA release tag lookup failed" >&2
+            exit 1
+          fi
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$STEP_CA_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
       - name: Reconcile existing Hermes release image
         id: existing-hermes
         shell: bash
@@ -1655,13 +1732,15 @@ jobs:
             --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
             --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
             --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
-            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
+            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}" \
+            --ca-image "${{ needs.release-metadata.outputs.ca_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.ca.outputs.digest }}"
           scripts/render-production-compose --channel pinned \
             --output release-output/docker-compose.pinned.yml \
             --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
             --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
             --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
-            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
+            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}" \
+            --ca-image "${{ needs.release-metadata.outputs.ca_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.ca.outputs.digest }}"
       - name: Upload production Compose
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -1708,6 +1787,8 @@ jobs:
           CONTROL_WORKER_DIGEST: ${{ needs.publish-images.outputs.worker_digest }}
           HERMES_AGENT_DIGEST: ${{ needs.publish-images.outputs.hermes_digest }}
           LITELLM_DIGEST: ${{ needs.publish-images.outputs.litellm_digest }}
+          STEP_CA_DIGEST: ${{ needs.publish-images.outputs.ca_digest }}
+          STEP_CA_IMAGE: ${{ needs.release-metadata.outputs.ca_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
         run: |
           scripts/validate-container-release-digests
           printf '%s\n' \
@@ -1715,6 +1796,7 @@ jobs:
             "CONTROL_WORKER_IMAGE=$CONTROL_WORKER_IMAGE@$CONTROL_WORKER_DIGEST" \
             "HERMES_AGENT_IMAGE=$HERMES_AGENT_IMAGE@$HERMES_AGENT_DIGEST" \
             "LITELLM_IMAGE=$LITELLM_IMAGE@$LITELLM_DIGEST" \
+            "STEP_CA_IMAGE=$STEP_CA_IMAGE@$STEP_CA_DIGEST" \
             > vonk-forge-images.env
           sha256sum vonk-forge-images.env > vonk-forge-images.env.sha256
       - name: Revalidate release authority before GitHub Release

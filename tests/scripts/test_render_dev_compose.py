@@ -66,6 +66,11 @@ def _run_renderer(
             worker_image,
             "--hermes-image",
             hermes_image,
+            "--ca-image",
+            "ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-"
+            + "a" * 40
+            + "@sha256:"
+            + DIGEST,
             "--litellm-image",
             litellm_image,
             "--channel",
@@ -319,3 +324,26 @@ def test_render_dev_rejects_role_swapped_mutable_aliases(tmp_path: Path) -> None
 
     assert result.returncode != 0
     assert "immutable published development image" in result.stderr
+
+
+def test_managed_ca_retains_signed_digest_when_other_services_follow_channel(
+    tmp_path: Path,
+) -> None:
+    """Catches silently replacing the reviewed CA service with a mutable tag."""
+    output = tmp_path / "docker-compose.yml"
+    result = _run_renderer(output, channel="dev")
+    assert result.returncode == 0, result.stderr
+    service = yaml.safe_load(output.read_text())["services"]["step-ca"]
+    assert (
+        service["image"]
+        == "ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-"
+        + "a" * 40
+        + "@sha256:"
+        + DIGEST
+    )
+    assert service["entrypoint"] == ["vonk-step-ca"]
+    assert "step-ca-data:/home/step" in service["volumes"]
+    with pytest.raises(ValueError, match="accepted immutable digest"):
+        _renderer_module().channel_image(
+            "ghcr.io/carstvaartjes/vonk-forge-ca:dev", "dev"
+        )

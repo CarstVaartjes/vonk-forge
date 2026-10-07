@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Hosted build entry point. Never called by local hooks or local test discovery.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+python3 "$root/scripts/prepare-journal-ca.py"
+cd "$root/deploy/compose/step-ca/service"
+export GOTOOLCHAIN=local
+export CGO_ENABLED=0
+case "${1:-}" in
+  lock)
+    # Bootstrap only: CI returns these locks as reviewable artifacts.
+    go mod tidy
+    ;;
+  proof)
+    export CGO_ENABLED=1
+    go mod verify
+    test -z "$(gofmt -l .)"
+    go test -mod=readonly -race -count=1 -timeout=180s ./...
+    ;;
+  build)
+    go mod verify
+    go build -mod=readonly -trimpath -buildvcs=false -o "$root/vonk-step-ca" .
+    ;;
+  *) echo 'usage: build-journal-ca lock|proof|build' >&2; exit 64 ;;
+esac

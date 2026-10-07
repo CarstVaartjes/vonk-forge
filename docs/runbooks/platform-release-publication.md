@@ -109,3 +109,26 @@ channel policy while preserving operator configuration, secrets, and named volum
 Immutable image records and `docker-compose.pinned.yml` are publication evidence
 inputs; the payload builder converts every image to the deployment channel before
 embedding Compose. They are not the installed deployment configuration.
+
+### Managed CA image closure
+
+The current installer graph requires the managed `ca` image alongside API,
+worker, Hermes and LiteLLM. The CA build uses the reviewed Smallstep source
+archive and signing-context patch, pinned Go toolchain, service module locks,
+and existing Smallstep runtime base. Its isolated build-input fingerprint binds
+those files and the acceptance policy. Reuse requires unchanged inputs on an
+ancestor source, signed hosted build provenance, and verified runnable manifests
+for both Linux architectures.
+
+The development producer deep-scans the OCI archive and binds its runnable
+manifests to the published registry digest before producing a CA receipt.
+Installer assembly requires that fifth image identity; the signed release and
+NAS payload bind its exact digest. Compose channel rendering preserves that
+CA digest, including during NAS installer preparation. No third-party CA image
+or mutable CA alias is a replacement for missing accepted evidence.
+
+An upgrade changes the executable of the existing `step-ca` service, with the
+canonical `--config` and `--password-file` arguments. It preserves the TLS
+listener, root/intermediate trust, secret mounts, keys and `step-ca-data` volume.
+Keep the existing bundle `.env`, secrets and named volumes during deployment.
+Repository or image acceptance does not itself redeploy a running NAS.

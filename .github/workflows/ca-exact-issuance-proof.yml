@@ -1,0 +1,114 @@
+name: CA exact issuance proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/ca-exact-issuance-proof.yml
+      - deploy/compose/step-ca/**
+      - scripts/build-journal-ca
+      - scripts/prepare-journal-ca.py
+      - control/src/vonk_control/step_ca.py
+      - control/src/vonk_control/enrollment.py
+  workflow_dispatch:
+    inputs:
+      bootstrap_lock:
+        description: Generate reviewable Go dependency locks, without acceptance
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ca-exact-issuance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  connected-proof:
+    name: Real pinned Authority, durable journal and fenced response
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install pinned Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Generate dependency locks for source review
+        if: ${{ inputs.bootstrap_lock }}
+        run: scripts/build-journal-ca lock
+      - name: Prove real signing, crash recovery and epoch fencing
+        if: ${{ !inputs.bootstrap_lock }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/ca-proof
+          scripts/build-journal-ca proof 2>&1 | tee artifacts/ca-proof/connected-proof.log
+      - name: Build the journal CA binary from proven source
+        if: ${{ !inputs.bootstrap_lock }}
+        working-directory: deploy/compose/step-ca/service
+        env:
+          CGO_ENABLED: '0'
+          GOTOOLCHAIN: local
+        run: go build -mod=readonly -trimpath -buildvcs=false -o ../../../../artifacts/ca-proof/vonk-step-ca .
+      - name: Build OCI runtime with existing CA trust and database layout
+        if: ${{ !inputs.bootstrap_lock }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --file deploy/compose/step-ca/Dockerfile --target runtime \
+            --tag vonk-ca-proof:"$GITHUB_SHA" .
+          docker save vonk-ca-proof:"$GITHUB_SHA" --output artifacts/ca-proof/ca-image.tar
+          docker image inspect vonk-ca-proof:"$GITHUB_SHA" > artifacts/ca-proof/image-inspect.json
+      - name: Record exact source and artifact provenance
+        if: ${{ !inputs.bootstrap_lock }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          root = pathlib.Path('artifacts/ca-proof')
+          inputs = [
+              'deploy/compose/step-ca/source.lock.json',
+              'deploy/compose/step-ca/upstream/manifest.json',
+              'deploy/compose/step-ca/upstream/context-signing.patch',
+              'deploy/compose/step-ca/service/go.mod',
+              'deploy/compose/step-ca/service/go.sum',
+          ]
+          outputs = [str(p) for p in root.iterdir() if p.is_file()]
+          manifest = {
+              'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'inputs': {p: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in inputs},
+              'outputs': {p: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in outputs},
+              'acceptance': 'hosted proof only; no publication or deployment',
+          }
+          (root / 'manifest.json').write_text(json.dumps(manifest, sort_keys=True, indent=2) + '\n')
+          PY
+      - name: Attest hosted binary and OCI archive
+        if: ${{ !inputs.bootstrap_lock }}
+        uses: actions/attest-build-provenance@8beda2b7ed98355c0e97c0a63bec38ae472e66c4 # v4
+        with:
+          subject-path: |
+            artifacts/ca-proof/vonk-step-ca
+            artifacts/ca-proof/ca-image.tar
+      - name: Upload proofs or dependency locks
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ca-exact-issuance-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            artifacts/ca-proof
+            deploy/compose/step-ca/service/go.mod
+            deploy/compose/step-ca/service/go.sum
+          if-no-files-found: error
+          retention-days: 7
