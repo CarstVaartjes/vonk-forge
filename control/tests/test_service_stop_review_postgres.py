@@ -355,6 +355,7 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         monkeypatch,
         lifecycle_before_dispatch=freeze_after_withdrawal,
         issue_grant=False,
+        initial_now=NOW,
     )
     assert native_id is None and claim is None
     before_claims = claims(
@@ -527,7 +528,7 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
 
 
 def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
-    published_service_run, monkeypatch
+    published_service_run, tmp_path, monkeypatch
 ):
     from vonk_agent_protocol import (
         AgentResult,
@@ -537,11 +538,32 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
         RecipeStopResult,
     )
     from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.presence import ManagementAddressPolicy
+    from vonk_control.recipe_routes import (
+        AtomicRecipeRoutePublisher,
+        RecipeRouteService,
+    )
+    from vonk_control.route_runtime import AtomicRouteBundlePublisher
 
     from .agent_fences import fenced_operation
     from .test_recipe_operations import _issue_exact_stop_grant, complete_started_recipe
 
-    sessions, service, _jobs, routes, publisher, run_id, nodes = published_service_run
+    sessions, service, _jobs, _old_routes, _stand_in, run_id, nodes = (
+        published_service_run
+    )
+    # Durable route retention is proved by the actual immutable bundle/marker,
+    # not an in-memory publisher that has no accepted live publication to reuse.
+    runtime = AtomicRouteBundlePublisher(tmp_path / "lost-history-route-bundle")
+    routes = RecipeRouteService(
+        sessions,
+        publisher=AtomicRecipeRoutePublisher(runtime),
+        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+        clock=lambda: NOW,
+        maximum_age_seconds=120,
+    )
+    service._route_publications = routes
+    routes.publish_run(run_id)
+    published_marker = runtime.inspect()
     before_claims = claims(sessions, run_id)
     assert any(state == "active" for _id, _node, state, _bytes in before_claims)
     with sessions.begin() as session:
@@ -565,13 +587,12 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
             member.observation_process_running = None
             member.observation_endpoint_ready = None
             member.observation_observed_at = None
-    generations = len(publisher.aliases)
     routes.maintain()
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None and run.route_state == "published"
         assert session.get(Job, lost_start_id) is None
-    assert len(publisher.aliases) == generations
+    assert runtime.inspect() == published_marker
     assert claims(sessions, run_id) == before_claims
     # A separate run may fit genuine spare capacity. Its preview must still
     # subtract this uncertain run's retained allocation, rather than assume absence.

@@ -480,4 +480,8 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
         root = session.get(Job, owner.profile_operation_id)
         assert root is not None and root.result is not None
         assert root.result["child_operation_id"] == stop_id
-        assert root.result.get("phase_retry_generation") == retry_generation
+        retained = RunSwitchOperationResult.model_validate_json(
+            canonical_message(root.result), strict=True
+        )
+        assert retained.child_operation_id == stop_id
+        assert retained.phase_retry_generation == retry_generation

@@ -8,7 +8,7 @@ use the production services and their stored contracts.
 from __future__ import annotations
 
 import hashlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -77,6 +77,7 @@ def _pending_stop(
     *,
     lifecycle_before_dispatch=None,
     issue_grant=True,
+    initial_now: datetime | None = None,
 ):
     sessions, fixture_lifecycle, _queue, mapping, build, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -91,7 +92,7 @@ def _pending_stop(
         nodes,
         request_id=_uuid(18701),
     )
-    clock = [NOW]
+    clock = [NOW if initial_now is None else initial_now]
     jobs = AgentJobService(sessions, clock=lambda: clock[0])
     lifecycle = RecipeOperationService(
         sessions,
@@ -110,7 +111,7 @@ def _pending_stop(
                 state="active",
                 protocol_version=2,
                 architecture="linux-arm64",
-                last_seen_at=NOW,
+                last_seen_at=clock[0],
             )
         )
         revision = session.scalar(
@@ -149,7 +150,9 @@ def _pending_stop(
     original = profiles.apply(
         original_profile.id, request_key=_uuid(18702), actor="admin"
     )
-    coordinator = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    coordinator = _service(sessions, clock[0], lifecycle, RecordingArtifactExecutor())
+    if initial_now is not None:
+        coordinator._clock = lambda: clock[0]
     adapter = RunSwitchFleetProfileAdapter(sessions, coordinator)
     native_start = adapter._start_child
     healthy_child = _running_child(_uuid(18703), _node_id(2))
@@ -233,7 +236,7 @@ def _pending_stop(
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.last_seen_at = NOW - timedelta(hours=1)
+        node.last_seen_at = clock[0] - timedelta(hours=1)
     return (
         sessions,
         profiles,
