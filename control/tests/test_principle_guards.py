@@ -423,3 +423,35 @@ def test_observation_loop_requires_resolved_unswallowed_absolute_deadline():
             site.kind for site in scan_source(changed, path=path, mode="waits")
         ] == ["loop-without-deadline"]
     assert scan_source(source, path="unrelated_reader.py", mode="waits")
+
+
+@pytest.mark.parametrize("subject", ["report", "reports[0]"])
+def test_failure_report_is_evidence_not_a_terminal_operation(subject):
+    """Do not mistake a persisted diagnostic for a poisoned operation outcome."""
+    source = (
+        "import json\ndef test_startup_timeout():\n"
+        "    report = json.loads(path.read_text())\n"
+        "    reports.append(json.loads(path.read_text()))\n"
+        f"    assert {subject}['status'] == 'failed'\n"
+        f"    assert {subject}['failure']['cause']\n"
+    )
+    assert not scan_source(source, path="test_diagnostics.py", mode="tests")
+    # Ordinary job state is still a violation, even beside a valid report.
+    assert scan_source(
+        source + "    assert op.state == 'failed'\n",
+        path="test_diagnostics.py",
+        mode="tests",
+    )
+    for changed in (
+        source.replace("json.loads(path.read_text())", "operation.result"),
+        source.replace("['status']", "['state']"),
+        source.replace(f"    assert {subject}['failure']['cause']\n", ""),
+        source.replace(
+            f"assert {subject}['failure']['cause']", "assert other['failure']['cause']"
+        ),
+        source.replace(
+            f"assert {subject}['failure']['cause']",
+            f"assert not {subject}['failure']['cause']",
+        ),
+    ):
+        assert scan_source(changed, path="test_diagnostics.py", mode="tests")
