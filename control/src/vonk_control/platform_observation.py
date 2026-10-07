@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from cluster_profiles.runtime_identity import (
@@ -17,6 +18,7 @@ from cluster_profiles.runtime_identity import (
 )
 
 from .models import ControlProcessHeartbeat
+from .platform_observation_errors import ObservationCaptureUnavailable
 from .strict_json import StrictModel
 
 Source = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
@@ -63,6 +65,16 @@ class PlatformObserver:
         return self.capture().observation
 
     def capture(self) -> CapturedPlatformObservation:
+        try:
+            return self._capture()
+        except ValidationError as error:
+            raise ObservationCaptureUnavailable(
+                phase="stored-worker-validation"
+            ) from error
+        except SQLAlchemyError as error:
+            raise ObservationCaptureUnavailable(phase="database-capture") from error
+
+    def _capture(self) -> CapturedPlatformObservation:
         now = self._clock().astimezone(UTC)
         identity = packaged_runtime_identity()
         with self._sessions() as session:

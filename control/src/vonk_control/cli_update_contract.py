@@ -20,6 +20,10 @@ from .platform_observation import (
     Digest,
     Source,
 )
+from .platform_observation_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
+)
 from .strict_json import StrictModel
 
 
@@ -125,6 +129,12 @@ def install_cli_update_contract_routes(
     )
     def cli_update_contract(
         response: Response, _actor: Any = actor_dependency
-    ) -> CliUpdateContract:
+    ) -> CliUpdateContract | Response:
         response.headers["Cache-Control"] = "no-store"
-        return summarize_cli_update_contract(capture())
+        try:
+            captured = capture()
+        except ObservationCaptureUnavailable as error:
+            return observation_capture_unavailable_response(
+                error, operation="getCliUpdateContract", endpoint="/api/cli/contract"
+            )
+        return summarize_cli_update_contract(captured)

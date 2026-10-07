@@ -944,12 +944,22 @@ def create_app(
     )
     def platform_observation(
         _actor: Actor = authenticated_actor,
-    ) -> PlatformObservation:
-        return (
-            api_only_observation()
-            if platform_observer is None
-            else platform_observer.read()
+    ) -> PlatformObservation | Response:
+        from .platform_observation_errors import (
+            ObservationCaptureUnavailable,
+            observation_capture_unavailable_response,
         )
+
+        try:
+            return (
+                api_only_observation()
+                if platform_observer is None
+                else platform_observer.read()
+            )
+        except ObservationCaptureUnavailable as error:
+            return observation_capture_unavailable_response(
+                error, operation="getPlatformObservation", endpoint="/api/platform"
+            )
 
     @app.get("/api/healthz", response_model=HealthzResponse)
     def healthz() -> HealthzResponse:

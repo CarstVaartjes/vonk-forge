@@ -4,12 +4,12 @@ from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control import platform_observation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.models import Base
+from vonk_control.models import Base, ControlProcessHeartbeat
 from vonk_control.platform_observation import PlatformObserver
 from vonk_control.worker import WorkerHeartbeatRecorder
 
@@ -83,6 +83,33 @@ def test_authenticated_contract_complete_membership_fault_recovery(
     assert complete["worker_source_sha"] == "b" * 40
     assert complete["api"]["source_sha"] == "a" * 40
     assert complete["worker_compatibility"] == "compatible"
+    damaged_identity = "unreadable-stored-worker"
+    original_identity = f"{256:064x}"
+    with sessions.begin() as session:
+        session.execute(
+            update(ControlProcessHeartbeat)
+            .where(ControlProcessHeartbeat.process_instance_id == original_identity)
+            .values(process_instance_id=damaged_identity)
+        )
+    for endpoint in ("/api/cli/contract", "/api/platform"):
+        failure = peer.get(endpoint, headers={"Authorization": f"Bearer {token}"})
+        assert failure.status_code == 503
+        assert failure.headers["Retry-After"] == "5"
+        assert failure.headers["Cache-Control"] == "no-store"
+        problem = failure.json()
+        assert problem["context"]["decision"] == "retry"
+        assert problem["context"]["retryable"] is True
+        assert problem["context"]["source"] == "unknown"
+        assert "stored-worker-validation" in problem["detail"]
+        assert damaged_identity not in failure.text
+        assert "workers" not in problem and "worker_count" not in problem
+    with sessions.begin() as session:
+        session.execute(
+            update(ControlProcessHeartbeat)
+            .where(ControlProcessHeartbeat.process_instance_id == damaged_identity)
+            .values(process_instance_id=original_identity)
+        )
+    assert read()["worker_compatibility"] == "compatible"
     worker_identity[0] = RuntimeBuildIdentity("e" * 40, "c" * 64, "d" * 64)
     recorders[-1].completed_loop()
     mixed = read()
