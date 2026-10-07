@@ -110,7 +110,7 @@ def test_missing_new_generation_reuses_old_bytes_without_rebinding_accepted_plan
     assert isinstance(image, StoredImage), image
     storage.layout.blob_path(image.layer_digests[-1]).unlink()
 
-    restarted = FilesystemRuntimeImageStorage(storage.root)
+    restarted = FilesystemRuntimeImageStorage(storage.root.parent)
     assert (
         restarted.find_build(
             BUILD_INPUT,
