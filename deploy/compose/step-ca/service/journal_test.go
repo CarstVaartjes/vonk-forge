@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/asn1"
 	"errors"
 	"math/big"
 	"net/url"
@@ -301,6 +302,21 @@ func TestPinnedBadgerCommitsSynchronously(t *testing.T) {
 	// guard must fail if a dependency update weakens the durable response fence.
 	if !badger.DefaultOptions(t.TempDir()).SyncWrites {
 		t.Fatal("CA backend does not sync commits before returning")
+	}
+}
+
+func TestNodeSubjectPreservesExactIdentityBeforeAndAfterDER(t *testing.T) {
+	node := "spk_" + strings.Repeat("a", 32)
+	if !nodeSubject(pkix.Name{CommonName: node}, node) {
+		t.Fatal("generated canonical subject requires decoded-only Names")
+	}
+	decoded := pkix.Name{CommonName: node, Names: []pkix.AttributeTypeAndValue{{Type: asn1.ObjectIdentifier{2, 5, 4, 3}, Value: node}}}
+	if !nodeSubject(decoded, node) {
+		t.Fatal("decoded canonical subject lost identity")
+	}
+	decoded.Names = append(decoded.Names, pkix.AttributeTypeAndValue{Type: asn1.ObjectIdentifier{1, 2, 3, 4}, Value: "other"})
+	if nodeSubject(decoded, node) || nodeSubject(pkix.Name{CommonName: node, Organization: []string{"other"}}, node) {
+		t.Fatal("extra subject identity was accepted")
 	}
 }
 

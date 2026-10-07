@@ -13,6 +13,12 @@ authentication JWT authorizes every issue or observation call through Smallstep'
 normal authorization path. Its one-use JWT ID is independent of the durable
 provider request ID.
 
+The current private HTTP endpoint is `/1.0/vonk/sign`. Its JWT audience remains
+the normal Smallstep sign audience, so normal authorization is unchanged. The
+distinct HTTP path prevents a new Controller from accidentally reaching the
+stock CA's unjournaled sign handler during rollout: a stock CA returns 404 without
+signing. The managed CA does not expose the legacy sign or native renewal routes.
+
 The CA adds `vonk_issuance_requests` and `vonk_issuance_serials` tables to the
 existing Badger directory. A short transaction reserves the request and serial.
 Signing happens outside database locks. A second short transaction checks the
