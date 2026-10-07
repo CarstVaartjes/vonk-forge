@@ -5,19 +5,25 @@ import hashlib
 import io
 import json
 import os
+import shutil
+import ssl
 import subprocess
 import sys
 import time
 import zipfile
 from contextlib import redirect_stdout
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
 from threading import Thread
+from typing import cast
 
 import pytest
+from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.x509.oid import NameOID
 
 from cluster_profiles import cli, cli_update
 from cluster_profiles.runtime_identity import contract_fingerprint
@@ -576,3 +582,250 @@ def test_signed_client_update_retains_install_until_deployed_contract_matches(
     assert result["current"] == current
     assert result["accepted_source_sha"] == "b" * 40
     assert result["compatibility"] == "controller-contract-unavailable-or-different"
+
+
+@pytest.fixture(scope="module")
+def signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
+    """Build and install once; no test resolves dependencies over the network."""
+    if os.environ.get("VONK_SIGNED_UPDATE_PROOF") != "1":
+        pytest.skip("run the designated hosted signed CLI update proof lane")
+    cache = Path(os.environ["VONK_SIGNED_UPDATE_CACHE"])
+    assert cache.is_dir() and any(cache.iterdir()), "locked resolver cache is absent"
+    uv = shutil.which("uv")
+    if uv is None or sys.version_info[:2] != (3, 14):
+        message = "installed update proof requires uv and Python 3.14"
+        if os.environ.get("CI", "").lower() == "true":
+            pytest.fail(message, pytrace=False)
+        pytest.skip(message)
+    workspace = tmp_path_factory.mktemp("signed-cli-tool")
+    root = Path(__file__).resolve().parents[2]
+    environment = {
+        "PATH": os.pathsep.join(
+            (str(Path(uv).parent), str(Path(sys.executable).parent), os.defpath)
+        ),
+        "HOME": str(Path.home()),
+        "XDG_CACHE_HOME": str(workspace / "xdg-cache"),
+        "XDG_CONFIG_HOME": str(workspace / "xdg-config"),
+        "XDG_DATA_HOME": str(workspace / "xdg-data"),
+        "PYTHONPATH": "",
+        "PYTHONNOUSERSITE": "1",
+        "UV_TOOL_DIR": str(workspace / "tools"),
+        "UV_TOOL_BIN_DIR": str(workspace / "bin"),
+        "UV_OFFLINE": "1",
+        "UV_PYTHON_DOWNLOADS": "never",
+        "VONK_CLI_UPDATE_NOTICES": "0",
+        "NO_PROXY": "127.0.0.1,localhost",
+        "UV_CACHE_DIR": str(cache),
+    }
+    wheels = []
+    for name, source, version in (
+        ("old", "c" * 40, "0.1.1"),
+        ("accepted", "b" * 40, "1.2.3"),
+    ):
+        directory = workspace / name
+        built = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "hatchling",
+                "build",
+                "--target",
+                "wheel",
+                "--directory",
+                str(directory),
+            ],
+            cwd=root,
+            env={
+                **environment,
+                "VONK_BUILD_SOURCE_SHA": source,
+                "VONK_BUILD_RELEASE_VERSION": version,
+            },
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert built.returncode == 0, built.stderr
+        [wheel] = directory.glob("vonk_cluster_profiles-*-py3-none-any.whl")
+        wheels.append(wheel)
+    installed = subprocess.run(
+        [uv, "tool", "install", "--force", "--python", "3.14", str(wheels[0])],
+        env=environment,
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert installed.returncode == 0, installed.stderr
+    executable = workspace / "bin" / "vonkctl"
+    python = workspace / "tools" / "vonk-cluster-profiles" / "bin" / "python"
+    assert executable.is_file() and python.is_file()
+    return workspace, environment, executable, python, wheels[1]
+
+
+@pytest.mark.linux_only
+@pytest.mark.slow(60)  # Two real updater processes, one actual offline uv replacement.
+def test_installed_cli_signed_update_replaces_actual_uv_tool(
+    signed_update_tool,
+) -> None:
+    """Catch verified bytes followed by a fake success or wrong-environment install."""
+    import ipaddress
+
+    workspace, environment, executable, python, wheel = signed_update_tool
+    key, objects = _signed_publication(
+        workspace, source_sha="b" * 40, wheel=wheel.read_bytes()
+    )
+    tls_key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(tls_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(hours=1))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+            ),
+            critical=False,
+        )
+        .sign(tls_key, hashes.SHA256())
+    )
+    cert_path, tls_key_path = workspace / "tls.pem", workspace / "tls-key.pem"
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    tls_key_path.write_bytes(
+        tls_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    responses = {
+        url.removeprefix("https://install.vonkforge.ai"): content
+        for url, content in objects.items()
+    }
+    from cluster_profiles.generated_control.models.api_runtime_observation import (
+        ApiRuntimeObservation,
+    )
+    from cluster_profiles.generated_control.models.platform_observation import (
+        PlatformObservation,
+    )
+
+    platform = PlatformObservation(
+        observed_at=now,
+        api=ApiRuntimeObservation.from_dict(
+            cast(dict[str, object], _controller_observation()["api"])
+        ),
+        workers=None,
+        worker_issue="worker-observation-unavailable",
+    )
+    responses["/api/platform"] = json.dumps(platform.to_dict()).encode()
+    token = os.urandom(32).hex()
+    token_path = workspace / "test-controller-token"
+    token_path.write_text(token)
+    token_path.chmod(0o600)
+    environment = {**environment, "VONK_CONTROL_TOKEN_FILE": str(token_path)}
+    wheel_path = next(path for path in responses if path.endswith(".whl"))
+    requests = []
+
+    class PublicationHost(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            requests.append(self.path)
+            if (
+                self.path == "/api/platform"
+                and self.headers.get("Authorization") != f"Bearer {token}"
+            ):
+                self.send_response(401)
+                self.end_headers()
+                return
+            content = responses.get(self.path)
+            self.send_response(200 if content is not None else 404)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(content or b"")
+
+        def log_message(self, *_args: object) -> None:
+            pass
+
+    def invoke(command: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            command,
+            env={**environment, "SSL_CERT_FILE": str(cert_path)},
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+
+    def identity() -> dict:
+        observed = invoke([str(executable), "--json", "--version"])
+        assert observed.returncode == 0, observed.stderr
+        return json.loads(observed.stdout)
+
+    before = identity()
+    assert before == {"version": "0.1.1", "source_sha": "c" * 40}
+    receipt_path = python.parent.parent / "uv-receipt.toml"
+    before_tool_receipt = receipt_path.read_bytes()
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert_path, tls_key_path)
+    with ThreadingHTTPServer(("127.0.0.1", 0), PublicationHost) as server:
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        worker = Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        origin = f"https://127.0.0.1:{server.server_port}"
+        environment = {**environment, "VONK_CONTROL_URL": origin}
+        # Import from the installed tool, with no repository import path. Both
+        # HTTPS verification and run_update's uv subprocess are unmodified.
+        driver = (
+            "import json,sys; from pathlib import Path; "
+            "from cluster_profiles import cli_update; "
+            "assert Path(cli_update.__file__).is_relative_to(sys.prefix); "
+            "print(json.dumps(cli_update.run_update(channel='stable',apply=True,"
+            "origin=sys.argv[1],public_key=Path(sys.argv[2]))))"
+        )
+        try:
+            responses[wheel_path] = b"!" + responses[wheel_path][1:]
+            rejected = invoke([str(python), "-c", driver, origin, str(key)])
+            assert rejected.returncode != 0
+            assert "CLI wheel digest or size is invalid" in rejected.stderr
+            assert identity() == before
+            assert receipt_path.read_bytes() == before_tool_receipt
+            responses[wheel_path] = wheel.read_bytes()
+            applied = invoke([str(python), "-c", driver, origin, str(key)])
+            assert applied.returncode == 0, applied.stderr
+            receipt = json.loads(applied.stdout)
+            after = identity()
+            assert after == {"version": "1.2.3", "source_sha": "b" * 40}
+            assert receipt["updated"] is True
+            assert receipt["compatibility"] == "compatible"
+            assert receipt["previous"] == before and receipt["current"] == after
+            assert requests.count(wheel_path) == 2
+            assert requests.count("/api/platform") == 1
+            # uv's real tool receipt must now reference the installed accepted
+            # bytes rather than retaining the initial fixture wheel.
+            tool_receipt = (python.parent.parent / "uv-receipt.toml").read_text()
+            assert str(workspace / "old") not in tool_receipt
+            assert "vonkctl-update-" in tool_receipt
+            if report := os.environ.get("VONK_SIGNED_UPDATE_REPORT"):
+                Path(report).write_text(
+                    json.dumps(
+                        {
+                            "before": before,
+                            "after": after,
+                            "receipt": receipt,
+                            "tampered_wheel_retained_prior_tool_receipt": True,
+                            "real_uv_tool_receipt_changed": receipt_path.read_bytes()
+                            != before_tool_receipt,
+                        },
+                        indent=2,
+                    )
+                    + "\n"
+                )
+        finally:
+            server.shutdown()
+            worker.join(timeout=5)

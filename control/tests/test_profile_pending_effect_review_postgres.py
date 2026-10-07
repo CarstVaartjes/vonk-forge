@@ -20,11 +20,12 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_control import agent_operation_states
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
 from vonk_control.fleet_profiles import (
     _persisted_profile_plan,
     build_production_fleet_profile_service,
 )
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     FleetProfileApplication,
     Job,
@@ -50,7 +51,8 @@ from .test_run_switch_operations import (
 )
 
 
-def _superseded(plan):
+def _superseded(plan: FleetProfilePreview | Residue):
+    assert isinstance(plan, FleetProfilePreview), plan
     return {
         (effect.kind, effect.id, tuple(effect.node_ids))
         for effect in plan.effects.superseded
@@ -102,21 +104,23 @@ def test_postgres_reviewed_parked_receipt_remains_bound_when_restarted_new_load_
         ("profile-application", parked.id, tuple(nodes)),
     }
     assert expected <= _superseded(reviewed)
+    assert reviewed.effects_digest is not None
     replacement = restarted.load(
         profile.number,
         request_key=_uuid(18801),
         actor="admin",
-        expected_plan_digest=reviewed.plan_digest,
+        reviewed_effects_digest=reviewed.effects_digest,
     )
     assert replacement.id not in {original.id, parked.id}
     with sessions() as session:
         accepted = session.get(FleetProfileApplication, replacement.id)
         retained = session.get(FleetProfileApplication, parked.id)
         assert accepted is not None and retained is not None
-        assert expected <= _superseded(_persisted_profile_plan(accepted))
+        accepted_plan = _persisted_profile_plan(accepted)
+        assert isinstance(accepted_plan, FleetProfilePreview), accepted_plan
+        assert expected <= _superseded(accepted_plan)
         assert all(
-            effect.id != replacement.id
-            for effect in _persisted_profile_plan(accepted).effects.superseded
+            effect.id != replacement.id for effect in accepted_plan.effects.superseded
         )
         assert (
             retained.request_key == parked_key and retained.plan_digest == parked_digest
@@ -161,11 +165,12 @@ def test_postgres_unrelated_damaged_parked_evidence_does_not_starve_exact_gang_c
     reviewed = restarted.preview(profile.id)
     assert reviewed.allowed, reviewed.reasons
     assert all(effect.id != parked.id for effect in reviewed.effects.superseded)
+    assert reviewed.effects_digest is not None
     replacement = restarted.load(
         profile.number,
         request_key=_uuid(18811),
         actor="admin",
-        expected_plan_digest=reviewed.plan_digest,
+        reviewed_effects_digest=reviewed.effects_digest,
     )
     before = _held_run_claims(sessions, run.owner_id)
     assert before and {claim[1] for claim in before} == set(nodes)
@@ -284,11 +289,12 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
     run_id = old_start.owner_id
     claims = _held_run_claims(sessions, run_id)
     assert claims and {claim[1] for claim in claims} == set(nodes)
+    assert reviewed.effects_digest is not None
     replacement = profiles.load(
         profile.number,
         request_key=_uuid(18822),
         actor="admin",
-        expected_plan_digest=reviewed.plan_digest,
+        reviewed_effects_digest=reviewed.effects_digest,
     )
     restarted = build_production_fleet_profile_service(
         sessions, clock=lambda: now[0], run_switch_operations=switches
@@ -337,6 +343,9 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
         ranks = list(session.scalars(select(RunNode).where(RunNode.run_id == run_id)))
         assert {rank.node_id for rank in ranks} == set(nodes)
         assert all(rank.state == "stopped" for rank in ranks)
-        assert session.get(RecipeRun, run_id).state == "stopped"
-        assert session.get(Job, old_start.id).request_id == _uuid(18821)
+        stored_run = session.get(RecipeRun, run_id)
+        stored_start = session.get(Job, old_start.id)
+        assert stored_run is not None and stored_start is not None
+        assert stored_run.state == "stopped"
+        assert stored_start.request_id == _uuid(18821)
     assert fenced_attempt(sessions, old_claim).result == original_evidence

@@ -16,6 +16,7 @@ from vonk_agent_protocol import AgentResult, LifecycleState, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
+    FleetProfilePreview,
     profile_switch_child_request_key,
 )
 from vonk_control.fleet_profiles import (
@@ -297,6 +298,7 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
             assert row is not None and selected_row is not None
             assert profiles._adopted_application_scope(session, row) == (nodes[0],)
             bound = _persisted_profile_plan(selected_row)
+            assert isinstance(bound, FleetProfilePreview), bound
             assert bound.effects.adopted == review.effects.adopted
             assert session.get(AgentNode, nodes[0]).workload_intent_ordinal == ordinal
         restarted_core = _service(
