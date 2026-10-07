@@ -2637,22 +2637,6 @@
       "justification": "Tests retaining live authorized adopted work across aggregate failure and releasing only replaced exact effects; the final lost-child observation intentionally preserves adopted authority."
     },
     {
-      "path": "control/tests/test_profile_jobrun_host_grant.py",
-      "function": "test_selected_profile_stop_issues_signed_exact_job_target_grant",
-      "kind": "ending-without-fresh-request",
-      "count": 1,
-      "reason": "security-edge",
-      "justification": "Helper issues exact Stop grant and verifies signature; wrong runtime target refuses. Does not execute Stop or consume result."
-    },
-    {
-      "path": "control/tests/test_profile_jobrun_host_wire_bridge.py",
-      "function": "test_selected_profile_job_target_grant_is_accepted_by_rust_helper",
-      "kind": "ending-without-fresh-request",
-      "count": 1,
-      "reason": "security-edge",
-      "justification": "Same real signed grant parsed by actual Rust helper and echoed byteexact; no Stop execution or terminal capacity claim."
-    },
-    {
       "path": "control/tests/test_profile_stop_effect_adoption_postgres.py",
       "function": "test_postgres_stop_adoption_loses_authority_on_exact_refusal",
       "kind": "ending-without-fresh-request",

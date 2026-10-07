@@ -24,7 +24,36 @@
       "control/src/vonk_control/recipe_operations.py",
       "control/src/vonk_control/run_switch_operations.py"
     ],
-    "guard_paths": ["control/src/vonk_control/lifecycle/", "control/src/vonk_control/agent_jobs.py", "control/src/vonk_control/agent_upgrades.py", "control/src/vonk_control/artifact_blob_store.py", "control/src/vonk_control/artifact_jobs.py", "control/src/vonk_control/artifact_lifecycle.py", "control/src/vonk_control/artifact_reference_scan.py", "control/src/vonk_control/availability_production.py", "control/src/vonk_control/distributed_lifecycle.py", "control/src/vonk_control/distributed_recovery.py", "control/src/vonk_control/fleet_profiles.py", "control/src/vonk_control/host_runtime_plan_authority.py", "control/src/vonk_control/install_admission.py", "control/src/vonk_control/jobs.py", "control/src/vonk_control/model_cache.py", "control/src/vonk_control/profile_stop_authority.py", "control/src/vonk_control/recipe_build_cancellation.py", "control/src/vonk_control/recipe_builds.py", "control/src/vonk_control/recipe_image_availability.py", "control/src/vonk_control/recipe_operation_phases.py", "control/src/vonk_control/recipe_operation_worker.py", "control/src/vonk_control/recipe_operations.py", "control/src/vonk_control/recipe_start_payloads.py", "control/src/vonk_control/recipe_stop_payloads.py", "control/src/vonk_control/recipe_update_batches.py", "control/src/vonk_control/run_admission.py", "control/src/vonk_control/run_switch_operations.py", "control/src/vonk_control/runtime_image_preparation.py"]
+    "guard_paths": [
+      "control/src/vonk_control/lifecycle/",
+      "control/src/vonk_control/agent_jobs.py",
+      "control/src/vonk_control/agent_upgrades.py",
+      "control/src/vonk_control/artifact_blob_store.py",
+      "control/src/vonk_control/artifact_jobs.py",
+      "control/src/vonk_control/artifact_lifecycle.py",
+      "control/src/vonk_control/artifact_reference_scan.py",
+      "control/src/vonk_control/availability_production.py",
+      "control/src/vonk_control/distributed_lifecycle.py",
+      "control/src/vonk_control/distributed_recovery.py",
+      "control/src/vonk_control/fleet_profiles.py",
+      "control/src/vonk_control/host_runtime_plan_authority.py",
+      "control/src/vonk_control/install_admission.py",
+      "control/src/vonk_control/jobs.py",
+      "control/src/vonk_control/model_cache.py",
+      "control/src/vonk_control/profile_stop_authority.py",
+      "control/src/vonk_control/recipe_build_cancellation.py",
+      "control/src/vonk_control/recipe_builds.py",
+      "control/src/vonk_control/recipe_image_availability.py",
+      "control/src/vonk_control/recipe_operation_phases.py",
+      "control/src/vonk_control/recipe_operation_worker.py",
+      "control/src/vonk_control/recipe_operations.py",
+      "control/src/vonk_control/recipe_start_payloads.py",
+      "control/src/vonk_control/recipe_stop_payloads.py",
+      "control/src/vonk_control/recipe_update_batches.py",
+      "control/src/vonk_control/run_admission.py",
+      "control/src/vonk_control/run_switch_operations.py",
+      "control/src/vonk_control/runtime_image_preparation.py"
+    ]
   },
   "max_debt": 0,
   "debt_ceiling": {
@@ -481,9 +510,10 @@
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService._stop_service_run_once",
       "catches": [
-        "_RouteNotWithdrawn"
+        "_RouteNotWithdrawn",
+        "UnknownOutcomeError"
       ],
-      "reason": "Competing publication is re-withdrawn and exact native dispatch retried a bounded number of times; the durable accepted request retains its original reviewed digest and intent."
+      "reason": "Competing publication is re-withdrawn and exact native dispatch retried a bounded number of times. After acceptance, a canonical unknown outcome is handed to _defer_accepted_service_stop, which preserves the same root and reviewed effects and persists updated_at; reconcile_pending_service_stops resumes that exact root after its five-second due interval without retaining a transaction across publication."
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
@@ -3661,6 +3691,13 @@
       "category": "security-edge",
       "reason": "Exact destructive-effect consent and target fences: reject changed profile intent, generation, reviewed plan, child identity or ambiguous source authority before issuing Stop. Historical launch history is handled separately by durable run ownership; these checks remain fail closed.",
       "sites": [
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-replacement-does-not-own-this-current-stop-phase", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-replacement-stop-phase-is-inconsistent", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-installation-disappeared", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-linked-child-identity-changed", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-linked-child-is-unreadable", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-linked-child-scope-changed", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-queue-request-binding-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-child-set-is-inconsistent", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-parent-identity-is-inconsistent", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "issued-profile-stop-child-changed", 1],
@@ -3722,7 +3759,6 @@
       "reason": "Exact immutable source, accepted target scope, reviewed effect digest, parent/child hashes, current ordinal and installation membership are authorization/integrity fences; profile selection and controller-cancellation fences remain unchanged.",
       "family": "exact-ordinary-jobrun-stop-security-edge",
       "sites": [
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "ProfileStopAuthorityError", "derive_runtime_plan_binding", "profile-stop-target-is-ambiguous", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "ProfileStopAuthorityError", "derive_runtime_plan_binding", "run-jobrun-stop-scope-is-missing", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "ProfileStopAuthorityError", "derive_runtime_plan_binding", "run-jobrun-stop-target-is-ambiguous", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_jobrun_stop_source", "jobrun-stop-differs-from-its-source", 1],
@@ -3745,7 +3781,6 @@
       "reason": "Exact immutable source, accepted target scope, reviewed effect digest, parent/child hashes, current ordinal and installation membership are authorization/integrity fences; profile selection and controller-cancellation fences remain unchanged.",
       "family": "exact-ordinary-jobrun-stop-input-validation",
       "sites": [
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "profile-jobrun-stop-authority-is-invalid", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "run-jobrun-stop-authority-is-invalid", 1]
       ]
     },
@@ -3765,6 +3800,8 @@
       "category": "security-edge",
       "reason": "Exact destructive Stop authority rejects substituted runtime generation, immutable payload, missing owner, changed execution order, or unproven absence; deferred accepted requests retain claims and original evidence for bounded worker retry.",
       "sites": [
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._defer_accepted_service_stop", "accepted-stop-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-child-action-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._stop_service_run_once.claim_withdrawal", "accepted-stop-disappeared", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-does-not-match-its-immutable-binding", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-is-unreadable", 1],
@@ -3797,14 +3834,6 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._check_service_stop", "reviewed-stop-route-state-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._check_service_stop", "reviewed-stop-effects-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._accept_service_stop", "stop-plan-is-stale-or-blocked", 1]
-      ]
-    },
-    {
-      "family": "recipe_operations.service-stop-withdrawal-retry",
-      "category": "already-retried",
-      "reason": "An exact accepted Stop whose route withdrawal is not settled retries with bounded admission attempts; the same durable root and reviewed manifest are retained for one due worker continuation per pass.",
-      "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._stop_service_run_once", "the-run-s-route-withdrawal-has-not-settled-retry-the-stop", 1]
       ]
     },
     {
