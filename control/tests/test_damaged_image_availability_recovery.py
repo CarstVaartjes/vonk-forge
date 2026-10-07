@@ -1,6 +1,6 @@
 """Hosted OCI recovery through the production availability composition.
 
-The external builder is a controlled receipt producer, not a physical Spark.
+Only the external build effect is controlled, not a physical Spark execution.
 OCI ingress, catalog/input resolution, SQL build ownership, preparation,
 collection, cancellation and availability completion use their real owners.
 """
@@ -11,26 +11,31 @@ import os
 import shutil
 import time
 import uuid
-from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.image_store_collection import GRACE, ImageStoreCollector
+from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
+from vonk_control.models import AgentCertificate, Job, ResourceReservation
 from vonk_control.oci_image_store import StoredImage
-from vonk_control.recipe_builds import RecipeBuildPlan, RecipeBuildService
+from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     prepare_runtime_image,
 )
 
+from .preflight_fixtures import record_passing_preflight
 from .test_oci_image_store import _docker_archive, _layer
 from .test_recipe_builds import setup as build_setup
 
@@ -83,57 +88,26 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
         now=now[0],
     )
 
-    class ExternalBuilder:
-        """Only the external build effect is controlled; dispatch is production."""
-
-        calls: list[tuple[str, str]]
-
-        def __init__(self) -> None:
-            self.calls = []
-
-        def build(
-            self,
-            selected: RecipeBuildPlan,
-            *,
-            build_input_sha256: str,
-            request_id: str,
-            admission_guard: Callable[[Session], None],
-            **_kwargs: object,
-        ) -> SimpleNamespace:
-            with sessions.begin() as session:
-                admission_guard(session)
-            self.calls.append((request_id, build_input_sha256))
-            restored = storage.layout.import_archive(archive)
-            assert isinstance(restored, StoredImage), restored
-            assert restored.manifest_digest == image.manifest_digest
-            builds.record_success(
-                selected.build_id,
-                build_input_sha256=build_input_sha256,
-                image_digest=restored.manifest_digest,
-                oci_layout_sha256=restored.manifest_digest.removeprefix("sha256:"),
-                image_bytes=restored.stored_bytes,
-                now=now[0],
+    jobs = AgentJobService(sessions, clock=lambda: now[0])
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=InstallAdmissionService(sessions),
+        run_admission=RunAdmissionService(sessions),
+        agent_jobs=jobs,
+        clock=lambda: now[0],
+        builds=builds,
+    )
+    jobs.set_result_consumer(operations.consume_agent_result)
+    with sessions.begin() as session:
+        session.add(
+            AgentCertificate(
+                serial="manifest-recovery-builder",
+                node_id=node_id,
+                not_before=initial - timedelta(seconds=1),
+                not_after=initial + timedelta(days=7),
+                fingerprint="manifest-recovery-builder",
             )
-            return SimpleNamespace(
-                id=str(uuid.uuid4()),
-                state="succeeded",
-                owner_id=selected.build_id,
-                result={
-                    "successful_nodes": [selected.builder_node_id],
-                    "failed_nodes": [],
-                    "node_evidence": {
-                        selected.builder_node_id: {
-                            "image_digest": restored.manifest_digest,
-                            "oci_layout_sha256": restored.manifest_digest.removeprefix(
-                                "sha256:"
-                            ),
-                            "image_bytes": restored.stored_bytes,
-                        }
-                    },
-                },
-            )
-
-    external = ExternalBuilder()
+        )
 
     def production():
         return build_recipe_image_availability(
@@ -141,7 +115,7 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
             artifact_root=artifact_root,
             managed_catalog_sync=None,
             recipe_builds=builds,
-            recipe_operations=external,
+            recipe_operations=operations,
             clock=lambda: now[0],
         )
 
@@ -152,7 +126,10 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
         )
         assert first.service.run_pending() == 1
         assert first.service.get(completed.id).state == "succeeded"
-        assert external.calls == []
+        with sessions() as session:
+            assert (
+                session.scalar(select(Job).where(Job.kind == "recipe.build.v1")) is None
+            )
         owner = first.service.start(
             revision.id, actor="operator", request_id=str(uuid.uuid4())
         )
@@ -220,10 +197,88 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
         )
         assert accepted.id not in {completed.id, owner.id}
         assert restarted.service.run_pending() == 1
+        waiting = restarted.service.get(accepted.id)
+        assert waiting.state == "queued", waiting.failure
+        assert waiting.failure is not None
+        with sessions() as session:
+            parent = session.get(Job, accepted.id)
+            assert parent is not None
+            dependency = parent.payload["build_dependency"]
+            child_id = dependency["operation_id"]
+            child_request = dependency["request_key"]
+            child = session.get(Job, child_id)
+            assert child is not None and child.kind == "recipe.build.v1"
+            assert child.request_id == child_request
+            assert child.targets == [node_id]
+            assert child.payload["plan_digest"] == plan.build_input_sha256
+            build_id = child.payload["owner_id"]
+            held = tuple(
+                session.scalars(
+                    select(ResourceReservation).where(
+                        ResourceReservation.owner_kind == "recipe-build",
+                        ResourceReservation.owner_id == build_id,
+                        ResourceReservation.state == "active",
+                    )
+                )
+            )
+            assert {hold.kind for hold in held} == {"disk", "host-memory"}
+            assert all(hold.plan_digest == plan.build_input_sha256 for hold in held)
+        record_passing_preflight(sessions, now[0])
+        claimed = jobs.claim(
+            node_id,
+            "manifest-recovery-builder",
+            runtime_identity={
+                "architecture": "linux-arm64",
+                "semantic_version": "1.2.3",
+                "build_digest": "sha256:" + "a" * 64,
+                "binary_digest": "1" * 64,
+            },
+        )
+        assert claimed is not None
+        assert claimed.payload["build_input_sha256"] == plan.build_input_sha256
+        # The sole controlled effect: build bytes arriving from this exact claim.
+        restored = restarted_storage.layout.import_archive(archive)
+        assert isinstance(restored, StoredImage), restored
+        assert restored.manifest_digest == image.manifest_digest
+        jobs.record_result(
+            AgentResult.model_validate_json(
+                canonical_message(
+                    {
+                        "fence": claimed.fence,
+                        "state": "succeeded",
+                        "result": {
+                            "image_digest": restored.manifest_digest,
+                            "oci_layout_sha256": restored.manifest_digest.removeprefix(
+                                "sha256:"
+                            ),
+                            "image_bytes": restored.stored_bytes,
+                        },
+                    }
+                )
+            )
+        )
+        assert operations.get(child_id).state == "succeeded"
+        restarted.close()
+        now[0] += timedelta(minutes=3)
+        restarted = production()
+        assert restarted.service.run_pending() == 1
         result = restarted.service.get(accepted.id)
         assert result.state == "succeeded", result.failure
-        assert len(external.calls) == 1
-        assert external.calls[0][1] == plan.build_input_sha256
+        with sessions() as session:
+            children = tuple(
+                session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+            )
+            assert [child.id for child in children] == [child_id]
+            assert children[0].request_id == child_request
+            assert (
+                session.scalar(
+                    select(ResourceReservation.id).where(
+                        ResourceReservation.owner_id == build_id,
+                        ResourceReservation.state == "active",
+                    )
+                )
+                is None
+            )
         assert result.result is not None
         assert result.result["build_input_sha256"] == plan.build_input_sha256
         assert result.result["oci_archive_sha256"] == receipt.oci_archive_sha256
