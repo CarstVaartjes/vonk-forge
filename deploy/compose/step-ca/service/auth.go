@@ -58,8 +58,9 @@ func bindingJSON(raw []byte) (Binding,error) {
 // Call only after Authority.Authorize has authenticated these exact JWT bytes.
 // This parser adds the durable Vonk binding; it does not replace JWT policy.
 func authenticatedBinding(ott string, body Binding, csr *x509.CertificateRequest) error {
+ segments:=strings.Split(ott,".");if len(segments)!=3{return errors.New("authentication must use compact JWT")}
  token,err:=jose.ParseSigned(ott);if err!=nil{return err}
- payload,err:=base64.RawURLEncoding.DecodeString(strings.Split(ott,".")[1]);if err!=nil{return err}
+ payload,err:=base64.RawURLEncoding.DecodeString(segments[1]);if err!=nil{return err}
  if err:=uniqueJSONKeys(json.NewDecoder(bytes.NewReader(payload)));err!=nil{return err}
  var claims struct {
   Subject string `json:"sub"`
