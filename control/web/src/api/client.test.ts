@@ -167,3 +167,26 @@ test("refuses a request body without an explicit method", async () => {
   const failure = await new ApiClient().request("/api/model/library", {body: JSON.stringify({})}).then(() => null, error => error);
   expect(String(failure.message)).toContain("explicit method");
 });
+
+test("native artifact upload rejects an undeclared JSON receipt before exposing a DTO", async () => {
+  let responseType = "";
+  class Upload {
+    status = 200;
+    responseText = '{"unexpected":9007199254740993}';
+    response = {unexpected: 9007199254740992};
+    upload = {};
+    onload?: () => void;
+    open() {}
+    setRequestHeader() {}
+    getResponseHeader(name: string) { return name.toLowerCase() === "content-type" ? "application/json" : null; }
+    set responseType(value: string) { responseType = value; }
+    send() { this.onload?.(); }
+  }
+  vi.stubGlobal("XMLHttpRequest", Upload);
+  setCsrfCookie();
+  const request = new ApiClient().uploadArtifactJobInput("00000000-0000-4000-8000-000000000001", {
+    slot: "prompt", name: "input.txt", media_type: "text/plain", size_bytes: 1, sha256: "a".repeat(64),
+  }, new Blob(["x"]));
+  await expect(request).rejects.toThrow("Invalid Control API contract");
+  expect(responseType).toBe("text");
+});
