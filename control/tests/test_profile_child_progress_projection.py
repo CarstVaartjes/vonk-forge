@@ -12,11 +12,15 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import select
 from vonk_agent_protocol import OperationProgress, canonical_message
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationView,
+    FleetProfileInput,
+)
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
+from vonk_control.job_documents import RecipeStartParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentCertificate,
@@ -75,11 +79,7 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=postgres_engine
     )
-    with sessions.begin() as session:
-        for node_id in nodes:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            node.capabilities = [*node.capabilities, "recipe.install"]
+    # Canonical fixture inventory advertises recipe.operations.v1 already.
     jobs = AgentJobService(sessions, clock=lifecycle._clock)
     lifecycle._agent_jobs = jobs
     base_now = lifecycle._clock()
@@ -161,7 +161,7 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     with sessions() as session:
         sample = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == claim.operation_id
+                AgentOperationAttempt.fence == claim.fence
             )
         )
         assert sample is not None and sample.progress is not None
@@ -171,6 +171,8 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     # A new service reconnects only from the same durable rows.
     lifecycle = RecipeOperationService(
         sessions,
+        install_admission=lifecycle._install_admission,
+        run_admission=lifecycle._run_admission,
         agent_jobs=jobs,
         clock=lambda: base_now + timedelta(seconds=60),
     )
@@ -196,7 +198,7 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     with sessions() as session:
         sample = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == claim.operation_id
+                AgentOperationAttempt.fence == claim.fence
             )
         )
         assert sample is not None and sample.progress == persisted_progress
@@ -255,10 +257,18 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     )
     assert response.status_code == 200, response.text
     document = validate_control_document("FleetProfileApplicationView", response.json())
-    public = document["progress"]["effects"][0]["progress"]["operation"]
-    assert public["completed_bytes"] == 48
-    assert public["members"][0]["observed_at"] == observed_at
-    assert {member["member_id"] for member in public["members"]} == set(nodes)
+    validated = FleetProfileApplicationView.model_validate_json(
+        canonical_message(document)
+    )
+    public_effect = next(
+        effect for effect in validated.progress.effects if effect.kind == "install"
+    )
+    assert public_effect.progress is not None
+    public = public_effect.progress.operation
+    assert public is not None
+    assert public.completed_bytes == 48
+    assert public.members[0].observed_at == observed_at
+    assert {member.member_id for member in public.members} == set(nodes)
 
 
 def test_disjoint_child_samples_remain_distinct_after_restart(
@@ -323,11 +333,7 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
     )
     record_passing_preflight(sessions, NOW)
     all_nodes = (*nodes, second)
-    with sessions.begin() as session:
-        for node_id in all_nodes:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            node.capabilities = [*node.capabilities, "recipe.install"]
+    # Canonical fixture inventory advertises recipe.operations.v1 already.
     now = [NOW]
     lifecycle._clock = lambda: now[0]
     jobs = AgentJobService(sessions, clock=lambda: now[0])
@@ -393,7 +399,11 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
         )
     # Fresh owners observe the same accepted children and durable samples.
     recovered_lifecycle = RecipeOperationService(
-        sessions, agent_jobs=jobs, clock=lambda: now[0]
+        sessions,
+        install_admission=lifecycle._install_admission,
+        run_admission=lifecycle._run_admission,
+        agent_jobs=jobs,
+        clock=lambda: now[0],
     )
     recovered_service, recovered_planner = _profile_service(
         sessions, recovered_lifecycle
@@ -407,11 +417,11 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
         for claim in claims:
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == claim.operation_id
+                    AgentOperationAttempt.fence == claim.fence
                 )
             )
             assert attempt is not None
-            original_samples[claim.operation_id] = copy.deepcopy(attempt.progress)
+            original_samples[claim.fence] = copy.deepcopy(attempt.progress)
     effects = [
         effect
         for effect in recovered_service.application(application.id).progress.effects
@@ -430,12 +440,12 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
         for claim in claims:
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == claim.operation_id
+                    AgentOperationAttempt.fence == claim.fence
                 )
             )
             assert (
                 attempt is not None
-                and attempt.progress == original_samples[claim.operation_id]
+                and attempt.progress == original_samples[claim.fence]
             )
 
 
@@ -503,18 +513,23 @@ def test_damaged_membership_is_unknown_and_does_not_mutate_execution(
     with write_guard_mode(strict=False), sessions.begin() as session:
         job = session.get(Job, start.id)
         assert job is not None
-        damaged = copy.deepcopy(job.payload)
+        parent = RecipeStartParent.model_validate_json(canonical_message(job.payload))
+        assert parent.phases is not None
+        phases = copy.deepcopy(parent.phases)
         if fault == "duplicate-target":
             job.targets = [*nodes, nodes[0]]
         elif fault == "unlisted-operation":
-            damaged["phases"][0][0]["operation_id"] = str(uuid4())
-        else:
-            first = damaged["phases"][0]
-            first[0]["node_id"], first[1]["node_id"] = (
-                first[1]["node_id"],
-                first[0]["node_id"],
+            phases[0][0] = phases[0][0].model_copy(
+                update={"operation_id": str(uuid4())}
             )
-        job.payload = damaged
+        else:
+            first = phases[0]
+            left, right = first[0].node_id, first[1].node_id
+            first[0] = first[0].model_copy(update={"node_id": right})
+            first[1] = first[1].model_copy(update={"node_id": left})
+        job.payload = parent.model_copy(update={"phases": phases}).model_dump(
+            mode="json"
+        )
         original_state = job.state
     observed = service.get(start.id)
     assert observed.progress is None
