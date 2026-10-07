@@ -69,13 +69,11 @@ def _retained_stop(tmp_path, engine: Engine | None = None):
     application = profiles.apply(profile.id, request_key=_uuid(18802), actor="admin")
     switches = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     adapter = RunSwitchFleetProfileAdapter(sessions, switches)
-    adapter.start(
-        application_id=application.id,
-        assignments=(),
-        scope_node_ids=nodes,
-        actor="admin",
-        request_id=_uuid(18803),
-    )
+    # Persist the accepted running profile step through its actual worker.
+    # Direct adapter startup would leave the application queued and cannot
+    # authorize its destructive Stop after retained bookkeeping conversion.
+    profiles._switch_adapter = adapter
+    profiles.tick()
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
