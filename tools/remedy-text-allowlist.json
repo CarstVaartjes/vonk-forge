@@ -15,12 +15,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/db.py",
-      "function": "run_with_database_startup_retry",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/distribution_executor.py",
       "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
       "kind": "imperative-remedy",

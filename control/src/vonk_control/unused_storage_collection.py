@@ -105,6 +105,7 @@ from .catalog_revision_collection import (
     operation_tokens,
     tokens,
 )
+from .exact_integer_storage import DecimalIntegerOrderKey
 from .fleet_profile_contract import FleetProfileAssignmentInput, FleetProfilePreview
 from .logging import log_event
 from .models import (
@@ -922,8 +923,18 @@ class UnusedStorageCollector:
             largest_install = (
                 session.scalar(select(func.max(InstallationNode.required_bytes))) or 0
             )
+            # Canonical decimal magnitude sorts by length then byte order.
+            # Return one typed integer, never materialize the whole inventory.
             largest_set = (
-                session.scalar(select(func.max(ModelCacheSet.expected_bytes))) or 0
+                session.scalar(
+                    select(ModelCacheSet.expected_bytes)
+                    .order_by(
+                        func.length(ModelCacheSet.expected_bytes).desc(),
+                        DecimalIntegerOrderKey(ModelCacheSet.expected_bytes).desc(),
+                    )
+                    .limit(1)
+                )
+                or 0
             )
             snapshots = _latest_snapshots(session)
         for node_id, (free, total, observed) in sorted(snapshots.items()):

@@ -3335,6 +3335,15 @@
       ]
     },
     {
+      "family": "db.already-retried",
+      "category": "already-retried",
+      "reason": "Only the initialize_database.initialize_once closure raises these private contention handoffs. Its sole caller, run_with_database_startup_retry, catches them under one fixed startup deadline; initialize_once rolls back, unlocks and closes SQL ownership and disposes the engine before backoff. Native PostgreSQL relation-owner and advisory-owner fault tests prove resource release and same-call recovery after the fault clears; the exhausted-deadline test proves truthful startup failure. Permission, schema and integrity refusals remain fatal. This is source and native journey evidence, not UnknownOutcomeError AST classification.",
+      "sites": [
+        ["control/src/vonk_control/db.py", "_DatabaseStartupContention", "initialize_database.initialize_once", "controller-schema-owner-is-busy-startup-will-retry", 1],
+        ["control/src/vonk_control/db.py", "_DatabaseStartupContention", "initialize_database.initialize_once", "controller-schema-relation-is-busy-startup-will-retry", 2]
+      ]
+    },
+    {
       "family": "agent_jobs.proven-retry",
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",

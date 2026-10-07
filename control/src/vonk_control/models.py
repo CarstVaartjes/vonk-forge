@@ -58,6 +58,12 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.inventory import MemoryPool
 
+from .exact_integer_storage import (
+    DecimalIntegerAtMost,
+    DecimalIntegerToken,
+    ExactNonnegativeInteger,
+)
+
 
 class Base(DeclarativeBase):
     pass
@@ -989,6 +995,16 @@ class CatalogDocumentRevision(Base):
         CheckConstraint(
             _lower_hex("content_digest", 64), name="ck_catalog_document_revision_digest"
         ),
+        CheckConstraint(
+            literal_column("download_bytes").is_(None)
+            | DecimalIntegerToken(literal_column("download_bytes")),
+            name="ck_catalog_document_revision_download_bytes",
+        ),
+        CheckConstraint(
+            literal_column("installed_bytes").is_(None)
+            | DecimalIntegerToken(literal_column("installed_bytes")),
+            name="ck_catalog_document_revision_installed_bytes",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -1008,8 +1024,8 @@ class CatalogDocumentRevision(Base):
     content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     artifact_key: Mapped[str | None] = mapped_column(String(64), index=True)
     execution_key: Mapped[str | None] = mapped_column(String(64), index=True)
-    download_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    installed_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    download_bytes: Mapped[int | None] = mapped_column(ExactNonnegativeInteger())
+    installed_bytes: Mapped[int | None] = mapped_column(ExactNonnegativeInteger())
     projected: Mapped[dict[str, object]] = mapped_column(
         JSON, nullable=False, default=dict
     )
@@ -1187,7 +1203,11 @@ class ModelCacheSet(Base):
             name="ck_model_cache_sets_state",
         ),
         CheckConstraint(
-            "expected_bytes >= 0 AND verified_bytes >= 0 AND verified_bytes <= expected_bytes",
+            DecimalIntegerToken(literal_column("expected_bytes"))
+            & DecimalIntegerToken(literal_column("verified_bytes"))
+            & DecimalIntegerAtMost(
+                literal_column("verified_bytes"), literal_column("expected_bytes")
+            ),
             name="ck_model_cache_sets_sizes",
         ),
         CheckConstraint(
@@ -1202,8 +1222,12 @@ class ModelCacheSet(Base):
     )
     recipe_revision_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
     manifest: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    expected_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    verified_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    expected_bytes: Mapped[int] = mapped_column(
+        ExactNonnegativeInteger(), nullable=False
+    )
+    verified_bytes: Mapped[int] = mapped_column(
+        ExactNonnegativeInteger(), nullable=False, default=0
+    )
     state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     protected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     protected_reasons: Mapped[list[str]] = mapped_column(

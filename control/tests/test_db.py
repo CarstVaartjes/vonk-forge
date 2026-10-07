@@ -4,6 +4,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
 
@@ -165,15 +167,22 @@ def test_build_engine_bounds_every_wait_only_on_postgres(monkeypatch) -> None:
     from vonk_control import db
 
     calls: list[tuple[str, dict[str, object]]] = []
+    engines: list[Engine] = []
 
-    def record(url: str, **kwargs: object) -> object:
+    def record(url: str, **kwargs: object) -> Engine:
         calls.append((url, kwargs))
-        return object()
+        engine = create_engine(url, **kwargs)
+        engines.append(engine)
+        return engine
 
     monkeypatch.setattr(db, "create_engine", record)
 
-    db.build_engine("postgresql+psycopg://control@postgres/control")
-    db.build_engine("sqlite+pysqlite:///:memory:")
+    try:
+        db.build_engine("postgresql+psycopg://control@postgres/control")
+        db.build_engine("sqlite+pysqlite:///:memory:")
+    finally:
+        for engine in engines:
+            engine.dispose()
 
     assert calls == [
         (
@@ -184,13 +193,14 @@ def test_build_engine_bounds_every_wait_only_on_postgres(monkeypatch) -> None:
                 "max_overflow": 10,
                 "pool_timeout": 30.0,
                 "connect_args": {
+                    "connect_timeout": 30,
                     "options": (
                         "-c application_name=vonk:control"
                         " -c lock_timeout=30000"
                         " -c statement_timeout=120000"
                         " -c transaction_timeout=300000"
                         " -c idle_in_transaction_session_timeout=60000"
-                    )
+                    ),
                 },
             },
         ),
