@@ -15,7 +15,12 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import InstallationState, RunState, adopt_machine_state
+from vonk_agent_protocol import (
+    InstallationState,
+    RunState,
+    adopt_machine_state,
+    canonical_message,
+)
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -668,9 +673,25 @@ class LibraryProjection:
             # subpath extraction on SQLite converts wide integers to floats
             # before Python can validate their canonical meaning.
             try:
-                progress = ModelCacheOperationProgress.model_validate(stored_progress)
+                progress = ModelCacheOperationProgress.model_validate_json(
+                    canonical_message(stored_progress), strict=True
+                )
             except ValidationError as error:
-                _note_unreadable("cache progress", operation_id, str(error))
+                _note_unreadable(
+                    "cache progress",
+                    operation_id,
+                    "; ".join(
+                        f"{issue['loc']}: {issue['type']}"
+                        for issue in error.errors(
+                            include_input=False,
+                            include_context=False,
+                            include_url=False,
+                        )
+                    ),
+                )
+                preparation = None
+            except (TypeError, ValueError) as error:
+                _note_unreadable("cache progress", operation_id, type(error).__name__)
                 preparation = None
             else:
                 preparation = self._cache_progress(
