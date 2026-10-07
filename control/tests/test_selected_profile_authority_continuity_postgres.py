@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -87,6 +90,40 @@ def _holds(sessions, owner_ids):
                 )
             )
         }
+
+
+def _follow_due(sessions, worker, application_id, clock):
+    """Early observation preserves the accepted child; only its due clock advances."""
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application_id)
+        assert row is not None
+        progress = _persisted_profile_progress(row)
+        due = progress.retry_due_at
+        if due is None or due <= clock[0]:
+            return None
+        identity = (row.id, row.request_key, row.plan_digest, row.current_operation_id)
+        journal = progress.switch_adapter
+        assert journal is not None
+        pending = list(journal.pending_children)
+        closed = list(journal.children)
+    # Other coordinators may progress, but this not-yet-due profile cannot reissue.
+    worker.tick()
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application_id)
+        assert row is not None
+        assert (
+            row.id,
+            row.request_key,
+            row.plan_digest,
+            row.current_operation_id,
+        ) == identity
+        progress = _persisted_profile_progress(row)
+        assert progress.retry_due_at == due
+        journal = progress.switch_adapter
+        assert journal is not None
+        assert journal.pending_children == pending and journal.children == closed
+    clock[0] = due
+    return due.isoformat()
 
 
 @pytest.mark.parametrize("authority_change", ["disabled", "demoted"])
@@ -238,13 +275,21 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
     )
     # Drive only native coordinators until B's exact Stop has been issued.
     stop_claim = None
+    due_checks = []
     for _ in range(16):
+        due = _follow_due(sessions, worker, accepted.id, clock)
+        if due is not None:
+            due_checks.append(due)
         worker.tick()
         stop_claim = claim_agent(jobs, node_b, "serial-b")
         if stop_claim is not None:
             break
     assert stop_claim is not None and stop_claim.operation.value == "recipe.stop"
     before = _journal(sessions, accepted.id)
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, accepted.id)
+        assert row is not None
+        accepted_identity = (row.id, row.request_key, row.plan_digest)
     assert {item.kind for item in before.queue} == {"stop", "cleanup"}
     accepted_a = publisher.accepted_run(run_a.owner_id, policy)
     assert accepted_a is not None
@@ -296,6 +341,9 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         )
     )
     for _ in range(16):
+        due = _follow_due(sessions, worker, accepted.id, clock)
+        if due is not None:
+            due_checks.append(due)
         worker.tick()
         current = profiles.application(accepted.id)
         if any(
@@ -325,8 +373,10 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         author.role = "administrator"
     # The stored retry deadline, not another load or changed plan, resumes cleanup.
     assert current.next_attempt_at is not None
-    clock[0] = current.next_attempt_at
     for _ in range(16):
+        due = _follow_due(sessions, worker, accepted.id, clock)
+        if due is not None:
+            due_checks.append(due)
         worker.tick()
         claim = claim_agent(jobs, node_b, "serial-b")
         if claim is not None:
@@ -353,3 +403,34 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         }
         removed = session.get(RecipeInstallation, installed_b.owner_id)
         assert removed is not None and removed.state == InstallationState.UNINSTALLED
+
+        row = session.get(FleetProfileApplication, accepted.id)
+        assert row is not None
+        assert (row.id, row.request_key, row.plan_digest) == accepted_identity
+    assert due_checks, "proof must actually reconnect across persisted retry deadlines"
+    if output := os.environ.get("VONK_AUTHOR_CONTINUITY_PROOF_OUTPUT"):
+        directory = Path(output)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{authority_change}.json").write_text(
+            json.dumps(
+                {
+                    "source_sha": os.environ["VONK_PROOF_SOURCE_SHA"],
+                    "authority_change": authority_change,
+                    "application_id": accepted.id,
+                    "request_key": accepted_identity[1],
+                    "plan_digest": accepted_identity[2],
+                    "stop_fence": stop_claim.fence,
+                    "selection": selection,
+                    "persisted_due_checks": due_checks,
+                    "same_intent_succeeded": True,
+                    "retained_run_id": run_a.owner_id,
+                    "retained_route_unchanged": True,
+                    "retired_run_id": run_b.owner_id,
+                    "closed_queue_indices": [
+                        c.queue_index for c in _journal(sessions, accepted.id).children
+                    ],
+                },
+                indent=2,
+            )
+            + "\n"
+        )
