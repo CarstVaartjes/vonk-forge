@@ -97,7 +97,10 @@ def export(output: Path) -> None:
             refusal = peer.post(
                 f"/api/recipe/runs/{run_id}/artifact-jobs",
                 content=canonical_message(expected_request),
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Request-ID": "00000000-0000-4000-8000-000000000301",
+                },
             )
         assert refusal.status_code == 503, refusal.text
         fixture = {
