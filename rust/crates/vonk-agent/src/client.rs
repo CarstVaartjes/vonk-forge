@@ -55,6 +55,7 @@ const MAX_REJECTION_LOCATION_CHARS: usize = 48;
 /// describe the payload's shape rather than the constraint its producer
 /// broke, so they rank behind a real constraint failure.
 const STRUCTURAL_ERROR_TYPES: [&str; 2] = ["missing", "extra_forbidden"];
+const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(75);
 const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 // Renewal has to finish before the active certificate expires. Keep each
 // controller call bounded so a stalled endpoint cannot consume the entire
@@ -550,7 +551,7 @@ impl AgentHttpClient {
             // HTTP/2 would multiplex them behind one flow-control window.
             .http1_only()
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(75))
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .build()?;
         Ok(client)
     }
@@ -2674,25 +2675,61 @@ mod tests {
         }
     }
 
-    fn request_capture_client(
+    // These capture cases share one deadline across peer acceptance, request
+    // reads, response writes and observation. A failed client cannot leave a
+    // blocking fixture thread behind the test's final join.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum CaptureStage {
+        Headers,
+        Body,
+    }
+
+    struct CapturePeer {
+        task: tokio::task::JoinHandle<Vec<u8>>,
+        deadline: tokio::time::Instant,
+        stages: tokio::sync::mpsc::Receiver<CaptureStage>,
+    }
+
+    impl Drop for CapturePeer {
+        fn drop(&mut self) {
+            // Also cancel acceptance/read futures when the client assertion
+            // fails before the explicit completion observation.
+            self.task.abort();
+        }
+    }
+
+    async fn request_capture_client(
         response_status: u16,
         response_headers: Vec<String>,
         response_body: Vec<u8>,
         response_delay: Option<Duration>,
-    ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        budget: Duration,
+    ) -> (AgentHttpClient, CapturePeer) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+        let deadline = tokio::time::Instant::now() + budget;
+        let (stage_observer, stages) = tokio::sync::mpsc::channel(2);
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = tokio::time::timeout_at(deadline, listener.accept())
+                .await
+                .expect("capture peer acceptance deadline")
+                .unwrap();
             let mut request = Vec::new();
             let mut buffer = [0_u8; 4096];
             let header_end = loop {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
+                let size = tokio::time::timeout_at(deadline, stream.read(&mut buffer))
+                    .await
+                    .expect("capture request header deadline")
+                    .unwrap();
+                assert_ne!(size, 0, "capture request ended before complete headers");
                 request.extend_from_slice(&buffer[..size]);
                 if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
                     break index + 4;
                 }
+                // Nonblocking acknowledgement of an accepted, incomplete
+                // request; the next read owns the same absolute deadline.
+                let _ = stage_observer.try_send(CaptureStage::Headers);
             };
             let headers = std::str::from_utf8(&request[..header_end]).unwrap();
             let content_length = headers
@@ -2702,40 +2739,111 @@ mod tests {
                     name.eq_ignore_ascii_case("content-length")
                         .then(|| value.trim().parse::<usize>().unwrap())
                 })
-                .unwrap();
+                .unwrap_or(0);
             while request.len() - header_end < content_length {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
+                let _ = stage_observer.try_send(CaptureStage::Body);
+                let size = tokio::time::timeout_at(deadline, stream.read(&mut buffer))
+                    .await
+                    .expect("capture request body deadline")
+                    .unwrap();
+                assert_ne!(size, 0, "capture request ended before declared body");
                 request.extend_from_slice(&buffer[..size]);
             }
-            let tolerate_response_write_error = response_delay.is_some();
             if let Some(response_delay) = response_delay {
-                thread::sleep(response_delay);
+                tokio::time::timeout_at(deadline, tokio::time::sleep(response_delay))
+                    .await
+                    .expect("capture response delay deadline");
             }
-            let response_write = write!(
-                stream,
+            let mut response = format!(
                 "HTTP/1.1 {response_status} Test\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
                 response_headers
                     .iter()
                     .map(|header| format!("{header}\r\n"))
                     .collect::<String>(),
-                response_body.len()
+                response_body.len(),
             )
-            .and_then(|()| stream.write_all(&response_body));
-            if !tolerate_response_write_error {
-                response_write.unwrap();
+            .into_bytes();
+            response.extend_from_slice(&response_body);
+            let written = tokio::time::timeout_at(deadline, stream.write_all(&response))
+                .await
+                .expect("capture response deadline");
+            if response_delay.is_none() {
+                written.unwrap();
             }
             request
         });
+        let client = authenticated_test_client(&format!("http://{address}/"), TEST_NODE_ID);
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-vonk-fixture-auth",
+            reqwest::header::HeaderValue::from_static("enrolled-agent"),
+        );
+        *client.client.write().await = reqwest::Client::builder()
+            .default_headers(headers)
+            .timeout(budget)
+            .build()
+            .unwrap();
         (
-            AgentHttpClient {
-                client: Arc::new(RwLock::new(reqwest::Client::new())),
-                controller: Url::parse(&format!("http://{address}/")).unwrap(),
-                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-                progress_phase: Default::default(),
+            client,
+            CapturePeer {
+                task: server,
+                deadline,
+                stages,
             },
-            server,
         )
+    }
+
+    async fn finish_capture_peer(mut server: CapturePeer) -> Vec<u8> {
+        match tokio::time::timeout_at(server.deadline, &mut server.task).await {
+            Ok(result) => result.expect("capture peer failed"),
+            Err(error) => {
+                server.task.abort();
+                let _ = (&mut server.task).await;
+                panic!("capture peer completion deadline: {error}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn capture_peer_drop_releases_silent_header_and_body_readers() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // A lost caller before either complete headers or a complete body must
+        // close its exact accepted socket, rather than leave a background peer
+        // alive until the ordinary request deadline.
+        for (partial, expected_stage) in [
+            (b"POST / HTTP/1.1\r\n".as_slice(), CaptureStage::Headers),
+            (
+                b"POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\n".as_slice(),
+                CaptureStage::Body,
+            ),
+        ] {
+            let (client, mut server) = request_capture_client(
+                204,
+                Vec::new(),
+                Vec::new(),
+                None,
+                HEARTBEAT_REQUEST_TIMEOUT,
+            )
+            .await;
+            let address = client.controller.socket_addrs(|| None).unwrap()[0];
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            stream.write_all(partial).await.unwrap();
+            let stage = tokio::time::timeout_at(server.deadline, server.stages.recv())
+                .await
+                .expect("capture reader phase acknowledgement deadline")
+                .expect("capture peer ended before entering its incomplete read");
+            assert_eq!(stage, expected_stage);
+            drop(server);
+            let mut byte = [0_u8; 1];
+            let closed = tokio::time::timeout(Duration::from_secs(1), stream.read(&mut byte))
+                .await
+                .expect("dropped capture peer retained its accepted socket");
+            match closed {
+                Ok(0) => (),
+                Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset),
+                other => panic!("dropped capture peer did not close its socket: {other:?}"),
+            }
+        }
     }
 
     #[test]
@@ -2764,7 +2872,14 @@ mod tests {
 
     #[tokio::test]
     async fn cloned_operation_client_sends_through_replaced_transport() {
-        let (client, server) = request_capture_client(204, Vec::new(), Vec::new(), None);
+        let (client, server) = request_capture_client(
+            204,
+            Vec::new(),
+            Vec::new(),
+            None,
+            CONTROLLER_REQUEST_TIMEOUT,
+        )
+        .await;
         let operation_client = client.clone();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -2773,6 +2888,7 @@ mod tests {
         );
         let replacement = reqwest::Client::builder()
             .default_headers(headers)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .build()
             .unwrap();
         *client.client.try_write().expect("uncontended test client") = replacement;
@@ -2781,7 +2897,7 @@ mod tests {
             .report_telemetry(&[telemetry_sample()])
             .await
             .unwrap();
-        let request = server.join().unwrap();
+        let request = finish_capture_peer(server).await;
         assert!(
             String::from_utf8_lossy(&request)
                 .to_ascii_lowercase()
@@ -2914,8 +3030,15 @@ mod tests {
         }
     }
 
-    fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
-        request_capture_client(status, Vec::new(), Vec::new(), None)
+    async fn observation_client(status: u16) -> (AgentHttpClient, CapturePeer) {
+        request_capture_client(
+            status,
+            Vec::new(),
+            Vec::new(),
+            None,
+            CONTROLLER_REQUEST_TIMEOUT,
+        )
+        .await
     }
 
     #[tokio::test]
@@ -4007,25 +4130,25 @@ mod tests {
         .unwrap()
     }
 
-    fn heartbeat_client(
-        response: AgentDirective,
-    ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+    async fn heartbeat_client(response: AgentDirective) -> (AgentHttpClient, CapturePeer) {
         let response_body = canonical_json(&response).unwrap();
         request_capture_client(
             200,
             vec!["Content-Type: application/json".to_owned()],
             response_body,
             None,
+            HEARTBEAT_REQUEST_TIMEOUT,
         )
+        .await
     }
 
-    fn host_runtime_grant_client() -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+    async fn host_runtime_grant_client() -> (AgentHttpClient, CapturePeer) {
         request_capture_client(
             200,
             vec!["Content-Type: application/json".to_owned()],
             br#"{"grant":{"claims":{"authority":"vonk.host-maintenance-helper","expires_at":2100000010,"issued_at":2100000000,"node_id":"spk_0123456789abcdef0123456789abcdef","operation":{"action":"image-pull","fence":"44d4e914-34df-4962-a802-d1f7dcd928aa","request_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","type":"execute-container-runtime-request"},"request_id":"84ddf214-f067-4bbf-917e-95df32a07fd8","schema_version":1},"schema_version":1,"signature":{"algorithm":"ed25519","key_id":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","value":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}}"#.to_vec(),
             None,
-        )
+         CONTROLLER_REQUEST_TIMEOUT).await
     }
 
     fn delayed_upload_client(
@@ -4120,10 +4243,10 @@ mod tests {
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
             fence: progress.fence,
         };
-        let (client, server) = heartbeat_client(directive.clone());
+        let (client, server) = heartbeat_client(directive.clone()).await;
 
         assert_eq!(client.heartbeat(&progress).await.unwrap(), directive);
-        let request = server.join().unwrap();
+        let request = finish_capture_peer(server).await;
         let (headers, body) = request
             .windows(4)
             .position(|value| value == b"\r\n\r\n")
@@ -4162,9 +4285,9 @@ mod tests {
                 deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
                 fence: progress.fence,
             };
-            let (client, server) = heartbeat_client(directive.clone());
+            let (client, server) = heartbeat_client(directive.clone()).await;
             assert_eq!(client.heartbeat(&progress).await.unwrap(), directive);
-            let request = server.join().unwrap();
+            let request = finish_capture_peer(server).await;
             let start = request.windows(4).position(|v| v == b"\r\n\r\n").unwrap() + 4;
             let observed =
                 vonk_agent_protocol::parse_strict::<AgentProgress>(&request[start..]).unwrap();
@@ -4186,11 +4309,11 @@ mod tests {
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
             fence: progress.fence,
         };
-        let (client, server) = heartbeat_client(directive);
+        let (client, server) = heartbeat_client(directive).await;
         client.set_progress_phase(progress.fence, ProgressPhase::Uploading);
         client.set_progress_bytes(progress.fence, 512, 1024);
         client.heartbeat(&progress).await.unwrap();
-        let request = server.join().unwrap();
+        let request = finish_capture_peer(server).await;
         let start = request
             .windows(4)
             .position(|value| value == b"\r\n\r\n")
@@ -4214,10 +4337,10 @@ mod tests {
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
             fence: progress.fence,
         };
-        let (client, server) = heartbeat_client(directive.clone());
+        let (client, server) = heartbeat_client(directive.clone()).await;
 
         assert_eq!(client.heartbeat(&progress).await.unwrap(), directive);
-        let request = server.join().unwrap();
+        let request = finish_capture_peer(server).await;
         let body = request
             .windows(4)
             .position(|value| value == b"\r\n\r\n")
@@ -4239,13 +4362,15 @@ mod tests {
             vec!["Content-Type: application/json".to_owned()],
             canonical_json(&progress).unwrap(),
             None,
-        );
+            CONTROLLER_REQUEST_TIMEOUT,
+        )
+        .await;
 
         assert!(matches!(
             client.heartbeat(&progress).await,
             Err(ClientError::Protocol)
         ));
-        server.join().unwrap();
+        finish_capture_peer(server).await;
     }
 
     #[tokio::test]
@@ -4256,13 +4381,13 @@ mod tests {
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
             fence: Uuid::new_v4(),
         };
-        let (client, server) = heartbeat_client(directive);
+        let (client, server) = heartbeat_client(directive).await;
 
         assert!(matches!(
             client.heartbeat(&progress).await,
             Err(ClientError::Protocol)
         ));
-        server.join().unwrap();
+        finish_capture_peer(server).await;
     }
 
     #[tokio::test]
@@ -4288,13 +4413,13 @@ mod tests {
             stop_plan: None,
         };
         let request_sha256 = hex_sha256(&canonical_json(&runtime_request).unwrap());
-        let (client, server) = host_runtime_grant_client();
+        let (client, server) = host_runtime_grant_client().await;
 
         client
             .host_runtime_grant(&claim, &runtime_request, &request_sha256)
             .await
             .unwrap();
-        let request = server.join().unwrap();
+        let request = finish_capture_peer(server).await;
         let body = request
             .windows(4)
             .position(|value| value == b"\r\n\r\n")
@@ -4453,12 +4578,12 @@ mod tests {
             process_running: false,
             endpoint_ready: None,
         }];
-        let (client, server) = observation_client(204);
+        let (client, server) = observation_client(204).await;
         client
             .report_exact_recipe_run_observations(Utc::now(), &observations)
             .await
             .unwrap();
-        let raw = server.join().unwrap();
+        let raw = finish_capture_peer(server).await;
         let body = raw
             .windows(4)
             .position(|value| value == b"\r\n\r\n")
@@ -4474,23 +4599,16 @@ mod tests {
 
     #[tokio::test]
     async fn disposition_retains_full_controller_generation_header() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 4096];
-            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-            }
-            write!(stream, "HTTP/1.1 200 OK\r\nx-vonk-recipe-run-generation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", i64::MAX).unwrap();
-        });
-        let client = authenticated_test_client(
-            &format!("http://{address}/"),
-            "spk_0123456789abcdef0123456789abcdef",
-        );
+        // Match the production ordinary HTTP transport budget, rather than
+        // creating a separate fixture-only allowance.
+        let (client, server) = request_capture_client(
+            200,
+            vec![format!("x-vonk-recipe-run-generation: {}", i64::MAX)],
+            Vec::new(),
+            None,
+            CONTROLLER_REQUEST_TIMEOUT,
+        )
+        .await;
         let disposition = client.recipe_run_disposition(Uuid::new_v4()).await.unwrap();
         assert_eq!(
             disposition,
@@ -4498,20 +4616,20 @@ mod tests {
                 run_generation: Some(i64::MAX as u64)
             }
         );
-        server.join().unwrap();
+        finish_capture_peer(server).await;
     }
 
     #[tokio::test]
     async fn telemetry_posts_current_contract_without_node_identity() {
         let sample = telemetry_sample();
-        let (client, server) = observation_client(204);
+        let (client, server) = observation_client(204).await;
 
         client
             .report_telemetry(std::slice::from_ref(&sample))
             .await
             .unwrap();
 
-        let request = server.join().unwrap();
+        let request = finish_capture_peer(server).await;
         let (headers, body) = request
             .windows(4)
             .position(|value| value == b"\r\n\r\n")
@@ -4560,13 +4678,15 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Some(Duration::from_millis(1_500)),
-        );
+            CONTROLLER_REQUEST_TIMEOUT,
+        )
+        .await;
 
         client
             .report_telemetry(std::slice::from_ref(&sample))
             .await
             .expect("telemetry should allow the two-second controller budget");
-        server.join().unwrap();
+        finish_capture_peer(server).await;
     }
 
     #[tokio::test]
@@ -4596,9 +4716,9 @@ mod tests {
             (401, "authentication"),
             (429, "retryable"),
         ] {
-            let (client, server) = observation_client(status);
+            let (client, server) = observation_client(status).await;
             let error = client.report_telemetry(&samples).await.unwrap_err();
-            server.join().unwrap();
+            finish_capture_peer(server).await;
             match expected {
                 "protocol" => assert!(matches!(error, ClientError::Protocol)),
                 "authentication" => {
@@ -4625,13 +4745,15 @@ mod tests {
             ],
             Vec::new(),
             None,
-        );
+            CONTROLLER_REQUEST_TIMEOUT,
+        )
+        .await;
 
         let error = client
             .report_telemetry(std::slice::from_ref(&sample))
             .await
             .expect_err("Controller rejection should be surfaced");
-        server.join().unwrap();
+        finish_capture_peer(server).await;
         assert_eq!(error.status(), Some(403));
         assert_eq!(error.code(), Some("controller.request_rejected"));
         assert_eq!(
@@ -4779,13 +4901,15 @@ mod tests {
             vec!["X-Vonk-Error-Code: controller.invalid_request".to_owned()],
             body,
             None,
-        );
+            CONTROLLER_REQUEST_TIMEOUT,
+        )
+        .await;
 
         let error = client
             .submit_result(&retained_result())
             .await
             .expect_err("a 422 is a refusal, never an acceptance");
-        server.join().unwrap();
+        finish_capture_peer(server).await;
 
         let ClientError::ResultRejected(error) = error else {
             panic!("a 422 must map to a typed ingress refusal");

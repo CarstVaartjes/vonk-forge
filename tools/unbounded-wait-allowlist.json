@@ -376,20 +376,8 @@
     },
     {
       "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "a_refused_result_records_the_controller_validation_digest",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
       "function": "bounded_body_limit",
       "kind": "rust-loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "cloned_operation_client_sends_through_replaced_transport",
-      "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
@@ -397,12 +385,6 @@
       "function": "content_addressed_distribution_handoff_reuses_objects_across_plan_digests",
       "kind": "rust-wait-without-deadline",
       "count": 2
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "controller_rejection_preserves_safe_status_code_and_request_id",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
     },
     {
       "path": "rust/crates/vonk-agent/src/client.rs",
@@ -496,50 +478,8 @@
     },
     {
       "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "exact_worker_observation_reports_process_without_endpoint_result",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "heartbeat_posts_exact_progress_and_accepts_matching_renewal",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "heartbeat_rejects_legacy_progress_response_shape",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "heartbeat_rejects_mismatched_or_regressing_renewal",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "host_runtime_grant_ttl_fits_inside_renewed_operation_lease",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
       "function": "job_input_client",
       "kind": "rust-loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "lease_only_heartbeat_omits_measured_progress",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "ordinary_heartbeat_preserves_active_upload_counters",
-      "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
@@ -562,12 +502,6 @@
     },
     {
       "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "request_capture_client",
-      "kind": "rust-loop-without-deadline",
-      "count": 2
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
       "function": "rotation_drains_requests_without_starving_heartbeats",
       "kind": "rust-loop-without-deadline",
       "count": 1
@@ -577,24 +511,6 @@
       "function": "rotation_drains_requests_without_starving_heartbeats",
       "kind": "rust-wait-without-deadline",
       "count": 2
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "telemetry_accepts_only_204_and_preserves_status_classification",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "telemetry_allows_the_two_second_controller_budget",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/client.rs",
-      "function": "telemetry_posts_current_contract_without_node_identity",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
     },
     {
       "path": "rust/crates/vonk-agent/src/executor.rs",
@@ -1273,6 +1189,22 @@
       "count": 1,
       "reason": "input-validation",
       "justification": "Bounded diagnostic normalization to the durable byte contract, not an external wait: each iteration removes an ancillary observation or halves a nontrivial text field. The finite item/text measure strictly decreases; when only structural/scalar fields remain it rejects an oversized document rather than repeating. Typed failure and exit facts remain explicit."
+    },
+    {
+      "path": "rust/crates/vonk-agent-protocol/src/wire_schema.rs",
+      "function": "visit_map",
+      "kind": "rust-loop-without-deadline",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "Pure finite decoding of one immutable RawValue object: each successful MapAccess next_entry consumes a complete key/value, closing brace ends iteration and malformed/EOF errors propagate. The owning original_value refuses depth >=128. This is not polling or an external wait; parse_strict has no universal byte ceiling and caller-specific HTTP/checkpoint byte budgets remain separate."
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/pair.rs",
+      "function": "bounded_pairing_body",
+      "kind": "rust-loop-without-deadline",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "The sole production caller constructs its reqwest client with a 30-second whole-request deadline (10-second connect deadline), which applies through response chunk consumption; the existing real TCP timeout proof verifies this transport cause. Each chunk is checked before allocation against MAX_RESPONSE_BYTES; the function does not reset the request deadline or create a new retry budget."
     },
     {
       "path": "scripts/dev_agent_wire_linux.py",
