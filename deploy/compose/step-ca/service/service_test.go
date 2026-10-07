@@ -4,6 +4,7 @@ import (
  "bytes"
  "context"
  "crypto/ecdsa"
+ "crypto/ed25519"
  "crypto/elliptic"
  "crypto/rand"
  "crypto/sha256"
@@ -82,6 +83,39 @@ func TestAuthorityHTTPRejectsUnauthenticatedAndChangedBindings(t *testing.T) {
  cases:=map[string]func(map[string]any){"audience":func(c map[string]any){c["aud"]="https://other.invalid/1.0/sign"},"expired":func(c map[string]any){c["exp"]=time.Now().Add(-10*time.Minute).Unix()},"confirmation":func(c map[string]any){c["cnf"]=map[string]string{"x5rt#S256":"wrong"}},"stable_jti":func(c map[string]any){c["jti"]=c["vonk"].(Binding).RequestID},"changed_serial":func(c map[string]any){b:=c["vonk"].(Binding);b.Serial="987";c["vonk"]=b}}
  for name,mutate:=range cases{t.Run(name,func(t *testing.T){f:=newAuthorityFixture(t);response:=f.call(t,f.binding,f.token(t,f.binding,mutate),"issue");if response.Code<400 || strings.Contains(response.Body.String(),"BEGIN CERTIFICATE"){t.Fatalf("invalid request leaked certificate: %d %s",response.Code,response.Body.String())};receipt,err:=f.j.Observe(f.binding);if err!=nil || receipt!=nil{t.Fatalf("refused authentication reserved issuance: %v",err)}})}
  t.Run("signature",func(t *testing.T){f:=newAuthorityFixture(t);token:=f.token(t,f.binding,nil);parts:=strings.Split(token,".");signature,err:=base64.RawURLEncoding.DecodeString(parts[2]);if err!=nil{t.Fatal(err)};signature[0]^=1;parts[2]=base64.RawURLEncoding.EncodeToString(signature);response:=f.call(t,f.binding,strings.Join(parts,"."),"issue");if response.Code!=401{t.Fatalf("wrong JWT signature accepted: %d",response.Code)}})
+}
+
+func TestAuthorityHTTPReplaysCannotChangeCSRSerialOrValidity(t *testing.T) {
+ f:=newAuthorityFixture(t)
+ original:=issuedLeaf(t,f.call(t,f.binding,f.token(t,f.binding,nil),"issue"))
+ variants:=map[string]func(*Binding){"serial":func(b *Binding){b.Serial="123456789"},"validity":func(b *Binding){before,_:=canonicalTime(b.NotBefore);after,_:=canonicalTime(b.NotAfter);b.NotBefore=before.Add(time.Second).Format("2006-01-02T15:04:05Z");b.NotAfter=after.Add(time.Second).Format("2006-01-02T15:04:05Z")},"generation":func(b *Binding){b.Generation++}}
+ for name,mutate:=range variants {t.Run(name,func(t *testing.T){binding:=f.binding;mutate(&binding);response:=f.call(t,binding,f.token(t,binding,nil),"issue");if response.Code<400 || strings.Contains(response.Body.String(),"BEGIN CERTIFICATE"){t.Fatalf("changed %s adopted another identity: %s",name,response.Body.String())}})}
+ _,key,err:=ed25519.GenerateKey(rand.Reader);if err!=nil{t.Fatal(err)}
+ der,err:=x509.CreateCertificateRequest(rand.Reader,&x509.CertificateRequest{Subject:f.csr.Subject,URIs:f.csr.URIs},key);if err!=nil{t.Fatal(err)}
+ changed,err:=x509.ParseCertificateRequest(der);if err!=nil{t.Fatal(err)}
+ previous:=f.csr;f.csr=changed
+ binding:=f.binding;binding.CSRSHA256=digest(changed.Raw)
+ response:=f.call(t,binding,f.token(t,binding,nil),"issue")
+ if response.Code<400 || strings.Contains(response.Body.String(),"BEGIN CERTIFICATE"){t.Fatal("changed CSR reissued committed request")}
+ f.csr=previous
+ recovered:=issuedLeaf(t,f.call(t,f.binding,f.token(t,f.binding,nil),"observe"))
+ if !bytes.Equal(original.Raw,recovered.Raw){t.Fatal("refused replays damaged original valid certificate")}
+}
+
+func TestAuthorityNativeRevocationRemainsEffectiveForJournalObservation(t *testing.T) {
+ f:=newAuthorityFixture(t)
+ leaf:=issuedLeaf(t,f.call(t,f.binding,f.token(t,f.binding,nil),"issue"))
+ token:=f.token(t,f.binding,func(claims map[string]any){claims["sub"]=leaf.SerialNumber.String();claims["aud"]="https://step-ca/1.0/revoke";delete(claims,"vonk");delete(claims,"cnf");delete(claims,"sans")})
+ raw,_:=json.Marshal(map[string]any{"serial":leaf.SerialNumber.String(),"ott":token,"passive":true,"reasonCode":0})
+ response:=httptest.NewRecorder();f.handler.ServeHTTP(response,httptest.NewRequest(http.MethodPost,"https://step-ca/1.0/revoke",bytes.NewReader(raw)))
+ if response.Code!=200{t.Fatalf("existing native revoke failed: %s",response.Body.String())}
+ observer:=f.call(t,f.binding,f.token(t,f.binding,nil),"observe")
+ if observer.Code!=403 || strings.Contains(observer.Body.String(),"BEGIN CERTIFICATE"){t.Fatal("revoked committed certificate remained adoptable")}
+ crl:=httptest.NewRecorder();f.handler.ServeHTTP(crl,httptest.NewRequest(http.MethodGet,"/1.0/crl?pem",nil))
+ block,_:=pem.Decode(crl.Body.Bytes());if crl.Code!=200 || block==nil{t.Fatal("native revocation failed to regenerate CRL")}
+ list,err:=x509.ParseRevocationList(block.Bytes);if err!=nil{t.Fatal(err)}
+ found:=false;for _,entry:=range list.RevokedCertificateEntries{if entry.SerialNumber.Cmp(leaf.SerialNumber)==0{found=true}}
+ if !found{t.Fatal("fresh CRL omitted journal certificate revocation")}
 }
 
 func TestAuthorityHTTPStorageFaultAndLostHTTPRecoverWithoutNewIdentity(t *testing.T) {
