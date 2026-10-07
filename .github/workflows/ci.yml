@@ -1029,8 +1029,13 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
-      - name: Run fixture-backed browser acceptance
-        run: npm run test:e2e --prefix control/web -- --project=chromium
+      - name: Run fixture-backed Admin browser acceptance
+        # Native contract consumers run with their Python-produced corpus and
+        # development server in browser-contract-artifacts.yml.
+        run: >-
+          npm run test:e2e --prefix control/web --
+          e2e/admin.spec.ts e2e/feedback.spec.ts e2e/operation-progress.spec.ts
+          --project=chromium
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

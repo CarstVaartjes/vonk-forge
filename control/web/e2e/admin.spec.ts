@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import {expect, test, type Page} from "@playwright/test";
-
-const commit = "a".repeat(40);
+import type {components} from "../src/api/generated";
+import {serveEmptyFleet} from "./fleet-fixture";
 
 async function expectNoSeriousAccessibilityViolations(page: Page) {
   const results = await new AxeBuilder({page}).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
@@ -40,7 +40,7 @@ test.beforeEach(async ({page}) => {
 });
 
 test("the redesigned shell exposes the focused workspace routes", async ({page}) => {
-  await page.route("**/api/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: commit, nodes: []}}));
+  await serveEmptyFleet(page);
   await page.route("**/api/model/library**", route => route.fulfill({json: {
     schema_version: 2, generated_at: new Date().toISOString(),
     freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
@@ -68,7 +68,7 @@ test("the redesigned shell exposes the focused workspace routes", async ({page})
 });
 
 test("Fleet summary keeps each count above its label at narrow and wide widths", async ({page}) => {
-  await page.route("**/api/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: commit, nodes: []}}));
+  await serveEmptyFleet(page);
   await page.goto("/fleet");
   const summary = page.getByRole("region", {name: "Fleet summary"});
   await expect(summary.locator("strong")).toHaveCount(5);
@@ -87,13 +87,13 @@ test("Fleet summary keeps each count above its label at narrow and wide widths",
 });
 
 test("Activity shows operations and standalone jobs", async ({page}) => {
+  await serveEmptyFleet(page);
   const requestId = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
   const targetId = `spk_${"1".repeat(32)}`;
   const expectedBinary = "b".repeat(64);
   const expectedBuild = `sha256:${"c".repeat(64)}`;
   let detailRequests = 0;
-  await page.route("**/api/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [{
-    schema_version: 2,
+  const operations: components["schemas"]["OperationsResponse"] = {operations: [{
     id: requestId,
     parent_id: null,
     kind: "recipe.start",
@@ -105,31 +105,31 @@ test("Activity shows operations and standalone jobs", async ({page}) => {
     failure: null,
     recovery: null,
   }, {
-    schema_version: 2,
     id: "job:upgrade-1",
     parent_id: null,
     kind: "agent-upgrade",
-    state: "waiting-for-operator",
+    state: "needs-operator",
     attempt: 1,
     node_ids: [targetId],
     created_at: "2026-08-24T08:58:00Z",
     progress: null,
     failure: null,
     recovery: null,
-  }], total: 2, next_cursor: null}}));
+  }], total: 2, next_cursor: null};
+  await page.route("**/api/operations?*", route => route.fulfill({json: operations}));
   await page.route("**/api/jobs/upgrade-1?*", route => {
     detailRequests += 1;
-    return route.fulfill({json: {
+    const detail: components["schemas"]["JobDetailResponse"] = {
       id: "upgrade-1",
       kind: "agent-upgrade",
-      state: "waiting-for-operator",
+      state: "needs-operator",
       authority_revision: "a".repeat(64),
       targets: [targetId],
       target_next_cursor: null,
       target_total: 1,
       current_attempt: 1,
       status_reason: "agent upgrade helper is unavailable",
-      operations: [{id: "upgrade-step", node_id: targetId, kind: "agent.upgrade.v1", state: "waiting-for-operator", attempt: 3, progress: null, updated_at: "2026-08-24T08:59:30Z"}],
+      operations: [{id: "upgrade-step", node_id: targetId, kind: "agent.upgrade.v1", state: "needs-operator", attempt: 3, progress: null, updated_at: "2026-08-24T08:59:30Z"}],
       operation_next_cursor: null,
       operation_total: 1,
       progress: {completed: 0, failed: 0, running: 0, total: 1},
@@ -137,7 +137,7 @@ test("Activity shows operations and standalone jobs", async ({page}) => {
         expected_identity: {version: "0.1.0~dev.350+g15f9faf7c5bf", binary_digest: expectedBinary, build_digest: expectedBuild},
         targets: [{
           node_id: targetId,
-          state: "waiting-for-operator",
+          state: "needs-operator",
           attempts: 3,
           target_proven: false,
           observed_identity: {version: "0.1.0~dev.335+glegacy", binary_digest: "d".repeat(64), build_digest: `sha256:${"e".repeat(64)}`},
@@ -145,11 +145,12 @@ test("Activity shows operations and standalone jobs", async ({page}) => {
           retry_not_before: "2026-08-24T09:03:30Z",
           retry_queued: true,
         }],
-        legacy_generic_ambiguous: false,
+        failure_details_unavailable: false,
         next_action: "Wait for the controller-managed retry behind its safety delay; it will not dispatch before the reported retry time. Do not manually resume the rollout again.",
         operator_summary: null,
       },
-    }});
+    };
+    return route.fulfill({json: detail});
   });
 
   await page.goto("/activity");
