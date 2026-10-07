@@ -1856,6 +1856,24 @@ if [[ "$crash_phase" = pre-runner-rename ]]; then
   exit 0
 fi
 
+# The final receipt and source-intent removal precede durable retirement of
+# the repair gate, retired journal, and capsule. Observe that complete boundary
+# before asserting cleanup or submitting the subsequent ordinary upgrade.
+repair_retirement_complete() {
+  local path
+  for path in "$source_intent" "$source_state/$source_package_sha.deb" \
+    "$source_blocker" "$source_pending" "$source_dropin" "$repair_gate" \
+    "$repair_state" "$source_state/repair.retired" "$source_capsule_dir" \
+    "$source_capsule_unit" "$source_capsule_gate" \
+    "$source_capsule_suppression" "$source_capsule_enablement"; do
+    [[ ! -e "$path" && ! -L "$path" ]] || return 1
+  done
+  [[ "$(find "$source_state" -mindepth 1 -maxdepth 1 -type d \
+    -name '.repair-build.*' | wc -l)" -eq 0 ]] || return 1
+  [[ "$(systemctl --system show --property=ActiveState --value \
+    "$recovery_unit")" = inactive ]]
+}
+
 for _ in {1..2400}; do
   if [[ "$crash_phase" = post-runner-rename && ! -e "$source_intent" \
     && "$(dpkg-query -W -f='${Version}' vonk-forge-agent 2>/dev/null)" \
@@ -1864,13 +1882,14 @@ for _ in {1..2400}; do
       'post-runner-rename boot converged outside the node-bound repair version' >&2
     exit 1
   fi
-  if [[ -f "$repair_receipt" && ! -e "$source_intent" \
+  if [[ -f "$repair_receipt" && -f "$helper_receipt" \
     && "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent 2>/dev/null)" \
-      = 'ii ' ]]; then
+      = 'ii ' ]] && repair_retirement_complete; then
     break
   fi
   sleep 0.1
 done
+repair_retirement_complete
 test -f "$repair_receipt"
 test -f "$helper_receipt"
 test "$(stat -c %u:%g:%a:%h "$repair_receipt")" = 0:0:600:1
