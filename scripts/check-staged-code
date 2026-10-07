@@ -6,6 +6,7 @@ from __future__ import annotations
 import platform
 import shlex
 import subprocess
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,12 +26,21 @@ def main() -> None:
         .decode()
         .split("\0")
     )
-    python = [file for file in changed if file.endswith(".py")]
     web = [
         file
         for file in changed
         if file.startswith("control/web/") and file.endswith((".ts", ".tsx"))
     ]
+    web_inputs = bool(
+        set(changed)
+        & {
+            "control/web/package.json",
+            "control/web/package-lock.json",
+            "control/web/tsconfig.json",
+            "control/web/tsconfig.check.json",
+            "control/web/biome.json",
+        }
+    )
     rust = any(
         file.endswith(".rs")
         or file in {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml"}
@@ -38,31 +48,28 @@ def main() -> None:
         and file.endswith("Cargo.toml")
         for file in changed
     )
-    if python:
-        uv = ["uv", "run", "--project", "control", "--no-sync", "--offline"]
-        try:
-            run([*uv, "python", "-c", "import ruff, pyright"])
-        except subprocess.CalledProcessError:
-            raise SystemExit(
-                "Prepare tools: scripts/build-control-wheel && uv sync --project control --frozen"
-            ) from None
-        run([*uv, "ruff", "check", "--force-exclude", "--", *python])
-        run([*uv, "ruff", "format", "--check", "--force-exclude", "--", *python])
-        run([*uv, "python", "scripts/check-python-types", "--", *python])
-    if web:
+    run(["python3", "scripts/check-staged-python"])
+    if web or web_inputs:
         directory = ROOT / "control/web"
         biome = directory / "node_modules/.bin/biome"
         if not biome.exists() or not (directory / "node_modules/.bin/tsc").exists():
             raise SystemExit("Prepare TypeScript tools: npm ci --prefix control/web")
-        run([str(biome), "check", *[str(ROOT / file) for file in web]], cwd=directory)
+        if web:
+            run(
+                [str(biome), "check", *[str(ROOT / file) for file in web]],
+                cwd=directory,
+            )
         run(["npm", "run", "typecheck"], cwd=directory)
     if rust:
+        toolchain = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())[
+            "toolchain"
+        ]["channel"]
         commands = [
-            ["rustup", "run", "1.98.1", "cargo", "fmt", "--all", "--check"],
+            ["rustup", "run", toolchain, "cargo", "fmt", "--all", "--check"],
             [
                 "rustup",
                 "run",
-                "1.98.1",
+                toolchain,
                 "cargo",
                 "clippy",
                 "--workspace",

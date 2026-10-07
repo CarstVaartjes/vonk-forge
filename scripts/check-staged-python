@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Run local commit checks without installing or modifying anything."""
+
+from __future__ import annotations
+
+import importlib.metadata
+import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+TYPE_INPUTS = {
+    "pyproject.toml",
+    "control/pyproject.toml",
+    "control/uv.lock",
+    "uv.lock",
+    "pyrightconfig.json",
+    "tools/pyright-baseline.json",
+    "scripts/check-python-types",
+    "scripts/check-staged-python",
+    "scripts/check-staged-code",
+}
+
+
+def main() -> int:
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRD", "-z"],
+        cwd=ROOT,
+    )
+    paths = [os.fsdecode(path) for path in staged.split(b"\0") if path]
+    files = [path for path in paths if path.endswith(".py") and (ROOT / path).is_file()]
+    full_types = bool(TYPE_INPUTS.intersection(paths))
+    if not files and not full_types:
+        return 0
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
+    if not environment.is_absolute():
+        environment = ROOT / environment
+    python = environment / "bin/python"
+    if not python.is_file():
+        print(
+            "Commit checks need the prepared control environment. Run scripts/build-control-wheel and uv sync --project control --frozen explicitly, then retry.",
+            file=sys.stderr,
+        )
+        return 1
+    if Path(sys.prefix).resolve() != environment.resolve():
+        return subprocess.run(
+            [str(python), str(Path(__file__).resolve())], cwd=ROOT, check=False
+        ).returncode
+    missing = [
+        name
+        for name in ("ruff", "pyright", "nodejs_wheel")
+        if importlib.util.find_spec(name) is None
+    ]
+    if missing:
+        print(
+            "Commit checks need prepared tools (" + ", ".join(missing) + "). "
+            "Run scripts/build-control-wheel and uv sync --project control --frozen explicitly, then retry.",
+            file=sys.stderr,
+        )
+        return 1
+    check_env = {
+        **os.environ,
+        "PYRIGHT_PYTHON_FORCE_VERSION": importlib.metadata.version("pyright"),
+        "PYRIGHT_PYTHON_NODEJS_WHEEL": "1",
+        "PYRIGHT_PYTHON_GLOBAL_NODE": "0",
+    }
+    commands = []
+    if files:
+        commands.extend(
+            [
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "check",
+                    "--force-exclude",
+                    "--",
+                    *files,
+                ],
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "format",
+                    "--check",
+                    "--force-exclude",
+                    "--",
+                    *files,
+                ],
+            ]
+        )
+    commands.append(
+        [sys.executable, "scripts/check-python-types", *([] if full_types else files)]
+    )
+    for command in commands:
+        result = subprocess.run(command, cwd=ROOT, env=check_env, check=False)
+        if result.returncode:
+            return result.returncode
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

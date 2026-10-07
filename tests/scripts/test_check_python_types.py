@@ -279,6 +279,9 @@ def test_real_hook_checks_whitespace_paths_without_building_or_syncing(
     shutil.copy2(
         ROOT / "scripts/check-staged-code", tmp_path / "scripts/check-staged-code"
     )
+    shutil.copy2(
+        ROOT / "scripts/check-staged-python", tmp_path / "scripts/check-staged-python"
+    )
     probe = tmp_path / 'probe with space and "quote".py'
     probe.write_text(source)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
@@ -324,14 +327,103 @@ def test_non_python_check_failure_still_blocks_the_commit(
     monkeypatch.setattr(
         module.subprocess, "check_output", lambda *a, **k: (file + "\0").encode()
     )
+    shutil.copy2(ROOT / "rust-toolchain.toml", tmp_path / "rust-toolchain.toml")
     tools = tmp_path / "control/web/node_modules/.bin"
     tools.mkdir(parents=True)
     (tools / "biome").touch()
     (tools / "tsc").touch()
 
     def refuse(command: list[str], **kwargs: object) -> None:
+        if command == ["python3", "scripts/check-staged-python"]:
+            return
         raise subprocess.CalledProcessError(1, command)
 
     monkeypatch.setattr(module, "run", refuse)
     with pytest.raises(subprocess.CalledProcessError):
         module.main()
+
+
+def _hook_module() -> ModuleType:
+    loader = importlib.machinery.SourceFileLoader(
+        "check_staged_python", str(ROOT / "scripts/check-staged-python")
+    )
+    specification = importlib.util.spec_from_loader(loader.name, loader)
+    assert specification is not None
+    module = importlib.util.module_from_spec(specification)
+    loader.exec_module(module)
+    return module
+
+
+def test_documentation_commit_needs_no_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = _hook_module()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        module.subprocess, "check_output", lambda *args, **kwargs: b"docs/example.md\0"
+    )
+    assert module.main() == 0
+
+
+def test_python_commit_reports_missing_environment_without_building(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _hook_module()
+    (tmp_path / "example.py").touch()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
+    monkeypatch.setattr(
+        module.subprocess, "check_output", lambda *args, **kwargs: b"example.py\0"
+    )
+    assert module.main() == 1
+    assert "uv sync --project control --frozen explicitly" in capsys.readouterr().err
+
+
+def test_hook_preserves_nul_filenames_and_only_runs_checks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = _hook_module()
+    filename = "with spaces\nand newline.py"
+    (tmp_path / filename).touch()
+    environment = tmp_path / "prepared"
+    (environment / "bin").mkdir(parents=True)
+    (environment / "bin/python").touch()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(environment))
+    monkeypatch.setattr(module.sys, "prefix", str(environment))
+    monkeypatch.setattr(
+        module.subprocess,
+        "check_output",
+        lambda *args, **kwargs: (filename + "\0").encode(),
+    )
+    monkeypatch.setattr(module.importlib.util, "find_spec", lambda name: object())
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        commands.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    assert module.main() == 0
+    assert commands == [
+        [
+            module.sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--force-exclude",
+            "--",
+            filename,
+        ],
+        [
+            module.sys.executable,
+            "-m",
+            "ruff",
+            "format",
+            "--check",
+            "--force-exclude",
+            "--",
+            filename,
+        ],
+        [module.sys.executable, "scripts/check-python-types", filename],
+    ]

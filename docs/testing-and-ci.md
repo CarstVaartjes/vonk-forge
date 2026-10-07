@@ -677,7 +677,6 @@ connection and socket idle time to 30 seconds and use the same total transfer
 budget. These budgets bound attempts; they do not change document, argument,
 artifact size, authorization or integrity contracts.
 
-Chromium system-library downloads are cached by Ubuntu release, architecture and
-web lockfile. apt still verifies package metadata and checksums; a cached archive
-is never proof a package is installed. Package installation runs once with a
-bounded ten-minute window; retries do not replay a package mutation.
+The Admin web CI job uses the digest-pinned Playwright image matching its locked
+version. Chromium and its system libraries are already installed, so the job
+does not perform apt or browser downloads. npm keeps its lockfile-keyed cache.

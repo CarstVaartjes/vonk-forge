@@ -169,7 +169,8 @@ scripts/install-git-hooks
 ```
 
 The hook runs pinned Ruff lint, formatting checks, and Python types on changed
-Python files selected from the index. Checks read the working files; stage the
+Python files selected from the index. Changes to Python dependency/type configuration
+trigger the full type check. Checks read the working files; stage the
 version you intend to commit. Filenames containing whitespace are preserved.
 The hook uses the prepared environment offline without syncing, building wheels,
 or generating or staging inventory. Missing tools fail with the setup command.
