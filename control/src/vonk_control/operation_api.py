@@ -1874,7 +1874,11 @@ class _DurableOperationProjection:
                 context={"job_id": job_id},
                 boundary=[_aware(last.created_at).isoformat(), last.id],
             )
-        terminal = {"succeeded", "accepted", "compensated"}
+        terminal = {
+            "succeeded",
+            "accepted",
+            agent_operation_states.RETAINED_COMPENSATED,
+        }
         failed = {"failed", "uncertain"}
         running = {"queued", "running", "planned", "compensating"}
         return OperationPage(

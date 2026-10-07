@@ -299,7 +299,11 @@ def _assert_plain_install_measurement(
     assert measured is not None and measured.phase == phase.kind
     assert measured.completed_bytes == 48 and measured.total_bytes == 64
     assert measured.observed_at == now.isoformat()
-    assert measured.bytes_per_second == 8 and measured.eta_seconds == 2
+    # Plain preparation counters carry no native transfer-phase attribution.
+    # Keep their bytes/timing, without inventing a throughput or transfer ETA.
+    assert measured.bytes_per_second is None
+    assert measured.smoothed_bytes_per_second is None
+    assert measured.eta_seconds is None
     restored = RunSwitchOperationResult.model_validate_json(
         canonical_message(progress), strict=True
     )
@@ -388,8 +392,9 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     clock[0] = base_now + timedelta(seconds=2)
     fresh = lifecycle.get(install_id)
     assert fresh.progress is not None
-    assert fresh.progress.members[0].bytes_per_second is not None
-    assert fresh.progress.members[0].eta_seconds is not None
+    assert fresh.progress.members[0].phase == "copying"
+    assert fresh.progress.members[0].bytes_per_second == 8
+    assert fresh.progress.members[0].eta_seconds == 2
     with sessions() as session:
         sample = session.scalar(
             select(AgentOperationAttempt).where(
