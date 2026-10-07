@@ -154,9 +154,13 @@ def assert_ended_without_blocking[World, Receipt](
     fresh: Callable[[World], Receipt],
     assert_released: Callable[[], None] | None = None,
     assert_reason: Callable[[Receipt], None] | None = None,
+    request_key: Callable[[Receipt], str] | None = None,
 ) -> tuple[Receipt, Receipt]:
-    original_key = getattr(operation, "request_key", None) or getattr(
-        operation, "request_id", None
+    original_key = (
+        request_key(operation)
+        if request_key is not None
+        else getattr(operation, "request_key", None)
+        or getattr(operation, "request_id", None)
     )
     assert original_key, "operation must carry a request key"
     ended = end(operation)
@@ -178,8 +182,11 @@ def assert_ended_without_blocking[World, Receipt](
     else:
         assert_released()
     admitted = fresh(world)
-    fresh_key = getattr(admitted, "request_key", None) or getattr(
-        admitted, "request_id", None
+    fresh_key = (
+        request_key(admitted)
+        if request_key is not None
+        else getattr(admitted, "request_key", None)
+        or getattr(admitted, "request_id", None)
     )
     assert fresh_key and fresh_key != original_key, (
         "fresh operation must have a new request key"

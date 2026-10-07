@@ -17,6 +17,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from .parsed_sources import parse_file
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -141,7 +143,29 @@ def scan_source(
     sites: list[Site] = []
     lines = source.splitlines()
     aliases: dict[str, str] = {}
+    instrumentation: dict[str, str] = {}
     for imported in tree.body:
+        if isinstance(imported, ast.ImportFrom) and imported.module in {
+            "sqlalchemy",
+            "sqlalchemy.event",
+        }:
+            instrumentation.update(
+                {
+                    a.asname or a.name: f"{imported.module}.{a.name}"
+                    for a in imported.names
+                    if a.name != "*"
+                }
+            )
+        elif isinstance(imported, ast.Import):
+            instrumentation.update(
+                {
+                    a.asname or a.name.split(".")[0]: (
+                        a.name if a.asname else a.name.split(".")[0]
+                    )
+                    for a in imported.names
+                    if a.name in {"sqlalchemy", "sqlalchemy.event"}
+                }
+            )
         if isinstance(imported, ast.ImportFrom) and imported.module in {
             "subprocess",
             "urllib.request",
@@ -204,7 +228,35 @@ def scan_source(
                 fresh = re.compile(
                     r"(?:^|_)(start|load|apply|prepare|request|create|enqueue|admit|activate|submit)(?:_|$)"
                 )
-                ends = [n for n in calls if ending.search(name(n.func))]
+                shadowed = {
+                    n.id
+                    for n in local_nodes(node)
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+                } | {n.arg for n in ast.walk(node.args) if isinstance(n, ast.arg)}
+                shadowed.update(
+                    n.id
+                    for statement in tree.body
+                    if isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+                    for n in ast.walk(statement)
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+                )
+
+                def is_instrumentation(call: ast.Call) -> bool:
+                    head, dot, tail = ast.unparse(call.func).partition(".")
+                    canonical = instrumentation.get(head, head) + (
+                        dot + tail if dot else ""
+                    )
+                    return (
+                        head in instrumentation
+                        and head not in shadowed
+                        and canonical == "sqlalchemy.event.remove"
+                    )
+
+                ends = [
+                    n
+                    for n in calls
+                    if ending.search(name(n.func)) and not is_instrumentation(n)
+                ]
                 if ends and not any(
                     name(n.func) == "assert_ended_without_blocking" for n in calls
                 ):
@@ -410,6 +462,47 @@ def scan_shell(source: str, *, path: str) -> list[Site]:
     ]
 
 
+def scan_compose_shell(source: str, *, path: str) -> list[Site]:
+    """Inspect actual shell entrypoints, not arbitrary YAML or command strings."""
+    document = yaml.safe_load(source)
+    if not isinstance(document, dict):
+        return []
+    services = document.get("services", {})
+    if not isinstance(services, dict):
+        return []
+    sites: list[Site] = []
+    for service_name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        for field in ("entrypoint", "command"):
+            command = service.get(field)
+            if (
+                isinstance(command, list)
+                and len(command) >= 3
+                and command[0] in {"sh", "/bin/sh", "bash", "/bin/bash"}
+                and command[1] == "-c"
+                and isinstance(command[2], str)
+            ):
+                body = command[2]
+                has_loop = re.search(r"\b(?:while\s+(?:true|:)|until\s+)", body)
+                has_exit_bound = re.search(
+                    r"if\s+\[[^\]]*(?:attempt|deadline|remaining|SECONDS)[^\]]*\]"
+                    r"\s*;\s*then\b.*?\b(?:exit|break|return)\b",
+                    body,
+                    re.DOTALL,
+                )
+                if has_loop and not has_exit_bound:
+                    sites.append(
+                        Site(
+                            path,
+                            f"{service_name}.{field}",
+                            "shell-loop-without-deadline",
+                            1,
+                        )
+                    )
+    return sites
+
+
 def scan_rust_remedies(source: str, *, path: str) -> list[Site]:
     sites = []
     for match in re.finditer(r'"(?:\\.|[^"\\])*"', source):
@@ -552,6 +645,8 @@ def source_files(mode: str) -> list[Path]:
                 not path.suffix and path.read_bytes().startswith(b"#!")
             ):
                 files.append(path)
+    if mode == "waits":
+        files.extend((ROOT / "deploy/compose").rglob("compose.yaml"))
     return sorted(files)
 
 
@@ -561,6 +656,9 @@ def scan_sites(mode: str) -> list[Site]:
     for path in source_files(mode):
         relative = path.relative_to(ROOT).as_posix()
         source = path.read_text()
+        if path.suffix == ".yaml":
+            sites.extend(scan_compose_shell(source, path=relative))
+            continue
         if path.suffix == ".rs":
             if mode == "waits":
                 sites.extend(scan_rust(source, path=relative))
