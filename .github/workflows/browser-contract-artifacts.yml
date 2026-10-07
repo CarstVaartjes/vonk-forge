@@ -73,7 +73,9 @@ jobs:
         id: corpus
         env:
           PYTHONPATH: control/src:agent_protocol/src:src
-        run: uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
+        run: |
+          uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
+          PYTHONPATH=control:control/src:agent_protocol/src:src uv run --project control --frozen python control/tests/export_artifact_workspace_fixture.py --output artifacts/consumer-corpus/artifact-workspace.json
       - name: Emit actual immutable observation producer transfers
         env:
           PYTHONPATH: control:control/src:agent_protocol/src:src
@@ -110,6 +112,11 @@ jobs:
           VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
         run: npm exec -- playwright test --config playwright.contracts.config.ts
         working-directory: control/web
+      - name: Validate native component request with the canonical Python owner
+        if: ${{ !cancelled() && steps.corpus.outcome == 'success' }}
+        env:
+          PYTHONPATH: control:control/src:agent_protocol/src:src
+        run: uv run --project control --frozen python control/tests/export_artifact_workspace_fixture.py --verify-request artifacts/consumer-corpus/artifact-workspace-request.json
       - name: Compile real browser consumers
         if: ${{ !cancelled() && steps.corpus.outcome == 'success' }}
         run: npm run build --prefix control/web

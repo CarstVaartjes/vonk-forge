@@ -790,10 +790,56 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-  control-suite:
-    name: Complete control suite (${{ matrix.shard.label }})
+  consumer-probe:
+    name: Build actual native consumer probe
     needs: changes
     if: needs.changes.outputs.control == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: "1"
+    steps:
+      - name: Check out exact suite source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Install pinned Rust toolchain
+        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
+      - name: Restore read-only Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Build actual canonical parser, HTTP client and state probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/retry-dependency-fetch cargo fetch --locked
+          uv run --project control --frozen python scripts/generate-agent-wire
+          cargo build --locked --package vonk-agent --example consumer_corpus_probe
+          mkdir -p "$RUNNER_TEMP/consumer-probe"
+          cp target/debug/examples/consumer_corpus_probe "$RUNNER_TEMP/consumer-probe/"
+          git rev-parse HEAD > "$RUNNER_TEMP/consumer-probe/source-sha.txt"
+          cd "$RUNNER_TEMP/consumer-probe"
+          sha256sum consumer_corpus_probe > sha256.txt
+      - name: Upload source-bound native probe
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: control-consumer-probe-${{ github.sha }}
+          path: ${{ runner.temp }}/consumer-probe
+          if-no-files-found: error
+          retention-days: 1
+
+  control-suite:
+    name: Complete control suite (${{ matrix.shard.label }})
+    needs: [changes, consumer-probe]
+    if: needs.changes.outputs.control == 'true'
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -815,6 +861,21 @@ jobs:
         uses: ./.github/actions/recipe-library
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+      - name: Download the exact-source native probe
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: control-consumer-probe-${{ github.sha }}
+          path: ${{ runner.temp }}/consumer-probe
+      - name: Verify native probe source and bytes before execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat "$RUNNER_TEMP/consumer-probe/source-sha.txt")" = "$(git rev-parse HEAD)"
+          cd "$RUNNER_TEMP/consumer-probe"
+          sha256sum --check --strict sha256.txt
+          chmod 0700 consumer_corpus_probe
+          test -x consumer_corpus_probe
+          printf 'VONK_CONSUMER_CORPUS_PROBE=%s/consumer-probe/consumer_corpus_probe\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Build recipe library index and packages
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Pull the pinned test images once

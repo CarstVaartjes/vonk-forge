@@ -178,3 +178,95 @@ def test_expired_fetch_reaps_child_and_resumes_without_partial_stdout(
     assert "retry 2/3" in captured.err
     with pytest.raises(ProcessLookupError):
         os.kill(int(marker.read_text()), 0)
+
+
+def _locked_temporary_pip_command(tmp_path, monkeypatch):
+    runner = tmp_path / "runner"
+    python = runner / "dependencies/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("isolated interpreter fixture")
+    (python.parent.parent / "pyvenv.cfg").write_text(
+        "home = isolated-test-interpreter\n"
+    )
+    requirements = runner / "locked-requirements.txt"
+    requirements.write_text("dependency==1 --hash=sha256:" + "a" * 64 + "\n")
+    cache = runner / "cache"
+    cache.mkdir()
+    monkeypatch.setenv("RUNNER_TEMP", str(runner))
+    monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    return [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        str(python),
+        "--reinstall",
+        "--require-hashes",
+        "-r",
+        str(requirements),
+    ]
+
+
+def test_locked_temporary_pip_acquisition_retries_real_child_without_partial_output(
+    tmp_path, monkeypatch, capsys
+):
+    module = _module()
+    command = _locked_temporary_pip_command(tmp_path, monkeypatch)
+    state = _fetcher(tmp_path, monkeypatch, ["connection reset by peer", ""])
+    delays = []
+    monkeypatch.setattr(module, "sleep", delays.append)
+    assert module.main(command) == 0
+    assert json.loads(state.read_text()) == []
+    assert delays == [2]
+    assert capsys.readouterr().out == "verified output\n"
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "without-hashes",
+        "extra-package",
+        "outside-venv",
+        "outside-cache",
+        "outside-requirements",
+        "missing-venv",
+    ],
+)
+def test_unbounded_pip_install_is_refused_before_real_child(
+    tmp_path, monkeypatch, fault
+):
+    module = _module()
+    command = _locked_temporary_pip_command(tmp_path, monkeypatch)
+    if fault == "without-hashes":
+        command.remove("--require-hashes")
+    elif fault == "extra-package":
+        command.append("unlocked-package")
+    elif fault == "outside-venv":
+        command[4] = sys.executable
+    elif fault == "outside-cache":
+        monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "foreign-cache"))
+    elif fault == "outside-requirements":
+        command[-1] = str(tmp_path / "foreign-requirements.txt")
+        Path(command[-1]).write_text("foreign requirements")
+    elif fault == "missing-venv":
+        (Path(command[4]).parent.parent / "pyvenv.cfg").unlink()
+    state = _fetcher(tmp_path, monkeypatch, [""])
+    assert module.main(command) == 64
+    assert json.loads(state.read_text()) == [""]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "Hash mismatch: connection reset by peer",
+        "403 Forbidden: connection reset by peer",
+    ],
+)
+def test_locked_pip_integrity_and_authorization_faults_never_retry(
+    tmp_path, monkeypatch, error
+):
+    module = _module()
+    command = _locked_temporary_pip_command(tmp_path, monkeypatch)
+    state = _fetcher(tmp_path, monkeypatch, [error, ""])
+    assert module.main(command) == 17
+    assert json.loads(state.read_text()) == [""]
