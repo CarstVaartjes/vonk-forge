@@ -18,6 +18,7 @@ from cluster_profiles.runtime_identity import (
 )
 
 from .models import ControlProcessHeartbeat
+from .observation_capture import begin_observation_capture
 from .platform_observation_errors import ObservationCaptureUnavailable
 from .strict_json import StrictModel
 
@@ -78,15 +79,18 @@ class PlatformObserver:
         now = self._clock().astimezone(UTC)
         identity = packaged_runtime_identity()
         with self._sessions() as session:
+            begin_observation_capture(session)
             rows = list(
                 session.scalars(
-                    select(ControlProcessHeartbeat).where(
+                    select(ControlProcessHeartbeat)
+                    .where(
                         ControlProcessHeartbeat.process_kind == "worker",
                         ControlProcessHeartbeat.loop_sequence >= 1,
                         ControlProcessHeartbeat.completed_at
                         >= now - timedelta(seconds=30),
                         ControlProcessHeartbeat.completed_at <= now,
                     )
+                    .order_by(ControlProcessHeartbeat.process_instance_id)
                 )
             )
         workers = [

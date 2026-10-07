@@ -1,9 +1,11 @@
 """Emit canonical numeric schema values through FastAPI's OpenAPI assembler.
 
 FastAPI0.141.1's final OpenAPI model coerces JSON Schema numeric keywords into
-float. The pinned assembler below is upstream get_openapi (MIT, FastAPI
-contributors), with only its final return adapted. Pydantic remains the schema
-owner; FastAPI still owns route construction and document validation.
+float. The assembler derives from pinned upstream get_openapi (MIT, FastAPI
+contributors). It preserves numeric keywords, registers complete observation
+payload graphs, and retains explicitly declared stream record and JSON error
+models. Pydantic remains the schema owner; FastAPI still owns route construction
+and document validation.
 Upstream source SHA256:41a50551f99619f9333ac64edf7cd397b64f721244b89a82916c69f233239def.
 """
 
@@ -18,6 +20,7 @@ from fastapi._compat import (
     get_definitions,
     get_flat_models_from_fields,
     get_model_name_map,
+    get_schema_from_model_field,
 )
 from fastapi.encoders import jsonable_encoder
 from fastapi.openapi.models import OpenAPI
@@ -26,6 +29,7 @@ from fastapi.openapi.utils import (
     get_fields_from_routes,
     get_openapi_path,
 )
+from pydantic.json_schema import models_json_schema
 from starlette.routing import BaseRoute
 
 UPSTREAM_ASSEMBLER_SHA256 = (
@@ -126,6 +130,18 @@ def canonical_openapi(
         model_name_map=model_name_map,
         separate_input_output_schemas=separate_input_output_schemas,
     )
+    # Streaming observations transport bytes of these original canonical
+    # models. They remain generated payload contracts even though an individual
+    # HTTP record carries a transfer envelope rather than the whole model.
+    from .fleet_projection import FleetSnapshot
+    from .platform_observation import PlatformObservation
+
+    _, payload_graph = models_json_schema(
+        [(FleetSnapshot, "serialization"), (PlatformObservation, "serialization")],
+        ref_template="#/components/schemas/{model}",
+    )
+    for name, definition in payload_graph.get("$defs", {}).items():
+        definitions.setdefault(name, definition)
     for route_context in routing.iter_route_contexts(routes):
         api_route = _get_api_route_for_openapi(route_context)
         if api_route is not None:
@@ -139,6 +155,54 @@ def canonical_openapi(
             if result:
                 path, security_schemes, path_definitions = result
                 if path:
+                    # FastAPI defaults a non-JSON response class to a raw
+                    # string, then merges an additional response model into it.
+                    # Our declared record/frame schema describes each decoded
+                    # record, so retain its exact owning model field instead
+                    # of the impossible string-and-object intersection.
+                    stream_field = api_route.response_fields.get(200)
+                    if stream_field is not None:
+                        for operation in path.values():
+                            if not isinstance(operation, dict) or not (
+                                operation.get("x-vonk-response-record-max-bytes")
+                                or operation.get("x-vonk-response-frame-max-bytes")
+                            ):
+                                continue
+                            record_schema = get_schema_from_model_field(
+                                field=stream_field,
+                                model_name_map=model_name_map,
+                                field_mapping=field_mapping,
+                                separate_input_output_schemas=separate_input_output_schemas,
+                            )
+                            for media in operation["responses"]["200"][
+                                "content"
+                            ].values():
+                                media["schema"] = deepcopy(record_schema)
+                            # Error responses remain canonical JSON even when
+                            # the success class emits NDJSON or SSE. Restore
+                            # only explicitly declared media, using the same
+                            # owning response model rather than the inferred
+                            # streaming success media.
+                            for status, field in api_route.response_fields.items():
+                                if not str(status).isdigit() or int(status) < 400:
+                                    continue
+                                declared_content = api_route.responses[status].get(
+                                    "content"
+                                )
+                                if not declared_content:
+                                    continue
+                                error_content = deepcopy(declared_content)
+                                error_schema = get_schema_from_model_field(
+                                    field=field,
+                                    model_name_map=model_name_map,
+                                    field_mapping=field_mapping,
+                                    separate_input_output_schemas=separate_input_output_schemas,
+                                )
+                                for media in error_content.values():
+                                    media["schema"] = deepcopy(error_schema)
+                                operation["responses"][str(status)]["content"] = (
+                                    error_content
+                                )
                     paths.setdefault(api_route.path_format, {}).update(path)
                 if security_schemes:
                     components.setdefault("securitySchemes", {}).update(

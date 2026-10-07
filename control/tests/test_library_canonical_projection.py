@@ -9,13 +9,15 @@ from pathlib import Path
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Table, create_engine, select
+from sqlalchemy import Table, create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import OperationProgress
 from vonk_control.auth import Actor, CursorError, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import _MAX_PAGE_RECIPES
 from vonk_control.library_projection import LibraryProjection
+from vonk_control.model_cache_contract import ModelCacheOperationProgress
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -31,6 +33,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.strict_json import ControllerAPIRoute, serialize_json_value
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -348,6 +351,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert both == one | two
 
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -837,26 +841,45 @@ def test_cached_download_progress_preserves_exact_totals_and_reads_negative_as_u
         index["catalog_entities"][0]["document"], actor="test"
     )
     entities.resolve(revision.id, actor="test")
+    expected = max(0, total_bytes)
+    healthy = ModelCacheOperationProgress(
+        phase="completed",
+        completed_artifacts=1,
+        total_artifacts=1,
+        downloaded_bytes=0,
+        expected_bytes=expected,
+        total_bytes_known=True,
+        measurement=OperationProgress(
+            phase="completed",
+            completed_bytes=0,
+            total_bytes=expected,
+            total_bytes_known=True,
+            completed_items=1,
+            total_items=1,
+        ),
+    )
+    saved = serialize_json_value(healthy)
+    if total_bytes < 0:
+        saved["expected_bytes"] = total_bytes
+        measurement = saved["measurement"]
+        assert isinstance(measurement, dict)
+        measurement["total_bytes"] = total_bytes
     with sessions.begin() as session:
-        session.add(
-            ModelCacheOperation(
-                request_key=str(uuid.uuid4()),
-                kind="download",
-                state="succeeded",
-                payload={"model_content_sha256": revision.content_digest},
-                progress={
-                    "measurement": {
-                        "phase": "completed",
-                        "completed_bytes": 0,
-                        "total_bytes": total_bytes,
-                    }
-                },
-                actor="test",
-                created_at=now,
-                updated_at=now,
-            )
+        operation = ModelCacheOperation(
+            request_key=str(uuid.uuid4()),
+            kind="download",
+            state="succeeded",
+            payload={"model_content_sha256": revision.content_digest},
+            progress=saved,
+            actor="test",
+            created_at=now,
+            updated_at=now,
         )
+        session.add(operation)
+        session.flush()
+        operation_id = operation.id
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -867,12 +890,52 @@ def test_cached_download_progress_preserves_exact_totals_and_reads_negative_as_u
     # A damaged stored total never takes the listing down: the model is listed
     # with no progress (unknown) and the damaged row is named in the log.
     assert response.status_code == 200, response.text
-    progress = response.json()["models"][0]["local"]["preparation"]
+    progress = response.json()["models"][0]["local"].get("preparation")
     if total_bytes < 0:
         assert progress is None
     else:
         assert progress["state"] == "succeeded"
         assert progress["total_bytes"] == total_bytes
+
+    # A malformed optional measurement preserves the asset and source row;
+    # repairing that same operation restores the original exact owned total.
+    damaged = serialize_json_value(healthy)
+    damaged["measurement"] = {"phase": "completed", "completed_bytes": "unreadable"}
+    with sessions.begin() as session:
+        session.execute(
+            update(ModelCacheOperation)
+            .where(ModelCacheOperation.id == operation_id)
+            .values(progress=damaged)
+        )
+    with TestClient(app) as client:
+        unknown = client.get("/api/model/library")
+        assert unknown.status_code == 200
+        assert (
+            unknown.json()["models"][0]["selector"]
+            == response.json()["models"][0]["selector"]
+        )
+        assert unknown.json()["models"][0]["local"].get("preparation") is None
+        with sessions() as session:
+            assert (
+                session.scalar(
+                    select(ModelCacheOperation.progress).where(
+                        ModelCacheOperation.id == operation_id
+                    )
+                )
+                == damaged
+            )
+        with sessions.begin() as session:
+            session.execute(
+                update(ModelCacheOperation)
+                .where(ModelCacheOperation.id == operation_id)
+                .values(progress=serialize_json_value(healthy))
+            )
+        repaired = client.get("/api/model/library")
+        assert repaired.status_code == 200
+        assert (
+            repaired.json()["models"][0]["local"]["preparation"]["total_bytes"]
+            == expected
+        )
 
 
 @pytest.mark.parametrize("kind", ["model", "recipe"])
@@ -966,6 +1029,7 @@ def test_model_detail_resolves_every_model_cache_selector_form(tmp_path: Path) -
         expected_digest = revision.content_digest
 
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -1018,6 +1082,7 @@ def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
     )
     cursors = TokenCodec(b"b" * 32).cursor_codec()
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -1118,6 +1183,7 @@ def test_model_library_pages_by_wire_bytes_without_losing_entries(
         description="é" * 4000,
     )
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -1159,11 +1225,13 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
     sessions = sessionmaker(engine, expire_on_commit=False)
     _insert_canonical_rows(sessions, kind="recipe", template=template, count=1)
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
         projection=LibraryProjection(
             sessions,
+            clock=lambda: datetime(2026, 10, 7, tzinfo=UTC),
             cursors=TokenCodec(b"p" * 32).cursor_codec(),
         ),
     )
@@ -1173,6 +1241,14 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
         assert fitting.status_code == 200, fitting.text
         exact_wire_bytes = len(fitting.content)
         assert exact_wire_bytes <= MAX_CONTROL_DOCUMENT_BYTES
+
+        monkeypatch.setattr(
+            "vonk_control.library_projection.MAX_CONTROL_DOCUMENT_BYTES",
+            exact_wire_bytes,
+        )
+        exactly_fitting = client.get("/api/recipe/library", params={})
+        assert exactly_fitting.status_code == 200, exactly_fitting.text
+        assert exactly_fitting.content == fitting.content
 
         # This cap is one byte below the observed, fully serialized response.
         # An envelope-bracket undercount of two bytes would incorrectly accept
@@ -1210,6 +1286,7 @@ def test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably(
         runtime_arguments=arguments,
     )
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),

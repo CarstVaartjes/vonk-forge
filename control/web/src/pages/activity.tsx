@@ -531,6 +531,7 @@ function CanonicalOperationDetails({api, detail, onUpdate}: {
       : detail.failure && <><strong>{failureSummary(detail.failure)}</strong>{"detail" in detail.failure && detail.failure.detail && <p style={{margin: 0}}>{detail.failure.detail}</p>}</>}
     {detail.evidence_download && <DiagnosticDownload id={detail.id} attempt={detail.attempt}/>}
     {detail.progress && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress)}/>}
+    {detail.projection_issues?.map(issue => <p key={issue.field} role="status" style={{margin: 0}}>{titleCase(issue.field)} unavailable: this observation requires {formatWire(issue.observed_bytes)} bytes; its reader budget is {formatWire(issue.budget_bytes)} bytes. Operation identity and state remain known. Refresh after the evidence changes.</p>)}
     <p className="activity-job-attempt" style={{margin: 0}}>Attempt {formatWire(detail.attempt)}{detail.progress?.phase ? ` · ${titleCase(detail.progress.phase)}` : ""}{active ? " · Updates automatically" : ""}</p>
     {(detail.recovery?.uncertain || (detail.failure && "uncertain" in detail.failure && detail.failure.uncertain))
       ? <p style={{margin: 0}}>Outcome uncertain. {detail.recovery?.explanation ?? "Inspect the observed state before recovery."}</p>

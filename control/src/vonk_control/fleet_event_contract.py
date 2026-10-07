@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
+from vonk_agent_protocol.contracts import canonical_message
 
 from .integer_domains import MAX_DATABASE_INTEGER
 from .strict_json import StrictJSONModel
@@ -108,7 +109,7 @@ type FleetEventPayload = NodeProfilePayload | NodeTelemetryPayload | _FleetEntit
 def _as_model[T: _FleetEventModel](model: type[T], payload: object) -> T:
     if isinstance(payload, model):
         return payload
-    return model.model_validate(payload)
+    return model.model_validate_json(canonical_message(payload), strict=True)
 
 
 def validate_fleet_event_payload(

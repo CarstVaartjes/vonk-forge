@@ -613,3 +613,22 @@ it("preserves visible activity when current operation membership is unknown", as
   await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 3 of 3 operations");
 });
+
+test("keeps known operation state visible when one fact exceeds its response budget, then refreshes", async () => {
+  const user = userEvent.setup();
+  const initial = canonicalOperation({
+    state: "running", failure: null, progress: null, recovery: {actions: ["inspect"], uncertain: false},
+    projection_issues: [{field: "progress", reason: "response-budget-exceeded", observed_bytes: 1500000, budget_bytes: 1048576}],
+  });
+  const client = canonicalApi([initial]);
+  vi.mocked(client.operation).mockResolvedValue({
+    ...initial, projection_issues: null,
+    progress: {phase: "copying", completed_bytes: 12, total_bytes: 24, total_bytes_known: true},
+  });
+  render(<ActivityPage api={client} now={NOW}/>);
+  expect(await screen.findByText(/Progress unavailable: this observation requires/)).toBeVisible();
+  expect(screen.getByText(/Operation identity and state remain known/)).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Refresh operation"}));
+  await waitFor(() => expect(screen.queryByText(/Progress unavailable: this observation requires/)).not.toBeInTheDocument());
+  expect(client.operation).toHaveBeenCalledWith(initial.id);
+});

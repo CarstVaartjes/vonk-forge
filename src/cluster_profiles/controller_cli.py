@@ -719,7 +719,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Show the Controller-owned removal impact without submitting it",
     )
     recipe_retry = recipe_actions.add_parser(
-        "retry", help="Retry a failed preparation using its frozen recipe intent"
+        "retry", help="Submit preparation using the original frozen recipe intent"
     )
     recipe_retry.add_argument("operation_id", type=_uuid_argument)
     _action_flags(recipe_retry, followable=True)
@@ -1995,7 +1995,7 @@ def _submit_recipe_retry(
     args: argparse.Namespace,
     factory: Callable[[], str],
 ) -> dict[str, object]:
-    """Retry the owning frozen intent, never resolve a mutable recipe selector."""
+    """Preserve the owning frozen intent instead of a mutable recipe selector."""
     original_id = args.operation_id
     original = client.request("GET", f"/api/recipe/operations/{_quoted(original_id)}")
     revision = original.get("recipe_revision_id")
@@ -2013,7 +2013,7 @@ def _submit_recipe_retry(
         )
     _confirm_action(
         args,
-        f"Retry recipe preparation {original_id} using its frozen revision {revision}?",
+        f"Submit recipe preparation from {original_id} using its frozen revision {revision}?",
     )
     key = _request_key(args, factory)
 

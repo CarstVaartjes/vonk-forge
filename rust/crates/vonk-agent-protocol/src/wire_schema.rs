@@ -16,17 +16,50 @@ use std::{
 /// arbitrary-precision Value visitor recognizes a private number-object marker;
 /// a real input object must remain an object rather than acquire numeric authority.
 /// RawValue also works for nested/from_value deserializers, so there is one path.
-pub(crate) fn deserialize_original_value<'de, D: Deserializer<'de>>(
+fn deserialize_original_value<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<Value, D::Error> {
+) -> Result<WireInstance, D::Error> {
     let raw = Box::<RawValue>::deserialize(deserializer)?;
-    original_value(&raw, 0).map_err(D::Error::custom)
+    original_value(&raw, 0)
+        .map(WireInstance)
+        .map_err(D::Error::custom)
+}
+
+/// The generated deserializer is the only consumer of a raw instance. This
+/// boundary owns original-kind reconstruction, normalization and validation
+/// together; callers cannot accidentally decode a named model before validation.
+pub(crate) fn deserialize_wire_value<'de, D: Deserializer<'de>>(
+    deserializer: D,
+    model: Option<&str>,
+) -> Result<Value, D::Error> {
+    let mut document = deserialize_original_value(deserializer)?;
+    if let Some(model) = model {
+        validate_and_materialize(model, &mut document.0).map_err(D::Error::custom)?;
+    }
+    // Anonymous generated union members are validated by their owning named
+    // model before this boundary, as in the canonical generated schema.
+    Ok(document.0)
+}
+
+/// Private instance ownership inside the canonical schema interpreter. No DTO
+/// or business reader receives this document; only generated decoding consumes it.
+struct WireInstance(Value);
+
+/// Validate a directly constructed typed value through the same owned JSON
+/// boundary. The caller supplies serialization, never an arbitrary document API.
+pub(crate) fn validate_constructed_document<T: serde::Serialize>(
+    model: &str,
+    value: &T,
+) -> Result<(), String> {
+    let raw = serde_json::value::to_raw_value(value).map_err(|error| error.to_string())?;
+    let mut document = WireInstance(original_value(&raw, 0)?);
+    validate_and_materialize(model, &mut document.0)
 }
 
 pub(crate) fn deserialize_integer_number<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<serde_json::Number, D::Error> {
-    match deserialize_original_value(deserializer)? {
+    match deserialize_original_value(deserializer)?.0 {
         Value::Number(number) if !number.to_string().contains(['.', 'e', 'E']) => Ok(number),
         _ => Err(D::Error::custom("expected an integer token")),
     }
@@ -51,7 +84,7 @@ fn original_value(raw: &RawValue, depth: usize) -> Result<Value, String> {
                 .iter()
                 .map(|member| original_value(member, depth + 1))
                 .collect::<Result<Vec<_>, _>>()
-                .map(Value::Array)
+                .map(Into::into)
         }
         // Only actual scalar tokens reach this visitor. Arbitrary-precision
         // numeric lexemes remain exact; an input map cannot imitate its marker.
@@ -76,7 +109,7 @@ impl<'de> Visitor<'de> for OriginalObject {
             let value = original_value(&raw, self.depth + 1).map_err(M::Error::custom)?;
             object.insert(key, value);
         }
-        Ok(Value::Object(object))
+        Ok(object.into())
     }
 }
 
@@ -139,11 +172,11 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
     let schema = SCHEMA
         .pointer(pointer.trim_start_matches('#'))
         .ok_or("unknown wire schema path")?;
-    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+    if let Some(reference) = schema.get("$ref").and_then(|value| value.as_str()) {
         return strict_numbers(reference, value);
     }
     for keyword in ["anyOf", "oneOf"] {
-        if let Some(variants) = schema.get(keyword).and_then(Value::as_array) {
+        if let Some(variants) = schema.get(keyword).and_then(|value| value.as_array()) {
             // JSON Schema treats an integral floating token as an integer and
             // lets out-of-range integer tokens fall through to a number union.
             // Pydantic strict scalar unions distinguish those wire values.
@@ -153,7 +186,9 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
             let integer_branches: Vec<_> = variants
                 .iter()
                 .enumerate()
-                .filter(|(_, schema)| schema.get("type").and_then(Value::as_str) == Some("integer"))
+                .filter(|(_, schema)| {
+                    schema.get("type").and_then(|value| value.as_str()) == Some("integer")
+                })
                 .map(|(index, _)| index)
                 .collect();
             if integer_token && !integer_branches.is_empty() {
@@ -173,13 +208,13 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
             return Err("wire scalar does not match its declared union".into());
         }
     }
-    if schema.get("type").and_then(Value::as_str) == Some("number")
+    if schema.get("type").and_then(|value| value.as_str()) == Some("number")
         && value.is_number()
         && !value.as_f64().is_some_and(f64::is_finite)
     {
         return Err("floating wire value must be finite".into());
     }
-    if schema.get("type").and_then(Value::as_str) == Some("integer")
+    if schema.get("type").and_then(|value| value.as_str()) == Some("integer")
         && value
             .as_number()
             .is_some_and(|number| number.to_string().contains(['.', 'e', 'E']))
@@ -187,7 +222,7 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
         return Err("integer wire value must use an integer token".into());
     }
     if let (Some(properties), Some(object)) = (
-        schema.get("properties").and_then(Value::as_object),
+        schema.get("properties").and_then(|value| value.as_object()),
         value.as_object(),
     ) {
         for (name, child) in object {
@@ -198,7 +233,7 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
                 )?;
             } else if schema
                 .get("additionalProperties")
-                .is_some_and(Value::is_object)
+                .is_some_and(|value| value.is_object())
             {
                 strict_numbers(&format!("{pointer}/additionalProperties"), child)?;
             }
@@ -228,11 +263,11 @@ fn materialize_float_numbers(pointer: &str, value: &mut Value) -> Result<(), Str
     let schema = SCHEMA
         .pointer(pointer.trim_start_matches('#'))
         .ok_or("unknown wire schema path")?;
-    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+    if let Some(reference) = schema.get("$ref").and_then(|value| value.as_str()) {
         return materialize_float_numbers(reference, value);
     }
     for keyword in ["anyOf", "oneOf"] {
-        if let Some(variants) = schema.get(keyword).and_then(Value::as_array) {
+        if let Some(variants) = schema.get(keyword).and_then(|value| value.as_array()) {
             let integer_token = value
                 .as_number()
                 .is_some_and(|number| !number.to_string().contains(['.', 'e', 'E']));
@@ -240,7 +275,7 @@ fn materialize_float_numbers(pointer: &str, value: &mut Value) -> Result<(), Str
                 .iter()
                 .enumerate()
                 .filter(|(_, variant)| {
-                    variant.get("type").and_then(Value::as_str) == Some("integer")
+                    variant.get("type").and_then(|value| value.as_str()) == Some("integer")
                 })
                 .map(|(index, _)| index)
                 .collect();
@@ -262,18 +297,18 @@ fn materialize_float_numbers(pointer: &str, value: &mut Value) -> Result<(), Str
             return Ok(());
         }
     }
-    if schema.get("type").and_then(Value::as_str) == Some("number") && value.is_number() {
+    if schema.get("type").and_then(|value| value.as_str()) == Some("number") && value.is_number() {
         let float = value
             .as_f64()
             .filter(|number| number.is_finite())
             .ok_or("floating wire value must be finite")?;
-        *value = Value::Number(
-            serde_json::Number::from_f64(float).ok_or("floating wire value must be finite")?,
-        );
+        *value = serde_json::Number::from_f64(float)
+            .ok_or("floating wire value must be finite")?
+            .into();
         return Ok(());
     }
     if let Some(object) = value.as_object_mut() {
-        let properties = schema.get("properties").and_then(Value::as_object);
+        let properties = schema.get("properties").and_then(|value| value.as_object());
         for (name, child) in object {
             if properties.is_some_and(|properties| properties.contains_key(name)) {
                 materialize_float_numbers(
@@ -282,7 +317,7 @@ fn materialize_float_numbers(pointer: &str, value: &mut Value) -> Result<(), Str
                 )?;
             } else if schema
                 .get("additionalProperties")
-                .is_some_and(Value::is_object)
+                .is_some_and(|value| value.is_object())
             {
                 materialize_float_numbers(&format!("{pointer}/additionalProperties"), child)?;
             }
@@ -308,7 +343,7 @@ enum SchemaTransform {
 // adopted before validation; defaults only after validation. Neither phase
 // invents field rules or modifies external passthrough content.
 fn transform(schema: &Value, value: &mut Value, phase: SchemaTransform) {
-    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+    if let Some(reference) = schema.get("$ref").and_then(|value| value.as_str()) {
         if let Some(schema) = reference
             .strip_prefix('#')
             .and_then(|pointer| SCHEMA.pointer(pointer))
@@ -324,7 +359,7 @@ fn transform(schema: &Value, value: &mut Value, phase: SchemaTransform) {
         *value = current.clone();
     }
     if let (Some(properties), Some(object)) = (
-        schema.get("properties").and_then(Value::as_object),
+        schema.get("properties").and_then(|value| value.as_object()),
         value.as_object_mut(),
     ) {
         for (name, property) in properties {
@@ -357,7 +392,7 @@ fn transform(schema: &Value, value: &mut Value, phase: SchemaTransform) {
     }
 }
 
-pub(crate) fn validate_and_materialize(name: &str, value: &mut Value) -> Result<(), String> {
+fn validate_and_materialize(name: &str, value: &mut Value) -> Result<(), String> {
     transform(&SCHEMA["$defs"][name], value, SchemaTransform::ReadAliases);
     let pointer = format!("#/$defs/{name}");
     // A model declared tolerant (`extra="ignore"`) drops keys it does not know
@@ -396,6 +431,18 @@ mod raw_integer_shape_tests {
     }
 
     #[test]
+    fn named_document_boundary_refuses_invalid_fields_before_typed_decoding() {
+        // A generated named decoder must not gain an unchecked document from
+        // its parser. This fails if the combined boundary skips its model.
+        let invalid = br#"{"text":2,"truncated":false,"dropped_bytes":null,"dropped_lines":null}"#;
+        let mut decoder = serde_json::Deserializer::from_slice(invalid);
+        assert!(super::deserialize_wire_value(&mut decoder, Some("FailureLogTail")).is_err());
+        // Directly constructed values use the same schema owner; serialization
+        // alone does not establish a valid model.
+        assert!(super::validate_constructed_document("FailureLogTail", &2_u64).is_err());
+    }
+
+    #[test]
     fn scalar_integer_rejects_original_object_and_preserves_wide_number() {
         let spoof = br#"{"$serde_json::private::Number":"18446744073709551616"}"#;
         assert!(crate::parse_strict::<crate::integer::Integer>(spoof).is_err());
@@ -417,13 +464,13 @@ mod raw_integer_shape_tests {
         // do not replace shape preservation with a global key blacklist.
         let raw = r#"{"nested":[{"$serde_json::private::Number":"18446744073709551616"}]}"#;
         let mut decoder = serde_json::Deserializer::from_str(raw);
-        let value = super::deserialize_original_value(&mut decoder).unwrap();
+        let value = super::deserialize_original_value(&mut decoder).unwrap().0;
         assert!(value["nested"][0].is_object());
         assert_eq!(
             value["nested"][0]["$serde_json::private::Number"].as_str(),
             Some("18446744073709551616")
         );
-        let through_value = super::deserialize_original_value(value.clone()).unwrap();
+        let through_value = super::deserialize_original_value(value.clone()).unwrap().0;
         assert_eq!(through_value, value);
 
         let raw = r#"{"text":"tail","truncated":false,"dropped_bytes":18446744073709551615,"dropped_lines":null}"#;

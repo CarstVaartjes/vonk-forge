@@ -103,6 +103,48 @@ def test_nas_responses_answer_only_the_remaining_installer_prompts() -> None:
     assert not any("CIDR" in prompt or "password" in prompt for prompt in disabled)
 
 
+@pytest.mark.parametrize("hermes", [False, True])
+def test_installer_output_detects_permuted_secret_answers(
+    tmp_path: Path, hermes: bool
+) -> None:
+    acceptance = _acceptance_module()
+    arguments = {
+        "nas_ip": "192.0.2.10",
+        "tailnet_suffix": "acceptance.example.test",
+        "oauth_client_id": "distinct-client-id",
+        "oauth_client_secret": "distinct-client-secret",
+        "upstream_key": "distinct-upstream-key",
+        "control_service": "svc:vonk-forge-ci",
+        "hermes_dashboard_service": "svc:hermes-dashboard-ci",
+        "hermes": hermes,
+    }
+    profiles = '"secure-remote,hermes"' if hermes else "secure-remote"
+    (tmp_path / ".env").write_text(
+        "NAS_LAN_IP=192.0.2.10\n"
+        "VONK_CONTROL_HOSTNAME=vonk-forge-ci.acceptance.example.test\n"
+        f"COMPOSE_PROFILES={profiles}\n"
+    )
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    for name, value in {
+        "tailscale-oauth-client-id": "distinct-client-id\n",
+        "tailscale-oauth-client-secret": "distinct-client-secret\n",
+        "litellm-upstream-key": "distinct-upstream-key\n",
+        "hf-token": "",
+    }.items():
+        (secrets / name).write_text(value)
+    acceptance.assert_installer_answer_bindings(tmp_path, **arguments)
+
+    # Individually valid answers still have distinct owners; an unordered answer
+    # set cannot detect their permutation at the consumer's output boundary.
+    (secrets / "tailscale-oauth-client-id").write_text("distinct-client-secret\n")
+    (secrets / "tailscale-oauth-client-secret").write_text("distinct-client-id\n")
+    with pytest.raises(
+        AcceptanceError, match="bound to secret tailscale-oauth-client-id"
+    ):
+        acceptance.assert_installer_answer_bindings(tmp_path, **arguments)
+
+
 def test_generate_bundle_allows_the_installer_to_reuse_its_target(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -273,6 +315,13 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
     acceptance = _acceptance_module()
     compose = ["docker", "compose"]
     calls: list[list[str]] = []
+    source = "a" * 40
+    monkeypatch.setenv("VONK_ACCEPTANCE_SOURCE_SHA", source)
+    package_identity = {
+        "source_sha": source,
+        "control_contract_sha256": "b" * 64,
+        "worker_contract_sha256": "c" * 64,
+    }
     healthy = json.dumps(
         [
             {
@@ -291,6 +340,19 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
             output = "example.invalid/image@sha256:" + "a" * 64 + "\n"
         elif command[-4:] == ["ps", "--all", "--format", "json"]:
             output = healthy
+        elif command[2:6] == ["exec", "-T", "control-api", "python"]:
+            output = json.dumps(
+                {
+                    "package": package_identity,
+                    "observation": {
+                        "api": package_identity,
+                        "workers": [package_identity],
+                        "worker_issue": None,
+                    },
+                }
+            )
+        elif command[2:6] == ["exec", "-T", "control-worker", "python"]:
+            output = json.dumps(package_identity)
         else:
             output = ""
         return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
@@ -333,6 +395,10 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
     )
     assert not set(up) & acceptance.TAILSCALE_SERVICES
     assert observed["expected"] == acceptance.LOCAL_HERMES_SERVICES
+    assert {command[4] for command in calls if command[2:4] == ["exec", "-T"]} == {
+        "control-api",
+        "control-worker",
+    }
     assert any("down" in command for command in calls)
 
 

@@ -42,6 +42,7 @@ from vonk_control.recipe_routes import RecipeRouteService
 from vonk_control.reservation_owners import ADOPTION_WINDOW
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .profile_due_fixtures import next_profile_due
 from .test_profile_build_process_recovery import _complete_agent_work
 from .test_recipe_operations import ConcurrentPublisher, setup_services
 from .test_run_switch_operations import (
@@ -54,6 +55,8 @@ def _load(tmp_path: Path):
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2
     )
+    now = [lifecycle._clock()]
+    lifecycle._clock = lambda: now[0]
     with sessions() as session:
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
@@ -100,6 +103,7 @@ def _load(tmp_path: Path):
     )
     return SimpleNamespace(
         sessions=sessions,
+        now=now,
         lifecycle=lifecycle,
         planner=planner,
         profiles=profiles,
@@ -132,10 +136,23 @@ def _switch(load) -> Job | None:
         )
 
 
-def _loop(load, until, *, complete: bool = True, rounds: int = 40) -> bool:
+def _loop(
+    load,
+    until,
+    *,
+    complete: bool = True,
+    rounds: int = 40,
+    application_id: str | None = None,
+) -> bool:
     for _ in range(rounds):
         if until():
             return True
+        due = next_profile_due(
+            load.profiles, load.planner, application_id or load.application.id
+        )
+        if due is not None:
+            assert due > load.now[0]
+            load.now[0] = due
         load.planner.tick()
         load.profiles.tick()
         load.worker.tick()
@@ -205,6 +222,7 @@ def test_the_next_attempt_proceeds_after_a_failure_at_every_phase(
     assert _loop(
         load,
         lambda: load.profiles.application(retried.id).state == "succeeded",
+        application_id=retried.id,
     ), load.profiles.application(retried.id).status_reason
     with load.sessions() as session:
         live = [
@@ -263,6 +281,7 @@ def test_an_install_that_fails_on_one_member_is_cleaned_and_retried(
     assert _loop(
         load,
         lambda: load.profiles.application(retried.id).state == "succeeded",
+        application_id=retried.id,
         rounds=60,
     ), load.profiles.application(retried.id).status_reason
 
@@ -271,7 +290,11 @@ def _planned_left_by_failed_copy(load) -> str:
     assert _loop(load, lambda: _at_phase(load, "target-copy"), complete=False)
     _fail_switch(load)
     load.planner.tick()
-    load.profiles.tick()  # the application fails; nothing released yet
+    due = next_profile_due(load.profiles, load.planner, load.application.id)
+    if due is not None:
+        assert due > load.now[0]
+        load.now[0] = due
+    load.profiles.tick()  # observe the failed child when the accepted parent is due
     with load.sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
         assert installation is not None and installation.state == "planned"
@@ -293,6 +316,7 @@ def test_the_next_attempt_adopts_the_plan_a_failed_copy_left(tmp_path: Path) -> 
     assert _loop(
         load,
         lambda: load.profiles.application(retried.id).state == "succeeded",
+        application_id=retried.id,
     ), load.profiles.application(retried.id).status_reason
     with load.sessions() as session:
         installations = tuple(session.scalars(select(RecipeInstallation)))
@@ -342,6 +366,7 @@ def test_a_plan_nobody_adopts_is_released_after_the_adoption_window(
     assert _loop(
         load,
         lambda: load.profiles.application(retried.id).state == "succeeded",
+        application_id=retried.id,
     ), load.profiles.application(retried.id).status_reason
 
 
@@ -373,8 +398,15 @@ def test_a_plan_the_next_attempt_replaced_is_released_without_the_wait(
     assert _loop(
         load,
         lambda: load.profiles.application(retried.id).state == "succeeded",
+        application_id=retried.id,
     ), load.profiles.application(retried.id).status_reason
-    assert _loop(load, lambda: not load.residues.tick(), complete=False, rounds=3)
+    assert _loop(
+        load,
+        lambda: not load.residues.tick(),
+        complete=False,
+        rounds=3,
+        application_id=retried.id,
+    )
     with load.sessions() as session:
         live = [
             (row.id, row.state)

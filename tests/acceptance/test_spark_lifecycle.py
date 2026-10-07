@@ -51,7 +51,7 @@ from scripts.spark_lifecycle_contract import (
     recompute_publication_graphs,
     validate_lifecycle,
 )
-from tests.acceptance.controller_contract import ContractSkew
+from tests.acceptance.controller_contract import ContractSkew, ControllerContract
 from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
@@ -648,6 +648,30 @@ def _set_bundle_environment(bundle: Path, values: dict[str, str]) -> None:
     environment.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _acceptance_caddy_entrypoint(value: object) -> list[str]:
+    """Honor the fixture command through the release's native startup path.
+
+    Historical signed bundles did not forward arguments through this shell
+    wrapper. Preserve their exact wait script and secret-validating native
+    entrypoint; change only final argv forwarding and the shell $0 sentinel.
+    """
+    if not isinstance(value, list) or not all(isinstance(part, str) for part in value):
+        raise LifecycleError("Caddy acceptance startup wrapper is invalid")
+    entrypoint = [part for part in value if isinstance(part, str)]
+    native = "exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh"
+    if len(entrypoint) not in {3, 4} or entrypoint[:2] != ["/bin/sh", "-c"]:
+        raise LifecycleError("Caddy acceptance startup wrapper is invalid")
+    if len(entrypoint) == 3 and entrypoint[2].endswith(native):
+        return [*entrypoint[:2], entrypoint[2] + ' "$$@"', "vonk-caddy-entrypoint"]
+    if (
+        len(entrypoint) == 4
+        and entrypoint[2].endswith(native + ' "$$@"')
+        and entrypoint[3] == "vonk-caddy-entrypoint"
+    ):
+        return entrypoint
+    raise LifecycleError("Caddy acceptance startup wrapper is invalid")
+
+
 def _configure_acceptance_renewal(
     bundle: Path,
     *,
@@ -732,6 +756,9 @@ def _configure_acceptance_renewal(
     )
     os.chmod(caddy_path, 0o644)
     caddy_volumes.append("./acceptance-Caddyfile:/etc/caddy/Caddyfile:ro")
+    caddy_service["entrypoint"] = _acceptance_caddy_entrypoint(
+        caddy_service.get("entrypoint")
+    )
     caddy_service["command"] = [
         "caddy",
         "run",
@@ -940,6 +967,7 @@ class LocalBrowserController:
         hostname: str,
         port: int,
         request_guard: Callable[[str, str, bytes | None], None] | None = None,
+        observation_contract: Callable[[], ControllerContract] | None = None,
     ) -> None:
         if (
             not hostname
@@ -953,6 +981,54 @@ class LocalBrowserController:
         self.port = port
         # Sees every request the administrator session sends before it leaves.
         self.request_guard = request_guard
+        self.observation_contract = observation_contract
+
+    def observation_request(
+        self, path: str, headers: dict[str, str], timeout: float
+    ) -> tuple[int, dict[str, object]]:
+        # Capture one source contract before I/O; carry changes this getter only
+        # when the verified release's Controller generation changes.
+        contract = (
+            self.observation_contract()
+            if self.observation_contract is not None
+            else ControllerContract(
+                json.loads(
+                    (
+                        Path(__file__).resolve().parents[2] / "control/openapi.json"
+                    ).read_text()
+                ),
+                label="this acceptance source's Controller",
+            )
+        )
+        selected = contract.observation(path)
+        request_headers = {**headers, "Accept": selected.media_type}
+        if self.request_guard is not None:
+            self.request_guard("GET", path, None)
+        if timeout <= 0 or any(
+            name.lower() in {"connection", "content-length", "host"}
+            or any(character in name for character in "\0\r\n:")
+            or any(character in value for character in "\0\r\n")
+            for name, value in request_headers.items()
+        ):
+            raise LifecycleError("local browser observation request is invalid")
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=timeout)
+        try:
+            connection.request(
+                "GET", path, headers={"Host": self.hostname, **request_headers}
+            )
+            response = connection.getresponse()
+            document = selected.decode(
+                response,
+                status=response.status,
+                media_type=response.getheader("Content-Type", ""),
+            )
+            return response.status, document
+        except (OSError, http.client.HTTPException, ValueError, ContractSkew) as error:
+            raise LifecycleError(
+                "complete source-bound observation is unavailable; retry observation"
+            ) from error
+        finally:
+            connection.close()
 
     def raw_request(
         self,
@@ -1067,6 +1143,7 @@ class LocalBrowserController:
             timeout=timeout,
             headers=fixed_headers,
             transport=transport,
+            observation_transport=self.observation_request,
         )
 
     def bearer(self, token: str, *, timeout: float) -> Client:
@@ -1087,6 +1164,7 @@ class LocalBrowserController:
             token,
             timeout=timeout,
             transport=transport,
+            observation_transport=self.observation_request,
         )
 
 
@@ -1454,7 +1532,7 @@ class SparkLifecycle:
     def _controller_site_values(self) -> dict[str, str]:
         """Synthetic Spark networks, set in .env where an operator would."""
         return {
-            "VONK_MANAGEMENT_CIDRS": "172.16.0.0/12",
+            "VONK_MANAGEMENT_CIDRS": f"172.31.{self.synthetic_fabric_octet}.0/30",
             "VONK_DIRECT_FABRIC_CIDRS": f"198.19.{self.synthetic_fabric_octet}.0/24",
         }
 
@@ -1523,11 +1601,23 @@ class SparkLifecycle:
             hostname=self.control_hostname,
             port=self._local_browser_port(),
             request_guard=self._controller_request_guard(),
+            observation_contract=self._controller_observation_contract,
         )
         self.browser = boundary
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
         del password
+
+    def _controller_observation_contract(self) -> ControllerContract:
+        """Fresh lanes run the Controller built from this acceptance source."""
+        return ControllerContract(
+            json.loads(
+                (
+                    Path(__file__).resolve().parents[2] / "control/openapi.json"
+                ).read_text()
+            ),
+            label="this acceptance source's Controller",
+        )
 
     def _controller_request_guard(
         self,
@@ -2246,6 +2336,173 @@ class SparkLifecycle:
         except LifecycleError as error:
             raise LifecycleError("native Docker CDI support is unavailable") from error
 
+    def _synthetic_management_namespace(self) -> tuple[str, str]:
+        assert self.bundle is not None
+        litellm_container = self._run_command(
+            self._compose("ps", "--quiet", "litellm"), cwd=self.bundle
+        ).stdout.strip()
+        if re.fullmatch(r"[0-9a-f]{64}", litellm_container) is None:
+            raise LifecycleError("synthetic firewall source container is invalid")
+        litellm_pid = self._run_command(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.State.Pid}}",
+                litellm_container,
+            ],
+            cwd=self.bundle,
+        ).stdout.strip()
+        if re.fullmatch(r"[1-9][0-9]{1,9}", litellm_pid) is None:
+            raise LifecycleError("synthetic firewall source namespace is invalid")
+        return litellm_container, litellm_pid
+
+    def _synthetic_management_address(
+        self, interface: str, *, namespace_pid: str | None = None
+    ) -> str:
+        assert self.temporary_root is not None
+        prefix = (
+            ["sudo", "/usr/bin/nsenter", "--target", namespace_pid, "--net"]
+            if namespace_pid is not None
+            else []
+        )
+        observed = self._run_command(
+            [*prefix, "/usr/sbin/ip", "-j", "-4", "address", "show", "dev", interface],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        try:
+            rows = json.loads(observed.stdout)
+            addresses = {
+                (str(ipaddress.IPv4Address(item["local"])), item["prefixlen"])
+                for row in rows
+                if row["ifname"] == interface
+                for item in row["addr_info"]
+                if item["family"] == "inet"
+            }
+        except (ValueError, KeyError, TypeError) as error:
+            raise LifecycleError(
+                "synthetic management interface evidence is invalid"
+            ) from error
+        if len(addresses) != 1:
+            raise LifecycleError("synthetic management interface evidence is invalid")
+        address, prefix = next(iter(addresses))
+        if prefix != 30:
+            raise LifecycleError("synthetic management interface evidence is invalid")
+        return address
+
+    def _detach_synthetic_management_peer(self) -> None:
+        """Keep the accepted host address alive while its gateway is replaced.
+
+        A veth pair belongs to both network namespaces. Moving the exact owned
+        peer back first prevents old-container teardown deleting the host peer
+        and the address captured in the already accepted Start placement.
+        """
+        assert self.temporary_root is not None
+        owner = self._synthetic_management_namespace()
+        if owner != self.synthetic_management_owner:
+            raise LifecycleError("synthetic management namespace owner changed")
+        interface = self.synthetic_interfaces[0]
+        peer = f"vnas{os.getpid() % 100000}"
+        host_address = self._synthetic_management_address(interface)
+        peer_address = self._synthetic_management_address(peer, namespace_pid=owner[1])
+        if (
+            host_address != f"172.31.{self.synthetic_fabric_octet}.1"
+            or peer_address != f"172.31.{self.synthetic_fabric_octet}.2"
+        ):
+            raise LifecycleError("synthetic management address owner changed")
+        self._run_command(
+            [
+                "sudo",
+                "/usr/bin/nsenter",
+                "--target",
+                owner[1],
+                "--net",
+                "/usr/sbin/ip",
+                "link",
+                "set",
+                peer,
+                "netns",
+                str(os.getpid()),
+            ],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        print(
+            "upgrade-carry management topology: "
+            + json.dumps(
+                {
+                    "phase": "detached",
+                    "container": owner[0],
+                    "namespace_pid": owner[1],
+                    "interface": interface,
+                    "peer": peer,
+                    "host_address": host_address,
+                    "peer_address": peer_address,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
+    def _attach_synthetic_management_peer(self) -> None:
+        assert self.temporary_root is not None
+        owner = self._synthetic_management_namespace()
+        interface = self.synthetic_interfaces[0]
+        peer = f"vnas{os.getpid() % 100000}"
+        self._run_command(
+            ["sudo", "/usr/sbin/ip", "link", "set", peer, "netns", owner[1]],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        for command in (
+            [
+                "address",
+                "replace",
+                f"172.31.{self.synthetic_fabric_octet}.2/30",
+                "dev",
+                peer,
+            ],
+            ["link", "set", peer, "up"],
+        ):
+            self._run_command(
+                [
+                    "sudo",
+                    "/usr/bin/nsenter",
+                    "--target",
+                    owner[1],
+                    "--net",
+                    "/usr/sbin/ip",
+                    *command,
+                ],
+                cwd=self.temporary_root,
+                timeout=30,
+            )
+        host_address = self._synthetic_management_address(interface)
+        peer_address = self._synthetic_management_address(peer, namespace_pid=owner[1])
+        if (
+            host_address != f"172.31.{self.synthetic_fabric_octet}.1"
+            or peer_address != f"172.31.{self.synthetic_fabric_octet}.2"
+        ):
+            raise LifecycleError("synthetic management address owner changed")
+        self.synthetic_management_owner = owner
+        print(
+            "upgrade-carry management topology: "
+            + json.dumps(
+                {
+                    "phase": "attached",
+                    "container": owner[0],
+                    "namespace_pid": owner[1],
+                    "interface": interface,
+                    "peer": peer,
+                    "host_address": host_address,
+                    "peer_address": peer_address,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
     def _prepare_synthetic_firewall_environment(self) -> None:
         assert self.bundle is not None and self.temporary_root is not None
         suffix = self.synthetic_fabric_octet
@@ -2265,23 +2522,7 @@ class SparkLifecycle:
             )
         ):
             raise LifecycleError("synthetic firewall interface identity is invalid")
-        litellm_container = self._run_command(
-            self._compose("ps", "--quiet", "litellm"), cwd=self.bundle
-        ).stdout.strip()
-        if re.fullmatch(r"[0-9a-f]{64}", litellm_container) is None:
-            raise LifecycleError("synthetic firewall source container is invalid")
-        litellm_pid = self._run_command(
-            [
-                "docker",
-                "inspect",
-                "--format",
-                "{{.State.Pid}}",
-                litellm_container,
-            ],
-            cwd=self.bundle,
-        ).stdout.strip()
-        if re.fullmatch(r"[1-9][0-9]{1,9}", litellm_pid) is None:
-            raise LifecycleError("synthetic firewall source namespace is invalid")
+        litellm_container, litellm_pid = self._synthetic_management_namespace()
         if any(
             re.fullmatch(r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}", value) is None
             for value in (node_management_ip, nas_management_ip)
@@ -2387,6 +2628,7 @@ class SparkLifecycle:
             ["sudo", "/usr/sbin/ip", "link", "set", fabric_interface, "up"],
             cwd=self.temporary_root,
         )
+        self.synthetic_management_owner = (litellm_container, litellm_pid)
         self.firewall_environment = {
             "VONK_NAS_MANAGEMENT_IP": nas_management_ip,
             "VONK_NODE_MANAGEMENT_IP": node_management_ip,
@@ -3063,7 +3305,7 @@ class SparkLifecycle:
                 label="synthetic canary profile cleanup",
                 node_id=node_id,
             )
-            _validate_canary_cleanup_application(
+            self._validate_cleanup_application(
                 cleanup_application,
                 installation_ids=[installation_id],
                 run_id=run_id,
@@ -3440,6 +3682,17 @@ class SparkLifecycle:
                 + self._redact_diagnostics(json.dumps(failure))
             )
         return typed.model_dump(mode="json")
+
+    def _validate_cleanup_application(
+        self,
+        application: dict[str, object],
+        *,
+        installation_ids: Sequence[str],
+        run_id: str,
+    ) -> None:
+        _validate_canary_cleanup_application(
+            application, installation_ids=installation_ids, run_id=run_id
+        )
 
     def _await_profile_application(
         self, operation: dict[str, object], *, label: str, node_id: str

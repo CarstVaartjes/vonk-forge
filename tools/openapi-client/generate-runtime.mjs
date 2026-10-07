@@ -132,7 +132,40 @@ for (const [route, item] of Object.entries(document.paths)) {
       const name = `contract${index++}`; register(content.schema, name); requests[media] = name;
       normalization[name] = shape(content.schema);
     }
-    routes.push({route, method: method.toUpperCase(), responses, requests, parameters});
+    const metadata = {};
+    const recordLimit = operation["x-vonk-response-record-max-bytes"];
+    const payload = operation["x-vonk-observation-payload"];
+    if (recordLimit !== undefined || payload !== undefined) {
+      const token = recordLimit instanceof LosslessNumber ? recordLimit.value : String(recordLimit);
+      if (!/^[1-9][0-9]*$/.test(token) || BigInt(token) > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`Invalid observation record allocation: ${route}`);
+      const ref = payload?.$ref;
+      if (typeof ref !== "string" || !ref.startsWith("#/components/schemas/") || !document.components?.schemas?.[ref.slice(21)]) throw new Error(`Invalid observation payload owner: ${route}`);
+      metadata.recordMaxBytes = Number(token);
+      metadata.observationPayload = ref.slice(21);
+    }
+    const frameLimit = operation["x-vonk-response-frame-max-bytes"];
+    if (frameLimit !== undefined) {
+      const token = frameLimit instanceof LosslessNumber ? frameLimit.value : String(frameLimit);
+      if (!/^[1-9][0-9]*$/.test(token) || BigInt(token) > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`Invalid SSE frame allocation: ${route}`);
+      metadata.frameMaxBytes = Number(token);
+    }
+    if (operation["x-vonk-sse-events"] !== undefined) {
+      metadata.sseEvents = Object.fromEntries(Object.entries(operation["x-vonk-sse-events"]).map(([event, payload]) => {
+        const ref = payload?.$ref;
+        if (typeof ref !== "string" || !ref.startsWith("#/components/schemas/") || !document.components?.schemas?.[ref.slice(21)]) throw new Error(`Invalid SSE payload owner: ${route}`);
+        return [event, ref.slice(21)];
+      }));
+    }
+    const declaredResponseMaxBytes = operation["x-vonk-response-max-bytes"];
+    let responseMaxBytes;
+    if (declaredResponseMaxBytes !== undefined) {
+      const budgetToken = declaredResponseMaxBytes instanceof LosslessNumber ? declaredResponseMaxBytes.value : "";
+      if (!/^[1-9][0-9]*$/.test(budgetToken) || BigInt(budgetToken) > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error(`Invalid producer response byte budget: ${method} ${route}`);
+      }
+      responseMaxBytes = Number(budgetToken);
+    }
+    routes.push({route, method: method.toUpperCase(), responses, requests, parameters, responseMaxBytes, ...metadata});
   }
 }
 const shapes = Object.create(null);
@@ -164,7 +197,10 @@ if (schemaOnly) {
 }
 // Ajv's generated code is JavaScript. Keep it JavaScript instead of inventing
 // annotations or suppressing TypeScript errors in a generated .ts file.
-fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>}[];\n');
+// The compiler owns its normalization descriptor alongside the generated
+// validators; runtime consumers import only this declaration.
+const normalizationDeclaration = 'export interface NormalizationShape {\n  type?: string | string[];\n  preserveIntegerFloat?: boolean;\n  ref?: string;\n  alternatives?: {validate: (value: unknown) => boolean; shape: NormalizationShape}[];\n  allOf?: NormalizationShape[];\n  properties?: Record<string, NormalizationShape>;\n  items?: NormalizationShape;\n  additionalProperties?: NormalizationShape;\n}\n';
+fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + normalizationDeclaration + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>; responseMaxBytes?: number; recordMaxBytes?: number; observationPayload?: string; frameMaxBytes?: number; sseEvents?: Readonly<Record<string, string>>}[];\n');
 // Route tables refer to the actual exported functions, never string names.
 const routeCode = JSON.stringify(routes).replace(/"(contract[0-9]+)"/g, "$1");
 const destination = path.join(out, "runtime.generated.js");

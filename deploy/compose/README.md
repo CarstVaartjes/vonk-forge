@@ -120,6 +120,9 @@ Controller API image. On every start the API stages it into the
 restart with it. A pull and redeploy therefore rolls out configuration too; the
 installer only needs to run again when `.env`, secrets or the Compose graph
 itself change.
+The Caddy startup wrapper forwards an explicit Compose `command` after the
+runtime-asset wait and native secret checks. With no command, its native
+entrypoint selects `/run/vonk-runtime-assets/caddy/Caddyfile`.
 
 Development and production use this exact topology and configuration contract.
 They use development `:dev` or production `:latest` application images and channel-specific Spark package versions
@@ -136,3 +139,20 @@ publication artifact provide evidence inputs, not the installed image policy.
 
 PostgreSQL writes automatic dumps to `./backups/` in the project folder. See
 [backup settings and restoration](../../docs/postgres-backups.md).
+
+### Runtime asset startup observation
+
+The Controller pre-exec stages public runtime assets before opening PostgreSQL.
+Consumers poll once per second for up to 120 checks (119 nominal sleeps), then
+log the exact missing asset and exit. This two-minute observation window matches
+the Controller database startup window and bounds one startup attempt, not the
+time required to recover an outage. Scheduling and file I/O can add elapsed time.
+The existing `unless-stopped` restart policy retries automatically when staging
+becomes available. PostgreSQL must not depend on a healthy Controller: staging
+precedes the Controller's database initialization and avoids a dependency cycle.
+
+Each shipped file is a bounded regular file (at most 64 KiB) published with fsync
+and atomic replacement. The startup window is an observation policy, not a
+measured guarantee of storage throughput. Local shell tests prove timeout and
+execution after staging; hosted Compose tests separately prove Docker restart
+and actual PostgreSQL readiness.

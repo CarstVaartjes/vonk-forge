@@ -10,6 +10,7 @@ import {FleetIcon} from "./icons";
 const apiFixture = {
   jobs: async () => ({jobs: [], next_cursor: null, total: 0}),
   operations: async () => ({operations: [], next_cursor: null, total: 0}),
+  fleetEvents: () => { const events = new EventTarget(); return {url: "/api/fleet/stream", close: () => undefined, addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events)}; },
   visualFleet: async () => ({event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
 } as unknown as ControlApi;
 

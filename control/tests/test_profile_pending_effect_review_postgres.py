@@ -7,6 +7,7 @@ physical absence. All database execution belongs to hosted PostgreSQL CI.
 
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 
 from sqlalchemy import select
@@ -17,8 +18,9 @@ from vonk_agent_protocol import (
     OutcomeKind,
     OutcomeUnknown,
     WaitReason,
+    canonical_message,
 )
-from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_control import agent_operation_states
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
@@ -26,8 +28,12 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_plan,
     build_production_fleet_profile_service,
 )
+from vonk_control.job_documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
+    AgentNode,
+    AgentOperation,
+    AgentOperationAttempt,
     FleetProfileApplication,
     Job,
     RecipeRun,
@@ -45,7 +51,12 @@ from .test_fleet_profile_cancel import (
     _two_target_stop_case,
 )
 from .test_fleet_profiles import _follow_profile_retry, _uuid
-from .test_recipe_operations import NOW, installed_recipe, setup_services
+from .test_recipe_operations import (
+    NOW,
+    installed_recipe,
+    setup_services,
+    start_evidence,
+)
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
@@ -337,6 +348,115 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
                 stored_run = session.get(RecipeRun, run_id)
                 assert stored_run is not None and stored_run.state != "stopped"
             assert _held_run_claims(sessions, run_id)
+            with sessions() as session:
+                node = session.get(AgentNode, old_operation.node_id)
+                assert node is not None
+                effects = jobs.assess_superseded_agent_effects_in_session(
+                    session, (node.node_id,), node.workload_intent_ordinal, now[0]
+                )
+                assert old_operation.id in {effect.operation_id for effect in effects}
+    # A full physical receipt resolves only its exact accepted scope. Damage or
+    # a foreign generation must retain the old Start's uncertainty, without
+    # rewriting its historical attempt or inventing a cancellation report.
+    for fault in (
+        "parent-digest",
+        "child-digest",
+        "current-attempt",
+        "missing-result",
+        "malformed-result",
+        "uncertain-result",
+        "partial-targets",
+        "foreign-generation",
+        "no-pending-start-cancel",
+    ):
+        with sessions.begin() as session, session.begin_nested() as damaged:
+            stop_parent = session.get(Job, stop_job)
+            receipt = session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == stop_job,
+                    AgentOperation.node_id == old_operation.node_id,
+                )
+            )
+            node = session.get(AgentNode, old_operation.node_id)
+            assert stop_parent is not None and receipt is not None and node is not None
+            if fault == "parent-digest":
+                stop_parent.payload_digest = "0" * 64
+            elif fault == "child-digest":
+                receipt.payload_digest = "0" * 64
+            elif fault == "current-attempt":
+                receipt.current_attempt += 1
+            elif fault in {"missing-result", "malformed-result", "uncertain-result"}:
+                attempt = session.scalar(
+                    select(AgentOperationAttempt).where(
+                        AgentOperationAttempt.operation_id == receipt.id,
+                        AgentOperationAttempt.attempt == receipt.current_attempt,
+                    )
+                )
+                assert attempt is not None
+                # Raw SQL corrupts retained evidence below the strict canonical
+                # writer, as storage damage can, while leaving state succeeded.
+                value = (
+                    None
+                    if fault == "missing-result"
+                    else {"damaged": True}
+                    if fault == "malformed-result"
+                    else OutcomeUnknown(
+                        kind=OutcomeKind.UNKNOWN,
+                        wait_reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                        reason="physical Stop result is unproven",
+                    ).model_dump(mode="json")
+                )
+                session.connection().execute(
+                    AgentOperationAttempt.__table__.update()
+                    .where(AgentOperationAttempt.__table__.c.id == attempt.id)
+                    .values(result=value)
+                )
+                session.expire(attempt)
+            elif fault == "partial-targets":
+                stop_parent.targets = stop_parent.targets[:1]
+            else:
+                changed = RecipeStopPayload.model_validate_json(
+                    canonical_message(receipt.payload), strict=True
+                )
+                if fault == "foreign-generation":
+                    changed = changed.model_copy(
+                        update={"run_generation": changed.run_generation + 1}
+                    )
+                else:
+                    changed = changed.model_copy(update={"cancel_pending_start": False})
+                receipt.payload = changed.model_dump(mode="json")
+                receipt.payload_digest = hashlib.sha256(
+                    canonical_message(changed)
+                ).hexdigest()
+                parent_document = RecipeStopParent.model_validate_json(
+                    canonical_message(stop_parent.payload), strict=True
+                )
+                assert parent_document.phases is not None
+                parent_document = parent_document.model_copy(
+                    update={
+                        "phases": [
+                            [
+                                item.model_copy(update={"payload": changed})
+                                if item.operation_id == receipt.id
+                                else item
+                                for item in phase
+                            ]
+                            for phase in parent_document.phases
+                        ]
+                    }
+                )
+                stop_parent.payload = parent_document.model_dump(mode="json")
+                stop_parent.payload_digest = hashlib.sha256(
+                    canonical_message(parent_document)
+                ).hexdigest()
+            session.flush()
+            effects = jobs.assess_superseded_agent_effects_in_session(
+                session, (node.node_id,), node.workload_intent_ordinal, now[0]
+            )
+            assert old_operation.id in {effect.operation_id for effect in effects}, (
+                fault
+            )
+            damaged.rollback()
     for _ in range(8):
         _follow_profile_retry(restarted, replacement.id, now)
         switches.tick()
@@ -352,4 +472,46 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
         assert stored_run is not None and stored_start is not None
         assert stored_run.state == "stopped"
         assert stored_start.request_id == _uuid(18821)
+    assert fenced_attempt(sessions, old_claim).result == original_evidence
+    assert fenced_operation(sessions, old_claim).payload == original_payload
+    original_attempt = fenced_operation(sessions, old_claim).current_attempt
+    fresh_plan = lifecycle.preview_run(
+        installation.owner_id, "after-exact-old-start-stop"
+    )
+    assert fresh_plan.allowed
+    fresh_start = lifecycle.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=_uuid(18823),
+    )
+    assert fresh_start.owner_id != run_id
+    # Real agent claims, through mutation fencing, must select the fresh Start;
+    # the retained historical order cannot dispatch again under newer intent.
+    for _ in range(4):
+        if lifecycle.get(fresh_start.id).state == "succeeded":
+            break
+        progressed = False
+        for node_id in nodes:
+            _, fresh_claim = _agent_service_and_target_claim(
+                sessions, lifecycle, node_id, nodes, clock=lambda: now[0], jobs=jobs
+            )
+            if fresh_claim is None:
+                continue
+            fresh_operation = fenced_operation(sessions, fresh_claim)
+            assert fresh_operation.parent_job_id == fresh_start.id
+            assert fresh_claim.operation.value == "recipe.start"
+            assert isinstance(fresh_claim.payload, RecipeStartPayload)
+            assert fresh_operation.id != old_operation.id
+            jobs.record_result(
+                _agent_result(
+                    fresh_claim,
+                    state="succeeded",
+                    result=start_evidence(fresh_claim.payload.model_dump(mode="json")),
+                )
+            )
+            progressed = True
+        assert progressed
+    assert lifecycle.get(fresh_start.id).state == "succeeded"
+    assert fenced_operation(sessions, old_claim).current_attempt == original_attempt
     assert fenced_attempt(sessions, old_claim).result == original_evidence
