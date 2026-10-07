@@ -58,7 +58,7 @@
     "control/src/vonk_control/profile_stop_authority.py": 1,
     "control/src/vonk_control/recipe_build_cancellation.py": 2,
     "control/src/vonk_control/recipe_builds.py": 6,
-    "control/src/vonk_control/recipe_image_availability.py": 46,
+    "control/src/vonk_control/recipe_image_availability.py": 44,
     "control/src/vonk_control/recipe_image_availability_api.py": 5,
     "control/src/vonk_control/recipe_image_removal_contract.py": 1,
     "control/src/vonk_control/recipe_lifecycle_contract.py": 4,

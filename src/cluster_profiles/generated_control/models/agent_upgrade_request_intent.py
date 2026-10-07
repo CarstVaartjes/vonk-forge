@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import cast
 
 
@@ -26,11 +25,11 @@ class AgentUpgradeRequestIntent:
 
         Attributes:
             all_ (bool):
-            selectors (list[str] | None | Unset):
+            selectors (list[str] | None):
      """
 
     all_: bool
-    selectors: list[str] | None | Unset = UNSET
+    selectors: list[str] | None
 
 
 
@@ -39,10 +38,8 @@ class AgentUpgradeRequestIntent:
     def to_dict(self) -> dict[str, Any]:
         all_ = self.all_
 
-        selectors: list[str] | None | Unset
-        if isinstance(self.selectors, Unset):
-            selectors = UNSET
-        elif isinstance(self.selectors, list):
+        selectors: list[str] | None
+        if isinstance(self.selectors, list):
             selectors = self.selectors
 
 
@@ -54,9 +51,8 @@ class AgentUpgradeRequestIntent:
 
         field_dict.update({
             "all": all_,
+            "selectors": selectors,
         })
-        if selectors is not UNSET:
-            field_dict["selectors"] = selectors
 
         return field_dict
 
@@ -67,10 +63,8 @@ class AgentUpgradeRequestIntent:
         d = dict(src_dict)
         all_ = d.pop("all")
 
-        def _parse_selectors(data: object) -> list[str] | None | Unset:
+        def _parse_selectors(data: object) -> list[str] | None:
             if data is None:
-                return data
-            if isinstance(data, Unset):
                 return data
             try:
                 if not isinstance(data, list):
@@ -80,9 +74,9 @@ class AgentUpgradeRequestIntent:
                 return selectors_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(list[str] | None | Unset, data)
+            return cast(list[str] | None, data)
 
-        selectors = _parse_selectors(d.pop("selectors", UNSET))
+        selectors = _parse_selectors(d.pop("selectors"))
 
 
         agent_upgrade_request_intent = cls(

@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     AgentResult,
     canonical_message,
 )
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import AgentCertificate, AgentNode, Base, Job
 
@@ -33,7 +34,7 @@ NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
-STOP_RESULT: dict[str, object] = {}
+STOP_RESULT = RecipeStopResult()
 PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (

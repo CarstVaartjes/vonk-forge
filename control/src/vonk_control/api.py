@@ -129,6 +129,7 @@ from .operation_api import (
     operation_detail_response,
 )
 from .operation_contract import OperationRecoveryAction
+from .operation_item_contract import OperationRow, operation_item
 from .operator_projection_api import (
     FleetOperatorServices,
     build_fleet_operator_services,
@@ -999,17 +1000,16 @@ def create_app(
     )
 
     def activity_detail(
-        item: Mapping[str, object], *, tolerate_unreadable: bool = False
+        row: OperationRow, *, tolerate_unreadable: bool = False
     ) -> OperationDetailResponse:
         """Expose recovery only when its family route is installed."""
         try:
+            item = operation_item(row)
             if failure_evidence is not None:
                 item = failure_evidence.decorate(item)
-            supported_actions = item.get("supported_actions")
             available_actions = (
                 (OperationRecoveryAction.RESUME,)
-                if isinstance(supported_actions, (list, tuple))
-                and "resume" in supported_actions
+                if item.supported_actions and "resume" in item.supported_actions
                 else ()
             )
             return operation_detail_response(item, available_actions=available_actions)
@@ -1018,8 +1018,9 @@ def create_app(
                 raise
             # A corrupt row keeps its durable identity and timestamp visible;
             # its broken historical details do not hide other current work.
-            operation_id = item.get("id")
-            created_at = item.get("created_at")
+            raw = dict(row) if isinstance(row, Mapping) else row.model_dump(mode="json")
+            operation_id = raw.get("id")
+            created_at = raw.get("created_at")
             if (
                 not isinstance(operation_id, str)
                 or not operation_id
@@ -1030,7 +1031,7 @@ def create_app(
             ):
                 raise
             warn_unreadable_once("operation", operation_id)
-            raw_nodes = item.get("node_ids")
+            raw_nodes = raw.get("node_ids")
             node_ids = (
                 [
                     node
@@ -1040,7 +1041,7 @@ def create_app(
                 if isinstance(raw_nodes, (list, tuple))
                 else []
             )
-            raw_owner = item.get("owner")
+            raw_owner = raw.get("owner")
             owner = None
             if isinstance(raw_owner, Mapping):
                 try:
@@ -1129,7 +1130,7 @@ def create_app(
             item = _global_get_operation(operations, operation_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="operation not found") from None
-        except RuntimeError:
+        except (RuntimeError, TypeError, ValueError):
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
