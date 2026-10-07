@@ -1915,7 +1915,7 @@ def test_lost_start_probe_binds_produced_placement_to_owned_interface(
         )
 
     run._run_command = command
-    run._run_canonical_inference = lambda *_args: "verified-response"
+    run._run_canonical_inference = lambda *_args, **_kwargs: "verified-response"
     run._observe_start_topology(
         endpoint,
         str(placement.endpoint_address),

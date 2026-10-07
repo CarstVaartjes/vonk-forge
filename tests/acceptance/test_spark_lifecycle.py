@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
@@ -31,6 +32,10 @@ from typing import NamedTuple, Protocol, Self
 from urllib.parse import urlsplit
 
 import yaml
+from vonk_agent_protocol.route_activation import (
+    ROUTE_SHUTDOWN_SECONDS,
+    ROUTE_STARTUP_SECONDS,
+)
 
 from cluster_profiles.serving_execution import (
     HttpObservation,
@@ -88,7 +93,9 @@ PLATFORMS = ("linux-arm64",)
 # operation stuck.  The operation itself remains restart-safe and reports its
 # own retry state while we wait.
 _CANARY_CONVERGENCE_SECONDS = 300
-_CANARY_ROUTE_SECONDS = 60
+# One supervisor stop/start budget plus two Compose health-check intervals.
+_LITELLM_READINESS_SECONDS = ROUTE_SHUTDOWN_SECONDS + ROUTE_STARTUP_SECONDS + 30
+_CANARY_ROUTE_SECONDS = _LITELLM_READINESS_SECONDS
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 SOURCE_SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -1313,8 +1320,11 @@ class SparkLifecycle:
         try:
             self._start_controller()
             return self
-        except BaseException:
-            self._cleanup()
+        except BaseException as error:
+            try:
+                _write_failure_report(self.arguments, error, phase="controller-startup")
+            finally:
+                self._cleanup()
             raise
 
     def __exit__(self, *_error: object) -> None:
@@ -1465,13 +1475,19 @@ class SparkLifecycle:
             allowance = (remaining - heading_cost) // len(unrendered)
             if allowance <= 0:
                 break
-            entry = f"{title}:\n" + self._redact_diagnostics(body, limit=allowance)
+            if title == "installer error" and len(body) > allowance:
+                # Keep outer type and the innermost cause/phase when logs fill the budget.
+                prefix = min(256, allowance // 2)
+                body = body[:prefix] + " ... " + body[-(allowance - prefix - 5) :]
+            entry = f"{title}: " + self._redact_diagnostics(body, limit=allowance)
             rendered.append(entry)
             remaining -= len(entry) + (1 if index < len(sections) - 1 else 0)
         return "\n".join(rendered)
 
     def _installation_failure(self, stage: str, error: Exception) -> LifecycleError:
-        sections: list[tuple[str, str]] = [("installer error", str(error))]
+        sections: list[tuple[str, str]] = [
+            ("installer error", _exception_cause(error, phase=stage))
+        ]
         if getattr(self, "bundle", None) is not None:
             # Service states come first: a restarting or unhealthy worker is the
             # difference between "the work is stuck" and "nothing is draining
@@ -1845,7 +1861,7 @@ class SparkLifecycle:
         )
         fixture = self.synthetic_canary_fixture
         return self._run_canonical_inference(
-            inference, fixture.serving_check, fixture.slug
+            inference, fixture.serving_check, fixture.slug, gateway=False
         )
 
     def _observe_start_topology(
@@ -3074,17 +3090,19 @@ class SparkLifecycle:
         and its cleanup: the upgrade-carry lane upgrades the Controller and
         the agent there and proves the workload kept serving.
         """
-        assert (
-            self.control is not None
-            and self.browser is not None
-            and isinstance(self.synthetic_canary_fixture, CanonicalCanaryFixture)
-        )
-        if NODE_ID.fullmatch(node_id) is None:
-            raise LifecycleError("synthetic canary node identity is invalid")
-        fixture = self.synthetic_canary_fixture
         completed = ["inventory-ready"]
         response_digest: str | None = None
+        phase = "preconditions"
         try:
+            assert (
+                self.control is not None
+                and self.browser is not None
+                and isinstance(self.synthetic_canary_fixture, CanonicalCanaryFixture)
+            )
+            if NODE_ID.fullmatch(node_id) is None:
+                raise LifecycleError("synthetic canary node identity is invalid")
+            fixture = self.synthetic_canary_fixture
+            phase = "catalog-sync"
             sync = self._import_canary_catalog(
                 fixture, self._canary_request_key(fixture, node_id, "catalog-sync")
             )
@@ -3118,6 +3136,7 @@ class SparkLifecycle:
                     "synthetic canary catalog sync is incomplete: "
                     + json.dumps(summary, sort_keys=True)[:1024]
                 )
+            phase = "recipe-resolution"
             _, listed_payload = self.control.request("GET", "/api/recipe/library")
             listed = require_object(listed_payload, "synthetic canary Library")
             recipes = listed.get("recipes")
@@ -3164,6 +3183,7 @@ class SparkLifecycle:
             ):
                 raise LifecycleError("synthetic canary canonical closure differs")
             completed.append("recipe-resolved")
+            phase = "source-download"
             fleet_before = self._fleet_snapshot()
             fleet_nodes = fleet_before.get("nodes")
             fleet_node_ids = (
@@ -3227,6 +3247,7 @@ class SparkLifecycle:
                     }
                 ],
             }
+            phase = "profile-authoring"
             _, saved_payload = self.control.request(
                 "PUT", "/api/profile/1", profile_payload
             )
@@ -3285,7 +3306,9 @@ class SparkLifecycle:
             # The carry lane is still running the published baseline here;
             # journal repair is a candidate behavior exercised by the fresh lane.
             if carry is None:
+                phase = "start-receipt-loss"
                 self._arm_start_receipt_loss()
+            phase = "profile-load"
             application_payload = self._load_canary_profile(
                 preview,
                 request_key=self._canary_request_key(fixture, node_id, "profile-load"),
@@ -3360,8 +3383,10 @@ class SparkLifecycle:
             completed.extend(
                 ("image-built", "image-distributed", "installed", "running")
             )
+            phase = "route-publication"
             self._await_canary_endpoint(fixture.slug, published=True)
             completed.append("route-published")
+            phase = "inference"
             inference_key = self._read_secret("litellm-master-key")
             inference = self.browser.bearer(inference_key, timeout=30)
             del inference_key
@@ -3369,8 +3394,10 @@ class SparkLifecycle:
                 inference, fixture.serving_check, fixture.slug
             )
             completed.append("inference-ok")
+            phase = "start-replay"
             if carry is None:
                 self._verify_lost_start_replay(run_id)
+            phase = "upgrade-carry"
             if carry is not None:
                 # A carry that replaced the workload reports the installation
                 # and run that now serve, which the cleanup must remove.
@@ -3388,6 +3415,7 @@ class SparkLifecycle:
                     inference, fixture.serving_check, fixture.slug
                 )
             if carry is None:
+                phase = "journal-recovery"
                 # PR carry CI exercises already promoted binaries. The fresh
                 # publication lane installs this exact candidate and must
                 # prove its new journal repair and Start replay behavior.
@@ -3407,6 +3435,7 @@ class SparkLifecycle:
                 "expected_revision": profile_revision,
                 "assignments": [],
             }
+            phase = "cleanup"
             _, cleanup_saved_payload = self.control.request(
                 "PUT", "/api/profile/1", cleanup_payload
             )
@@ -3476,18 +3505,20 @@ class SparkLifecycle:
                     "synthetic canary cleanup left the installation present"
                 )
             completed.append("uninstalled")
-        except (SliceError, ServingExecutionError, LifecycleError) as error:
+            if (
+                completed != list(SYNTHETIC_CANARY_STATES)
+                or not isinstance(response_digest, str)
+                or SHA256.fullmatch(response_digest) is None
+            ):
+                raise LifecycleError("synthetic canary evidence is incomplete")
+        except Exception as error:
             # Keep the API response concise for the lifecycle client, but make
             # the bounded Controller logs available before cleanup.  This is
             # the only useful evidence for an unexpected 5xx from a fresh
             # candidate and uses the existing secret redaction path.
-            raise self._installation_failure("synthetic canary", error) from error
-        if (
-            completed != list(SYNTHETIC_CANARY_STATES)
-            or not isinstance(response_digest, str)
-            or SHA256.fullmatch(response_digest) is None
-        ):
-            raise LifecycleError("synthetic canary evidence is incomplete")
+            raise self._installation_failure(
+                f"synthetic canary/{phase}", error
+            ) from error
         return {
             "completed_states": completed,
             "deterministic_response_sha256": response_digest,
@@ -4073,10 +4104,14 @@ class SparkLifecycle:
 
     def _await_canary_endpoint(self, alias: str, *, published: bool) -> None:
         deadline = time.monotonic() + _CANARY_ROUTE_SECONDS
+        last_error: Exception | None = None
         while True:
             try:
                 fleet = self._fleet_snapshot()
-            except (SliceError, LifecycleError):
+            except (SliceError, LifecycleError) as error:
+                if re.search(r"HTTP (401|403)\b", str(error)):
+                    raise
+                last_error = error
                 fleet = None
             runs: list[dict[str, object]] = []
             if isinstance(fleet, dict):
@@ -4097,13 +4132,63 @@ class SparkLifecycle:
                 for run in runs
             ):
                 return
-            if not published and not any(
-                run.get("route_state") in {"published", "pending"} for run in runs
+            if (
+                fleet is not None
+                and not published
+                and not any(
+                    run.get("route_state") in {"published", "pending"} for run in runs
+                )
             ):
                 return
             if time.monotonic() >= deadline:
-                raise LifecycleError("synthetic canary route state did not converge")
-            time.sleep(1)
+                detail = (
+                    _exception_cause(last_error, phase="route-observation")
+                    if last_error is not None
+                    else f"GET /api/fleet: alias={alias}, published={published}, runs={runs}"
+                )
+                raise LifecycleError(
+                    "synthetic canary route state did not converge; " + detail
+                ) from last_error
+            time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+    @staticmethod
+    def _await_inference_ready(inference: Client) -> None:
+        deadline = time.monotonic() + _LITELLM_READINESS_SECONDS
+        last_error: Exception | None = None
+        original_timeout = inference.timeout
+        try:
+            while time.monotonic() < deadline:
+                inference.timeout = min(original_timeout, deadline - time.monotonic())
+                try:
+                    inference.request("GET", "/litellm/health/readiness")
+                    if time.monotonic() < deadline:
+                        return
+                    last_error = TimeoutError(
+                        "GET /litellm/health/readiness completed after deadline"
+                    )
+                except SliceError as error:
+                    # Access refusals, TLS failures and invalid contracts are not outages.
+                    cause = error.__cause__
+                    reason = (
+                        cause.reason
+                        if isinstance(cause, urllib.error.URLError)
+                        else cause
+                    )
+                    if isinstance(reason, ssl.SSLError) or not (
+                        re.search(r"HTTP (502|503|504)\b", str(error))
+                        or isinstance(error.__cause__, (OSError, urllib.error.URLError))
+                    ):
+                        raise
+                    last_error = error
+                time.sleep(min(2, max(0, deadline - time.monotonic())))
+            raise LifecycleError(
+                "LiteLLM readiness deadline expired; "
+                + _exception_cause(
+                    last_error or TimeoutError(), phase="inference-readiness"
+                )
+            ) from last_error
+        finally:
+            inference.timeout = original_timeout
 
     @staticmethod
     def _serving_request(
@@ -4128,17 +4213,27 @@ class SparkLifecycle:
 
     @staticmethod
     def _run_canonical_inference(
-        inference: Client, check: dict[str, object], alias: str
+        inference: Client, check: dict[str, object], alias: str, *, gateway: bool = True
     ) -> str:
+        if gateway:
+            SparkLifecycle._await_inference_ready(inference)
         path, body = SparkLifecycle._serving_request(check, alias)
         responses: list[dict[str, object]] = []
         for _attempt in range(2):
             status, payload = inference.request("POST", path, body)
             response = require_object(payload, "synthetic serving response")
-            evaluate_http_response(
-                HttpObservation(status=status, headers={}, body=_canonical(response)),
-                check,
-            )
+            try:
+                evaluate_http_response(
+                    HttpObservation(
+                        status=status, headers={}, body=_canonical(response)
+                    ),
+                    check,
+                )
+            except ServingExecutionError as error:
+                raise LifecycleError(
+                    f"POST {path} returned HTTP {status}; "
+                    + _exception_cause(error, phase="inference")
+                ) from error
             responses.append(response)
         first_response, second_response = responses
         if first_response != second_response:
@@ -4785,6 +4880,43 @@ def _valid_run_identity(arguments: argparse.Namespace) -> bool:
     )
 
 
+def _exception_cause(error: BaseException, *, phase: str) -> str:
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        detail = " ".join(str(current).split()) or "no exception text"
+        if isinstance(current, LifecycleError) and len(detail) > 1_200:
+            # Lifecycle wrappers lead with the failing phase; keep that ahead
+            # of noisy log tails as well as the final diagnostic section.
+            detail = detail[:600] + " ... " + detail[-595:]
+        detail = SparkLifecycle._redact_diagnostics(detail, limit=1_200)
+        parts.append(f"{type(current).__name__}: {detail}")
+        current = current.__cause__ or (
+            None if current.__suppress_context__ else current.__context__
+        )
+    return SparkLifecycle._redact_diagnostics(f"{' <- '.join(parts)}; phase={phase}")
+
+
+def _write_failure_report(
+    arguments: argparse.Namespace,
+    error: BaseException,
+    *,
+    phase: str,
+    previous: BaseException | None = None,
+) -> None:
+    cause = _exception_cause(error, phase=phase)
+    if previous is not None and previous is not error:
+        cause += "; original failure: " + _exception_cause(
+            previous, phase="observation"
+        )
+    report = _report_document(arguments, {})
+    report["status"] = "failed"
+    report["failure"] = {"phase": phase, "cause": cause}
+    _atomic_write(arguments.output, report)
+
+
 def run_lifecycle(
     arguments: argparse.Namespace,
     *,
@@ -4794,31 +4926,51 @@ def run_lifecycle(
     | None = None,
 ) -> None:
     """Observe the real lifecycle and own validation, cleanup, and report output."""
-    if not _valid_run_identity(arguments):
-        raise LifecycleError("lifecycle run identity is invalid")
-    graph = check_publication_graph(arguments)
-    factory = lifecycle_factory
-    if factory is None:
-        factory = SparkLifecycle
-    with factory(arguments, graph) as lifecycle_run:
-        proof = lifecycle_run.observe()
-    lifecycle = {
-        "completed_phases": PHASES[arguments.platform],
-        "proof": proof,
-    }
+    phase = "publication-graph"
+    failure: BaseException | None = None
+    failure_phase = phase
     try:
-        validate_lifecycle(
-            lifecycle,
-            platform=arguments.platform,
-            channel=arguments.channel,
-            version=arguments.version,
-            source_sha=arguments.source_sha,
-            generation=arguments.generation,
-            expected_publication_graph=graph,
-        )
-    except ContractError as error:
-        raise LifecycleError(str(error)) from error
-    _atomic_write(arguments.output, _report_document(arguments, lifecycle))
+        if not _valid_run_identity(arguments):
+            raise LifecycleError("lifecycle run identity is invalid")
+        graph = check_publication_graph(arguments)
+        factory = lifecycle_factory or SparkLifecycle
+        phase = "controller-startup"
+        with factory(arguments, graph) as lifecycle_run:
+            try:
+                phase = "observation"
+                proof = lifecycle_run.observe()
+                lifecycle = {
+                    "completed_phases": PHASES[arguments.platform],
+                    "proof": proof,
+                }
+                phase = "validation"
+                validate_lifecycle(
+                    lifecycle,
+                    platform=arguments.platform,
+                    channel=arguments.channel,
+                    version=arguments.version,
+                    source_sha=arguments.source_sha,
+                    generation=arguments.generation,
+                    expected_publication_graph=graph,
+                )
+            except BaseException as error:
+                failure = error
+                failure_phase = phase
+                _write_failure_report(arguments, error, phase=phase)
+                raise
+            finally:
+                phase = "cleanup"
+        phase = "report-publication"
+        _atomic_write(arguments.output, _report_document(arguments, lifecycle))
+    except BaseException as error:
+        # Cleanup can fail too. Keep both errors even if a context manager
+        # replaced the observation exception instead of chaining it explicitly.
+        if error is failure:
+            phase = failure_phase
+        _write_failure_report(arguments, error, phase=phase, previous=failure)
+        if not isinstance(error, Exception):
+            raise
+        raise LifecycleError(_exception_cause(error, phase=phase)) from error
 
 
 def _arguments() -> argparse.Namespace:
@@ -4870,7 +5022,11 @@ def main() -> int:
         else:
             raise LifecycleError("lifecycle command is invalid")
     except LifecycleError as error:
-        print(f"Spark lifecycle failed: {error}", file=sys.stderr)
+        print(
+            "Spark lifecycle failed: "
+            + _exception_cause(error, phase=arguments.command),
+            file=sys.stderr,
+        )
         return 1
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0

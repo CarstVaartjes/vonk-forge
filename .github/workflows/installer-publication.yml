@@ -964,6 +964,7 @@ jobs:
             --output "$RUNNER_TEMP/nas-acceptance/report.json"
 
       - name: Upload NAS behavioral gate report
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: installer-nas-acceptance-${{ needs.candidate.outputs.generation }}
@@ -1222,6 +1223,7 @@ jobs:
             ${{ runner.temp }}/spark-acceptance/renewal-scheduling-clock.json
 
       - name: Upload Spark behavioral gate report
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: installer-spark-acceptance-${{ needs.candidate.outputs.generation }}-linux-arm64
