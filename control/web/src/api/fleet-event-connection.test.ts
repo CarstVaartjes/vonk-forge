@@ -126,3 +126,20 @@ test("rejects canonical payload/header mismatch before dispatch and reconnects f
   expect(new Headers(requests[1].headers).get("Last-Event-ID")).toBe("5");
   connection.close();
 });
+
+
+test("retries service unavailable without claiming malformed event authority", async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, {status: 503}));
+  vi.stubGlobal("fetch", fetcher);
+  const connection = new FleetEventConnection(() => "5");
+  const unavailable = vi.fn(), error = vi.fn();
+  connection.addEventListener("unavailable", unavailable);
+  connection.addEventListener("error", error);
+  await flush();
+  expect(unavailable).not.toHaveBeenCalled();
+  expect(error).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(3000); await flush();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  connection.close();
+});

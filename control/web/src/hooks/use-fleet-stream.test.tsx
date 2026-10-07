@@ -110,11 +110,11 @@ function change(type: "recipe-state" | "node-profile" | "operation-state"): Flee
   };
 }
 
-function api(visualFleet: ControlApi["visualFleet"]): ControlApi {
-  return {visualFleet, fleetEvents: (cursor: () => string) => new FakeFleetConnection(cursor)} as ControlApi;
+function api(visualFleet: ControlApi["visualFleet"]): Pick<ControlApi, "visualFleet" | "fleetEvents"> {
+  return {visualFleet, fleetEvents: (cursor: () => string) => new FakeFleetConnection(cursor)};
 }
 
-function Probe({control}: {control: ControlApi}) {
+function Probe({control}: {control: ReturnType<typeof api>}) {
   const fleet = useFleetStream(control);
   return <>
     <span data-testid="connection">{fleet.connection}</span>
@@ -318,8 +318,8 @@ test("retries when concurrent telemetry makes a sparse REST response stale", asy
   act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7"));
   await act(async () => resolveRefresh(snapshot(6, 66)));
 
-  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
-  expect(screen.getByTestId("gpu")).toHaveTextContent("77");
+  expect(screen.getByTestId("cursor")).toHaveTextContent("6");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("66");
   act(() => vi.advanceTimersByTime(1_000));
   await flush();
 

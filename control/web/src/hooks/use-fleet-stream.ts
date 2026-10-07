@@ -40,7 +40,7 @@ function errorMessage(value: unknown): string {
   return message.length > MAX_ERROR_LENGTH ? `${message.slice(0, MAX_ERROR_LENGTH)}…` : message;
 }
 
-export function useFleetStream(api: ControlApi) {
+export function useFleetStream(api: Pick<ControlApi, "visualFleet" | "fleetEvents">) {
   const [state, dispatch] = useReducer(fleetStreamReducer, initialFleetStreamState);
   const [now, setNow] = useState(() => new Date());
   const [generation, setGeneration] = useState(0);

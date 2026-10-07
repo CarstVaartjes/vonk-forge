@@ -112,6 +112,7 @@ export class FleetEventConnection extends EventTarget {
     if (this.closed) return;
     const controller = new AbortController();
     this.controller = controller;
+    let readingCanonicalEvents = false;
     try {
       const headers = new Headers({Accept: "text/event-stream"});
       const cursor = this.appliedCursor();
@@ -129,6 +130,7 @@ export class FleetEventConnection extends EventTarget {
         if (response.status !== 503) this.closed = true;
         throw new ContractViolation("GET", this.url, response.status);
       }
+      readingCanonicalEvents = true;
       this.dispatchEvent(new Event("open"));
       await readFleetEvents(response, event => {
         const owner = contractRoutes.find(route => route.method === "GET" && route.route === this.url)?.sseEvents?.[event.type];
@@ -142,7 +144,7 @@ export class FleetEventConnection extends EventTarget {
       }, milliseconds => { this.retryMilliseconds = milliseconds; });
     } catch (cause) {
       if (controller.signal.aborted) return;
-      if (cause instanceof ContractViolation) this.dispatchEvent(new Event("unavailable"));
+      if (readingCanonicalEvents && cause instanceof ContractViolation) this.dispatchEvent(new Event("unavailable"));
     } finally {
       this.controller = undefined;
     }
