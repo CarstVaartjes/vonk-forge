@@ -1204,9 +1204,8 @@ def test_oversized_saved_sparse_frame_becomes_bounded_truthful_refresh_notice() 
         repaired_fields, repaired_data = _parsed_frame(repaired)
         assert repaired_fields["event"] == "operation-state"
         assert repaired_fields["id"] == str(event_value.id)
-        assert (
-            FleetChangeEvent.model_validate(repaired_data).change.fields.kind
-            == "deploy"
-        )
+        operation = FleetChangeEvent.model_validate(repaired_data)
+        assert isinstance(operation.change.fields, JobPayload)
+        assert operation.change.fields.kind == "deploy"
     finally:
         engine.dispose()
