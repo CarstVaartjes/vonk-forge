@@ -69,13 +69,11 @@ def _retained_stop(tmp_path, engine: Engine | None = None):
     application = profiles.apply(profile.id, request_key=_uuid(18802), actor="admin")
     switches = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     adapter = RunSwitchFleetProfileAdapter(sessions, switches)
-    adapter.start(
-        application_id=application.id,
-        assignments=(),
-        scope_node_ids=nodes,
-        actor="admin",
-        request_id=_uuid(18803),
-    )
+    # Persist the accepted running profile step through its actual worker.
+    # Direct adapter startup would leave the application queued and cannot
+    # authorize its destructive Stop after retained bookkeeping conversion.
+    profiles._switch_adapter = adapter
+    profiles.tick()
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
@@ -305,12 +303,29 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
             _persist_retained(session, row, progress)
             original = deepcopy(progress)
         session.flush()
+        # The actual worker admitted this owner after apply returned its queued
+        # view. Conversion must preserve the current persisted owner, not that
+        # earlier response snapshot.
+        assert row.id == application.id and row.state == "running"
+        retained_owner = (
+            row.id,
+            row.state,
+            row.request_key,
+            row.plan_digest,
+            row.current_operation_id,
+        )
         result = try_convert_application(session, row, NOW)
         assert result.state == "deferred"
         assert result.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
         assert result.next_attempt_at is not None and result.next_attempt_at > NOW
         assert row.progress == original
-        assert row.id == application.id and row.state == application.state
+        assert (
+            row.id,
+            row.state,
+            row.request_key,
+            row.plan_digest,
+            row.current_operation_id,
+        ) == retained_owner
         assert needs_conversion(row)
         assert conversion_observation(row) == result
         assert {
@@ -328,7 +343,13 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
         assert retried.next_attempt_at is not None
         assert retried.next_attempt_at > NOW + timedelta(seconds=31)
         assert row.progress == original
-        assert row.id == application.id
+        assert (
+            row.id,
+            row.state,
+            row.request_key,
+            row.plan_digest,
+            row.current_operation_id,
+        ) == retained_owner
 
 
 def test_postgres_startup_converts_real_stop_and_continuation_is_idempotent(

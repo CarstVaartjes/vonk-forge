@@ -535,6 +535,10 @@ class ProjectionCode(WireEnum):
     """Warnings and attention items of the fleet and library projections."""
 
     CPU_LOW_CLOCK = "cpu.low-clock"
+    FLEET_FRAME_BUDGET_EXCEEDED = "fleet.frame_budget_exceeded"
+    FLEET_FRAME_ENCODING_UNAVAILABLE = "fleet.frame_encoding_unavailable"
+    FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE = "fleet.stored_event_payload_unavailable"
+    OBSERVATION_TRANSFER_UNAVAILABLE = "observation.transfer_unavailable"
     INSTALL_PARTIAL = "install.partial"
     INVENTORY_MISSING = "inventory.missing"
     INVENTORY_STALE = "inventory.stale"

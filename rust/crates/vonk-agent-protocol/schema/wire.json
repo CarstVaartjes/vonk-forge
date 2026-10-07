@@ -6775,6 +6775,10 @@
       "description": "Warnings and attention items of the fleet and library projections.",
       "enum": [
         "cpu.low-clock",
+        "fleet.frame_budget_exceeded",
+        "fleet.frame_encoding_unavailable",
+        "fleet.stored_event_payload_unavailable",
+        "observation.transfer_unavailable",
         "install.partial",
         "inventory.missing",
         "inventory.stale",
@@ -8266,6 +8270,151 @@
         "request_sha256"
       ],
       "title": "RecipeRunInspectionRequest",
+      "type": "object"
+    },
+    "RecipeRunObservationCheckpoint": {
+      "additionalProperties": false,
+      "description": "Existing recipe_observation_scan_v1 JSON, without a format migration.",
+      "properties": {
+        "had_failures": {
+          "title": "Had Failures",
+          "type": "boolean"
+        },
+        "had_plans": {
+          "title": "Had Plans",
+          "type": "boolean"
+        },
+        "metadata_stamp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeRunObservationDirectoryStamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root": {
+          "title": "Root",
+          "type": "string"
+        },
+        "runs_stamp": {
+          "$ref": "#/$defs/RecipeRunObservationDirectoryStamp"
+        },
+        "started_at": {
+          "pattern": "^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt ]([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\\.[0-9]+)?(?:[Zz]|[+-]([0-9]{2}):([0-9]{2}))$(?![\\s\\S])",
+          "title": "Started At",
+          "type": "string"
+        },
+        "witness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeRunObservationCursorWitness"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "root",
+        "runs_stamp",
+        "metadata_stamp",
+        "started_at",
+        "witness",
+        "had_plans",
+        "had_failures"
+      ],
+      "title": "RecipeRunObservationCheckpoint",
+      "type": "object"
+    },
+    "RecipeRunObservationCursorWitness": {
+      "additionalProperties": false,
+      "description": "An opaque cursor is reusable only after its preceding entry matches.",
+      "properties": {
+        "after": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "After",
+          "type": "integer"
+        },
+        "before": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Before",
+          "type": "integer"
+        },
+        "inode": {
+          "title": "Inode",
+          "type": "string"
+        },
+        "name": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Name",
+          "type": "array"
+        }
+      },
+      "required": [
+        "before",
+        "after",
+        "name",
+        "inode"
+      ],
+      "title": "RecipeRunObservationCursorWitness",
+      "type": "object"
+    },
+    "RecipeRunObservationDirectoryStamp": {
+      "additionalProperties": false,
+      "description": "Exact identity and modification witnesses of one native directory.",
+      "properties": {
+        "changed_nanoseconds": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Changed Nanoseconds",
+          "type": "integer"
+        },
+        "changed_seconds": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Changed Seconds",
+          "type": "integer"
+        },
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "inode": {
+          "title": "Inode",
+          "type": "string"
+        },
+        "modified_nanoseconds": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Modified Nanoseconds",
+          "type": "integer"
+        },
+        "modified_seconds": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Modified Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "device",
+        "inode",
+        "modified_seconds",
+        "modified_nanoseconds",
+        "changed_seconds",
+        "changed_nanoseconds"
+      ],
+      "title": "RecipeRunObservationDirectoryStamp",
       "type": "object"
     },
     "RecipeRunObservationWire": {
@@ -10601,6 +10750,9 @@
     "RecipeReconcileResult": "vonk_agent_protocol.recipe_operations.RecipeReconcileResult",
     "RecipeReconciliationIdentity": "vonk_agent_protocol.host_helper.RecipeReconciliationIdentity",
     "RecipeRunInspectionRequest": "vonk_agent_protocol.host_helper.RecipeRunInspectionRequest",
+    "RecipeRunObservationCheckpoint": "vonk_agent_protocol.runtime_scan.RecipeRunObservationCheckpoint",
+    "RecipeRunObservationCursorWitness": "vonk_agent_protocol.runtime_scan.RecipeRunObservationCursorWitness",
+    "RecipeRunObservationDirectoryStamp": "vonk_agent_protocol.runtime_scan.RecipeRunObservationDirectoryStamp",
     "RecipeRunObservationWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationWire",
     "RecipeRunObservationsWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationsWire",
     "RecipeStartPayload": "vonk_agent_protocol.recipe_operations.RecipeStartPayload",
@@ -10774,6 +10926,9 @@
     "RecipeReconcileResult": "#/$defs/RecipeReconcileResult",
     "RecipeReconciliationIdentity": "#/$defs/RecipeReconciliationIdentity",
     "RecipeRunInspectionRequest": "#/$defs/RecipeRunInspectionRequest",
+    "RecipeRunObservationCheckpoint": "#/$defs/RecipeRunObservationCheckpoint",
+    "RecipeRunObservationCursorWitness": "#/$defs/RecipeRunObservationCursorWitness",
+    "RecipeRunObservationDirectoryStamp": "#/$defs/RecipeRunObservationDirectoryStamp",
     "RecipeRunObservationWire": "#/$defs/RecipeRunObservationWire",
     "RecipeRunObservationsWire": "#/$defs/RecipeRunObservationsWire",
     "RecipeStartPayload": "#/$defs/RecipeStartPayload",

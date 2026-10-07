@@ -345,3 +345,175 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(
             capture_output=True,
             timeout=30,
         )
+
+
+@pytest.fixture(scope="module")
+def postgres_after_runtime_asset_restart(tmp_path_factory, postgres_image: str):
+    """Hosted-only: missing assets must trigger a real restart, then recover.
+
+    The production observation window is inherently two minutes. Keep that
+    process boundary in module setup, rather than shorten the tested command.
+    """
+    import importlib.machinery
+    import importlib.util
+
+    from vonk_control.runtime_init import stage_runtime_assets
+
+    loader = importlib.machinery.SourceFileLoader(
+        "asset_restart_compose", str(ROOT / "scripts/render-dev-compose")
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    production = module._compose_document(ROOT / "deploy/compose/compose.yaml")[
+        "services"
+    ]["postgres"]
+    root = tmp_path_factory.mktemp("asset-restart-postgres")
+    assets = root / "assets"
+    assets.mkdir()
+    password = root / "password"
+    password.write_text("b" * 64 + "\n")
+    password.chmod(0o600)
+    project = "asset-restart-" + uuid.uuid4().hex
+    compose = root / "compose.json"
+    compose.write_text(
+        json.dumps(
+            {
+                "services": {
+                    "postgres": {
+                        "image": postgres_image,
+                        "restart": production["restart"],
+                        "entrypoint": production["entrypoint"],
+                        "command": production["command"],
+                        "environment": {
+                            "POSTGRES_DB": "control",
+                            "POSTGRES_USER": "control",
+                            "POSTGRES_PASSWORD": "test-password",
+                        },
+                        "volumes": [
+                            f"{assets}:/run/vonk-runtime-assets:ro",
+                            f"{password}:/run/secrets/litellm-database-password:ro",
+                        ],
+                    }
+                }
+            }
+        )
+    )
+    cli = ["docker", "compose", "--project-name", project, "-f", str(compose)]
+    container = ""
+    try:
+        subprocess.run(
+            cli + ["up", "-d"], check=True, capture_output=True, text=True, timeout=30
+        )
+        container = subprocess.check_output(
+            cli + ["ps", "-q"], text=True, timeout=10
+        ).strip()
+        assert container
+        deadline = time.monotonic() + 160
+        while time.monotonic() < deadline:
+            restarts = int(
+                subprocess.check_output(
+                    ["docker", "inspect", "--format", "{{.RestartCount}}", container],
+                    text=True,
+                    timeout=10,
+                )
+            )
+            if restarts >= 1:
+                break
+            time.sleep(0.25)
+        else:
+            raise AssertionError(
+                "missing production runtime assets never triggered container restart"
+            )
+        logs = subprocess.check_output(
+            ["docker", "logs", container],
+            text=True,
+            stderr=subprocess.STDOUT,
+            timeout=10,
+        )
+        assert (
+            "runtime-asset-timeout: /run/vonk-runtime-assets/postgres/init-databases.sh"
+            in logs
+        )
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "fchown", lambda *_args: None)
+            stage_runtime_assets(ROOT / "deploy/compose/postgres", assets / "postgres")
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            probe = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    container,
+                    "psql",
+                    "-U",
+                    "control",
+                    "-d",
+                    "control",
+                    "-tAc",
+                    "SELECT datname FROM pg_database WHERE datname IN ('control','litellm') ORDER BY datname",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            logs = subprocess.check_output(
+                ["docker", "logs", container],
+                text=True,
+                stderr=subprocess.STDOUT,
+                timeout=10,
+            )
+            if (
+                probe.returncode == 0
+                and probe.stdout.splitlines() == ["control", "litellm"]
+                and "PostgreSQL init process complete; ready for start up." in logs
+            ):
+                break
+            time.sleep(0.25)
+        else:
+            raise AssertionError(
+                "restarted PostgreSQL did not initialize the staged databases"
+            )
+        yield container, cli, restarts
+    finally:
+        subprocess.run(
+            cli + ["down", "--volumes"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+
+@pytest.mark.timeout(300)
+def test_real_compose_restart_recovers_after_runtime_assets_arrive(
+    postgres_after_runtime_asset_restart,
+):
+    container, cli, restarts = postgres_after_runtime_asset_restart
+    assert restarts >= 1
+    assert (
+        subprocess.check_output(cli + ["ps", "-q"], text=True, timeout=10).strip()
+        == container
+    )
+    for database in ("control", "litellm"):
+        assert (
+            subprocess.check_output(
+                [
+                    "docker",
+                    "exec",
+                    container,
+                    "psql",
+                    "-U",
+                    "control",
+                    "-d",
+                    database,
+                    "-tAc",
+                    "SELECT 1",
+                ],
+                text=True,
+                timeout=10,
+            ).strip()
+            == "1"
+        )

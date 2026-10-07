@@ -33,6 +33,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -65,7 +66,6 @@ from tests.acceptance.test_spark_lifecycle import (
     _editorial_successor,
     _run_spark_bootstrap,
     _sibling_recipes,
-    _validate_canary_cleanup_application,
     _validate_canary_cleanup_preview,
 )
 
@@ -302,6 +302,85 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             )
         return application
 
+    def _validate_cleanup_application(
+        self,
+        application: dict[str, object],
+        *,
+        installation_ids: Sequence[str],
+        run_id: str,
+    ) -> None:
+        # Carry intentionally drives already promoted Controllers, whose complete
+        # receipt belongs to their verified source, not this newer harness's DTO.
+        application_id = application.get("id")
+        self._current_release().contract.check_json_response(
+            "GET", f"/api/profile/applications/{application_id}", application
+        )
+        progress = require_object(application.get("progress"), "cleanup progress")
+        steps = require_object(progress.get("step_results"), "cleanup steps")
+        if (
+            application.get("state") != "succeeded"
+            or len(steps) != 1
+            or any(
+                require_object(step, "cleanup step").get("kind") != "switch"
+                for step in steps.values()
+            )
+        ):
+            raise LifecycleError(
+                "synthetic canary cleanup profile receipt is incomplete"
+            )
+        adapter = require_object(progress.get("switch_adapter"), "cleanup adapter")
+        result = require_object(adapter.get("result"), "cleanup adapter result")
+        raw_children = result.get("children")
+        if not isinstance(raw_children, list):
+            raise LifecycleError("synthetic canary cleanup child receipt is missing")
+        children = [require_object(child, "cleanup child") for child in raw_children]
+        if {child.get("kind") for child in children} != {"stop", "cleanup"}:
+            raise LifecycleError(
+                "synthetic canary cleanup child sequence is incomplete"
+            )
+        if any(child.get("state") != "succeeded" for child in children):
+            raise LifecycleError("synthetic canary cleanup child did not succeed")
+        phases: dict[str, list[dict[str, object]]] = {"stop": [], "cleanup": []}
+        for child in children:
+            receipt = require_object(child.get("result"), "cleanup child receipt")
+            if receipt.get("run_switch_operation_id") != child.get("operation_id"):
+                raise LifecycleError(
+                    "synthetic canary cleanup receipt identity differs"
+                )
+            switch = require_object(receipt.get("run_switch"), "cleanup switch receipt")
+            raw_phases = switch.get("phase_results")
+            if not isinstance(raw_phases, list):
+                raise LifecycleError(
+                    "synthetic canary cleanup phase receipts are missing"
+                )
+            kind = child.get("kind")
+            if not isinstance(kind, str) or kind not in phases:
+                raise LifecycleError("synthetic canary cleanup child kind is invalid")
+            phases[kind].extend(
+                require_object(phase, "cleanup phase") for phase in raw_phases
+            )
+        if not any(
+            phase.get("phase") == "stop" and phase.get("run_id") == run_id
+            for phase in phases["stop"]
+        ):
+            raise LifecycleError("synthetic canary stop receipt is incomplete")
+        for installation_id in installation_ids:
+            if not any(
+                phase.get("phase") == "uninstall"
+                and phase.get("installation_id") == installation_id
+                for phase in phases["cleanup"]
+            ) or not any(
+                phase.get("phase") == "final_verify"
+                and phase.get("installation_id") == installation_id
+                and phase.get("final_verified") is True
+                and phase.get("removed") is True
+                and type(phase.get("active_runs")) is int
+                and phase.get("active_runs") == 0
+                and phase.get("installation_state") in {None, "uninstalled"}
+                for phase in phases["cleanup"]
+            ):
+                raise LifecycleError("synthetic canary removal receipt is incomplete")
+
     def _current_release(self) -> ReleaseInput:
         return (
             self.candidate
@@ -311,6 +390,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
 
     def _acceptance_caddyfile(self) -> str | None:
         return self._current_release().caddyfile
+
+    def _controller_observation_contract(self) -> ControllerContract:
+        return self._current_release().contract
 
     def _controller_request_guard(self):
         # The harness is newer than both Controllers it drives: every request
@@ -512,6 +594,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             hostname=self.control_hostname,
             port=self._local_browser_port(),
             request_guard=self._controller_request_guard(),
+            observation_contract=self._controller_observation_contract,
         )
         password = self._read_secret("admin-password")
         control = browser.login(password, timeout=30)
@@ -813,7 +896,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             label="sibling profile cleanup",
             node_id=node_id,
         )
-        _validate_canary_cleanup_application(
+        self._validate_cleanup_application(
             application, installation_ids=installations, run_id=run_id
         )
         self._await_canary_endpoint(last.slug, published=False)

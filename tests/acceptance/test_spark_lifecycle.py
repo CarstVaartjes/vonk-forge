@@ -51,7 +51,7 @@ from scripts.spark_lifecycle_contract import (
     recompute_publication_graphs,
     validate_lifecycle,
 )
-from tests.acceptance.controller_contract import ContractSkew
+from tests.acceptance.controller_contract import ContractSkew, ControllerContract
 from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
@@ -111,6 +111,29 @@ CANARY_CATALOG_IMPORT = Path(__file__).with_name("spark_canary_catalog_import.py
 SPARK_CONFIG = Path("/etc/vonk-forge-agent/agent.toml")
 AGENT_BINARY = Path("/usr/lib/vonk-forge/vonk-agent")
 AGENT_DATA = Path("/var/lib/vonk-forge-agent")
+
+
+def _agent_journal_fault_command(journal: Path) -> list[str]:
+    """Fault the stopped disposable SQLite journal, including its WAL pages."""
+    if journal.name != "state.sqlite":
+        raise LifecycleError("acceptance journal path is invalid")
+    return [
+        "sudo",
+        "/usr/bin/python3",
+        "-c",
+        (
+            "from pathlib import Path; import json, sys; journal = Path(sys.argv[1]); "
+            "sidecars = [Path(str(journal) + suffix) for suffix in ('-wal', '-shm')]; "
+            "before = [path.exists() for path in sidecars]; "
+            "journal.write_bytes(b'acceptance-corrupt-agent-journal'); "
+            "[path.unlink(missing_ok=True) for path in sidecars]; "
+            "print(json.dumps({'wal_before': before[0], 'shm_before': before[1], "
+            "'wal_after': sidecars[0].exists(), 'shm_after': sidecars[1].exists()}))"
+        ),
+        os.fspath(journal),
+    ]
+
+
 COMPOSE_IMAGE_ROLES = {
     "api": "control-api",
     "worker": "control-worker",
@@ -967,6 +990,7 @@ class LocalBrowserController:
         hostname: str,
         port: int,
         request_guard: Callable[[str, str, bytes | None], None] | None = None,
+        observation_contract: Callable[[], ControllerContract] | None = None,
     ) -> None:
         if (
             not hostname
@@ -980,6 +1004,54 @@ class LocalBrowserController:
         self.port = port
         # Sees every request the administrator session sends before it leaves.
         self.request_guard = request_guard
+        self.observation_contract = observation_contract
+
+    def observation_request(
+        self, path: str, headers: dict[str, str], timeout: float
+    ) -> tuple[int, dict[str, object]]:
+        # Capture one source contract before I/O; carry changes this getter only
+        # when the verified release's Controller generation changes.
+        contract = (
+            self.observation_contract()
+            if self.observation_contract is not None
+            else ControllerContract(
+                json.loads(
+                    (
+                        Path(__file__).resolve().parents[2] / "control/openapi.json"
+                    ).read_text()
+                ),
+                label="this acceptance source's Controller",
+            )
+        )
+        selected = contract.observation(path)
+        request_headers = {**headers, "Accept": selected.media_type}
+        if self.request_guard is not None:
+            self.request_guard("GET", path, None)
+        if timeout <= 0 or any(
+            name.lower() in {"connection", "content-length", "host"}
+            or any(character in name for character in "\0\r\n:")
+            or any(character in value for character in "\0\r\n")
+            for name, value in request_headers.items()
+        ):
+            raise LifecycleError("local browser observation request is invalid")
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=timeout)
+        try:
+            connection.request(
+                "GET", path, headers={"Host": self.hostname, **request_headers}
+            )
+            response = connection.getresponse()
+            document = selected.decode(
+                response,
+                status=response.status,
+                media_type=response.getheader("Content-Type", ""),
+            )
+            return response.status, document
+        except (OSError, http.client.HTTPException, ValueError, ContractSkew) as error:
+            raise LifecycleError(
+                "complete source-bound observation is unavailable; retry observation"
+            ) from error
+        finally:
+            connection.close()
 
     def raw_request(
         self,
@@ -1094,6 +1166,7 @@ class LocalBrowserController:
             timeout=timeout,
             headers=fixed_headers,
             transport=transport,
+            observation_transport=self.observation_request,
         )
 
     def bearer(self, token: str, *, timeout: float) -> Client:
@@ -1114,6 +1187,7 @@ class LocalBrowserController:
             token,
             timeout=timeout,
             transport=transport,
+            observation_transport=self.observation_request,
         )
 
 
@@ -1550,11 +1624,23 @@ class SparkLifecycle:
             hostname=self.control_hostname,
             port=self._local_browser_port(),
             request_guard=self._controller_request_guard(),
+            observation_contract=self._controller_observation_contract,
         )
         self.browser = boundary
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
         del password
+
+    def _controller_observation_contract(self) -> ControllerContract:
+        """Fresh lanes run the Controller built from this acceptance source."""
+        return ControllerContract(
+            json.loads(
+                (
+                    Path(__file__).resolve().parents[2] / "control/openapi.json"
+                ).read_text()
+            ),
+            label="this acceptance source's Controller",
+        )
 
     def _controller_request_guard(
         self,
@@ -1795,6 +1881,63 @@ class SparkLifecycle:
             )
         self._lost_start_placement = (address, int(port))
 
+    def _record_start_recovery_checkpoint(
+        self,
+        phase: str,
+        operation_id: str,
+        run_id: str,
+        fence: str,
+        *,
+        observe_attempts: bool = False,
+    ) -> None:
+        """Retain bounded identifiers/phase facts before disposable cleanup."""
+        assert self.bundle is not None
+        root = self.bundle.parent / "acceptance-receipts"
+        document: dict[str, object] = {
+            "phase": phase,
+            "operation_id": operation_id,
+            "run_id": run_id,
+            "old_fence": fence,
+            "restart_marker_exists": (root / "recovered.json").is_file(),
+        }
+        fault = getattr(self, "_start_journal_fault", None)
+        if fault is not None:
+            document["journal_fault"] = fault
+        if phase != "profile_timeout":
+            self._start_recovery_phase = phase
+        else:
+            document["last_completed_phase"] = getattr(
+                self, "_start_recovery_phase", None
+            )
+        latest = root / "last-start-receipt.json"
+        if latest.is_file() and latest.stat().st_size <= 64 * 1024:
+            value = require_object(
+                json.loads(latest.read_text()), "receipt relay observation"
+            )
+            received = value.get("fence")
+            gate = value.get("gate")
+            if isinstance(received, str) and UUID.fullmatch(received) is not None:
+                document["latest_received_fence"] = received
+            if isinstance(gate, str) and gate in {
+                "old-fence",
+                "restart-incomplete",
+                "released",
+            }:
+                document["relay_gate"] = gate
+        if observe_attempts:
+            try:
+                document["controller_attempts"] = self._psql(
+                    "SELECT a.attempt,a.fence,a.state,o.state,"
+                    "CASE WHEN a.lease_deadline<=clock_timestamp() THEN 'expired' ELSE 'live' END "
+                    "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
+                    f"WHERE o.id='{operation_id}' ORDER BY a.attempt DESC LIMIT 8"
+                )
+            except LifecycleError as error:
+                document["attempt_observation_error"] = type(error).__name__
+        _atomic_write(
+            self.arguments.output.with_name("failed-start-recovery.json"), document
+        )
+
     def _recover_lost_start_receipt(self, node_id: str) -> None:
         if getattr(self, "lost_start_proof", None) is not None:
             return
@@ -1863,21 +2006,31 @@ class SparkLifecycle:
         before_container = self._container_for_replay(run_id)
         before_managed = self._managed_for_replay()
         before_response = self._direct_canary_inference(endpoint)
+        self._record_start_recovery_checkpoint(
+            "runtime_verified", operation_id, run_id, fence
+        )
         self._run_command(
             ["sudo", "/usr/bin/systemctl", "stop", "vonk-forge-agent.service"],
             cwd=self.temporary_root,
             timeout=30,
         )
-        self._run_command(
-            [
-                "sudo",
-                "/usr/bin/python3",
-                "-c",
-                "from pathlib import Path; import sys; Path(sys.argv[1]).write_bytes(b'acceptance-lost-start-journal')",
-                os.fspath(AGENT_DATA / "state.sqlite"),
-            ],
+        self._record_start_recovery_checkpoint(
+            "agent_stopped", operation_id, run_id, fence
+        )
+        fault = self._run_command(
+            _agent_journal_fault_command(AGENT_DATA / "state.sqlite"),
             cwd=self.temporary_root,
             timeout=30,
+        )
+        observation = require_object(
+            json.loads(fault.stdout), "journal fault observation"
+        )
+        keys = ("wal_before", "shm_before", "wal_after", "shm_after")
+        if any(type(observation.get(key)) is not bool for key in keys):
+            raise LifecycleError("journal fault observation is invalid")
+        self._start_journal_fault = {key: observation[key] for key in keys}
+        self._record_start_recovery_checkpoint(
+            "journal_faulted", operation_id, run_id, fence
         )
         # Retire every pre-restart lease using Controller time. A buffered
         # receipt from the stopped process must be stale even if the network
@@ -1899,9 +2052,15 @@ class SparkLifecycle:
             cwd=self.temporary_root,
             timeout=30,
         )
+        self._record_start_recovery_checkpoint(
+            "agent_restarted", operation_id, run_id, fence
+        )
         recovered = bundle.parent / "acceptance-receipts/recovered.json"
         recovered.write_text(json.dumps({"fence": fence}), encoding="utf-8")
         os.chmod(recovered, 0o644)
+        self._record_start_recovery_checkpoint(
+            "restart_released", operation_id, run_id, fence
+        )
         self.lost_start_proof = LostStartProof(
             operation_id,
             payload_digest,
@@ -3242,7 +3401,7 @@ class SparkLifecycle:
                 label="synthetic canary profile cleanup",
                 node_id=node_id,
             )
-            _validate_canary_cleanup_application(
+            self._validate_cleanup_application(
                 cleanup_application,
                 installation_ids=[installation_id],
                 run_id=run_id,
@@ -3370,16 +3529,7 @@ class SparkLifecycle:
         # Only the derived journal is faulted; credentials and runtime evidence
         # are preserved so the recovered agent must adopt the exact effect.
         self._run_command(
-            [
-                "sudo",
-                "/usr/bin/python3",
-                "-c",
-                (
-                    "from pathlib import Path; import sys; "
-                    "Path(sys.argv[1]).write_bytes(b'acceptance-corrupt-agent-journal')"
-                ),
-                os.fspath(AGENT_DATA / "state.sqlite"),
-            ],
+            _agent_journal_fault_command(AGENT_DATA / "state.sqlite"),
             cwd=temporary_root,
             timeout=30,
         )
@@ -3620,6 +3770,17 @@ class SparkLifecycle:
             )
         return typed.model_dump(mode="json")
 
+    def _validate_cleanup_application(
+        self,
+        application: dict[str, object],
+        *,
+        installation_ids: Sequence[str],
+        run_id: str,
+    ) -> None:
+        _validate_canary_cleanup_application(
+            application, installation_ids=installation_ids, run_id=run_id
+        )
+
     def _await_profile_application(
         self, operation: dict[str, object], *, label: str, node_id: str
     ) -> dict[str, object]:
@@ -3647,6 +3808,15 @@ class SparkLifecycle:
         while typed.state in _LIVE_APPLICATION_STATES:
             self._recover_lost_start_receipt(node_id)
             if time.monotonic() >= deadline:
+                proof = self.lost_start_proof
+                if proof is not None:
+                    self._record_start_recovery_checkpoint(
+                        "profile_timeout",
+                        proof.operation_id,
+                        proof.run_id,
+                        proof.fence,
+                        observe_attempts=True,
+                    )
                 # Say where it stalled: a queued application with no step
                 # means nothing claimed it, while a running one names the step
                 # and child phase it never left.

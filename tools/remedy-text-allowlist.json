@@ -34,12 +34,6 @@
     },
     {
       "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "RunSwitchFleetProfileAdapter._advance_in_session",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
       "function": "_require_recovery_preparation",
       "kind": "imperative-remedy",
       "count": 1
@@ -189,5 +183,14 @@
       "count": 2
     }
   ],
-  "exceptions": []
+  "exceptions": [
+    {
+      "path": "control/src/vonk_control/platform_observation_errors.py",
+      "function": "observation_capture_unavailable_response",
+      "kind": "imperative-remedy",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "The sole matched literal is the canonical HTTP Retry-After header name (value 5), not an imperative operator instruction. The typed retryable unknown observation remains repairable through the same authenticated read; no empty membership or manual-only recovery is introduced."
+    }
+  ]
 }

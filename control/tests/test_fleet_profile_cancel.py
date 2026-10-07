@@ -45,6 +45,7 @@ from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
+from .profile_due_fixtures import next_profile_due
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
 from .test_fleet_profile_api import _client, _headers
@@ -88,6 +89,8 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         run_id,
         node_id,
     ) = running_artifact_service(tmp_path, engine=postgres_engine)
+    clock = [lifecycle._clock()]
+    lifecycle._clock = lambda: clock[0]
     artifact = submitted_artifact_job(artifact_jobs, run_id, request_suffix=115)
     with sessions.begin() as session:
         artifact_row = session.get(ArtifactJob, artifact.id)
@@ -124,13 +127,13 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
     run_switch = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
-        clock=lambda: NOW,
+        clock=lambda: clock[0],
         artifacts=CompleteArtifactInspector(),
         artifact_phase_executor=RecordingArtifactExecutor(),
         memory_floor_bytes=50,
     )
     profiles = build_production_fleet_profile_service(
-        sessions, clock=lambda: NOW, run_switch_operations=run_switch
+        sessions, clock=lambda: clock[0], run_switch_operations=run_switch
     )
     profile = profiles.create(
         FleetProfileInput.model_validate(
@@ -205,7 +208,7 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         assert claims, "claims stay held until the exact Stop receipt proves absence"
 
     agent_jobs, stop_claim = _agent_service_and_target_claim(
-        sessions, lifecycle, node_id, [node_id], clock=lambda: NOW
+        sessions, lifecycle, node_id, [node_id], clock=lambda: clock[0]
     )
     with sessions() as session:
         stop_children = tuple(
@@ -272,6 +275,10 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         return
 
     for _ in range(12):
+        due = next_profile_due(profiles, run_switch, application.id)
+        if due is not None:
+            assert due > clock[0]
+            clock[0] = due
         run_switch.tick()
         profiles.tick()
         if profiles.application(application.id).state == "succeeded":
@@ -1203,7 +1210,7 @@ def test_activity_preserves_issued_effect_while_profile_cancellation_waits(
         {
             "effect_id": child_id,
             "kind": "run",
-            "label": "Active Run/Switch child",
+            "label": "Pending Run/Switch child",
             "operation_id": child_id,
             "outcome": "pending",
         }

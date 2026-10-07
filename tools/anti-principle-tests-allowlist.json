@@ -75,12 +75,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_admission_build_install_postgres.py",
-      "function": "test_source_build_plan_writer_and_install_retry_share_builder_admission",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_agent_api.py",
       "function": "test_a_concluded_operation_never_acquires_a_boundary_refusal_note",
       "kind": "refused-read-assertion",
@@ -159,24 +153,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_agent_job_lock_order_postgres.py",
-      "function": "test_changed_candidate_does_not_claim_another_operation",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_job_lock_order_postgres.py",
-      "function": "test_changed_target_scope_is_rejected_after_unlocked_hint",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_job_lock_order_postgres.py",
-      "function": "test_revocation_between_hint_and_lock_stays_fail_closed",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_agent_jobs.py",
       "function": "test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retry",
       "kind": "transient-failed-assertion",
@@ -226,31 +202,7 @@
     },
     {
       "path": "control/tests/test_agent_jobs_postgres.py",
-      "function": "test_postgres_claim_locks_only_operations_without_nullable_join",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs_postgres.py",
-      "function": "test_postgres_complete_serializes_expiry_gate_with_identity_lock",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs_postgres.py",
-      "function": "test_postgres_concurrent_final_completions_aggregate_parent_once",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs_postgres.py",
       "function": "test_postgres_enqueue_cannot_race_parent_finalization",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs_postgres.py",
-      "function": "test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation",
       "kind": "ending-without-fresh-request",
       "count": 1
     },
@@ -264,12 +216,6 @@
       "path": "control/tests/test_agent_jobs_postgres.py",
       "function": "test_postgres_restart_receipt_retries_only_exact_safe_operation",
       "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs_postgres.py",
-      "function": "test_postgres_revocation_serializes_agent_work_and_contact",
-      "kind": "ending-without-fresh-request",
       "count": 1
     },
     {
@@ -693,12 +639,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_enrollment.py",
-      "function": "test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_serial",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_exact_recovery_process_postgres.py",
       "function": "test_postgres_exact_intent_recovers_past_budget_after_process_death",
       "kind": "ending-without-fresh-request",
@@ -719,30 +659,6 @@
     {
       "path": "control/tests/test_fleet_events.py",
       "function": "test_recorder_installation_is_idempotent_and_uninstall_removes_listeners",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_events.py",
-      "function": "test_replay_batch_reads_events_and_retention_metadata_from_one_snapshot",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_events.py",
-      "function": "test_retention_window_reads_one_database_snapshot",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_events.py",
-      "function": "test_sqlite_concurrent_allocations_are_unique_and_monotonic",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_events_postgres.py",
-      "function": "test_postgres_cursor_lock_makes_ids_follow_commit_order",
       "kind": "ending-without-fresh-request",
       "count": 1
     },
@@ -951,12 +867,6 @@
       "count": 2
     },
     {
-      "path": "control/tests/test_fleet_projection.py",
-      "function": "test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_fleet_resume_installed_cli.py",
       "function": "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt",
       "kind": "operator-wait-assertion",
@@ -972,18 +882,6 @@
       "path": "control/tests/test_fleet_resume_installed_cli.py",
       "function": "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt.request",
       "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_stream.py",
-      "function": "test_production_repositories_bound_queries_and_release_before_orderly_close",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_stream.py",
-      "function": "test_production_stream_cancellation_during_poll_await_leaves_no_resources",
-      "kind": "ending-without-fresh-request",
       "count": 1
     },
     {
@@ -1414,20 +1312,8 @@
     },
     {
       "path": "control/tests/test_profile_capacity_admission.py",
-      "function": "test_late_admission_outcome_preserves_concurrent_winner",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_profile_capacity_admission.py",
       "function": "test_pending_admission_refuses_revoked_actor_before_fencing_workloads",
       "kind": "transient-failed-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_profile_capacity_admission.py",
-      "function": "test_profile_load_parks_while_shared_node_admission_is_held",
-      "kind": "ending-without-fresh-request",
       "count": 1
     },
     {
@@ -1456,18 +1342,6 @@
     },
     {
       "path": "control/tests/test_profile_load_submission.py",
-      "function": "test_admission_serializes_insertion_of_a_previously_unknown_spark",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_profile_load_submission.py",
-      "function": "test_admission_serializes_run_replacement_until_acceptance_commits",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_profile_load_submission.py",
       "function": "test_change_between_fresh_review_and_admission_refuses_load",
       "kind": "refused-read-assertion",
       "count": 1
@@ -1482,12 +1356,6 @@
       "path": "control/tests/test_profile_load_submission.py",
       "function": "test_recipe_head_changed_after_review_is_not_substituted_into_admitted_intent",
       "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_profile_load_submission.py",
-      "function": "test_superseded_child_contention_is_parked_without_holding_admission",
-      "kind": "ending-without-fresh-request",
       "count": 1
     },
     {
@@ -2063,12 +1931,6 @@
     {
       "path": "control/tests/test_recipe_operations.py",
       "function": "test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
-      "function": "test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock",
       "kind": "transient-failed-assertion",
       "count": 2
     },
@@ -2577,36 +2439,6 @@
       "count": 3
     },
     {
-      "path": "control/tests/test_telemetry.py",
-      "function": "test_record_batch_locks_node_before_reading_latest_projection",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_telemetry.py",
-      "function": "test_record_batch_rejects_time_window_before_opening_transaction",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_telemetry.py",
-      "function": "test_sample_and_latest_writes_are_one_transaction",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_telemetry_postgres.py",
-      "function": "test_postgres_concurrent_replay_is_idempotent",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_telemetry_postgres.py",
-      "function": "test_postgres_out_of_order_commits_cannot_regress_latest",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_token_scan_memory.py",
       "function": "test_operation_token_scan_memory_does_not_grow_with_the_table",
       "kind": "ending-without-fresh-request",
@@ -2668,6 +2500,14 @@
     }
   ],
   "exceptions": [
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim",
+      "kind": "operator-wait-assertion",
+      "count": 2,
+      "reason": "security-edge",
+      "justification": "An issued irreversible artifact job has an unobserved effect after lease expiry; replaying it or releasing its reservation would duplicate user work. The connected test retains ownership across Controller restart until the superseding Stop receives the exact old fenced cancellation acknowledgement, then proves same-key Stop replay, SQL hold release, fresh inventory, and fresh same-scope run/job admission with an actual agent claim."
+    },
     {
       "path": "control/tests/test_fleet_profile_continuity.py",
       "function": "test_selected_cancel_fences_both_original_and_new_node_ordinals",

@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract import (
@@ -26,6 +27,7 @@ from vonk_control.fleet_profiles import (
     FleetProfileAdmissionBusy,
     FleetProfileConflict,
     FleetProfileService,
+    build_production_fleet_profile_service,
 )
 from vonk_control.lifecycle.types import State as LifecycleState
 from vonk_control.models import (
@@ -43,6 +45,7 @@ from vonk_control.models import (
     ResourceReservation,
     User,
 )
+from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles import cli
@@ -217,28 +220,72 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
 
 
 def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) -> None:
-    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
+    sessions, _api, _codec, _headers_unused, _preview = _profile_api(postgres_engine)
+    now = [NOW]
+    clock = lambda: now[0]
+    planner = RunSwitchOperationService(sessions, clock=clock)
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=clock, run_switch_operations=planner
+    )
+    api, codec = _client(sessions, profiles=profiles)
+    headers = _headers(codec, "administrator")
     original = FleetProfileService._queue_application
     attempts = 0
 
     def busy_then_queue(service, reviewed, **kwargs):
         nonlocal attempts
-        if attempts < 2:
-            attempts += 1
+        attempts += 1
+        if attempts <= 2:
             raise FleetProfileAdmissionBusy("transient admission owner")
         return original(service, reviewed, **kwargs)
 
     monkeypatch.setattr(FleetProfileService, "_queue_application", busy_then_queue)
+    key = str(uuid4())
     response = api.post(
-        "/api/profile/1/load",
-        headers=headers,
-        json={"request_key": str(uuid4())},
+        "/api/profile/1/load", headers=headers, json={"request_key": key}
     )
 
     assert response.status_code == 202, response.text
-    assert attempts == 2
+    assert attempts == 1, "HTTP acceptance tries admission once without waiting"
+    application_id = response.json()["id"]
     with sessions() as session:
-        assert session.scalar(select(FleetProfileApplication)) is not None
+        accepted = session.get(FleetProfileApplication, application_id)
+        assert accepted is not None and accepted.request_key == key
+        accepted_plan = canonical_message(accepted.plan)
+        intended = profiles.application(application_id).progress.intended_profile
+        assert intended is not None
+        accepted_intent = canonical_message(intended)
+        accepted_ordinal = accepted.progress["workload_intent_ordinal"]
+    profiles.tick()
+    assert attempts == 2
+    waiting = profiles.application(application_id)
+    assert waiting.state == "queued" and waiting.next_attempt_at is not None
+    profiles.tick()
+    assert attempts == 2, "a durable retry must not run before its due time"
+    now[0] = waiting.next_attempt_at
+    profiles.tick()
+    assert attempts == 3
+    lookup = api.get(f"/api/profile/1/requests/{key}", headers=headers)
+    assert lookup.status_code == 200 and lookup.json()["id"] == application_id
+    replay = api.post("/api/profile/1/load", headers=headers, json={"request_key": key})
+    assert replay.status_code == 202 and replay.json()["id"] == application_id
+    assert attempts == 3, "same-key replay observes the existing accepted owner"
+    with sessions() as session:
+        assert tuple(session.scalars(select(FleetProfileApplication.id))) == (
+            application_id,
+        )
+        accepted = session.get(FleetProfileApplication, application_id)
+        assert accepted is not None and accepted.request_key == key
+        assert canonical_message(accepted.plan) == accepted_plan
+        assert (
+            canonical_message(
+                profiles.application(application_id).progress.intended_profile
+            )
+            == accepted_intent
+        )
+        assert accepted.progress["workload_intent_ordinal"] == accepted_ordinal
+        selected = session.get(FleetProfileSelection, 1)
+        assert selected is not None and selected.application_id == application_id
 
 
 @pytest.mark.parametrize("change", ["roster", "authority", "profile"])

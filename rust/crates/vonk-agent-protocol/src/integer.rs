@@ -3,24 +3,21 @@
 //! Fields with proven physical/owner limits retain their canonical bounds.
 //! This scalar is used when the schema has no finite machine domain; schema
 //! validation still applies any declared minimum at the model boundary.
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::Number;
 use std::cmp::Ordering;
 use std::fmt;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Integer(Number);
+pub use crate::generated::Integer;
 
 impl Default for Integer {
     fn default() -> Self {
-        Self(0_u64.into())
+        Self::from(0_u64)
     }
 }
 
 impl Ord for Integer {
     fn cmp(&self, other: &Self) -> Ordering {
-        let left = self.0.to_string();
-        let right = other.0.to_string();
+        let left = self.number().to_string();
+        let right = other.number().to_string();
         let left_negative = left.starts_with('-');
         let right_negative = right.starts_with('-');
         if left_negative != right_negative {
@@ -59,32 +56,20 @@ impl PartialOrd<u64> for Integer {
     }
 }
 
-impl<'de> Deserialize<'de> for Integer {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        crate::wire_schema::deserialize_integer_number(deserializer).map(Self)
-    }
-}
-
-impl Serialize for Integer {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
-}
-
 impl fmt::Display for Integer {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
+        self.number().fmt(formatter)
     }
 }
 
 impl From<i64> for Integer {
     fn from(value: i64) -> Self {
-        Self(value.into())
+        Self::from_i64(value)
     }
 }
 
 impl From<u64> for Integer {
     fn from(value: u64) -> Self {
-        Self(value.into())
+        Self::from_u64(value)
     }
 }

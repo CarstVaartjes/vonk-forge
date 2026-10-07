@@ -10,6 +10,11 @@ def test_root_tests_do_not_import_control_implementation() -> None:
     contract_boundary_tests = {
         ROOT / "tests/test_spark_lifecycle_runner.py",
         ROOT / "tests/acceptance/test_spark_lifecycle.py",
+        # These source-bound acceptance tests serve the actual native producer
+        # to installed/historical consumers. They do not define client-owned
+        # Controller models or import Controller implementation in production.
+        ROOT / "tests/test_acceptance_observation_transfer.py",
+        ROOT / "tests/cluster_profiles/test_cli_update.py",
     }
     offenders = []
     for path in (ROOT / "tests").rglob("test_*.py"):

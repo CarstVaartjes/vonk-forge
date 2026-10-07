@@ -6,6 +6,7 @@ const digest = (seed: string): string => {
   return hex.repeat(Math.ceil(64 / hex.length)).slice(0, 64);
 };
 const revisionId = (index: number): string => `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+const recipeId = (index: number): string => `00000001-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 // Projected from the Controller schema2 catalog corpus (92 Models / 85 Recipes).
@@ -51,7 +52,7 @@ function recipe(index: number): LibraryViewRecipe {
   const id = index === 0 ? actualRecipeDocumentSeed.identity.slug : `recipe-${index + 1}`;
   const title = index === 0 ? actualRecipeDocumentSeed.metadata.title : index === 1 ? "Ling 3.0 Flash auxiliary" : `Catalog Recipe ${index + 1}`;
   const definition = clone(actualRecipeDocumentSeed);
-  if (index === 0) return {capabilities: [], content_sha256: digest(`r${index}`), description: definition.metadata.description, installation_returned_count: 0, installation_total_count: 0, installations: [], installations_truncated: false, publisher: definition.identity.publisher, reasons: [], recipe_document: definition, recipe_id: id, recipe_revision_id: revisionId(index), run_returned_count: 0, run_total_count: 0, runs: [], runs_truncated: false, slug: id, title, topology_name: definition.topology.name};
+  if (index === 0) return {capabilities: [], content_sha256: digest(`r${index}`), description: definition.metadata.description, installation_returned_count: 0, installation_total_count: 0, installations: [], installations_truncated: false, publisher: definition.identity.publisher, reasons: [], recipe_document: definition, recipe_id: recipeId(index), recipe_revision_id: revisionId(index), run_returned_count: 0, run_total_count: 0, runs: [], runs_truncated: false, slug: id, title, topology_name: definition.topology.name};
   definition.identity = {...definition.identity, slug: id};
   definition.metadata = {...definition.metadata, title, description: `${title} canonical RecipeDefinition from the Controller catalog corpus.`};
   const modelIndexes = index === 4 ? [0, 1] : [syntheticModelTarget(index)];
@@ -60,7 +61,7 @@ function recipe(index: number): LibraryViewRecipe {
     const modelDoc = modelDocument(modelIndex);
     return {...source, id: modelPosition === 0 ? "primary" : `auxiliary-${modelPosition}`, model: {...source.model, publisher: modelDoc.identity.publisher, slug: modelDoc.identity.slug, content_sha256: digest(`m${modelIndex}`)}};
   });
-  return {capabilities: ["chat"], content_sha256: digest(`r${index}`), description: definition.metadata.description, installation_returned_count: 0, installation_total_count: 0, installations: [], installations_truncated: false, publisher: definition.identity.publisher, reasons: [], recipe_document: definition, recipe_id: id, recipe_revision_id: revisionId(index), run_returned_count: 0, run_total_count: 0, runs: [], runs_truncated: false, slug: id, title, topology_name: definition.topology.name};
+  return {capabilities: ["chat"], content_sha256: digest(`r${index}`), description: definition.metadata.description, installation_returned_count: 0, installation_total_count: 0, installations: [], installations_truncated: false, publisher: definition.identity.publisher, reasons: [], recipe_document: definition, recipe_id: recipeId(index), recipe_revision_id: revisionId(index), run_returned_count: 0, run_total_count: 0, runs: [], runs_truncated: false, slug: id, title, topology_name: definition.topology.name};
 }
 
 export function libraryRecipeSummary(input: Partial<LibraryViewRecipe> & Pick<LibraryViewRecipe, "recipe_id" | "slug" | "title">): LibraryViewRecipe {
@@ -89,7 +90,7 @@ export const modelLibrary: ModelLibrary = {generated_at: libraryViewSnapshot.gen
 export const recipeLibrary: RecipeLibrary = {generated_at: libraryViewSnapshot.generated_at, freshness_policy: libraryViewSnapshot.freshness_policy, facets: facetValues, filters: {}, next_cursor: null, recipes: [...models.flatMap(entry => entry.recipes), ...libraryViewSnapshot.unlinked_recipes].map(entry => ({selector: `${entry.publisher}/${entry.slug}`, identity: {content_sha256: entry.content_sha256, description: entry.description, publisher: entry.publisher, recipe_id: entry.recipe_id, recipe_revision_id: entry.recipe_revision_id, slug: entry.slug, title: entry.title}, document: entry.recipe_document, model_selectors: entry.recipe_document.models.map(model => model.model.content_sha256), usage: entry.capabilities, resources: projectionResources, local: projectionLocal, alignment: entry.recipe_document.metadata.alignment, node_count: entry.recipe_document.topology.node_count, engine: entry.recipe_document.runtime.engine, creator: entry.recipe_document.provenance.source_reference?.split("/")[3] ?? null, updated_at: libraryViewSnapshot.generated_at}))};
 export const chatRecipe = recipes[0]!;
 export const codeRecipe = recipes[1]!;
-export const unlinkedRecipe = libraryRecipeSummary({recipe_id: "recipe-unlinked", recipe_revision_id: revisionId(10_000), slug: "unlinked", title: "Unlinked recipe"});
+export const unlinkedRecipe = libraryRecipeSummary({recipe_id: recipeId(10_000), recipe_revision_id: revisionId(10_000), slug: "unlinked", title: "Unlinked recipe"});
 const detailModelDocuments = recipes[0]!.recipe_document.models.map(selection => ({model_document: models.find(model => model.model.content_sha256 === selection.model.content_sha256)!.model_document, selection}));
 export const minimalLibraryDetail: LibraryViewRecipeDetail = {generated_at: "2026-09-06T12:00:00Z", definition: recipes[0]!.recipe_document, recipe: {...recipes[0]!}, model_documents: detailModelDocuments, operational_state: {builds: [], installations: [], mappings: [], runs: []}, placement: [], reasons: [], topology: recipes[0]!.recipe_document.topology};
 export const fullLibraryDetail = minimalLibraryDetail;

@@ -2,6 +2,48 @@
   "schema": 1,
   "permanent": [
     {
+      "path": "control/src/vonk_control/openapi_numbers.py",
+      "function": "install_canonical_openapi.openapi",
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "reason": "Pinned FastAPI OpenAPI assembler reads and emits the external OpenAPI/JSON Schema format; canonical Pydantic models still own every application payload, and this mapping preserves their authored numeric schema keywords."
+    },
+    {
+      "path": "control/src/vonk_control/openapi_numbers.py",
+      "function": "canonical_openapi",
+      "annotation": "dict[str, Any]",
+      "count": 5,
+      "reason": "Pinned FastAPI OpenAPI assembler reads and emits the external OpenAPI/JSON Schema format; canonical Pydantic models still own every application payload, and this mapping preserves their authored numeric schema keywords."
+    },
+    {
+      "path": "control/src/vonk_control/openapi_numbers.py",
+      "function": "canonical_openapi",
+      "annotation": "dict[str, str | Any]",
+      "count": 3,
+      "reason": "Pinned FastAPI OpenAPI assembler reads and emits the external OpenAPI/JSON Schema format; canonical Pydantic models still own every application payload, and this mapping preserves their authored numeric schema keywords."
+    },
+    {
+      "path": "control/src/vonk_control/openapi_numbers.py",
+      "function": "canonical_openapi",
+      "annotation": "dict[str, dict[str, Any]]",
+      "count": 3,
+      "reason": "Pinned FastAPI OpenAPI assembler reads and emits the external OpenAPI/JSON Schema format; canonical Pydantic models still own every application payload, and this mapping preserves their authored numeric schema keywords."
+    },
+    {
+      "path": "control/src/vonk_control/cli_update_contract.py",
+      "function": "cli_update_contract_schema",
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "reason": "The canonical CliUpdateContract Pydantic model emits an external JSON Schema document; this mapping is the schema format, not an untyped observation payload."
+    },
+    {
+      "path": "control/src/vonk_control/observation_transfer.py",
+      "function": "observation_openapi",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "External OpenAPI route-extension metadata names canonical stream-record and full-observation model components; application observations remain their separately owned typed models."
+    },
+    {
       "path": "agent_protocol/src/vonk_agent_protocol/compiled_execution_plan.py",
       "function": "CompiledExecutionPlan.to_mapping",
       "annotation": "dict[str, object]",

@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -206,8 +207,9 @@ def _rust_accepts_many(
 
     if not cases:
         return []
+    timings = os.environ.get("VONK_WIRE_PROBE_TIMINGS") == "1"
     completed = subprocess.run(
-        [str(probe), "--verdicts"],
+        [str(probe), "--verdicts", *(["--timings"] if timings else [])],
         input="".join(
             json.dumps(_claim(operation, payload), separators=(",", ":")) + "\n"
             for operation, payload in cases
@@ -216,6 +218,8 @@ def _rust_accepts_many(
         capture_output=True,
         check=False,
     )
+    if timings:
+        print(completed.stderr, end="")
     verdicts = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     if completed.returncode != 0 or len(verdicts) != len(cases):
         raise AssertionError(
@@ -669,6 +673,7 @@ def test_catalog_launch_payloads_are_accepted_by_python_and_rust(
     from verbatim release recipes; here the same documents cross the production
     Rust install/start parser and the Python wire models.
     """
+    started = time.perf_counter()
     cases: list[tuple[AgentOperation, dict[str, Any]]] = []
     labels: list[str] = []
     models = {
@@ -682,12 +687,21 @@ def test_catalog_launch_payloads_are_accepted_by_python_and_rust(
         if start is not None:
             cases.append((AgentOperation.RECIPE_START, start))
             labels.append(f"start {name}")
+    compiled = time.perf_counter()
     for (operation, payload), label in zip(cases, labels, strict=True):
         try:
             models[operation].model_validate(payload)
         except ValueError as error:
             raise AssertionError(f"{label}: {error}") from error
+    validated = time.perf_counter()
     verdicts = _rust_accepts_many(wire_probe, cases)
+    if os.environ.get("VONK_WIRE_PROBE_TIMINGS") == "1":
+        print(
+            f"wire_catalog_timing cases={len(cases)} "
+            f"fixtures_s={compiled - started:.6f} "
+            f"python_validation_s={validated - compiled:.6f} "
+            f"native_batch_s={time.perf_counter() - validated:.6f}"
+        )
     assert [
         label for label, verdict in zip(labels, verdicts, strict=True) if not verdict
     ] == []

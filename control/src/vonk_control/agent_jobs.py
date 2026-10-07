@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import Boolean, and_, or_, select, update
+from sqlalchemy import Boolean, String, and_, cast, or_, select, update
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, object_session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -38,6 +38,7 @@ from vonk_agent_protocol import (
     OutcomeFailed,
     OutcomeUnknown,
     ProgressPhase,
+    RecipeStopResult,
     ReservationState,
     RouteState,
     RunState,
@@ -142,6 +143,7 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
+    RunNode,
 )
 from .models import AgentOperation as StoredOperation
 from .operation_contract import sanitize_failure_evidence, validate_progress_update
@@ -1097,6 +1099,227 @@ _MAX_CLAIM_REFUSAL_REASON = 512
 
 def _is_refusal_reason(reason: str | None) -> bool:
     return reason is None or reason.startswith(_REFUSAL_PREFIXES)
+
+
+def _exact_service_stop_receipt_covers_start(
+    session: Session, source: StoredOperation, current_ordinal: int
+) -> bool:
+    """Observe an older Start's exact runtime through a complete physical Stop.
+
+    The Start and its attempt remain historical evidence. Only the same frozen
+    runtime generation is resolved; cancellation or a terminal parent alone
+    proves nothing. Current node intent still fences every original Start claim.
+    """
+    from .job_documents import RecipeStartParent, RecipeStopParent
+    from .recipe_stop_payloads import durable_run_stop_payloads, stop_payload_from_start
+
+    if (
+        source.kind != AgentOperation.RECIPE_START.value
+        or source.current_attempt < 1
+        or source.workload_intent_ordinal is None
+        or source.workload_intent_ordinal >= current_ordinal
+        or source.payload_digest
+        != hashlib.sha256(canonical_message(source.payload)).hexdigest()
+    ):
+        return False
+    source_parent = session.get(Job, source.parent_job_id)
+    source_attempt = session.scalar(
+        select(AgentOperationAttempt).where(
+            AgentOperationAttempt.operation_id == source.id,
+            AgentOperationAttempt.attempt == source.current_attempt,
+        )
+    )
+    node = session.get(AgentNode, source.node_id)
+    if (
+        source_parent is None
+        or source_parent.kind != "recipe.start"
+        or source.authority_revision != source_parent.authority_revision
+        or source_attempt is None
+        or node is None
+        or node.workload_intent_ordinal != current_ordinal
+        or source_parent.payload_digest
+        != hashlib.sha256(canonical_message(source_parent.payload)).hexdigest()
+    ):
+        return False
+    try:
+        start = read_stored_model(
+            RecipeStartPayload,
+            canonical_message(source.payload),
+            from_json=True,
+            strict=True,
+        )
+        parent = read_stored_model(
+            RecipeStartParent,
+            canonical_message(source_parent.payload),
+            from_json=True,
+            strict=True,
+        )
+        run = session.get(RecipeRun, start.run_id)
+        if (
+            parent.owner_kind != "run"
+            or parent.owner_id != start.run_id
+            or parent.plan_digest != start.plan_digest
+            or parent.workload_intent_ordinal != source.workload_intent_ordinal
+            or run is None
+            or run.state != RunState.STOPPED
+            or run.run_generation != start.run_generation
+        ):
+            return False
+        members = tuple(
+            session.scalars(select(RunNode).where(RunNode.run_id == run.id))
+        )
+        member_ids = {member.node_id for member in members}
+        if source.node_id not in member_ids or set(source_parent.targets) != member_ids:
+            return False
+        accepted_sources = [
+            item
+            for phase in parent.phases or []
+            for item in phase
+            if item.node_id == source.node_id
+            and item.operation_id == source.id
+            and canonical_message(item.payload) == canonical_message(start)
+        ]
+        if len(accepted_sources) != 1:
+            return False
+        expected = durable_run_stop_payloads(
+            session,
+            run,
+            members,
+            run_generation=start.run_generation,
+            cancel_pending_start=True,
+            allow_missing_nodes=False,
+        )
+        source_target = stop_payload_from_start(start, cancel_pending_start=True)
+        source_target = source_target.model_copy(
+            update={
+                "stop_timeout_seconds": expected[source.node_id].stop_timeout_seconds
+            }
+        )
+        if canonical_message(source_target) != canonical_message(
+            expected[source.node_id]
+        ):
+            return False
+        stop_parents = session.scalars(
+            select(Job)
+            .where(
+                Job.kind == "recipe.stop",
+                Job.state == LifecycleState.SUCCEEDED,
+                Job.payload["owner_id"].as_string() == run.id,
+                Job.id.in_(
+                    select(StoredOperation.parent_job_id).where(
+                        StoredOperation.node_id == source.node_id,
+                        StoredOperation.kind == AgentOperation.RECIPE_STOP.value,
+                        StoredOperation.state == LifecycleState.SUCCEEDED,
+                        StoredOperation.workload_intent_ordinal
+                        > source.workload_intent_ordinal,
+                        StoredOperation.workload_intent_ordinal <= current_ordinal,
+                        StoredOperation.payload["run_id"].as_string() == run.id,
+                        cast(
+                            StoredOperation.payload["run_generation"].as_string(),
+                            String,
+                        )
+                        == str(start.run_generation),
+                    )
+                ),
+            )
+            .order_by(Job.created_at.desc(), Job.id)
+        )
+        for stop_parent in stop_parents:
+            if (
+                stop_parent.payload_digest
+                != hashlib.sha256(canonical_message(stop_parent.payload)).hexdigest()
+            ):
+                continue
+            try:
+                stop_document = read_stored_model(
+                    RecipeStopParent,
+                    canonical_message(stop_parent.payload),
+                    from_json=True,
+                    strict=True,
+                )
+            except (TypeError, ValueError):
+                continue
+            ordinal = stop_document.workload_intent_ordinal
+            if (
+                stop_document.owner_kind != "run"
+                or stop_document.owner_id != run.id
+                or stop_document.phases is None
+                or stop_document.profile_partial_stop is not None
+                or stop_document.execution_mode is not None
+                or stop_document.recovery is not None
+                or ordinal is None
+                or not source.workload_intent_ordinal < ordinal <= current_ordinal
+                or set(stop_parent.targets) != member_ids
+            ):
+                continue
+            children = tuple(
+                session.scalars(
+                    select(StoredOperation).where(
+                        StoredOperation.parent_job_id == stop_parent.id
+                    )
+                )
+            )
+            if (
+                len(children) != len(member_ids)
+                or {child.node_id for child in children} != member_ids
+            ):
+                continue
+            accepted_stops = [item for phase in stop_document.phases for item in phase]
+            if (
+                len(accepted_stops) != len(member_ids)
+                or {item.node_id for item in accepted_stops} != member_ids
+                or any(
+                    not any(
+                        child.id == item.operation_id and child.node_id == item.node_id
+                        for child in children
+                    )
+                    or canonical_message(item.payload)
+                    != canonical_message(expected[item.node_id])
+                    for item in accepted_stops
+                )
+            ):
+                continue
+            proven = True
+            for child in children:
+                attempt = session.scalar(
+                    select(AgentOperationAttempt).where(
+                        AgentOperationAttempt.operation_id == child.id,
+                        AgentOperationAttempt.attempt == child.current_attempt,
+                    )
+                )
+                if (
+                    child.kind != AgentOperation.RECIPE_STOP.value
+                    or child.state != LifecycleState.SUCCEEDED
+                    or child.current_attempt < 1
+                    or child.workload_intent_ordinal != ordinal
+                    or child.authority_revision != stop_parent.authority_revision
+                    or child.created_at < source.created_at
+                    or attempt is None
+                    or attempt.state != LifecycleState.SUCCEEDED
+                    or child.payload_digest
+                    != hashlib.sha256(canonical_message(child.payload)).hexdigest()
+                    or canonical_message(child.payload)
+                    != canonical_message(expected[child.node_id])
+                ):
+                    proven = False
+                    break
+                try:
+                    receipt = validate_result_for_operation(
+                        child.kind,
+                        attempt.result,
+                        state=agent_operation_states.attempt_wire_state(attempt),
+                    )
+                except (TypeError, ValueError):
+                    proven = False
+                    break
+                if not isinstance(receipt, RecipeStopResult):
+                    proven = False
+                    break
+            if proven:
+                return True
+    except (TypeError, ValueError, UnknownOutcomeError):
+        return False
+    return False
 
 
 def _profile_stop_covers_jobrun_mutations(
@@ -2291,6 +2514,10 @@ class AgentJobService:
         )
         pending = []
         for operation in candidates:
+            if _exact_service_stop_receipt_covers_start(
+                session, operation, current_ordinal
+            ):
+                continue
             if (
                 operation.kind in _ABANDONABLE_OPERATIONS
                 and operation.state in agent_operation_states.PARKED
@@ -3232,6 +3459,13 @@ class AgentJobService:
                 active_mutations_list = []
                 reconciled_dead_running = False
                 for old in candidates:
+                    if (
+                        operation.workload_intent_ordinal is not None
+                        and _exact_service_stop_receipt_covers_start(
+                            session, old, operation.workload_intent_ordinal
+                        )
+                    ):
+                        continue
                     if old.state == "running":
                         attempt = session.scalar(
                             select(AgentOperationAttempt)

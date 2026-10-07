@@ -497,6 +497,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "Unknown abandonment retains the plan, logs its next attempt and continues other plans; the tick re-observes the retained plan after a five second backoff."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "_exact_service_stop_receipt_covers_start",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "This exact Stop observer returns False for unreadable accepted Start evidence, retaining the issued old effect. AgentJobService.assess_superseded_agent_effects_in_session returns typed UNCERTAIN_EFFECT with persisted observation due, so FleetProfileService re-observes the same journal; the AgentJobService claim gate retains the old active mutation and each next AgentClaim re-reads the healed receipt. The connected PostgreSQL pending-effect proof exercises partial and nine damaged receipts, repair, the same profile continuation and a fresh native Start claim without changing the old attempt."
     }
   ],
   "call_edges": [

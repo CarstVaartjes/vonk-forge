@@ -311,9 +311,18 @@ mod tests {
     async fn read_request_headers(socket: &mut tokio::net::TcpStream) {
         let mut request = [0; 4096];
         let mut received = 0;
+        // The controlled streaming peer uses this same two-second transport
+        // budget; header reads cannot outlive that request.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         while !request[..received].ends_with(b"\r\n\r\n") {
-            assert!(received < request.len(), "test request headers exceed allocation");
-            let amount = socket.read(&mut request[received..]).await.unwrap();
+            assert!(
+                received < request.len(),
+                "test request headers exceed allocation"
+            );
+            let amount = tokio::time::timeout_at(deadline, socket.read(&mut request[received..]))
+                .await
+                .expect("test request header deadline")
+                .unwrap();
             assert!(amount > 0, "test request ended before complete headers");
             received += amount;
         }

@@ -1,20 +1,21 @@
-import {formatWire, stringifyContractJson} from "../api/contract-numeric";
+import {FleetEventConnection} from "../api/fleet-event-connection";
+import {formatWire, parseContractJson, stringifyContractJson} from "../api/contract-numeric";
 import {act, render, screen} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {ControlApi, FleetChangeEvent, TelemetryPoint, VisualFleetSnapshot} from "../api/types";
 import {useFleetStream} from "./use-fleet-stream";
 
-class FakeEventSource {
-  static instances: FakeEventSource[] = [];
+class FakeFleetConnection {
+  static instances: FakeFleetConnection[] = [];
   readonly url: string;
   readonly withCredentials = false;
   readyState = 0;
   closed = false;
   private listeners = new Map<string, Set<EventListener>>();
 
-  constructor(url: string | URL) {
-    this.url = String(url);
-    FakeEventSource.instances.push(this);
+  constructor(readonly appliedCursor: () => string) {
+    this.url = "/api/fleet/stream";
+    FakeFleetConnection.instances.push(this);
   }
 
   addEventListener(type: string, listener: EventListener): void {
@@ -33,7 +34,9 @@ class FakeEventSource {
   }
 
   emit(type: string, data: unknown = undefined, lastEventId = ""): void {
-    const event = type === "open" || type === "error"
+    if ((type === "node-telemetry" || type === "node-profile" || type === "recipe-state" || type === "operation-state")
+        && data && typeof data === "object") data = {...data, event_cursor: parseContractJson(lastEventId)};
+    const event = type === "open" || type === "error" || type === "unavailable"
       ? new Event(type)
       : new MessageEvent(type, {data: stringifyContractJson(data), lastEventId});
     for (const listener of this.listeners.get(type) ?? []) listener(event);
@@ -89,27 +92,30 @@ function snapshot(cursor: number, gpu = 10): VisualFleetSnapshot {
 function change(type: "recipe-state" | "node-profile" | "operation-state"): FleetChangeEvent {
   const occurred_at = "2026-08-15T12:00:00Z";
   if (type === "node-profile") return {
+    event_cursor: 0,
     projection_refresh_required: true,
     change: {entity_kind: "node-profile", entity_id: NODE_A, node_id: NODE_A, occurred_at,
       fields: {node_id: NODE_A, profile_changed: true}},
   };
   if (type === "recipe-state") return {
+    event_cursor: 0,
     projection_refresh_required: true,
     change: {entity_kind: "recipe-installation", entity_id: "installation-a", node_id: null, occurred_at,
       fields: {entity_kind: "recipe-installation", entity_id: "installation-a", recipe_revision_id: "revision-a", mapping_id: "mapping-a", mapping_generation: 1, state: "installed"}},
   };
   return {
+    event_cursor: 0,
     projection_refresh_required: true,
     change: {entity_kind: "job", entity_id: "job-a", node_id: null, occurred_at,
       fields: {entity_kind: "job", entity_id: "job-a", kind: "recipe.start", state: "queued", target_count: 1}},
   };
 }
 
-function api(visualFleet: ControlApi["visualFleet"]): ControlApi {
-  return {visualFleet} as ControlApi;
+function api(visualFleet: ControlApi["visualFleet"]): Pick<ControlApi, "visualFleet" | "fleetEvents"> {
+  return {visualFleet, fleetEvents: (cursor: () => string) => new FakeFleetConnection(cursor)};
 }
 
-function Probe({control}: {control: ControlApi}) {
+function Probe({control}: {control: ReturnType<typeof api>}) {
   const fleet = useFleetStream(control);
   return <>
     <span data-testid="connection">{fleet.connection}</span>
@@ -125,8 +131,7 @@ async function flush(): Promise<void> {
 }
 
 beforeEach(() => {
-  FakeEventSource.instances = [];
-  vi.stubGlobal("EventSource", FakeEventSource);
+  FakeFleetConnection.instances = [];
 });
 
 afterEach(() => {
@@ -134,10 +139,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("uses same-origin EventSource and reconciles increments and backward resets", async () => {
-  render(<Probe control={api(async () => snapshot(5))}/>);
+test("uses same-origin bounded connection and reconciles increments and backward resets", async () => {
+  vi.useFakeTimers();
+  const visualFleet = vi.fn().mockResolvedValueOnce(snapshot(5)).mockResolvedValueOnce(snapshot(2, 22));
+  render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   expect(stream.url).toBe("/api/fleet/stream");
   expect(screen.getByTestId("cursor")).toHaveTextContent("5");
@@ -148,21 +155,25 @@ test("uses same-origin EventSource and reconciles increments and backward resets
   expect(screen.getByTestId("gpu")).toHaveTextContent("73");
   act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(99)}, "6"));
   expect(screen.getByTestId("gpu")).toHaveTextContent("73");
-  // Deliberately mismatched envelope/sample ownership must remain ignored.
+  // An invalid ownership envelope fences subsequent increments until capture.
   act(() => stream.emit("node-telemetry", {node_id: NODE_B, sample: point(88)}, "7"));
   expect(screen.getByTestId("cursor")).toHaveTextContent("6");
   act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7"));
-  expect(screen.getByTestId("gpu")).toHaveTextContent("77");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("73");
 
-  act(() => stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(2, 22)}, "2"));
+  act(() => stream.emit("fleet-refresh", {reset_reason: "cursor-ahead", event_cursor: 2}, "2"));
+  expect(screen.getByTestId("cursor")).toHaveTextContent("6");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("73");
+  act(() => vi.advanceTimersByTime(100));
+  await flush();
   expect(screen.getByTestId("cursor")).toHaveTextContent("2");
   expect(screen.getByTestId("gpu")).toHaveTextContent("22");
 });
 
-test("keeps one native EventSource across browser-managed Last-Event-ID reconnects", async () => {
+test("keeps one connection owner and reconnects from applied cursor", async () => {
   render(<Probe control={api(async () => snapshot(5))}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => {
     stream.emit("open");
@@ -176,7 +187,8 @@ test("keeps one native EventSource across browser-managed Last-Event-ID reconnec
     stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7");
   });
 
-  expect(FakeEventSource.instances).toHaveLength(1);
+  expect(stream.appliedCursor()).toBe("7");
+  expect(FakeFleetConnection.instances).toHaveLength(1);
   expect(stream.closed).toBe(false);
   expect(screen.getByTestId("connection")).toHaveTextContent("live");
   expect(screen.getByTestId("cursor")).toHaveTextContent("7");
@@ -190,7 +202,7 @@ test("coalesces sparse recipe, profile, and operation refresh signals", async ()
     .mockResolvedValueOnce(snapshot(7, 70));
   render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => {
     stream.emit("recipe-state", change("recipe-state"), "6");
@@ -208,22 +220,22 @@ test("authoritative cursor-ahead reset cancels old sparse retries and starts a n
   vi.useFakeTimers();
   const visualFleet = vi.fn()
     .mockResolvedValueOnce(snapshot(10))
-    .mockResolvedValueOnce(snapshot(100, 100));
+    .mockResolvedValueOnce(snapshot(21, 21));
   render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => {
     stream.emit("recipe-state", change("recipe-state"), "100");
-    stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
+    stream.emit("fleet-refresh", {reset_reason: "cursor-ahead", event_cursor: 20}, "20");
     stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "21");
     vi.advanceTimersByTime(10_000);
   });
   await flush();
 
-  expect(visualFleet).toHaveBeenCalledTimes(1);
+  expect(visualFleet).toHaveBeenCalledTimes(2);
   expect(screen.getByTestId("cursor")).toHaveTextContent("21");
-  expect(screen.getByTestId("gpu")).toHaveTextContent("77");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("21");
 });
 
 test("ignores an old-timeline sparse response already in flight across an authoritative reset", async () => {
@@ -236,7 +248,7 @@ test("ignores an old-timeline sparse response already in flight across an author
     .mockResolvedValueOnce(snapshot(22, 22));
   render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => {
     stream.emit("recipe-state", change("recipe-state"), "100");
@@ -245,7 +257,7 @@ test("ignores an old-timeline sparse response already in flight across an author
   expect(visualFleet).toHaveBeenCalledTimes(2);
 
   act(() => {
-    stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
+    stream.emit("fleet-refresh", {reset_reason: "cursor-ahead", event_cursor: 20}, "20");
     stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "21");
     stream.emit("operation-state", change("operation-state"), "22");
   });
@@ -269,7 +281,7 @@ test("retries a failed sparse refresh until the required cursor is reconciled", 
     .mockResolvedValueOnce(snapshot(6, 60));
   render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => {
     stream.emit("recipe-state", change("recipe-state"), "6");
@@ -297,7 +309,7 @@ test("retries when concurrent telemetry makes a sparse REST response stale", asy
     .mockResolvedValueOnce(snapshot(7, 70));
   render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => {
     stream.emit("operation-state", change("operation-state"), "6");
@@ -307,8 +319,8 @@ test("retries when concurrent telemetry makes a sparse REST response stale", asy
   act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7"));
   await act(async () => resolveRefresh(snapshot(6, 66)));
 
-  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
-  expect(screen.getByTestId("gpu")).toHaveTextContent("77");
+  expect(screen.getByTestId("cursor")).toHaveTextContent("6");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("66");
   act(() => vi.advanceTimersByTime(1_000));
   await flush();
 
@@ -324,7 +336,7 @@ test("polls once per ten seconds while reconnecting and stops on stream recovery
     .mockResolvedValueOnce(snapshot(6, 60));
   render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => stream.emit("error"));
   expect(screen.getByTestId("connection")).toHaveTextContent("reconnecting");
@@ -347,7 +359,7 @@ test("periodically reconciles server-derived state while the SSE connection stay
     .mockResolvedValueOnce(snapshot(6, 60));
   render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => stream.emit("open"));
   act(() => vi.advanceTimersByTime(30_000));
@@ -366,7 +378,7 @@ test("does not overlap periodic live reconciliation requests", async () => {
     .mockReturnValueOnce(pending);
   render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => stream.emit("open"));
   act(() => vi.advanceTimersByTime(90_000));
@@ -375,15 +387,15 @@ test("does not overlap periodic live reconciliation requests", async () => {
   expect(screen.getByTestId("connection")).toHaveTextContent("live");
 });
 
-test("uses polling fallback when EventSource is unavailable", async () => {
+test("uses completed snapshot polling while the event connection is unavailable", async () => {
   vi.useFakeTimers();
-  vi.stubGlobal("EventSource", undefined);
   const visualFleet = vi.fn()
     .mockResolvedValueOnce(snapshot(5))
     .mockResolvedValueOnce(snapshot(6));
 
   render(<Probe control={api(visualFleet)}/>);
   await flush();
+  act(() => FakeFleetConnection.instances[0].emit("error"));
   expect(screen.getByTestId("connection")).toHaveTextContent("reconnecting");
   act(() => vi.advanceTimersByTime(10_000));
   await flush();
@@ -401,7 +413,7 @@ test("does not let an older in-flight poll overwrite a newer stream increment", 
     .mockReturnValueOnce(pendingPoll);
   render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => {
     stream.emit("error");
@@ -414,7 +426,7 @@ test("does not let an older in-flight poll overwrite a newer stream increment", 
   expect(screen.getByTestId("gpu")).toHaveTextContent("77");
 });
 
-test("retries initial errors with a fresh EventSource", async () => {
+test("retries initial errors with a fresh connection", async () => {
   const visualFleet = vi.fn()
     .mockRejectedValueOnce(new Error("Control API returned 503"))
     .mockResolvedValueOnce(snapshot(4));
@@ -422,16 +434,16 @@ test("retries initial errors with a fresh EventSource", async () => {
   await flush();
 
   expect(screen.getByTestId("error")).toHaveTextContent("Control API returned 503");
-  const first = FakeEventSource.instances[0];
+  const first = FakeFleetConnection.instances[0];
   await userEvent.click(screen.getByRole("button", {name: "Retry"}));
   await flush();
 
   expect(first.closed).toBe(true);
-  expect(FakeEventSource.instances).toHaveLength(2);
+  expect(FakeFleetConnection.instances).toHaveLength(2);
   expect(screen.getByTestId("cursor")).toHaveTextContent("4");
 });
 
-test("cleans EventSource listeners, timers, and in-flight requests on unmount", () => {
+test("cleans connection listeners, timers, and in-flight requests on unmount", () => {
   vi.useFakeTimers();
   let signal: AbortSignal | undefined;
   const pending = new Promise<VisualFleetSnapshot>(() => undefined);
@@ -439,7 +451,7 @@ test("cleans EventSource listeners, timers, and in-flight requests on unmount", 
     signal = candidate;
     return pending;
   })}/>);
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
   act(() => stream.emit("error"));
 
   view.unmount();
@@ -462,7 +474,7 @@ test("aborts and stops an in-flight periodic live reconciliation on unmount", as
     });
   const view = render(<Probe control={api(visualFleet)}/>);
   await flush();
-  const stream = FakeEventSource.instances[0];
+  const stream = FakeFleetConnection.instances[0];
 
   act(() => stream.emit("open"));
   act(() => vi.advanceTimersByTime(30_000));
@@ -474,4 +486,87 @@ test("aborts and stops an in-flight periodic live reconciliation on unmount", as
   expect(reconciliationSignal?.aborted).toBe(true);
   expect(visualFleet).toHaveBeenCalledTimes(2);
   expect(vi.getTimerCount()).toBe(0);
+});
+
+test("keeps the last completed roster through a refresh notice and failed capture, then recovers", async () => {
+  vi.useFakeTimers();
+  const visualFleet = vi.fn()
+    .mockResolvedValueOnce(snapshot(5, 50))
+    .mockRejectedValueOnce(new Error("observation.transfer_unavailable: capture interrupted"))
+    .mockResolvedValueOnce(snapshot(7, 70));
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeFleetConnection.instances[0];
+  act(() => {
+    stream.emit("fleet-refresh", {reset_reason: "retention-gap", event_cursor: 6}, "6");
+    stream.emit("node-telemetry", {node_id: NODE_A, sample: point(99)}, "7");
+  });
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("50");
+  act(() => vi.advanceTimersByTime(100));
+  await flush();
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("50");
+  act(() => vi.advanceTimersByTime(1100));
+  await flush();
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("70");
+  expect(visualFleet).toHaveBeenCalledTimes(3);
+});
+
+
+test("malformed sparse authority fences later telemetry until a new complete capture", async () => {
+  vi.useFakeTimers();
+  let complete!: (value: VisualFleetSnapshot) => void;
+  const capture = new Promise<VisualFleetSnapshot>(resolve => { complete = resolve; });
+  const visualFleet = vi.fn().mockResolvedValueOnce(snapshot(5)).mockReturnValueOnce(capture);
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeFleetConnection.instances[0];
+  act(() => {
+    stream.emit("operation-state", {}, "999999999999999999999999999999");
+    stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7");
+  });
+  expect(stream.appliedCursor()).toBe("5");
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("10");
+  act(() => vi.advanceTimersByTime(100));
+  await flush();
+  expect(visualFleet).toHaveBeenCalledTimes(2);
+  await act(async () => complete(snapshot(7, 70)));
+  expect(stream.appliedCursor()).toBe("7");
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("70");
+  // The untrusted, out-of-range header never became a required retry cursor.
+  act(() => vi.advanceTimersByTime(1000));
+  await flush();
+  expect(visualFleet).toHaveBeenCalledTimes(2);
+});
+
+
+test("proxy outage preserves roster until the same connection receives a notice and complete repair", async () => {
+  vi.useFakeTimers();
+  const requests: RequestInit[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_path: string, init: RequestInit) => {
+    requests.push(init);
+    if (requests.length === 1) return new Response("Bad Gateway", {status: 502, headers: {"Retry-After": "5"}});
+    const body = new TextEncoder().encode(`id: 7\nevent: fleet-refresh\ndata: ${stringifyContractJson({reset_reason: "retention-gap", event_cursor: 7})}\n\n`);
+    return new Response(new ReadableStream({start(controller) { controller.enqueue(body); }}),
+      {headers: {"Content-Type": "text/event-stream"}});
+  }));
+  const visualFleet = vi.fn().mockResolvedValueOnce(snapshot(5)).mockResolvedValueOnce(snapshot(7, 70));
+  const control: Pick<ControlApi, "visualFleet" | "fleetEvents"> = {visualFleet, fleetEvents: cursor => new FleetEventConnection(cursor)};
+  render(<Probe control={control}/>);
+  await flush();
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("10");
+  act(() => vi.advanceTimersByTime(5000)); await flush();
+  expect(requests).toHaveLength(2);
+  expect(new Headers(requests[1].headers).get("Last-Event-ID")).toBe("5");
+  // A received notice is not roster authority.
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("10");
+  act(() => vi.advanceTimersByTime(100)); await flush();
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("70");
 });

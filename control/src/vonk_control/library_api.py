@@ -7,6 +7,8 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query
 
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
 from .auth import CursorError
 from .bounded_json import BoundedJSONError
 from .cursor_contract import MAX_CURSOR_LENGTH
@@ -88,6 +90,7 @@ def install_library_routes(
         response_model=ModelLibraryResponse,
         responses=bounded_error_responses(401, 422, 503),
         operation_id="listModelLibrary",
+        openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def model_library(
         limit: Annotated[int, Query(ge=1, le=512)] = 100,
@@ -142,6 +145,7 @@ def install_library_routes(
         response_model=RecipeLibraryResponse,
         responses=bounded_error_responses(401, 422, 503),
         operation_id="listRecipeLibrary",
+        openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def recipe_library(
         limit: Annotated[int, Query(ge=1, le=512)] = 100,

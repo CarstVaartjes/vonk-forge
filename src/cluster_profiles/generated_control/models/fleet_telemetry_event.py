@@ -25,10 +25,12 @@ T = TypeVar("T", bound="FleetTelemetryEvent")
 class FleetTelemetryEvent:
     """
         Attributes:
+            event_cursor (int):
             node_id (str):
             sample (TelemetryPoint):
      """
 
+    event_cursor: int
     node_id: str
     sample: TelemetryPoint
 
@@ -38,6 +40,8 @@ class FleetTelemetryEvent:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.telemetry_point import TelemetryPoint # noqa: PLC0415
+        event_cursor = self.event_cursor
+
         node_id = self.node_id
 
         sample = self.sample.to_dict()
@@ -46,6 +50,7 @@ class FleetTelemetryEvent:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "event_cursor": event_cursor,
             "node_id": node_id,
             "sample": sample,
         })
@@ -58,6 +63,8 @@ class FleetTelemetryEvent:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.telemetry_point import TelemetryPoint # noqa: PLC0415
         d = dict(src_dict)
+        event_cursor = d.pop("event_cursor")
+
         node_id = d.pop("node_id")
 
         sample = TelemetryPoint.from_dict(d.pop("sample"))
@@ -66,6 +73,7 @@ class FleetTelemetryEvent:
 
 
         fleet_telemetry_event = cls(
+            event_cursor=event_cursor,
             node_id=node_id,
             sample=sample,
         )

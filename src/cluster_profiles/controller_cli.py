@@ -61,6 +61,9 @@ if TYPE_CHECKING:
     from .generated_control.models.fleet_profile_endpoints_view import (
         FleetProfileEndpointsView,
     )
+    from .generated_control.models.recipe_image_availability_response import (
+        RecipeImageAvailabilityResponse,
+    )
 
 MAX_PAGE_LIMIT = 512
 # An enrollment grant lives for the longest time the Controller allows.
@@ -719,7 +722,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Show the Controller-owned removal impact without submitting it",
     )
     recipe_retry = recipe_actions.add_parser(
-        "retry", help="Retry a failed preparation using its frozen recipe intent"
+        "retry", help="Submit preparation using the original frozen recipe intent"
     )
     recipe_retry.add_argument("operation_id", type=_uuid_argument)
     _action_flags(recipe_retry, followable=True)
@@ -1994,15 +1997,36 @@ def _submit_recipe_retry(
     client: ControllerClient,
     args: argparse.Namespace,
     factory: Callable[[], str],
-) -> dict[str, object]:
-    """Retry the owning frozen intent, never resolve a mutable recipe selector."""
+) -> RecipeImageAvailabilityResponse:
+    """Preserve the owning frozen intent instead of a mutable recipe selector."""
+    from .generated_control.models.recipe_image_availability_response import (
+        RecipeImageAvailabilityResponse,
+    )
+    from .generated_control.models.recipe_retry_intent import RecipeRetryIntent
+
+    def decode(value: object) -> RecipeImageAvailabilityResponse:
+        if not isinstance(value, Mapping):
+            raise ControlMalformedResponse(
+                "recipe preparation receipt is not an object"
+            )
+        try:
+            return RecipeImageAvailabilityResponse.from_dict(
+                validate_control_document("RecipeImageAvailabilityResponse", value)
+            )
+        except (ControlClientError, KeyError, TypeError, ValueError) as error:
+            raise ControlMalformedResponse(
+                "recipe preparation receipt is malformed"
+            ) from error
+
     original_id = args.operation_id
-    original = client.request("GET", f"/api/recipe/operations/{_quoted(original_id)}")
-    revision = original.get("recipe_revision_id")
-    content = original.get("recipe_content_sha256")
+    original = decode(
+        client.request("GET", f"/api/recipe/operations/{_quoted(original_id)}")
+    )
+    revision = original.recipe_revision_id
+    content = original.recipe_content_sha256
     if (
-        _cache_operation_id("recipe", original) != original_id
-        or original.get("kind") != "recipe.image.availability.v2"
+        _cache_operation_id("recipe", original.to_dict()) != original_id
+        or original.kind != "recipe.image.availability.v2"
         or not isinstance(revision, str)
         or not revision
         or not isinstance(content, str)
@@ -2013,44 +2037,47 @@ def _submit_recipe_retry(
         )
     _confirm_action(
         args,
-        f"Retry recipe preparation {original_id} using its frozen revision {revision}?",
+        f"Submit recipe preparation from {original_id} using its frozen revision {revision}?",
     )
     key = _request_key(args, factory)
 
-    def validate(result: Mapping[str, object]) -> str:
-        intent = result.get("request")
+    def validate(document: object) -> str:
+        result = decode(document)
+        intent = result.request
         if (
-            result.get("kind") != "recipe.image.availability.v2"
-            or result.get("request_id") != key
-            or not isinstance(intent, Mapping)
-            or intent.get("kind") != "retry"
-            or intent.get("operation_id") != original_id
-            or result.get("recipe_revision_id") != revision
-            or result.get("recipe_content_sha256") != content
+            result.kind != "recipe.image.availability.v2"
+            or result.request_id != key
+            or not isinstance(intent, RecipeRetryIntent)
+            or intent.kind != "retry"
+            or intent.operation_id != original_id
+            or result.recipe_revision_id != revision
+            or result.recipe_content_sha256 != content
         ):
             raise ControlMalformedResponse(
                 "recipe retry receipt identifies another request or frozen intent"
             )
-        operation_id = _cache_operation_id("recipe", result)
+        operation_id = _cache_operation_id("recipe", result.to_dict())
         if operation_id == original_id:
             raise ControlMalformedResponse(
                 "recipe retry did not identify a new accepted attempt"
             )
         return operation_id
 
-    return _submit_idempotent_request(
-        client,
-        args,
-        key=key,
-        path=f"/api/recipe/operations/{_quoted(original_id)}/retry",
-        lookup=f"/api/recipe/requests/{key}",
-        body={"request_key": key},
-        noun="recipe",
-        action="retry",
-        validate=validate,
-        reconnect=shlex.join(
-            ["vonkctl", "recipe", "progress", "--request-key", key, "--follow"]
-        ),
+    return decode(
+        _submit_idempotent_request(
+            client,
+            args,
+            key=key,
+            path=f"/api/recipe/operations/{_quoted(original_id)}/retry",
+            lookup=f"/api/recipe/requests/{key}",
+            body={"request_key": key},
+            noun="recipe",
+            action="retry",
+            validate=validate,
+            reconnect=shlex.join(
+                ["vonkctl", "recipe", "progress", "--request-key", key, "--follow"]
+            ),
+        )
     )
 
 
@@ -3317,7 +3344,7 @@ def _recipe(
         return _follow_mutation(client, "recipe", result, args)
     if action == "retry":
         result = _submit_recipe_retry(client, args, factory)
-        return _follow_mutation(client, "recipe", result, args)
+        return _follow_mutation(client, "recipe", result.to_dict(), args)
     if action == "cancel":
         if not args.yes:
             raise ValueError("recipe cancel requires --yes in noninteractive mode")

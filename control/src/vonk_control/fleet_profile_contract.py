@@ -48,6 +48,7 @@ from .run_switch_contract import (
     RunSwitchAssessment,
     RunSwitchOperationResult,
     RunSwitchProfileStopScope,
+    RunSwitchProgress,
     RunSwitchReason,
     SparkGroupNode,
     StopImpact,
@@ -925,7 +926,9 @@ class FleetProfileSwitchChildState(StrictModel):
     operation_id: UuidId
     original_operation_id: UuidId | None = None
     kind: FleetProfileSwitchChildKind
-    state: Literal["succeeded", "failed", "cancelled"]
+    state: Literal[
+        LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+    ]
     result: FleetProfileSwitchChildResult | None = None
 
 
@@ -1124,6 +1127,7 @@ class FleetProfileEffectProgress(StrictModel):
         "not-issued", "pending", "succeeded", "failed", "cancelled", "unknown"
     ]
     result: FleetProfileSwitchChildResult | None = None
+    progress: RunSwitchProgress | None = None
     stop_effect: FleetProfileRunEffect | None = None
 
 

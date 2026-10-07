@@ -23,7 +23,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from . import job_states
+from . import agent_operation_states, job_states
 from .lifecycle.evidence import Residue
 from .stored_json import read_row_column
 from .strict_json import read_stored_model
@@ -194,6 +194,67 @@ def project_progress(
             }
         )
     return projected
+
+
+def project_progress_for_state(
+    value: OperationProgress, state: object, now: datetime | None = None
+) -> OperationProgress:
+    """One advisory freshness policy for every retained attempt consumer."""
+    projected = project_progress(value, now)
+    if state in {
+        LifecycleState.SUCCEEDED,
+        "accepted",
+        "compensated",
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+        *agent_operation_states.PARKED,
+    }:
+        return projected.model_copy(
+            update={
+                "activity": None,
+                "bytes_per_second": None,
+                "smoothed_bytes_per_second": None,
+                "eta_seconds": None,
+            }
+        )
+    return projected
+
+
+def member_progress(
+    value: OperationProgress | None,
+    *,
+    member_id: str,
+    state: str,
+    phase: str,
+    kind: str | None = None,
+) -> OperationMemberProgress:
+    """Carry measured fields once; an unissued member has no sample or estimate."""
+    if value is None:
+        return OperationMemberProgress(
+            member_id=member_id,
+            state=state,
+            phase=phase,
+            kind=kind,
+            activity="waiting" if state == LifecycleState.QUEUED else None,
+        )
+    return OperationMemberProgress(
+        member_id=member_id,
+        state=state,
+        phase=value.phase,
+        kind=kind or value.kind,
+        object_sha256=value.object_sha256,
+        completed_bytes=value.completed_bytes,
+        total_bytes=value.total_bytes,
+        bytes_per_second=value.bytes_per_second,
+        smoothed_bytes_per_second=value.smoothed_bytes_per_second,
+        eta_seconds=value.eta_seconds,
+        completed_items=value.completed_items,
+        total_items=value.total_items,
+        elapsed_seconds=value.elapsed_seconds,
+        observed_at=value.observed_at,
+        last_progress_at=value.last_progress_at,
+        activity=value.activity,
+    )
 
 
 def aggregate_progress(members: Sequence[OperationMemberProgress]) -> OperationProgress:
