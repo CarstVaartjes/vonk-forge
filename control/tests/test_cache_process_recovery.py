@@ -118,7 +118,10 @@ with open(sys.argv[1], "a+b") as lock:
             row = session.get(ModelCacheOperation, waiting.id)
             assert row is not None and row.state == "queued"
             assert row.next_action_at is not None and row.next_action_at > now[0]
-            assert row.fence is None and row.lease_deadline is None
+            assert row.lease_deadline is None
+            queued_payload = parse_model_cache_payload(row.kind, row.payload)
+            assert isinstance(queued_payload, ModelCacheDownloadPayload)
+            assert queued_payload.claim is None
         holder.stdin.close()
         assert holder.wait(timeout=3) == 0
         deadline = time.monotonic() + 3
@@ -134,7 +137,9 @@ with open(sys.argv[1], "a+b") as lock:
                     assert isinstance(payload, ModelCacheDownloadPayload)
                     assert payload.failure is not None
                     assert payload.failure.code == ModelCacheCode.OBJECT_BUSY
-                    assert row.fence is None and row.lease_deadline is None
+                    # A retained historical fence rejects old reports. Only
+                    # the running state and live lease denote a current claim.
+                    assert row.lease_deadline is None and payload.claim is None
                     assert row.next_action_at is not None
                     now[0] = max(now[0], row.next_action_at)
             service.tick()
