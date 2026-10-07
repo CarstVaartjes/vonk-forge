@@ -4526,6 +4526,7 @@ impl ::std::convert::TryFrom<::std::string::String> for InstallerReleaseIdentity
 #[derive(Eq)]
 pub struct InstallerReleaseImages {
     pub api: ::std::string::String,
+    pub ca: ::std::string::String,
     pub hermes: ::std::string::String,
     pub litellm: ::std::string::String,
     pub worker: ::std::string::String,
@@ -19332,6 +19333,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
         #[derive(Eq)]
         struct Raw {
             pub api: ::std::string::String,
+            pub ca: ::std::string::String,
             pub hermes: ::std::string::String,
             pub litellm: ::std::string::String,
             pub worker: ::std::string::String,
@@ -19340,6 +19342,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             api: raw.api,
+            ca: raw.ca,
             hermes: raw.hermes,
             litellm: raw.litellm,
             worker: raw.worker,
