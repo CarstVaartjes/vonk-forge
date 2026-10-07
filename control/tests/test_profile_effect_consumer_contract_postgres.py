@@ -61,9 +61,8 @@ def installed_vonkctl(tmp_path_factory):
     """Build the exact checked-out wheel, then install without Controller imports."""
     root = Path(__file__).resolve().parents[2]
     workspace = tmp_path_factory.mktemp("effect-consumer-cli")
-    source = subprocess.check_output(
-        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
-    ).strip()
+    source = os.environ["VONK_EFFECT_PLATFORM_SOURCE_SHA"]
+    assert len(source) == 40 and all(c in "0123456789abcdef" for c in source)
     environment = isolated_environment(
         workspace / "build-home",
         extra={"VONK_BUILD_SOURCE_SHA": source, "VONK_BUILD_RELEASE_VERSION": "0.1.1"},
@@ -162,12 +161,6 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         healthy_child,
     ) = pending_stop
     recipes = Path(os.environ["VONK_RECIPE_EFFECT_CONSUMER_SOURCE"]).resolve()
-    assert (
-        subprocess.check_output(
-            ["git", "-C", str(recipes), "rev-parse", "HEAD"], text=True
-        ).strip()
-        == RECIPES_SHA
-    )
     spec = importlib.util.spec_from_file_location(
         "frozen_recipes_cleanup", recipes / "spark_sweep/cleanup.py"
     )

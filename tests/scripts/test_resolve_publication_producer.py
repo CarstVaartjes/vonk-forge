@@ -22,33 +22,35 @@ def module():
     return result
 
 
-def git(*args: str) -> str:
-    return subprocess.check_output(["git", *args], text=True).strip()
+def git(*args: str, cwd: Path) -> str:
+    return subprocess.check_output(
+        ["git", *args], cwd=cwd, text=True, timeout=10
+    ).strip()
 
 
 def commit(root: Path, path: str, content: str) -> str:
     target = root / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
-    git("add", "-A")
-    git("commit", "-qm", path)
-    return git("rev-parse", "HEAD")
+    git("add", "-A", cwd=root)
+    git("commit", "-qm", path, cwd=root)
+    return git("rev-parse", "HEAD", cwd=root)
 
 
 @pytest.fixture
 def history(tmp_path, monkeypatch):
     """main: base -> docs -> packaging change; plus an unrelated branch."""
     monkeypatch.chdir(tmp_path)
-    git("init", "-q", "-b", "main")
-    git("config", "user.name", "CI test")
-    git("config", "user.email", "ci@example.invalid")
-    git("config", "commit.gpgsign", "false")
+    git("init", "-q", "-b", "main", cwd=tmp_path)
+    git("config", "user.name", "CI test", cwd=tmp_path)
+    git("config", "user.email", "ci@example.invalid", cwd=tmp_path)
+    git("config", "commit.gpgsign", "false", cwd=tmp_path)
     shas = {"base": commit(tmp_path, "packaging/input", "one\n")}
     shas["docs"] = commit(tmp_path, "docs/guide.md", "words\n")
     shas["changed"] = commit(tmp_path, "packaging/input", "two\n")
-    git("checkout", "-q", "-b", "side", shas["base"])
+    git("checkout", "-q", "-b", "side", shas["base"], cwd=tmp_path)
     shas["side"] = commit(tmp_path, "docs/side.md", "elsewhere\n")
-    git("checkout", "-q", "main")
+    git("checkout", "-q", "main", cwd=tmp_path)
     return shas
 
 
@@ -147,15 +149,19 @@ def test_reuse_checks_each_producer_input_filter(
     assert resolver.changed_matches("a" * 40, "b" * 40, patterns) is expected
 
 
-def test_renaming_an_input_out_of_its_area_is_a_change(history):
+def test_renaming_an_input_out_of_its_area_is_a_change(history, tmp_path):
     resolver = module()
-    before = git("rev-parse", "HEAD")
-    git("mv", "packaging/input", "docs/input")
-    git("commit", "-qm", "move input")
-    assert resolver.changed_matches(before, git("rev-parse", "HEAD"), ("packaging/**",))
+    before = git("rev-parse", "HEAD", cwd=tmp_path)
+    git("mv", "packaging/input", "docs/input", cwd=tmp_path)
+    git("commit", "-qm", "move input", cwd=tmp_path)
+    assert resolver.changed_matches(
+        before, git("rev-parse", "HEAD", cwd=tmp_path), ("packaging/**",)
+    )
 
 
-def test_unchanged_producer_reuses_the_newest_ancestor_release(history, github):
+def test_unchanged_producer_reuses_the_newest_ancestor_release(
+    history, github, tmp_path
+):
     resolver, fake = github
     fake.release(10, history["base"], "agent")
     fake.release(11, history["docs"], "agent")
@@ -164,7 +170,7 @@ def test_unchanged_producer_reuses_the_newest_ancestor_release(history, github):
         (11, 1011, history["docs"]),
     )
     # A documentation-only child keeps reusing the package built for docs.
-    git("checkout", "-q", "-b", "later", history["docs"])
+    git("checkout", "-q", "-b", "later", history["docs"], cwd=tmp_path)
     child = commit(Path.cwd(), "docs/more.md", "more\n")
     assert resolver.resolve("agent", child, REPO) == (0, (11, 1011, history["docs"]))
 
