@@ -204,7 +204,7 @@ def project_progress_for_state(
     if state in {
         LifecycleState.SUCCEEDED,
         "accepted",
-        "compensated",
+        agent_operation_states.RETAINED_COMPENSATED,
         LifecycleState.FAILED,
         LifecycleState.CANCELLED,
         *agent_operation_states.PARKED,
@@ -263,7 +263,8 @@ def aggregate_progress(members: Sequence[OperationMemberProgress]) -> OperationP
     active = [
         member
         for member in members
-        if member.state not in {"succeeded", "accepted", "compensated"}
+        if member.state
+        not in {"succeeded", "accepted", agent_operation_states.RETAINED_COMPENSATED}
     ]
     rates_known = bool(active) and all(
         member.bytes_per_second is not None for member in active
