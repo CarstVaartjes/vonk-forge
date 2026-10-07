@@ -57,5 +57,5 @@ jobs:
       - name: Compile real browser consumers
         run: npm run build --prefix control/web
       - name: Exercise both browser HTTP consumers and exact numbers
-        run: npm exec --prefix control/web -- vitest run src/api/contract-json.test.ts src/api/client.test.ts
+        run: npm exec -- vitest run src/api/contract-json.test.ts src/api/client.test.ts
         working-directory: control/web

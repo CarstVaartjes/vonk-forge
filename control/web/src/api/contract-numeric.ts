@@ -93,11 +93,11 @@ export function displayRatio(a: WireNumber, b: WireNumber): number {
   const coefficient = (digits: string) => Number(digits.slice(0, 16)) / 10 ** (Math.min(digits.length, 16) - 1);
   return coefficient(x.digits) / coefficient(y.digits) * 10 ** shift * (x.negative !== y.negative ? -1 : 1);
 }
-export function contractType(value: unknown, types: string[]): boolean {
+export function contractType(value: unknown, types: string[], strictIntegerTokens = true, finiteNumbers = true): boolean {
   return types.some(type => {
     const token = numericToken(value);
-    if (type === "integer") return token !== undefined && /^-?(?:0|[1-9][0-9]*)$/.test(token);
-    if (type === "number") return token !== undefined && Number.isFinite(Number(token));
+    if (type === "integer") return token !== undefined && (strictIntegerTokens ? /^-?(?:0|[1-9][0-9]*)$/.test(token) : numericMultiple(value, "1"));
+    if (type === "number") return token !== undefined && (!finiteNumbers || Number.isFinite(Number(token)));
     if (type === "object") return value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof LosslessNumber);
     if (type === "array") return Array.isArray(value);
     if (type === "null") return value === null;

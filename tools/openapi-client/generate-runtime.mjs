@@ -12,8 +12,12 @@ import openapiTS, {astToString} from "openapi-typescript";
 import ts from "typescript";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const input = process.argv[2] ?? path.join(root, "control/openapi.json");
-const raw = fs.readFileSync(input, "utf8"), document = parse(raw);
+// The official JSON Schema corpus exercises mathematical integer semantics;
+// production Control contracts additionally require strict integer lexemes.
+const schemaOnly = process.argv[2] === "--schema";
+const input = process.argv[schemaOnly ? 3 : 2] ?? path.join(root, "control/openapi.json");
+const raw = fs.readFileSync(input, "utf8"), parsed = parse(raw);
+const document = schemaOnly ? {components: {schemas: {Suite: parsed}}, paths: {}} : parsed;
 const out = path.join(root, "control/web/src/api");
 const token = value => value instanceof LosslessNumber ? value.value : String(value);
 const numericKeywords = ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"];
@@ -39,7 +43,9 @@ addFormats(ajv);
 for (const [keyword, helper] of [["vonkType", "contractType"], ["vonkEnum", "contractEnum"], ["vonkMultiple", "numericMultiple"]]) {
   ajv.addKeyword({keyword, code(context) {
     const func = context.gen.scopeValue("func", {ref: () => true, code: new _Code(helper)});
-    context.fail(_`!${func}(${context.data}, ${new _Code(JSON.stringify(context.schema))})`);
+    context.fail(keyword === "vonkType"
+      ? _`!${func}(${context.data}, ${new _Code(JSON.stringify(context.schema))}, ${!schemaOnly}, ${!schemaOnly})`
+      : _`!${func}(${context.data}, ${new _Code(JSON.stringify(context.schema))})`);
   }});
 }
 ajv.addKeyword({keyword: "vonkBounds", code(context) {
@@ -76,10 +82,15 @@ for (const [route, item] of Object.entries(document.paths)) {
     routes.push({route, method: method.toUpperCase(), responses, requests});
   }
 }
-for (const name of Object.keys(document.components?.schemas ?? {})) register({$ref: `#/components/schemas/${name}`}, `component${name}`);
+if (schemaOnly) register(parsed, "componentSuite");
+else for (const name of Object.keys(document.components?.schemas ?? {})) register({$ref: `#/components/schemas/${name}`}, `component${name}`);
 const imports = 'import {fullFormats} from "ajv-formats/dist/formats";\nimport {contractType, contractEnum, numericBound, numericMultiple} from "./contract-numeric";\n';
 const code = standalone(ajv, exports);
 const provenance = `// Generated from canonical OpenAPI SHA256 ${crypto.createHash("sha256").update(raw).digest("hex")}. Do not edit.\n`;
+if (schemaOnly) {
+  fs.writeFileSync(process.argv[4], provenance + imports + code + "\nexport {componentSuite as validateSchema};\n");
+  process.exit(0);
+}
 // Ajv's generated code is JavaScript. Keep it JavaScript instead of inventing
 // annotations or suppressing TypeScript errors in a generated .ts file.
 fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + Object.keys(exports).map(name => `export const ${name}: ((value: unknown) => boolean) & {errors?: readonly {keyword: string; instancePath: string}[] | null};`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, (value: unknown) => boolean>>; requests: Record<string, (value: unknown) => boolean>}[];\n');
