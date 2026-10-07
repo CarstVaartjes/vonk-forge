@@ -308,6 +308,14 @@ jobs:
                 control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
                 control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
                 --api-response-witness="$RUNNER_TEMP/api-response-witnesses.json"
+      - name: Attribute catalog wire validation cost with the actual compiled probe
+        env:
+          VONK_WIRE_PROBE_TIMINGS: "1"
+        run: |
+          set -euo pipefail
+          export VONK_INSTALL_START_WIRE_PROBE="${CARGO_TARGET_DIR:-$PWD/target}/debug/examples/install_start_wire_probe"
+          uv run --project control --frozen pytest -s -q -n 0 \
+            agent_protocol/tests/test_schema2_recipe_rust_compat.py::test_catalog_launch_payloads_are_accepted_by_python_and_rust
       - name: Exercise Controller requests and Spark results together
         run: >-
           uv run --project control --frozen
