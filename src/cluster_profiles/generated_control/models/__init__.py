@@ -66,6 +66,7 @@ from .availability_runtime import AvailabilityRuntime
 from .availability_runtime_placement_environment_type_0 import AvailabilityRuntimePlacementEnvironmentType0
 from .availability_supersession import AvailabilitySupersession
 from .blocker_category import BlockerCategory
+from .bookkeeping_reason import BookkeepingReason
 from .boolean_parameter import BooleanParameter
 from .bounded_error_response import BoundedErrorResponse
 from .build_cleanup_phase_operation import BuildCleanupPhaseOperation
@@ -649,6 +650,7 @@ from .removed_recipe_node_result import RemovedRecipeNodeResult
 from .request_validation_issue import RequestValidationIssue
 from .request_validation_problem import RequestValidationProblem
 from .reservation_state import ReservationState
+from .residue import Residue
 from .resource_blocker_code import ResourceBlockerCode
 from .resource_demand_evidence import ResourceDemandEvidence
 from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
@@ -899,6 +901,7 @@ __all__ = (
     "AvailabilityRuntimePlacementEnvironmentType0",
     "AvailabilitySupersession",
     "BlockerCategory",
+    "BookkeepingReason",
     "BooleanParameter",
     "BoundedErrorResponse",
     "BuildCleanupPhaseOperation",
@@ -1482,6 +1485,7 @@ __all__ = (
     "RequestValidationIssue",
     "RequestValidationProblem",
     "ReservationState",
+    "Residue",
     "ResourceBlockerCode",
     "ResourceDemandEvidence",
     "ResourceDemandEvidenceEvidenceState",

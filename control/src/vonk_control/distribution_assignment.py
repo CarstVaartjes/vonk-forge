@@ -13,6 +13,8 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .integer_domains import MAX_DATABASE_INTEGER
+
 
 class NodeDistributionAssignment(DistributionAssignment):
     """A distribution grant scoped to one node, plan and model set.
@@ -23,7 +25,7 @@ class NodeDistributionAssignment(DistributionAssignment):
 
     assignment_id: str = Field(json_schema_extra={"format": "uuid"})
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    generation: int = Field(ge=1)
+    generation: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     expires_at: datetime
     model_artifact_set_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

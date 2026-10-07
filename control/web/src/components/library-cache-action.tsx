@@ -1,3 +1,4 @@
+import {compareWire, displayRatio} from "../api/contract-numeric";
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {CacheRemovalReview, ControlApi, ModelCacheOperatorResponse} from "../api/types";
 
@@ -24,8 +25,8 @@ export type LibraryCacheState = "cached" | "preparing" | "not_cached" | "failed"
 function progressLabel(response: ModelCacheOperatorResponse): string {
   const total = response.total_bytes ?? 0;
   const transferred = response.transferred_bytes ?? 0;
-  if (total > 0 && transferred > 0) {
-    const percent = Math.min(100, Math.round((transferred / total) * 100));
+  if (compareWire(total, 0) > 0 && compareWire(transferred, 0) > 0) {
+    const percent = Math.min(100, Math.round(displayRatio(transferred, total) * 100));
     return `${response.phase} · ${percent}%`;
   }
   return response.phase;

@@ -161,8 +161,8 @@ def test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled(
             try:
                 assert started.wait(timeout=10)
                 progress = service.application(application.id).progress.switch_adapter
-                assert progress is not None and progress.active_operation_id is not None
-                child_id = progress.active_operation_id
+                assert progress is not None and progress.pending_children
+                child_id = progress.pending_children[0].operation_id
                 result = run(
                     "--profile",
                     str(profile.number),

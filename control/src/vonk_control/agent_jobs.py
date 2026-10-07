@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import Boolean, and_, or_, select, update
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, object_session, sessionmaker
@@ -33,6 +33,7 @@ from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
+    OperationProgress,
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
@@ -49,9 +50,15 @@ from vonk_agent_protocol import (
     validate_result_for_operation,
 )
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_payload
+from vonk_agent_protocol.contracts import (
+    AgentFailureResult,
+    AgentResultPayload,
+    ArtifactDistributionResult,
+    canonical_payload,
+)
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
-from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_agent_protocol.wire_model import WireModel
 
 from . import agent_operation_states, job_states
 from .admission_locking import (
@@ -63,6 +70,7 @@ from .admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
+from .agent_job_contract import ClaimFacts
 from .agent_operation_facts import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     SUPERSEDED_CANCELLATION_SECONDS,
@@ -137,7 +145,12 @@ from .models import (
 )
 from .models import AgentOperation as StoredOperation
 from .operation_contract import sanitize_failure_evidence, validate_progress_update
-from .operation_progress import observe_progress, progress_write_due
+from .operation_progress import (
+    progress_document,
+    progress_write_due,
+    sample_progress,
+    stored_progress,
+)
 from .recipe_builds import BUILD_ARTIFACT_FORMAT
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -153,6 +166,7 @@ from .recovery_policy import (
     classify,
     kind_for_agent_error,
 )
+from .stored_json import read_row_column
 from .strict_json import read_stored_model
 
 _LOGGER = logging.getLogger(__name__)
@@ -268,7 +282,7 @@ _CONTROL_OPERATIONS = frozenset(operation.value for operation in AgentOperation)
 CLAIM_LEASE_SECONDS = 30
 
 
-def _safe_retry_failure(kind: str, state: str, result: Mapping[str, object]) -> bool:
+def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
     """One classification for both fresh results and retained interrupted work.
 
     Every restart-safe order retries automatically, with a bounded rate, while
@@ -354,8 +368,10 @@ def _parked_retry_evidence(
             operation.kind,
             attempt.result,
             state=agent_operation_states.attempt_wire_state(attempt),
-        ).model_dump(mode="json")
+        )
     except (TypeError, ValueError):
+        return False
+    if not isinstance(result, WireModel):
         return False
     return _safe_retry_failure(
         operation.kind, agent_operation_states.attempt_wire_state(attempt), result
@@ -981,24 +997,25 @@ def _failure_result(
     *,
     uncertain: bool,
     failure_kind: FailureKind | None = None,
-) -> dict[str, object]:
+) -> AgentFailureResult:
     """Build a typed failure result through the redaction boundary."""
 
     if failure_kind is None:
         failure_kind = (
             FailureKind.UNCERTAIN_EFFECT if uncertain else FailureKind.INVALID_CONTRACT
         )
-    evidence: dict[str, object] = {
+    # The reason is redacted and bounded before the typed result is built, so a
+    # long or sensitive reason cannot make the failure itself unrepresentable.
+    evidence = {
         "error_code": error_code,
         "summary": reason,
         "reason": reason,
         "uncertain": uncertain,
         "recovery": "inspect-before-resume" if uncertain else "retry-or-inspect",
         "failure_kind": failure_kind.value,
+        **({} if uncertain else {"status": "failed"}),
     }
-    if not uncertain:
-        evidence["status"] = "failed"
-    return sanitize_failure_evidence(evidence)
+    return AgentFailureResult.model_validate(sanitize_failure_evidence(evidence))
 
 
 def _lease_expiry_reason(
@@ -1193,14 +1210,9 @@ def _claim_note_reason(check: str, **facts: object) -> str:
     return _refusal_reason(_CLAIM_NOTE_PREFIX, check, **facts)
 
 
-def _document(value: Mapping[str, object]) -> dict[str, object]:
+def _document(value: BaseModel) -> Any:
     """Return the protocol's validated, deterministic JSON representation."""
     return json.loads(canonical_message(value))
-
-
-def _signer_message(value: Mapping[str, object]) -> bytes:
-    """Return the signer's canonical newline-delimited wire representation."""
-    return canonical_message(value) + b"\n"
 
 
 def _json_flag_parts(element: FunctionElement, compiler, **kwargs) -> tuple[str, str]:
@@ -1509,10 +1521,18 @@ def _anchor_start_budget(
     carry the anchored deadline too.
     """
 
+    # job_documents reaches this module through the build contracts.
+    from .job_documents import RecipeStartParent
+
     job = session.get(Job, operation.parent_job_id, with_for_update=True)
-    if job is None or not isinstance(job.payload, Mapping):
+    if job is None:
         return
-    if "recovery" in job.payload or job.payload.get("start_anchored_at") is not None:
+    parent = read_row_column(job, "payload")
+    if not isinstance(parent, RecipeStartParent):
+        # Anchoring is a courtesy; a parent that cannot be read keeps its
+        # queue-time deadlines (its own reader retires it).
+        return
+    if parent.recovery is not None or parent.start_anchored_at is not None:
         return
     queued_deadline = _operation_start_deadline(operation)
     if queued_deadline is None:
@@ -1525,8 +1545,8 @@ def _anchor_start_budget(
         # Nothing waited: the queue-time deadline already is the anchored one.
         return
 
-    def rebound(payload: Mapping[str, object]) -> dict[str, object]:
-        return {**payload, "start_deadline": anchored}
+    def rebound(payload: RecipeStartPayload) -> RecipeStartPayload:
+        return payload.model_copy(update={"start_deadline": anchored})
 
     for sibling in session.scalars(
         select(StoredOperation)
@@ -1537,33 +1557,36 @@ def _anchor_start_budget(
         )
         .with_for_update(of=StoredOperation)
     ):
-        if _operation_start_deadline(sibling) is None:
+        queued = read_row_column(sibling, "payload")
+        if not isinstance(queued, RecipeStartPayload) or queued.start_deadline is None:
             continue
-        document = rebound(sibling.payload)
-        sibling.payload = document
+        document = rebound(queued)
+        sibling.payload = json.loads(canonical_message(document))
         sibling.payload_digest = hashlib.sha256(
             canonical_payload(AgentOperation(sibling.kind), document)
         ).hexdigest()
-    updated = dict(job.payload)
-    if "start_deadline" in updated:
-        updated["start_deadline"] = anchored
-    phases = updated.get("phases")
-    if isinstance(phases, Sequence) and not isinstance(phases, str):
-        updated["phases"] = [
-            [
-                {**item, "payload": rebound(item["payload"])}
-                if isinstance(item, Mapping)
-                and isinstance(item.get("payload"), Mapping)
-                and item["payload"].get("start_deadline") is not None
-                else item
-                for item in group
-            ]
-            if isinstance(group, Sequence) and not isinstance(group, str)
-            else group
-            for group in phases
-        ]
-    updated["start_anchored_at"] = _aware(now).isoformat()
-    job.payload = updated
+    updated = parent.model_copy(
+        update={
+            "start_anchored_at": _aware(now),
+            **(
+                {"start_deadline": datetime.fromisoformat(anchored)}
+                if parent.start_deadline is not None
+                else {}
+            ),
+            "phases": None
+            if parent.phases is None
+            else [
+                [
+                    item.model_copy(update={"payload": rebound(item.payload)})
+                    if item.payload.start_deadline is not None
+                    else item
+                    for item in group
+                ]
+                for group in parent.phases
+            ],
+        }
+    )
+    job.payload = json.loads(canonical_message(updated))
     job.payload_digest = hashlib.sha256(canonical_message(updated)).hexdigest()
 
 
@@ -1573,36 +1596,40 @@ def _claim_condition_facts(
     attempt: AgentOperationAttempt | None,
     node: AgentNode,
     now: datetime,
-) -> dict[str, object]:
+) -> ClaimFacts:
     """Return the bounded facts that explain one failed named condition."""
 
     if check == "workload-intent-superseded":
-        return {
-            "operation_intent": operation.workload_intent_ordinal,
-            "node_intent": node.workload_intent_ordinal,
-        }
+        return ClaimFacts(
+            operation_intent=operation.workload_intent_ordinal,
+            node_intent=node.workload_intent_ordinal,
+        )
     if check in {
         "queued-attempt-not-zero",
         "operator-retry-not-authorized",
         "operator-retry-attempt-not-ready",
     }:
-        return {"attempt": operation.current_attempt}
+        return ClaimFacts(attempt=operation.current_attempt)
     if check in {"running-attempt-missing", "running-attempt-not-running"}:
-        facts: dict[str, object] = {"attempt": operation.current_attempt}
-        if attempt is not None:
-            facts["attempt_state"] = attempt.state
-        return facts
+        return ClaimFacts(
+            attempt=operation.current_attempt,
+            attempt_state=None if attempt is None else attempt.state,
+        )
     if check in {"running-lease-live", "upgrade-safety-not-elapsed"}:
-        facts = {"attempt": operation.current_attempt}
-        if attempt is not None:
-            facts["lease_deadline"] = _aware(attempt.lease_deadline).isoformat()
-        return facts
+        return ClaimFacts(
+            attempt=operation.current_attempt,
+            lease_deadline=None
+            if attempt is None
+            else _aware(attempt.lease_deadline).isoformat(),
+        )
     if check == "operator-retry-not-due":
-        facts = {"attempt": operation.current_attempt}
-        if operation.next_action_at is not None:
-            facts["retry_due_at"] = _aware(operation.next_action_at).isoformat()
-        return facts
-    return {}
+        return ClaimFacts(
+            attempt=operation.current_attempt,
+            retry_due_at=None
+            if operation.next_action_at is None
+            else _aware(operation.next_action_at).isoformat(),
+        )
+    return ClaimFacts()
 
 
 def _held_claim_conditions(
@@ -2636,7 +2663,7 @@ class AgentJobService:
         session: Session,
         node: AgentNode,
         now: datetime,
-    ) -> tuple[StoredOperation, str, dict[str, object]] | None:
+    ) -> tuple[StoredOperation, str, ClaimFacts] | None:
         """Explain why a non-terminal operation on this node was not offered.
 
         ``_claimable_operations`` is a closed predicate.  When it matches
@@ -2660,7 +2687,7 @@ class AgentJobService:
         )
         if operation is None:
             return None
-        facts: dict[str, object] = {"kind": operation.kind, "state": operation.state}
+        facts = ClaimFacts(kind=operation.kind, state=operation.state)
         predicate = _claim_predicate(now)
         branch = predicate.branch_for(operation.state)
         # Diagnostics come first so a malformed persisted value is named before
@@ -2683,12 +2710,11 @@ class AgentJobService:
             return (
                 operation,
                 condition.check,
-                {
-                    **facts,
-                    **_claim_condition_facts(
+                facts.model_copy(
+                    update=_claim_condition_facts(
                         condition.check, operation, attempt, node, now
-                    ),
-                },
+                    ).model_dump(exclude_none=True)
+                ),
             )
         # Every modelled condition held, so the operation is claimable now. The
         # claim query that found nothing ran earlier in this transaction, and
@@ -2711,10 +2737,7 @@ class AgentJobService:
         return (
             operation,
             "unclassified-unclaimable",
-            {
-                **facts,
-                "attempt": operation.current_attempt,
-            },
+            facts.model_copy(update={"attempt": operation.current_attempt}),
         )
 
     def _cancel_superseded_operation(
@@ -3145,7 +3168,7 @@ class AgentJobService:
                         operation=excluded_operation,
                         job_id=excluded_operation.parent_job_id,
                         check=refusal_check,
-                        **refusal_facts,
+                        **refusal_facts.rendered(),
                     )
                 return None
             statement = (
@@ -3364,11 +3387,7 @@ class AgentJobService:
                     previous is not None
                     and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
                 ):
-                    resumable_progress = (
-                        None
-                        if previous.progress is None
-                        else validate_progress_update(None, previous.progress)
-                    )
+                    resumable_progress = stored_progress(previous)
                 if previous is not None and (
                     previous.state == "running"
                     or agent_operation_states.attempt_reported_unknown(previous)
@@ -3559,10 +3578,10 @@ class AgentJobService:
                 AgentOperationAdapter.record_report(
                     current,
                     "failed",
-                    {
-                        "reason": "agent package " + receipt.phase,
-                        "package_activation": receipt.model_dump(mode="json"),
-                    },
+                    AgentFailureResult(
+                        reason="agent package " + receipt.phase,
+                        package_activation=receipt,
+                    ),
                 )
             # The helper restored (or tried to restore) the rollback source.
             # Retry this Spark behind the dpkg safety fence while the rollout
@@ -3611,9 +3630,7 @@ class AgentJobService:
         # contact reconciles the operation projection, not the historical fact
         # that the signed helper attempt returned failure.
         if attempt.state != "failed":
-            AgentOperationAdapter.record_report(
-                attempt, "succeeded", _document(evidence)
-            )
+            AgentOperationAdapter.record_report(attempt, "succeeded", message.result)
         AgentOperationAdapter(session).settle(
             operation, attempt, None, Reported(Outcome.DONE), now
         )
@@ -3847,7 +3864,7 @@ class AgentJobService:
         nodes = sorted(
             {node_id} | {target for _, scope in scopes.values() for target in scope}
         )
-        locked_rows: Mapping[str, tuple[Any, ...]] = {}
+        locked_rows = None
         if nowait:
             locked_rows = lock_admission_rows(
                 session,
@@ -3887,7 +3904,7 @@ class AgentJobService:
                 job.id: job
                 for job in (
                     locked_rows.get("target-parent-jobs", ())
-                    if nowait
+                    if locked_rows is not None
                     else session.scalars(
                         select(Job)
                         .where(Job.id.in_(parent_ids))
@@ -3909,7 +3926,7 @@ class AgentJobService:
     def heartbeat(
         self,
         fence: AgentFence,
-        progress: Mapping[str, object] | None,
+        progress: OperationProgress | None,
         lease_seconds: int,
         *,
         source: AgentSource | None = None,
@@ -3973,27 +3990,40 @@ class AgentJobService:
             write_progress = message.progress is None
             if message.progress is not None:
                 try:
-                    current_progress = dict(message.progress)
+                    current_progress = message.progress
+                    retained = stored_progress(attempt)
                     if (
                         operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
-                        and attempt.progress
+                        and retained is not None
                     ):
                         # A restarted transfer walks already durable objects again.
                         # Replayed offsets are not loss of retained operation bytes.
-                        for key in ("completed_bytes", "completed_items"):
-                            if key in current_progress and key in attempt.progress:
-                                current_progress[key] = max(
-                                    current_progress[key], attempt.progress[key]
-                                )
+                        replayed: dict[str, int] = {}
+                        given = current_progress.model_fields_set
+                        if "completed_bytes" in given:
+                            replayed["completed_bytes"] = max(
+                                current_progress.completed_bytes,
+                                retained.completed_bytes,
+                            )
+                        if (
+                            "completed_items" in given
+                            and current_progress.completed_items is not None
+                            and retained.completed_items is not None
+                        ):
+                            replayed["completed_items"] = max(
+                                current_progress.completed_items,
+                                retained.completed_items,
+                            )
+                        current_progress = current_progress.model_copy(update=replayed)
                     validated = validate_progress_update(
-                        attempt.progress, current_progress, partial=False
+                        retained, current_progress, partial=False
                     )
                     write_progress = progress_write_due(
-                        attempt.progress, validated, _aware(now)
+                        retained, validated, _aware(now)
                     )
                     if write_progress:
-                        attempt.progress = observe_progress(
-                            attempt.progress, validated, _aware(now)
+                        attempt.progress = progress_document(
+                            sample_progress(retained, validated, _aware(now))
                         )
                 except (TypeError, ValueError):
                     # Progress is optional evidence on a lease heartbeat: a
@@ -4091,7 +4121,7 @@ class AgentJobService:
                 )
             )
 
-    def succeed(self, fence: AgentFence, result: Mapping[str, object]) -> None:
+    def succeed(self, fence: AgentFence, result: AgentResultPayload) -> None:
         refused: UnknownOutcomeError | None = None
         for _attempt in admission_attempts():
             try:
@@ -4252,7 +4282,7 @@ class AgentJobService:
                 )
             ):
                 adapter = AgentOperationAdapter(session)
-                adapter.record_report(attempt, "cancelled", evidence)
+                adapter.record_report(attempt, "cancelled", message.result)
                 # The agent confirmed its host action has ceased: a definite end.
                 adapter.settle(
                     operation,
@@ -4328,7 +4358,7 @@ class AgentJobService:
         fence: AgentFence,
         state: str,
         *,
-        result: Mapping[str, object] | None,
+        result: AgentResultPayload | None,
         reason: str | None,
         source: AgentSource | None = None,
     ) -> None:
@@ -4431,25 +4461,22 @@ class AgentJobService:
                         f"operation failure evidence is invalid: {error}",
                         reason=InvalidRequestReason.MALFORMED,
                     ) from error
-            else:
-                message_result = _document(message.result)
             if (
                 state == "succeeded"
                 and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
+                and isinstance(message.result, ArtifactDistributionResult)
             ):
                 # Final authoritative evidence closes a last sample that may
                 # have been coalesced immediately before result publication.
-                final_progress = {
-                    "phase": ProgressPhase.COMPLETED,
-                    "completed_bytes": message_result["downloaded_bytes"],
-                }
-                if attempt.progress and attempt.progress.get("total_items") is not None:
-                    final_progress["completed_items"] = attempt.progress["total_items"]
-                final_progress = validate_progress_update(
-                    attempt.progress, final_progress
+                retained = stored_progress(attempt)
+                final_progress = OperationProgress(
+                    phase=ProgressPhase.COMPLETED,
+                    completed_bytes=message.result.downloaded_bytes,
+                    completed_items=None if retained is None else retained.total_items,
                 )
-                attempt.progress = observe_progress(
-                    attempt.progress, final_progress, _aware(now)
+                final_progress = validate_progress_update(retained, final_progress)
+                attempt.progress = progress_document(
+                    sample_progress(retained, final_progress, _aware(now))
                 )
                 record_distributed_runtime_image(
                     session,
@@ -4460,13 +4487,13 @@ class AgentJobService:
             adapter = AgentOperationAdapter(
                 session, resume_candidates=operator_resume_candidates_in_session
             )
-            adapter.record_report(attempt, state, message_result)
+            adapter.record_report(attempt, state, message.result)
             adapter.settle(
                 operation,
                 attempt,
                 parent,
                 self._report_event(
-                    operation, attempt, parent, outcome, message_result, now
+                    operation, attempt, parent, outcome, message.result, now
                 ),
                 now,
             )
@@ -4483,7 +4510,7 @@ class AgentJobService:
         attempt: AgentOperationAttempt,
         parent: Job | None,
         outcome: OutcomeDone | OutcomeFailed | OutcomeUnknown,
-        result: Mapping[str, object],
+        result: AgentResultPayload,
         now: datetime,
     ) -> Reported:
         """What an agent's report tells the lifecycle core.

@@ -1,6 +1,7 @@
 import {render, screen, waitFor} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {vi} from "vitest";
+import {LosslessNumber} from "lossless-json";
 import type {ControlApi, FleetProfile, LibraryViewRecipeDetail} from "../api/types";
 import {LibraryNodeNamesProvider} from "./library-node-names";
 import {LibraryProfileComposer} from "./library-profile-composer";
@@ -67,4 +68,37 @@ test("a chosen recipe option is saved with the assignment", async () => {
   await user.selectOptions(await screen.findByLabelText("Verification"), "adaptive-k");
   await user.click(screen.getByRole("button", {name: "Create Fleet Profile"}));
   expect(autosaveProfile).toHaveBeenCalledWith(1, expect.objectContaining({assignments: [expect.objectContaining({option_choices: {verification: "adaptive-k", projections: "stock"}})]}));
+});
+
+
+test("selects adjacent large profile identities and preserves their exact revision", async () => {
+  const user = userEvent.setup();
+  const lower = new LosslessNumber("9007199254740992");
+  const upper = new LosslessNumber("9007199254740993");
+  const revision = new LosslessNumber("9007199254740995");
+  const definition = {name: "Exact", description: "", favorite: false, installation_policy: "exact", labels: {}, assignments: []};
+  const existing = {number: upper, revision, name: "Exact", definition, assignments: []} as unknown as FleetProfile;
+  const autosaveProfile = vi.fn(async () => existing);
+  const api = {profiles: vi.fn(async () => ({profiles: [{...existing, number: lower, name: "Lower"}, existing]})), autosaveProfile} as unknown as ControlApi;
+  render(<LibraryProfileComposer api={api} detail={detail}/>);
+  await user.click(screen.getByRole("button", {name: "Add to Fleet Profile"}));
+  await screen.findByRole("option", {name: "Profile 9007199254740993 · Exact · 0 workloads"});
+  await waitFor(() => expect(screen.getByLabelText("Destination")).toBeEnabled());
+  await user.selectOptions(screen.getByLabelText("Destination"), "9007199254740993");
+  await user.click(screen.getByRole("button", {name: "Add workload"}));
+  expect(autosaveProfile).toHaveBeenCalledWith(upper, expect.objectContaining({expected_revision: revision}));
+  expect(await screen.findByRole("link", {name: "Review and apply profile 9007199254740993"})).toHaveAttribute("href", "/library/profiles?profile=9007199254740993");
+});
+
+test("allocates the next profile number exactly beyond the safe integer range", async () => {
+  const user = userEvent.setup();
+  const largest = new LosslessNumber("9007199254740993");
+  const next = new LosslessNumber("9007199254740994");
+  const autosaveProfile = vi.fn(async () => ({...saved, number: next}));
+  const api = {profiles: vi.fn(async () => ({profiles: [{number: largest, name: "Existing", definition: {}, assignments: []}]})), autosaveProfile} as unknown as ControlApi;
+  render(<LibraryProfileComposer api={api} detail={detail}/>);
+  await user.click(screen.getByRole("button", {name: "Add to Fleet Profile"}));
+  await waitFor(() => expect(screen.getByLabelText("Destination")).toBeEnabled());
+  await user.click(screen.getByRole("button", {name: "Create Fleet Profile"}));
+  expect(autosaveProfile).toHaveBeenCalledWith(next, expect.any(Object));
 });

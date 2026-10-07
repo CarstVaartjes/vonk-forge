@@ -263,6 +263,63 @@ generated clients or weakening their schema. Rust wire compatibility requires
 tests that serialize actual producer values and pass them to the other
 language's real parser and validator, in both directions.
 
+### Browser numeric values and runtime acceptance
+
+The same canonical OpenAPI input generates browser DTOs and Ajv standalone
+validators. Both the generic browser request and the openapi-fetch response
+middleware validate raw JSON before exposing a DTO. Request bodies and path
+and query parameters use the same generated contracts. SSE frames validate
+their canonical event component before updating the retained Fleet snapshot.
+A malformed frame or response is not evidence of a completed remote operation.
+
+The browser decoder retains numeric tokens with pinned lossless-json. Strict
+integer fields accept integer tokens, not `1.0` or `1e0`. Integers outside the
+JavaScript safe range remain `ExactInteger` values, an alias of that library's
+single `LosslessNumber` representation. Bounds are compared exactly without
+expanding exponent tokens. Arithmetic, selection identity, copy and JSON export
+preserve integer values; display ratios alone use an explicit approximation.
+An unsafe JavaScript Number cannot silently become an exact integer request:
+its float token fails a strict integer field; use an exact integer value instead.
+
+Canonical float branches use finite IEEE materialization, including permitted
+underflow and signed zero, before checking their float bounds. The successful
+compiled union branch also owns normalization. A mathematical JSON Schema
+integer is a different rule from the production strict integer token rule;
+the pinned official semantics corpus exercises that distinction explicitly.
+Neither path permits non-finite float materialization. Numeric token wrappers
+cannot satisfy object branches or evade ordinary object property constraints.
+The nominal serializer treats an ordinary `isLosslessNumber` property as data,
+not as permission to emit an unchecked numeric token.
+
+Ordinary Controller and standalone CLI JSON decoding uses last-key wins for
+duplicate object keys, and the browser follows that boundary. Stricter owning
+ingress, such as browser login and Spark wire parsing, retains its explicit
+duplicate-key rejection. Schema validation does not change that policy.
+
+Numeric maxima come from their actual owners: physical log-drop counters use
+the complete u64 range, PostgreSQL integer and bigint generations retain their
+storage domains, and Linux process IDs retain their execution domain. Other
+intentional unbounded integers stay unbounded, including engine values and
+logical wire counters. Rust's generated unbounded integer representation
+retains exact arbitrary-precision JSON values instead of inventing an i64 cap.
+Parser resource constraints, including Python's decimal integer conversion
+limit, remain separately reported consumer behavior rather than hidden schema
+bounds. No JavaScript safe-integer maximum is added to the canonical schema.
+
+The library producer packs pages into its existing shared byte budget. That
+request/library budget does not establish a universal API response ceiling;
+the browser does not impose one on unrelated responses. Transport limits must
+come from the owning route or a reviewed shared producer policy.
+
+The hosted consumer corpus uses actual ASGI output, installed raw and generated
+CLI HTTP consumers, both browser HTTP paths, and Rust HTTP and durable restart
+readers. Identical diagnostic leaf bytes travel inside each consumer's real
+envelope. Component-only, Python-only and Python/Rust-only cases are identified
+explicitly; an unexecuted route or a model-only semantic constraint is not
+reported as cross-language network proof. Generated outputs carry their exact
+source SHA and file digests, and the required drift check includes browser
+runtime validators as well as DTO declarations.
+
 Test the actual FastAPI serialization schema as well as Pydantic validation.
 A custom serializer can accidentally erase a nested model from OpenAPI even
 when its Python validator remains strict. `test_api_contract_graph.py` permits

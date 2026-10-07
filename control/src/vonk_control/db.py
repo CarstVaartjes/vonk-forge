@@ -6,6 +6,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -991,6 +992,21 @@ def initialize_database(
                             "retryable, so startup aborts; schema failure: "
                             f"{error}"
                         ) from error
+                    # Retained profile journals need exact SQL child proof before
+                    # the sole current reader can resume them. One short bounded
+                    # page runs under this startup owner; normal worker passes
+                    # continue remaining or temporarily locked rows automatically.
+                    from .fleet_profile_adapter_conversion import (
+                        convert_due_retained_applications,
+                    )
+
+                    converted = convert_due_retained_applications(
+                        sessionmaker(engine, expire_on_commit=False), datetime.now(UTC)
+                    )
+                    if converted:
+                        _LOGGER.info(
+                            "Converted %d retained profile adapter journals", converted
+                        )
                 finally:
                     if lock_connection.in_transaction():
                         lock_connection.rollback()

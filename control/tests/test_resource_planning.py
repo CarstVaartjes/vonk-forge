@@ -1,3 +1,5 @@
+import json
+
 from vonk_control.resource_planning import (
     ENVELOPE_EXCEEDS_CAPACITY,
     ENVELOPE_UNVERIFIED,
@@ -581,3 +583,93 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
     for service in (RunAdmissionService, RunSwitchOperationService):
         default = inspect.signature(service).parameters["memory_floor_bytes"].default
         assert default == PLATFORM_MEMORY_FLOOR_BYTES == 2_000_000_000
+
+
+def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
+    """Catches projections accepting malformed sizes or counting unused files."""
+    from importlib import resources
+
+    from vonk_control.resource_planning import memory_requirement
+    from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+
+    recipe = RecipeDefinition.model_validate_json(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text()
+    )
+    model = ModelDefinition.model_validate_json(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    selection = recipe.models[0]
+    reference = selection.model
+    role = recipe.topology.roles[0]
+    key = (reference.publisher, reference.slug, reference.content_sha256)
+    stored_recipe = json.loads(recipe.model_dump_json())
+    stored_model = json.loads(model.model_dump_json())
+    need = memory_requirement(
+        stored_recipe, role.resources.memory, role.name, {key: stored_model}
+    )
+    selected = {item.file_id for item in selection.files if role.name in item.roles}
+    assert need.demand.weights_bytes == sum(
+        item.size_bytes for item in model.files if item.id in selected
+    )
+    assert need.demand.allowed
+    stored_model["files"][0]["size_bytes"] = True
+    damaged = memory_requirement(
+        stored_recipe, role.resources.memory, role.name, {key: stored_model}
+    )
+    assert not damaged.demand.allowed
+    assert damaged.demand.weights_bytes is None
+
+
+def test_typed_effective_selection_roundtrip_keeps_bound_identity_and_knobs() -> None:
+    """Catches object duck-reading losing the already reviewed settings digest."""
+    from vonk_control.run_switch_contract import EffectiveSettingsSelection
+
+    resolved = resolve_effective_settings(_recipe_document(_recipe_settings())).settings
+    assert resolved is not None
+    selection = EffectiveSettingsSelection.model_validate_json(
+        json.dumps(
+            {
+                "kind": resolved.kind,
+                "context_tokens": resolved.context_tokens,
+                "concurrency": resolved.concurrency,
+                "max_batch_tokens": None,
+                "parallelism": {
+                    "world_size": 2,
+                    "tensor": 2,
+                    "pipeline": 1,
+                    "data": 1,
+                    "backend": "tcp",
+                },
+                "knobs": {"engine-switch": False, "engine-count": 0, "engine-note": ""},
+                "change_effects": {},
+                "identity_sha256": "f" * 64,
+            }
+        ),
+        strict=True,
+    )
+    roundtrip = resolve_effective_settings(selection)
+    assert roundtrip.allowed
+    assert roundtrip.settings is not None
+    assert roundtrip.settings.identity_digest == selection.identity_sha256
+    assert roundtrip.settings.knobs == selection.knobs
+    assert resource_demand(roundtrip.settings, _evidence()).total_bytes == 120
+
+
+def test_invalid_engine_knob_and_boolean_context_remain_contract_blockers() -> None:
+    """Catches raw nested values escaping canonical scalar and integer checks."""
+    settings = _recipe_settings()
+    settings["knobs"] = {
+        "engine-owned": {"value": {"nested": True}, "change_effect": "restart"}
+    }
+    result = resolve_effective_settings(_recipe_document(settings))
+    assert not result.allowed
+    assert any(reason.code == "resource.knobs_invalid" for reason in result.reasons)
+    settings = _recipe_settings()
+    settings["context_tokens"] = {"value": True, "change_effect": "restart"}
+    result = resolve_effective_settings(_recipe_document(settings))
+    assert not result.allowed
+    assert any(reason.code == "resource.settings_type" for reason in result.reasons)
