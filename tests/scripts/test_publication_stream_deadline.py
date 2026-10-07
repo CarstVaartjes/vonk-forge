@@ -45,6 +45,7 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
         "    sys.stdout.buffer.flush()\n"
         "    time.sleep(60)\n"
     )
+    transfer_timeout = publication.RCLONE_TRANSFER_TIMEOUT
     monkeypatch.setattr(publication, "RCLONE_TRANSFER_TIMEOUT", 0.15)
     popen = publication.subprocess.Popen
     children = []
@@ -70,6 +71,9 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
         pid = int(pidfile.read_text())
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
+        # The transfer fault has cleared. A fresh Python process may need more
+        # than the injected stall budget merely to start on a busy CI worker.
+        monkeypatch.setattr(publication, "RCLONE_TRANSFER_TIMEOUT", transfer_timeout)
         complete = b"the complete accepted remote observation"
         payload.write_bytes(complete)
         assert read() == (

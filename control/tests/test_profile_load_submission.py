@@ -27,6 +27,7 @@ from vonk_control.fleet_profiles import (
     FleetProfileAdmissionBusy,
     FleetProfileConflict,
     FleetProfileService,
+    build_production_fleet_profile_service,
 )
 from vonk_control.lifecycle.types import State as LifecycleState
 from vonk_control.models import (
@@ -44,6 +45,7 @@ from vonk_control.models import (
     ResourceReservation,
     User,
 )
+from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles import cli
@@ -220,7 +222,11 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
 def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) -> None:
     sessions, _api, _codec, _headers_unused, _preview = _profile_api(postgres_engine)
     now = [NOW]
-    profiles = FleetProfileService(sessions, clock=lambda: now[0])
+    clock = lambda: now[0]
+    planner = RunSwitchOperationService(sessions, clock=clock)
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=clock, run_switch_operations=planner
+    )
     api, codec = _client(sessions, profiles=profiles)
     headers = _headers(codec, "administrator")
     original = FleetProfileService._queue_application

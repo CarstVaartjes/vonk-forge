@@ -3,6 +3,11 @@
   "note": "Hand-written object shapes in control/web/src. API data is an alias of the generated schema; only UI-only shapes are listed, each with a reason.",
   "entries": [
     {
+      "file": "control/web/src/api/fleet-event-connection.ts",
+      "type": "FleetEventStream",
+      "reason": "Browser-local event connection handle with listener/disposal methods and its route URL; never serialized as API data. Event payloads use the generated canonical route schema."
+    },
+    {
       "file": "control/web/src/api/types.ts",
       "type": "ActivityFilters",
       "reason": "UI-only state or form draft; never serialized to the API"

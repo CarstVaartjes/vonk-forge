@@ -6,6 +6,7 @@ from typing import NoReturn
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from vonk_control import platform_observation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -26,9 +27,16 @@ class Jobs:
 
 
 def test_authenticated_contract_complete_membership_fault_recovery(
-    tmp_path, monkeypatch
+    monkeypatch,
 ):
-    engine = create_engine(f"sqlite:///{tmp_path / 'compatibility.sqlite'}")
+    # This proves committed producer/store/capture semantics, not crash durability.
+    # Keep all 257 real process recorders and separate transactions without
+    # charging hundreds of disk fsyncs to an observation-contract test.
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = [datetime(2026, 10, 7, tzinfo=UTC)]

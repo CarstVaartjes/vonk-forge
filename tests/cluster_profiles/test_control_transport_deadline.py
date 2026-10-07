@@ -217,15 +217,20 @@ def test_cli_slow_response_never_repeats_post_without_authoritative_absence(
     assert json.loads(state["calls"][0][2])["request_key"] == KEY
 
 
-def test_generated_client_uses_same_body_deadline_and_received_evidence(https_peer):
+@pytest.mark.parametrize("stage", ["headers", "body"])
+def test_generated_client_uses_same_body_deadline_and_received_evidence(
+    https_peer, stage
+):
     client, state = https_peer
-    state["status"] = 503
+    state.update(status=503, stage=stage)
     with pytest.raises(ControlTransportError) as failure:
         client.fleet()
     context = failure.value.context
     assert context is not None and context.transport == "timeout"
-    assert context.http_status == 503 and context.request_id == "deadline-fixture"
-    assert failure.value.retry_after_seconds == 120
+    assert context.http_status == (503 if stage == "body" else None)
+    assert context.request_id == ("deadline-fixture" if stage == "body" else None)
+    assert failure.value.retry_after_seconds == (120 if stage == "body" else None)
+    assert len(state["calls"]) == 1
     assert state["closed"].wait(1)
 
 
