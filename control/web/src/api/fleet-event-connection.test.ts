@@ -93,3 +93,14 @@ test("204 closes permanently and 401 invokes the existing authentication owner w
     connection.close();
   }
 });
+
+test("canonical frame issues refuse contradictory cause evidence", () => {
+  const document = (reason_code: string, observed_bytes_at_least: number | null, budget_bytes = 1048576) => stringifyContractJson({
+    reset_reason: "frame-unavailable", event_cursor: 7, issue: {reason_code, observed_bytes_at_least, budget_bytes},
+  });
+  expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_encoding_unavailable", 1048577))).toThrow();
+  expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_budget_exceeded", null))).toThrow();
+  expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_budget_exceeded", 1048576))).toThrow();
+  expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_budget_exceeded", 1048577, 2))).toThrow();
+  expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_encoding_unavailable", null))).not.toThrow();
+});

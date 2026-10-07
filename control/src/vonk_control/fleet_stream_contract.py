@@ -14,6 +14,8 @@ from pydantic import (
     model_validator,
 )
 
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
 from .fleet_event_contract import (
     AgentOperationPayload,
     InstallationNodePayload,
@@ -32,11 +34,48 @@ class _FleetStreamModel(StrictJSONModel):
 
 
 class FleetFrameIssue(_FleetStreamModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "reason_code": {"const": "fleet.frame_encoding_unavailable"}
+                        },
+                        "required": ["reason_code"],
+                    },
+                    "then": {
+                        "properties": {"observed_bytes_at_least": {"type": "null"}}
+                    },
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "reason_code": {"const": "fleet.frame_budget_exceeded"}
+                        },
+                        "required": ["reason_code"],
+                    },
+                    "then": {
+                        "properties": {
+                            "observed_bytes_at_least": {
+                                "type": "integer",
+                                "minimum": MAX_CONTROL_DOCUMENT_BYTES + 1,
+                            }
+                        }
+                    },
+                },
+            ]
+        }
+    )
     reason_code: Literal[
         "fleet.frame_budget_exceeded", "fleet.frame_encoding_unavailable"
     ]
-    observed_bytes_at_least: Annotated[int, Field(ge=1)] | None
-    budget_bytes: Annotated[int, Field(ge=1)]
+    observed_bytes_at_least: (
+        Annotated[int, Field(ge=MAX_CONTROL_DOCUMENT_BYTES + 1)] | None
+    )
+    budget_bytes: Annotated[
+        int, Field(ge=MAX_CONTROL_DOCUMENT_BYTES, le=MAX_CONTROL_DOCUMENT_BYTES)
+    ]
 
     @model_validator(mode="after")
     def truthful_measurement(self) -> FleetFrameIssue:
