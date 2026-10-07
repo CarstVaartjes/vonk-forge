@@ -103,6 +103,10 @@
       "kind": "agent-protocol"
     },
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/runtime_scan.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/source_bundles.py",
       "kind": "agent-protocol"
     },

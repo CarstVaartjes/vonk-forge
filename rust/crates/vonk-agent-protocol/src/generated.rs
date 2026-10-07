@@ -8651,6 +8651,40 @@ pub struct RecipeRunInspectionRequest {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct RecipeRunObservationCheckpoint {
+    pub had_failures: bool,
+    pub had_plans: bool,
+    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    pub metadata_stamp: ::std::option::Option<RecipeRunObservationDirectoryStamp>,
+    pub root: ::std::string::String,
+    pub runs_stamp: RecipeRunObservationDirectoryStamp,
+    pub started_at: ::std::string::String,
+    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    pub witness: ::std::option::Option<RecipeRunObservationCursorWitness>,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RecipeRunObservationCursorWitness {
+    pub after: i64,
+    pub before: i64,
+    pub inode: ::std::string::String,
+    pub name: ::std::vec::Vec<u8>,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RecipeRunObservationDirectoryStamp {
+    pub changed_nanoseconds: i64,
+    pub changed_seconds: i64,
+    pub device: ::std::string::String,
+    pub inode: ::std::string::String,
+    pub modified_nanoseconds: i64,
+    pub modified_seconds: i64,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct RecipeRunObservationWire {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub endpoint_ready: ::std::option::Option<bool>,
@@ -24662,6 +24696,96 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunInspectionRequest {
             include_logs: raw.include_logs,
             request_id: raw.request_id,
             request_sha256: raw.request_sha256,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationCheckpoint {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeRunObservationCheckpoint", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub had_failures: bool,
+            pub had_plans: bool,
+            #[serde(deserialize_with = "::std::option::Option::deserialize")]
+            pub metadata_stamp: ::std::option::Option<RecipeRunObservationDirectoryStamp>,
+            pub root: ::std::string::String,
+            pub runs_stamp: RecipeRunObservationDirectoryStamp,
+            pub started_at: ::std::string::String,
+            #[serde(deserialize_with = "::std::option::Option::deserialize")]
+            pub witness: ::std::option::Option<RecipeRunObservationCursorWitness>,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            had_failures: raw.had_failures,
+            had_plans: raw.had_plans,
+            metadata_stamp: raw.metadata_stamp,
+            root: raw.root,
+            runs_stamp: raw.runs_stamp,
+            started_at: raw.started_at,
+            witness: raw.witness,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationCursorWitness {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        crate::wire_schema::validate_and_materialize(
+            "RecipeRunObservationCursorWitness",
+            &mut value,
+        )
+        .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub after: i64,
+            pub before: i64,
+            pub inode: ::std::string::String,
+            pub name: ::std::vec::Vec<u8>,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            after: raw.after,
+            before: raw.before,
+            inode: raw.inode,
+            name: raw.name,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationDirectoryStamp {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        crate::wire_schema::validate_and_materialize(
+            "RecipeRunObservationDirectoryStamp",
+            &mut value,
+        )
+        .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub changed_nanoseconds: i64,
+            pub changed_seconds: i64,
+            pub device: ::std::string::String,
+            pub inode: ::std::string::String,
+            pub modified_nanoseconds: i64,
+            pub modified_seconds: i64,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            changed_nanoseconds: raw.changed_nanoseconds,
+            changed_seconds: raw.changed_seconds,
+            device: raw.device,
+            inode: raw.inode,
+            modified_nanoseconds: raw.modified_nanoseconds,
+            modified_seconds: raw.modified_seconds,
         })
     }
 }

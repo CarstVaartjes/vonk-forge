@@ -26,6 +26,22 @@ use crate::failure_evidence::{FailureProcessLogs, sanitize_tail};
 /// channel and the privileged helper cannot drift.
 const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BYTES;
 
+/// The existing background observation concurrency wave belongs to native
+/// helper work, not to futures that may be cancelled before that work finishes.
+/// Foreground lifecycle/diagnostic requests do not wait on this pool.
+pub(crate) const BACKGROUND_RUN_INSPECTION_CONCURRENCY: usize = 8;
+fn background_inspection_slots() -> std::sync::Arc<tokio::sync::Semaphore> {
+    static SLOTS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    SLOTS
+        .get_or_init(|| {
+            std::sync::Arc::new(tokio::sync::Semaphore::new(
+                BACKGROUND_RUN_INSPECTION_CONCURRENCY,
+            ))
+        })
+        .clone()
+}
+
 #[derive(Debug, Error)]
 pub enum HostRuntimeError {
     #[error("host runtime request storage is invalid")]
@@ -314,12 +330,35 @@ impl HostRuntimeBoundary<'_> {
             .map(|report| report.running)
     }
 
+    pub async fn inspect_recipe_run_for_observation(
+        &self,
+        arguments: Vec<String>,
+    ) -> Result<bool, HostRuntimeError> {
+        let permit = background_inspection_slots()
+            .acquire_owned()
+            .await
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))?;
+        self.inspect_recipe_run_report_with_permit(arguments, false, Some(permit))
+            .await
+            .map(|report| report.running)
+    }
+
     /// Like `inspect_recipe_run`, and when `include_logs` is set also reads the
     /// running container's bounded output without stopping it.
     pub async fn inspect_recipe_run_report(
         &self,
         arguments: Vec<String>,
         include_logs: bool,
+    ) -> Result<RunInspectionReport, HostRuntimeError> {
+        self.inspect_recipe_run_report_with_permit(arguments, include_logs, None)
+            .await
+    }
+
+    async fn inspect_recipe_run_report_with_permit(
+        &self,
+        arguments: Vec<String>,
+        include_logs: bool,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
         let request = HostRuntimeRequest {
             action: HostRuntimeAction::RunInspect,
@@ -339,7 +378,7 @@ impl HostRuntimeBoundary<'_> {
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
         let request_path = write_request(self.request_root, &digest, &body)?;
-        let _request_cleanup = RequestFileCleanup(request_path);
+        let request_cleanup = RequestFileCleanup(request_path);
         let request_id = uuid::Uuid::new_v4();
         let frame = canonical_generated_json(&RecipeRunInspectionRequest {
             request_id,
@@ -349,6 +388,10 @@ impl HostRuntimeBoundary<'_> {
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let helper_socket = self.helper_socket.to_path_buf();
         let response = tokio::task::spawn_blocking(move || {
+            // Both native ownership and its request stay alive until actual
+            // socket work returns, even when the awaiting page is cancelled.
+            let _permit = permit;
+            let _request_cleanup = request_cleanup;
             call_helper(&helper_socket, &frame, Duration::from_secs(15))
         })
         .await
@@ -895,6 +938,213 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
     use vonk_agent_protocol::{HostRuntimeAction, RecipeStartRequest};
+
+    /// Real Unix framing and the production spawn_blocking boundary prove
+    /// ownership survives abandoned logical pages. Only native process-running
+    /// evidence is a fixture response; permits/socket/request cleanup are real.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work_ready() {
+        use super::{BACKGROUND_RUN_INSPECTION_CONCURRENCY, HostRuntimeBoundary};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, Condvar, Mutex};
+        struct Gate {
+            release: Arc<(Mutex<bool>, Condvar)>,
+            stop: Arc<AtomicBool>,
+        }
+        impl Drop for Gate {
+            fn drop(&mut self) {
+                *self.release.0.lock().unwrap() = true;
+                self.release.1.notify_all();
+                self.stop.store(true, Ordering::SeqCst);
+            }
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("inspection.sock");
+        let requests = temp.path().join("requests");
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let gate = Gate {
+            release: release.clone(),
+            stop: stop.clone(),
+        };
+        let native_active = active.clone();
+        let native_maximum = maximum.clone();
+        let native_started = started.clone();
+        let native_requests = requests.clone();
+        let server = std::thread::spawn(move || {
+            let mut workers = Vec::new();
+            while !stop.load(Ordering::SeqCst) {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
+                    Err(error) => panic!("inspection listener: {error}"),
+                };
+                let active = native_active.clone();
+                let maximum = native_maximum.clone();
+                let started = native_started.clone();
+                let release = release.clone();
+                let requests = native_requests.clone();
+                workers.push(std::thread::spawn(move || {
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut prefix = [0; 4];
+                    stream.read_exact(&mut prefix).unwrap();
+                    let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+                    stream.read_exact(&mut body).unwrap();
+                    let request: vonk_agent_protocol::RecipeRunInspectionRequest =
+                        vonk_agent_protocol::parse_strict(&body).unwrap();
+                    let background = request.include_logs != Some(true);
+                    if background {
+                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        maximum.fetch_max(current, Ordering::SeqCst);
+                        started.fetch_add(1, Ordering::SeqCst);
+                        let mut released = release.0.lock().unwrap();
+                        while !*released {
+                            released = release.1.wait(released).unwrap();
+                        }
+                        // Dropping an awaiting logical page must neither free
+                        // the native permit nor delete its still-owned request.
+                        assert!(
+                            requests
+                                .join(format!("{}.json", request.request_sha256))
+                                .exists()
+                        );
+                    }
+                    let response = super::HelperResponse {
+                        schema_version: 1,
+                        request_id: Some(request.request_id),
+                        status: super::HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+                        process_running: Some(true),
+                        exit_code: None,
+                        error_code: None,
+                        diagnostic: None,
+                        process_logs: None,
+                    };
+                    let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+                    if background {
+                        // Native inspection is finished before its reply makes
+                        // the client's permit available to the next call.
+                        active.fetch_sub(1, Ordering::SeqCst);
+                    }
+                    stream
+                        .write_all(&(body.len() as u32).to_be_bytes())
+                        .unwrap();
+                    stream.write_all(&body).unwrap();
+                }));
+            }
+            for worker in workers {
+                worker.join().unwrap();
+            }
+        });
+        let spawn = |background: bool| {
+            let socket = socket.clone();
+            let requests = requests.clone();
+            tokio::spawn(async move {
+                let client = crate::client::AgentHttpClient::for_http_test(
+                    "http://127.0.0.1:9/",
+                    "spk_0123456789abcdef0123456789abcdef",
+                );
+                let boundary = HostRuntimeBoundary {
+                    client: &client,
+                    request_root: &requests,
+                    helper_socket: &socket,
+                };
+                let arguments = vec![Uuid::new_v4().to_string()];
+                if background {
+                    boundary.inspect_recipe_run_for_observation(arguments).await
+                } else {
+                    boundary
+                        .inspect_recipe_run_report(arguments, true)
+                        .await
+                        .map(|report| report.running)
+                }
+            })
+        };
+        let first: Vec<_> = (0..BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+            .map(|_| spawn(true))
+            .collect();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while active.load(Ordering::SeqCst) != BACKGROUND_RUN_INSPECTION_CONCURRENCY {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for task in first {
+            task.abort();
+            let _ = task.await;
+        }
+        for _ in 0..3 {
+            let page: Vec<_> = (0..BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+                .map(|_| spawn(true))
+                .collect();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            for task in page {
+                task.abort();
+                let _ = task.await;
+            }
+            assert_eq!(
+                active.load(Ordering::SeqCst),
+                BACKGROUND_RUN_INSPECTION_CONCURRENCY
+            );
+            assert_eq!(
+                started.load(Ordering::SeqCst),
+                BACKGROUND_RUN_INSPECTION_CONCURRENCY
+            );
+        }
+        // A real foreground boundary call has its own lifecycle lane. It is
+        // not stuck behind permits still owned by abandoned observer futures.
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), spawn(false))
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            maximum.load(Ordering::SeqCst),
+            BACKGROUND_RUN_INSPECTION_CONCURRENCY
+        );
+        *gate.release.0.lock().unwrap() = true;
+        gate.release.1.notify_all();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), spawn(true))
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while active.load(Ordering::SeqCst) != 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        // Returning every native permit also proves request cleanup happened
+        // in the blocking closures, rather than just in the fixture server.
+        let permits = tokio::time::timeout(
+            Duration::from_secs(2),
+            super::background_inspection_slots()
+                .acquire_many_owned(BACKGROUND_RUN_INSPECTION_CONCURRENCY as u32),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        drop(gate);
+        server.join().unwrap();
+        assert!(fs::read_dir(requests).unwrap().next().is_none());
+        drop(permits);
+    }
 
     #[test]
     fn runtime_rejection_binds_and_redacts_captured_process_logs() {
