@@ -587,6 +587,7 @@ def test_recorder_captures_every_authoritative_insert_with_public_payloads(
     for row in rows[1:]:
         FleetChangeEvent.model_validate(
             {
+                "event_cursor": row.id,
                 "projection_refresh_required": True,
                 "change": {
                     "entity_kind": row.entity_kind,
@@ -663,6 +664,7 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
     for row in rows:
         FleetChangeEvent.model_validate(
             {
+                "event_cursor": row.id,
                 "projection_refresh_required": True,
                 "change": {
                     "entity_kind": row.entity_kind,

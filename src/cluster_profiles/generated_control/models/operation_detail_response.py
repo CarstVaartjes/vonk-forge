@@ -15,7 +15,6 @@ if TYPE_CHECKING:
   from ..models.agent_failure_result import AgentFailureResult
   from ..models.availability_operation_failure import AvailabilityOperationFailure
   from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
-  from ..models.model_cache_cancellation import ModelCacheCancellation
   from ..models.operation_blocker import OperationBlocker
   from ..models.operation_evidence_download import OperationEvidenceDownload
   from ..models.operation_failure_evidence import OperationFailureEvidence
@@ -46,7 +45,6 @@ class OperationDetailResponse:
             cancellation (FleetProfileApplicationCancellationView | None | Unset):
             evidence_download (None | OperationEvidenceDownload | Unset):
             failure (AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset):
-            model_cache_cancellation (ModelCacheCancellation | None | Unset):
             next_attempt_at (None | str | Unset):
             owner (None | OperationOwnerReference | Unset):
             parent_id (None | str | Unset):
@@ -67,7 +65,6 @@ class OperationDetailResponse:
     cancellation: FleetProfileApplicationCancellationView | None | Unset = UNSET
     evidence_download: None | OperationEvidenceDownload | Unset = UNSET
     failure: AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset = UNSET
-    model_cache_cancellation: ModelCacheCancellation | None | Unset = UNSET
     next_attempt_at: None | str | Unset = UNSET
     owner: None | OperationOwnerReference | Unset = UNSET
     parent_id: None | str | Unset = UNSET
@@ -85,7 +82,6 @@ class OperationDetailResponse:
         from ..models.agent_failure_result import AgentFailureResult # noqa: PLC0415
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
-        from ..models.model_cache_cancellation import ModelCacheCancellation # noqa: PLC0415
         from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
@@ -143,14 +139,6 @@ class OperationDetailResponse:
             failure = self.failure.to_dict()
         else:
             failure = self.failure
-
-        model_cache_cancellation: dict[str, Any] | None | Unset
-        if isinstance(self.model_cache_cancellation, Unset):
-            model_cache_cancellation = UNSET
-        elif isinstance(self.model_cache_cancellation, ModelCacheCancellation):
-            model_cache_cancellation = self.model_cache_cancellation.to_dict()
-        else:
-            model_cache_cancellation = self.model_cache_cancellation
 
         next_attempt_at: None | str | Unset
         if isinstance(self.next_attempt_at, Unset):
@@ -232,8 +220,6 @@ class OperationDetailResponse:
             field_dict["evidence_download"] = evidence_download
         if failure is not UNSET:
             field_dict["failure"] = failure
-        if model_cache_cancellation is not UNSET:
-            field_dict["model_cache_cancellation"] = model_cache_cancellation
         if next_attempt_at is not UNSET:
             field_dict["next_attempt_at"] = next_attempt_at
         if owner is not UNSET:
@@ -260,7 +246,6 @@ class OperationDetailResponse:
         from ..models.agent_failure_result import AgentFailureResult # noqa: PLC0415
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
-        from ..models.model_cache_cancellation import ModelCacheCancellation # noqa: PLC0415
         from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
@@ -372,26 +357,6 @@ class OperationDetailResponse:
             return cast(AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset, data)
 
         failure = _parse_failure(d.pop("failure", UNSET))
-
-
-        def _parse_model_cache_cancellation(data: object) -> ModelCacheCancellation | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                model_cache_cancellation_type_0 = ModelCacheCancellation.from_dict(data)
-
-
-
-                return model_cache_cancellation_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(ModelCacheCancellation | None | Unset, data)
-
-        model_cache_cancellation = _parse_model_cache_cancellation(d.pop("model_cache_cancellation", UNSET))
 
 
         def _parse_next_attempt_at(data: object) -> None | str | Unset:
@@ -530,7 +495,6 @@ class OperationDetailResponse:
             cancellation=cancellation,
             evidence_download=evidence_download,
             failure=failure,
-            model_cache_cancellation=model_cache_cancellation,
             next_attempt_at=next_attempt_at,
             owner=owner,
             parent_id=parent_id,

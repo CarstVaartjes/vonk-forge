@@ -7463,6 +7463,14 @@ impl ::std::convert::TryFrom<::std::string::String> for ProgressPhase {
 pub enum ProjectionCode {
     #[serde(rename = "cpu.low-clock")]
     CpuLowClock,
+    #[serde(rename = "fleet.frame_budget_exceeded")]
+    FleetFrameBudgetExceeded,
+    #[serde(rename = "fleet.frame_encoding_unavailable")]
+    FleetFrameEncodingUnavailable,
+    #[serde(rename = "fleet.stored_event_payload_unavailable")]
+    FleetStoredEventPayloadUnavailable,
+    #[serde(rename = "observation.transfer_unavailable")]
+    ObservationTransferUnavailable,
     #[serde(rename = "install.partial")]
     InstallPartial,
     #[serde(rename = "inventory.missing")]
@@ -7494,6 +7502,12 @@ impl ::std::fmt::Display for ProjectionCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::CpuLowClock => f.write_str("cpu.low-clock"),
+            Self::FleetFrameBudgetExceeded => f.write_str("fleet.frame_budget_exceeded"),
+            Self::FleetFrameEncodingUnavailable => f.write_str("fleet.frame_encoding_unavailable"),
+            Self::FleetStoredEventPayloadUnavailable => {
+                f.write_str("fleet.stored_event_payload_unavailable")
+            }
+            Self::ObservationTransferUnavailable => f.write_str("observation.transfer_unavailable"),
             Self::InstallPartial => f.write_str("install.partial"),
             Self::InventoryMissing => f.write_str("inventory.missing"),
             Self::InventoryStale => f.write_str("inventory.stale"),
@@ -7521,6 +7535,12 @@ impl ::std::str::FromStr for ProjectionCode {
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "cpu.low-clock" => Ok(Self::CpuLowClock),
+            "fleet.frame_budget_exceeded" => Ok(Self::FleetFrameBudgetExceeded),
+            "fleet.frame_encoding_unavailable" => Ok(Self::FleetFrameEncodingUnavailable),
+            "fleet.stored_event_payload_unavailable" => {
+                Ok(Self::FleetStoredEventPayloadUnavailable)
+            }
+            "observation.transfer_unavailable" => Ok(Self::ObservationTransferUnavailable),
             "install.partial" => Ok(Self::InstallPartial),
             "inventory.missing" => Ok(Self::InventoryMissing),
             "inventory.stale" => Ok(Self::InventoryStale),
@@ -23006,6 +23026,10 @@ impl ProjectionCode {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::CpuLowClock => "cpu.low-clock",
+            Self::FleetFrameBudgetExceeded => "fleet.frame_budget_exceeded",
+            Self::FleetFrameEncodingUnavailable => "fleet.frame_encoding_unavailable",
+            Self::FleetStoredEventPayloadUnavailable => "fleet.stored_event_payload_unavailable",
+            Self::ObservationTransferUnavailable => "observation.transfer_unavailable",
             Self::InstallPartial => "install.partial",
             Self::InventoryMissing => "inventory.missing",
             Self::InventoryStale => "inventory.stale",
@@ -23057,6 +23081,14 @@ impl<'de> ::serde::Deserialize<'de> for ProjectionCode {
         enum Raw {
             #[serde(rename = "cpu.low-clock")]
             CpuLowClock,
+            #[serde(rename = "fleet.frame_budget_exceeded")]
+            FleetFrameBudgetExceeded,
+            #[serde(rename = "fleet.frame_encoding_unavailable")]
+            FleetFrameEncodingUnavailable,
+            #[serde(rename = "fleet.stored_event_payload_unavailable")]
+            FleetStoredEventPayloadUnavailable,
+            #[serde(rename = "observation.transfer_unavailable")]
+            ObservationTransferUnavailable,
             #[serde(rename = "install.partial")]
             InstallPartial,
             #[serde(rename = "inventory.missing")]
@@ -23088,6 +23120,10 @@ impl<'de> ::serde::Deserialize<'de> for ProjectionCode {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::CpuLowClock => Self::CpuLowClock,
+            Raw::FleetFrameBudgetExceeded => Self::FleetFrameBudgetExceeded,
+            Raw::FleetFrameEncodingUnavailable => Self::FleetFrameEncodingUnavailable,
+            Raw::FleetStoredEventPayloadUnavailable => Self::FleetStoredEventPayloadUnavailable,
+            Raw::ObservationTransferUnavailable => Self::ObservationTransferUnavailable,
             Raw::InstallPartial => Self::InstallPartial,
             Raw::InventoryMissing => Self::InventoryMissing,
             Raw::InventoryStale => Self::InventoryStale,

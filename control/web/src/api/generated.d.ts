@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 f265bf250aac73036ba2d693e77655660a04dacfcfd0d2ab1d26360d24be75be. Do not edit.
+// Generated from canonical OpenAPI SHA256 dd631258759b6dd283e67f04899f3684879fe3478da46e7f836f84a0541d8e12. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5973,28 +5973,12 @@ export interface components {
         ModelCacheCancellation: {
             /** Actor */
             actor: string;
-            observation?: components["schemas"]["ModelCacheCancellationObservation"] | null;
             /** Reason */
             reason: string;
             /** Request Key */
             request_key: string;
             /** Requested At */
             requested_at: string;
-        };
-        /**
-         * ModelCacheCancellationObservation
-         * @description The lifecycle owner's actual terminal cancellation evidence.
-         */
-        ModelCacheCancellationObservation: {
-            /** Detail */
-            detail: string;
-            /**
-             * Effect
-             * @enum {string}
-             */
-            effect: "unknown" | "none" | "stopped";
-            /** Observed At */
-            observed_at: string;
         };
         /**
          * ModelCacheCancellationRequest
@@ -6934,7 +6918,6 @@ export interface components {
             id: string;
             /** Kind */
             kind: string;
-            model_cache_cancellation?: components["schemas"]["ModelCacheCancellation"] | null;
             /** Next Attempt At */
             next_attempt_at?: string | null;
             /** Node Ids */
@@ -7532,7 +7515,7 @@ export interface components {
          * @description Warnings and attention items of the fleet and library projections.
          * @enum {string}
          */
-        ProjectionCode: "cpu.low-clock" | "install.partial" | "inventory.missing" | "inventory.stale" | "network.nas-route-wifi-no-wired-port" | "network.nas-route-wifi-wired-port-down" | "network.nas-route-wifi-wired-port-unused" | "node.offline" | "profile.retrying" | "recipe.update_available" | "run.degraded" | "telemetry.delayed" | "telemetry.missing" | "telemetry.stale";
+        ProjectionCode: "cpu.low-clock" | "fleet.frame_budget_exceeded" | "fleet.frame_encoding_unavailable" | "fleet.stored_event_payload_unavailable" | "observation.transfer_unavailable" | "install.partial" | "inventory.missing" | "inventory.stale" | "network.nas-route-wifi-no-wired-port" | "network.nas-route-wifi-wired-port-down" | "network.nas-route-wifi-wired-port-unused" | "node.offline" | "profile.retrying" | "recipe.update_available" | "run.degraded" | "telemetry.delayed" | "telemetry.missing" | "telemetry.stale";
         /** ProjectionReason */
         ProjectionReason: {
             code: components["schemas"]["ProjectionCode"];

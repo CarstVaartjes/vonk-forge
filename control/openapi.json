@@ -14928,16 +14928,6 @@
             "title": "Actor",
             "type": "string"
           },
-          "observation": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ModelCacheCancellationObservation"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "reason": {
             "maxLength": 512,
             "minLength": 1,
@@ -14963,40 +14953,6 @@
           "requested_at"
         ],
         "title": "ModelCacheCancellation",
-        "type": "object"
-      },
-      "ModelCacheCancellationObservation": {
-        "additionalProperties": false,
-        "description": "The lifecycle owner's actual terminal cancellation evidence.",
-        "properties": {
-          "detail": {
-            "maxLength": 1024,
-            "minLength": 1,
-            "title": "Detail",
-            "type": "string"
-          },
-          "effect": {
-            "enum": [
-              "unknown",
-              "none",
-              "stopped"
-            ],
-            "title": "Effect",
-            "type": "string"
-          },
-          "observed_at": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Observed At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "effect",
-          "observed_at",
-          "detail"
-        ],
-        "title": "ModelCacheCancellationObservation",
         "type": "object"
       },
       "ModelCacheCancellationRequest": {
@@ -17796,16 +17752,6 @@
             "title": "Kind",
             "type": "string"
           },
-          "model_cache_cancellation": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ModelCacheCancellation"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "next_attempt_at": {
             "anyOf": [
               {
@@ -19710,6 +19656,10 @@
         "description": "Warnings and attention items of the fleet and library projections.",
         "enum": [
           "cpu.low-clock",
+          "fleet.frame_budget_exceeded",
+          "fleet.frame_encoding_unavailable",
+          "fleet.stored_event_payload_unavailable",
+          "observation.transfer_unavailable",
           "install.partial",
           "inventory.missing",
           "inventory.stale",

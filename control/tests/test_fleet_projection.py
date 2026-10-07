@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import Table, create_engine, event, literal, select, text, update
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
     _AUTHORITY_REVISION,
@@ -616,6 +617,7 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
         assert event is not None
         FleetChangeEvent.model_validate(
             {
+                "event_cursor": event.id,
                 "projection_refresh_required": True,
                 "change": {
                     "entity_kind": event.entity_kind,
@@ -1755,7 +1757,9 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     snapshot = projection.read()
     observed = client.get("/api/fleet", headers=operator)
     assert observed.status_code == 200
-    observed_snapshot = FleetSnapshot.model_validate(observation_document(observed))
+    observed_snapshot = FleetSnapshot.model_validate_json(
+        canonical_message(observation_document(observed))
+    )
     if damage != "labels":
         assert observed_snapshot.nodes[0].installed[0].complete is None
         assert observed_snapshot.nodes[0].loaded[0].healthy is None
@@ -1772,8 +1776,8 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
                 .values(labels={"role": "inference"})
             )
         recovered = client.get("/api/fleet", headers=operator)
-        recovered_snapshot = FleetSnapshot.model_validate(
-            observation_document(recovered)
+        recovered_snapshot = FleetSnapshot.model_validate_json(
+            canonical_message(observation_document(recovered))
         )
         assert recovered_snapshot.nodes[0].labels == {"role": "inference"}
         assert not recovered_snapshot.nodes[0].projection_issues
@@ -1838,7 +1842,9 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
         )
     recovered = client.get("/api/fleet", headers=operator)
     assert recovered.status_code == 200
-    recovered_snapshot = FleetSnapshot.model_validate(observation_document(recovered))
+    recovered_snapshot = FleetSnapshot.model_validate_json(
+        canonical_message(observation_document(recovered))
+    )
     assert recovered_snapshot.nodes[0].loaded[0].healthy is True
     restored = projection.read()
     assert restored.nodes[0].installed[0].complete is True
@@ -1871,7 +1877,7 @@ def test_non_rfc_non_nil_boot_id_flows_through_snapshot() -> None:
     assert node_telemetry.sample.boot_id == NON_RFC_BOOT_ID
 
 
-def test_projection_selects_only_the_latest_512_current_installation_groups() -> None:
+def test_projection_preserves_all_current_installation_groups_beyond_512() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1980,10 +1986,10 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
 
     installation_ids = [value.installation_id for value in snapshot.nodes[0].installed]
-    assert len(installation_ids) == 512
-    assert installation_ids[0] == "install-001"
+    assert len(installation_ids) == 513
+    assert installation_ids[0] == "install-000"
     assert installation_ids[-1] == "install-512"
-    assert "install-000" not in installation_ids
+    assert len(set(installation_ids)) == len(installation_ids)
 
 
 def test_projection_keeps_every_registered_node_visible_beyond_500() -> None:
@@ -2556,7 +2562,9 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
     )
     response = client.get("/api/fleet", headers=operator)
     assert response.status_code == 200
-    observed_snapshot = FleetSnapshot.model_validate(observation_document(response))
+    observed_snapshot = FleetSnapshot.model_validate_json(
+        canonical_message(observation_document(response))
+    )
     nodes = {node.id: node for node in observed_snapshot.nodes}
     assert set(nodes) == {NODE_A, NODE_B}
     healthy_inventory = nodes[NODE_B].inventory
@@ -2584,7 +2592,9 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
             )
     recovered = client.get("/api/fleet", headers=operator)
     assert recovered.status_code == 200
-    recovered_snapshot = FleetSnapshot.model_validate(observation_document(recovered))
+    recovered_snapshot = FleetSnapshot.model_validate_json(
+        canonical_message(observation_document(recovered))
+    )
     restored = next(node for node in recovered_snapshot.nodes if node.id == NODE_A)
     if damaged == "inventory":
         assert restored.inventory is not None

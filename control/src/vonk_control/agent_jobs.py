@@ -1203,13 +1203,13 @@ def _exact_service_stop_receipt_covers_start(
             select(Job)
             .where(
                 Job.kind == "recipe.stop",
-                Job.state == "succeeded",
+                Job.state == LifecycleState.SUCCEEDED,
                 Job.payload["owner_id"].as_string() == run.id,
                 Job.id.in_(
                     select(StoredOperation.parent_job_id).where(
                         StoredOperation.node_id == source.node_id,
                         StoredOperation.kind == AgentOperation.RECIPE_STOP.value,
-                        StoredOperation.state == "succeeded",
+                        StoredOperation.state == LifecycleState.SUCCEEDED,
                         StoredOperation.workload_intent_ordinal
                         > source.workload_intent_ordinal,
                         StoredOperation.workload_intent_ordinal <= current_ordinal,
@@ -1289,13 +1289,13 @@ def _exact_service_stop_receipt_covers_start(
                 )
                 if (
                     child.kind != AgentOperation.RECIPE_STOP.value
-                    or child.state != "succeeded"
+                    or child.state != LifecycleState.SUCCEEDED
                     or child.current_attempt < 1
                     or child.workload_intent_ordinal != ordinal
                     or child.authority_revision != stop_parent.authority_revision
                     or child.created_at < source.created_at
                     or attempt is None
-                    or attempt.state != "succeeded"
+                    or attempt.state != LifecycleState.SUCCEEDED
                     or child.payload_digest
                     != hashlib.sha256(canonical_message(child.payload)).hexdigest()
                     or canonical_message(child.payload)
@@ -1317,7 +1317,7 @@ def _exact_service_stop_receipt_covers_start(
                     break
             if proven:
                 return True
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, UnknownOutcomeError):
         return False
     return False
 

@@ -386,8 +386,6 @@ from .model_artifact_preparation_completeness import ModelArtifactPreparationCom
 from .model_cache_access_recheck import ModelCacheAccessRecheck
 from .model_cache_blocker_code import ModelCacheBlockerCode
 from .model_cache_cancellation import ModelCacheCancellation
-from .model_cache_cancellation_observation import ModelCacheCancellationObservation
-from .model_cache_cancellation_observation_effect import ModelCacheCancellationObservationEffect
 from .model_cache_cancellation_request import ModelCacheCancellationRequest
 from .model_cache_claim import ModelCacheClaim
 from .model_cache_code import ModelCacheCode
@@ -1246,8 +1244,6 @@ __all__ = (
     "ModelCacheAccessRecheck",
     "ModelCacheBlockerCode",
     "ModelCacheCancellation",
-    "ModelCacheCancellationObservation",
-    "ModelCacheCancellationObservationEffect",
     "ModelCacheCancellationRequest",
     "ModelCacheClaim",
     "ModelCacheCode",

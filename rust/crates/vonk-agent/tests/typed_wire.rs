@@ -30,7 +30,7 @@ const PASSTHROUGH: [(&str, usize, &str); 3] = [
     ),
     (
         "vonk-agent-protocol/src/wire_schema.rs",
-        15,
+        14,
         "the JSON Schema interpreter behind every generated deserializer; its \
          subject is the schema document and the instance under validation",
     ),

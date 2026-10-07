@@ -8,7 +8,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import select
 from vonk_agent_protocol import OperationProgress, canonical_message
 from vonk_control.agent_jobs import AgentJobService
@@ -117,7 +116,31 @@ def _drive_install(sessions, service, planner, application_id, clock, count):
             )
         if len(identities) == count:
             return identities
-    raise AssertionError(f"Expected {count} exact native installs, found {identities}")
+    observed = service.application(application_id)
+    journal = observed.progress.switch_adapter
+    child_observations = []
+    if journal is not None:
+        for child in journal.pending_children:
+            operation = planner.get(child.operation_id)
+            child_observations.append(
+                {
+                    "queue_index": child.queue_index,
+                    "operation_id": operation.operation_id,
+                    "kind": operation.kind,
+                    "state": operation.state,
+                    "status_reason": operation.status_reason,
+                    "current_phase": operation.current_phase,
+                    "next_attempt_at": operation.next_attempt_at,
+                    "request_key": operation.request_key,
+                }
+            )
+    raise AssertionError(
+        f"Expected {count} exact native installs, found {identities}; "
+        f"now={clock[0]}, state={observed.state}, "
+        f"reason={observed.status_reason}, due={observed.progress.retry_due_at}, "
+        f"ordinal={observed.progress.workload_intent_ordinal}, "
+        f"children={child_observations}"
+    )
 
 
 def test_wide_measurements_roundtrip_without_losing_integer_precision() -> None:
@@ -146,7 +169,6 @@ def test_wide_measurements_roundtrip_without_losing_integer_precision() -> None:
 def test_live_agent_progress_reaches_recipe_switch_and_profile(
     tmp_path: Path, postgres_engine
 ) -> None:
-    signer = Ed25519PrivateKey.generate()
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=postgres_engine
     )
@@ -169,9 +191,6 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
         runtime_identity={
             **PACKAGED_RUNTIME_IDENTITY,
             "architecture": "linux-arm64",
-            "observation_receipt_public_key": signer.public_key()
-            .public_bytes_raw()
-            .hex(),
         },
     )
     assert claim is not None
@@ -426,7 +445,6 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
     measured = {all_nodes[0]: (32, 64), second: (16, 128)}
     claims = []
     for node, serial in zip(all_nodes, ("serial-0", "serial-b"), strict=True):
-        key = Ed25519PrivateKey.generate()
         claim = claim_agent(
             jobs,
             node,
@@ -435,9 +453,6 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
             runtime_identity={
                 **PACKAGED_RUNTIME_IDENTITY,
                 "architecture": "linux-arm64",
-                "observation_receipt_public_key": key.public_key()
-                .public_bytes_raw()
-                .hex(),
             },
         )
         assert claim is not None

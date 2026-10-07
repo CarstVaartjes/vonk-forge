@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from sqlalchemy import cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentProtocolError, canonical_message
+from vonk_agent_protocol import AgentProtocolError, RunState, canonical_message
 
 from .fleet_profile_adapter_conversion_contract import (
     ProfileAdapterConversionOutcome,
@@ -503,7 +503,7 @@ def _convert(
         )
         stopped = not (
             run is None
-            or run.state != "stopped"
+            or run.state != RunState.STOPPED
             or effect is None
             or run.installation_id != effect.installation_id
         )
