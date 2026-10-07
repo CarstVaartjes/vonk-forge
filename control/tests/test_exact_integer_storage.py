@@ -23,6 +23,7 @@ from sqlalchemy import (
     inspect,
     select,
     text,
+    update,
 )
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError, StatementError
@@ -316,7 +317,7 @@ def test_database_rejects_noncanonical_tokens_and_exact_adjacent_verified_bytes(
     for token in ("", "00", "01", "+1", "-1", "1.0", "1e2", "1\n", " 1", "١", "0x1"):
         with pytest.raises(StatementError), storage_engine.begin() as connection:
             connection.execute(
-                ModelCacheSet.__table__.update()
+                update(ModelCacheSet)
                 .where(ModelCacheSet.artifact_set_sha256 == digest)
                 .values(expected_bytes=token)
             )
@@ -332,13 +333,13 @@ def test_database_rejects_noncanonical_tokens_and_exact_adjacent_verified_bytes(
     for value in (0, 9, 10):
         with storage_engine.begin() as connection:
             connection.execute(
-                ModelCacheSet.__table__.update()
+                update(ModelCacheSet)
                 .where(ModelCacheSet.artifact_set_sha256 == digest)
                 .values(verified_bytes=value)
             )
     with pytest.raises(DBAPIError), storage_engine.begin() as connection:
         connection.execute(
-            ModelCacheSet.__table__.update()
+            update(ModelCacheSet)
             .where(ModelCacheSet.artifact_set_sha256 == digest)
             .values(verified_bytes=11)
         )
@@ -349,7 +350,7 @@ def test_database_rejects_noncanonical_tokens_and_exact_adjacent_verified_bytes(
         )
     with pytest.raises(StatementError), storage_engine.begin() as connection:
         connection.execute(
-            ModelCacheSet.__table__.update()
+            update(ModelCacheSet)
             .where(ModelCacheSet.artifact_set_sha256 == digest)
             .values(verified_bytes=True)
         )
@@ -364,13 +365,13 @@ def test_database_rejects_noncanonical_tokens_and_exact_adjacent_verified_bytes(
         for value in sorted({0, max(0, expected - 1), expected}):
             with storage_engine.begin() as connection:
                 connection.execute(
-                    ModelCacheSet.__table__.update()
+                    update(ModelCacheSet)
                     .where(ModelCacheSet.artifact_set_sha256 == digest)
                     .values(verified_bytes=value)
                 )
         with pytest.raises(DBAPIError), storage_engine.begin() as connection:
             connection.execute(
-                ModelCacheSet.__table__.update()
+                update(ModelCacheSet)
                 .where(ModelCacheSet.artifact_set_sha256 == digest)
                 .values(verified_bytes=expected + 1)
             )

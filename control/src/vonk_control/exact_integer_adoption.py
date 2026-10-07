@@ -139,6 +139,7 @@ def _pending_adoption(connection: Connection) -> dict[str, tuple[str, ...]]:
             for constraint in Base.metadata.tables[table_name].constraints:
                 if (
                     isinstance(constraint, CheckConstraint)
+                    and isinstance(constraint.name, str)
                     and constraint.name in _OWNED_CHECKS[table_name]
                 ):
                     expected = constraint.sqltext.compile(dialect=connection.dialect)
@@ -362,7 +363,7 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
                     for check in inspect(connection).get_check_constraints(table_name)
                 }
                 for name in _OWNED_CHECKS[table_name]:
-                    if name in checks:
+                    if isinstance(name, str) and name in checks:
                         ops.drop_constraint(name, table_name, type_="check")
                 for name in names:
                     # Canonical decimal validation above proves the cast and
@@ -389,6 +390,7 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
                 for constraint in declared.constraints:
                     if (
                         isinstance(constraint, CheckConstraint)
+                        and isinstance(constraint.name, str)
                         and constraint.name in _OWNED_CHECKS[table_name]
                     ):
                         ops.create_check_constraint(
@@ -410,6 +412,7 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
                 for constraint in declared.constraints:
                     if (
                         isinstance(constraint, CheckConstraint)
+                        and isinstance(constraint.name, str)
                         and constraint.name in _OWNED_CHECKS[table_name]
                     ):
                         reflected.append_constraint(
