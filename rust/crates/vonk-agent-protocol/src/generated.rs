@@ -8439,11 +8439,14 @@ pub struct RecipeJobRunResult {
 pub enum RecipeOperationCode {
     #[serde(rename = "recipe.operation_conflict")]
     RecipeOperationConflict,
+    #[serde(rename = "recipe.evidence_unproven")]
+    RecipeEvidenceUnproven,
 }
 impl ::std::fmt::Display for RecipeOperationCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::RecipeOperationConflict => f.write_str("recipe.operation_conflict"),
+            Self::RecipeEvidenceUnproven => f.write_str("recipe.evidence_unproven"),
         }
     }
 }
@@ -8452,6 +8455,7 @@ impl ::std::str::FromStr for RecipeOperationCode {
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "recipe.operation_conflict" => Ok(Self::RecipeOperationConflict),
+            "recipe.evidence_unproven" => Ok(Self::RecipeEvidenceUnproven),
             _ => Err("invalid value".into()),
         }
     }
@@ -24174,6 +24178,7 @@ impl RecipeOperationCode {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::RecipeOperationConflict => "recipe.operation_conflict",
+            Self::RecipeEvidenceUnproven => "recipe.evidence_unproven",
         }
     }
 }
@@ -24213,11 +24218,14 @@ impl<'de> ::serde::Deserialize<'de> for RecipeOperationCode {
         enum Raw {
             #[serde(rename = "recipe.operation_conflict")]
             RecipeOperationConflict,
+            #[serde(rename = "recipe.evidence_unproven")]
+            RecipeEvidenceUnproven,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::RecipeOperationConflict => Self::RecipeOperationConflict,
+            Raw::RecipeEvidenceUnproven => Self::RecipeEvidenceUnproven,
         })
     }
 }

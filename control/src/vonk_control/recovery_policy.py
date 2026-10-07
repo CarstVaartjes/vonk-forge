@@ -39,23 +39,33 @@ def kind_for_agent_error(evidence: Mapping[str, object]) -> FailureKind:
     failures. Exact producers provide ``failure_kind`` for the precise boundary.
     """
     raw_kind = evidence.get("failure_kind")
+    code = evidence.get("error_code")
+    return kind_for_failure_fields(
+        raw_kind if isinstance(raw_kind, str) else None,
+        code if isinstance(code, str) else None,
+        evidence.get("uncertain") is True,
+    )
+
+
+def kind_for_failure_fields(
+    failure_kind: str | None, error_code: str | None, uncertain: bool = False
+) -> FailureKind:
+    """The same failure decision for already validated typed observations."""
+    raw_kind = failure_kind
     if isinstance(raw_kind, str):
         try:
             return FailureKind(raw_kind)
         except ValueError:
             return FailureKind.INVALID_CONTRACT
-    if evidence.get("error_code") == FailureCode.RETAINED_CONTAINER_FOREIGN.value:
+    if error_code == FailureCode.RETAINED_CONTAINER_FOREIGN.value:
         # Another party's container holds the name the start needs and was left
         # untouched: a prerequisite that clears when it is gone, never a broken
         # contract.  The agent states the kind itself; this keeps a body that
         # carries only the code from ending the load.
         return FailureKind.RESOURCE_PREREQUISITE
-    if (
-        evidence.get("uncertain") is True
-        or evidence.get("error_code") == "operation_outcome_uncertain"
-    ):
+    if uncertain is True or error_code == "operation_outcome_uncertain":
         return FailureKind.UNCERTAIN_EFFECT
-    if evidence.get("error_code") == "agent_lease_expired":
+    if error_code == "agent_lease_expired":
         return FailureKind.UNCERTAIN_EFFECT
     return FailureKind.INVALID_CONTRACT
 

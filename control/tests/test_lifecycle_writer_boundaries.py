@@ -134,6 +134,32 @@ def test_a_state_dict_store_is_a_write_only_in_an_owner_module() -> None:
     assert _scanned(source, path=OTHER) == []
 
 
+def test_a_job_argument_does_not_turn_a_typed_other_row_into_a_job() -> None:
+    source = """
+        from .models import Job, RecipeRun
+
+        def run_for(job: Job) -> RecipeRun | None:
+            return None
+
+        def job_for(run: RecipeRun) -> Job | None:
+            return None
+
+        def update(session, job: Job):
+            run = run_for(job)
+            run.state = "running"
+            direct = session.get(RecipeRun, job.id)
+            direct.state = "running"
+            recovered = job_for(run)
+            recovered.state = "failed"
+            unknown = undocumented(job)
+            unknown.state = "failed"
+    """
+    assert _scanned(source) == [
+        ("Job", ATTRIBUTE, "update"),
+        ("Job", ATTRIBUTE, "update"),
+    ]
+
+
 @pytest.mark.parametrize(
     "source",
     [

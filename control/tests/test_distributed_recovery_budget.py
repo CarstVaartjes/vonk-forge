@@ -8,6 +8,7 @@ from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_control.distributed_lifecycle import DistributedLifecycleError
 from vonk_control.distributed_recovery import (
     DistributedRecoveryCoordinator,
+    _recovery_marker,
     enforce_recovery_deadline,
 )
 from vonk_control.models import AgentOperation, AgentPresence, Job, RecipeRun, RunNode
@@ -376,3 +377,29 @@ def test_recovery_refuses_missing_or_invalid_original_start_authority(
         assert run.route_state == "withdrawn"
         assert run.route_error is not None and "start authority" in run.route_error
         assert not tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
+
+
+def test_recovery_marker_retains_timestamp_spelling_bound_to_request_identity() -> None:
+    deadline = (NOW + timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+    marker = _recovery_marker(
+        {
+            "recovery": {
+                "schema_version": 1,
+                "failed_rank": 0,
+                "deadline": deadline,
+            }
+        }
+    )
+    assert marker is not None and marker.deadline == deadline
+    assert enforce_recovery_deadline(marker, now=NOW)
+    with pytest.raises(DistributedLifecycleError):
+        enforce_recovery_deadline(
+            {
+                "recovery": {
+                    "schema_version": 1,
+                    "failed_rank": True,
+                    "deadline": deadline,
+                }
+            },
+            now=NOW,
+        )

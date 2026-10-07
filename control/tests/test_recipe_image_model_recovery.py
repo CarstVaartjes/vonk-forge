@@ -202,7 +202,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     # Admission queues intent; the worker resolves/adopts its model child.
     assert service.run_pending(limit=1) == 1
     seeded_parent = service.get(seeded_parent.id)
-    assert seeded_parent.state == "succeeded"
+    assert seeded_parent.state == "succeeded", seeded_parent.failure
     assert seeded_parent.model_child is not None
     assert seeded_parent.model_child["id"] == seeded.id
     assert len(image_builds) == 1

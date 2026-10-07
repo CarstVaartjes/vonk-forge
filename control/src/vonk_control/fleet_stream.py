@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel
 
-from .fleet_event_contract import validate_fleet_event_payload
+from .fleet_event_contract import NodeTelemetryPayload, validate_fleet_event_payload
 from .fleet_events import FleetEvent, FleetEventRepository, FleetReplayBatch
 from .fleet_projection import FleetProjection, FleetSnapshot, telemetry_point
 from .fleet_stream_contract import (
@@ -207,9 +207,9 @@ class FleetStream:
         for event in batch:
             if event.event_type != "node-telemetry":
                 continue
-            sample_id = event.payload.get("sample_id")
-            if not isinstance(sample_id, str):
+            if not isinstance(event.payload, NodeTelemetryPayload):
                 return None
+            sample_id = event.payload.sample_id
             if sample_id not in sample_ids:
                 sample_ids.append(sample_id)
         samples = self._telemetry.by_ids(tuple(sample_ids)) if sample_ids else {}
@@ -229,8 +229,9 @@ class FleetStream:
                 event.node_id,
                 event.payload,
             )
-            sample_id = event.payload.get("sample_id")
-            sample = samples.get(sample_id) if isinstance(sample_id, str) else None
+            if not isinstance(event.payload, NodeTelemetryPayload):
+                raise RuntimeError("Fleet telemetry event payload is inconsistent")
+            sample = samples.get(event.payload.sample_id)
             if sample is None or sample.node_id != event.node_id:
                 raise RuntimeError("Fleet telemetry event hydration is inconsistent")
             return FleetTelemetryEvent(
