@@ -11,7 +11,7 @@ live repository ruleset, not the dated protection report under `inventory/`):
 
 | Check | Purpose |
 | --- | --- |
-| `Ruff` | Lint changed Python files (or the whole tree for a release tag). |
+| `Ruff` | Lint and formatting on changed Python files; full Python type check (whole-tree lint/format for a release tag). |
 | `Generated control clients` | Rebuild OpenAPI clients and reject generated drift. |
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
@@ -283,10 +283,12 @@ export UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache
 
 # Python lint; ruff is the repository's formatting authority too.
 uv run --project control --frozen ruff check .
+uv run --project control --frozen ruff format --check .
 
 # Python types. Pyright is locked in the control dev group and resolves imports
 # from that same environment.
 scripts/build-control-wheel
+uv sync --project control --frozen
 scripts/check-python-types
 
 # Web behavior and types; the build runs tsc --noEmit before bundling.
@@ -314,8 +316,11 @@ same rule cannot hide and a fixed error must be removed; an entry that no
 longer occurs fails as stale; and an entry without a reason fails, so
 `--update` is not a way to accept an error without saying why. Run `--update`
 to write the current errors, then write the reason for anything it adds.
-`pyright` runs over `control/src`, `src`, `tests` and `control/tests` in basic
-mode; generated clients and virtualenvs are excluded.
+With no file arguments, `pyright` runs over `control/src`, `src`, `tests` and
+`control/tests` in basic mode; generated clients and virtualenvs are excluded.
+The commit hook passes changed Python paths and checks only their diagnostics
+and reviewed exceptions. CI retains the full check, including errors in
+unchanged consumers. Partial checks cannot update the repository baseline.
 
 The coordination boundaries are checked by
 `control/tests/coordination_boundaries.py`, which the control suite runs over
@@ -500,8 +505,13 @@ Controller-restart-tolerant wait through `vonkctl` and asserts that no operator
 wait lacks an action and no admission is stuck. It is run by hand after
 lifecycle releases; see [the runbook](runbooks/lifecycle-canary.md).
 
-There is no separate ESLint or Prettier configuration. TypeScript formatting
-follows the surrounding files, and `npm run build` is the type gate.
+TypeScript uses pinned Biome for formatting and focused correctness lint rules.
+The commit hook and pull-request CI check changed authored TypeScript files.
+`npm run typecheck --prefix control/web` checks both the application and browser
+tests/configuration; `npm run build` also checks application types. Generated
+contracts remain owned by their generators. Rust hooks run pinned formatting and
+offline Clippy/compiler checks, using the Linux VM on macOS. Dependency acquisition
+is explicit setup, never a commit-hook action.
 
 When acceptance inputs are available, run the actual harness through the same
 OrbStack Docker context, not only its unit tests:
@@ -531,7 +541,7 @@ Run `scripts/verify-supply-chain --json` to validate authored lockfiles, the
 third-party contract wheel digest, and image pins. CI builds the protocol
 wheel, generates SPDX documents and a digest manifest, and uploads them as
 verified release evidence. These generated files are not committed or staged
-by the pre-commit hook. See the
+by the pre-commit hook, which runs only lint, format, and types. See the
 [development workflow](runbooks/development-workflow.md#generated-artifacts-and-release-evidence).
 
 ## What earns a test
@@ -666,3 +676,7 @@ before the existing bounded retry. Streaming object reads additionally bound
 connection and socket idle time to 30 seconds and use the same total transfer
 budget. These budgets bound attempts; they do not change document, argument,
 artifact size, authorization or integrity contracts.
+
+The Admin web CI job uses the digest-pinned Playwright image matching its locked
+version. Chromium and its system libraries are already installed, so the job
+does not perform apt or browser downloads. npm keeps its lockfile-keyed cache.

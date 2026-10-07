@@ -160,16 +160,29 @@ image lock, and reviewed upstream artifact pins. See the
   image; reused components or separately rebuilt images may have different
   build revisions. A refreshed source field alone does not prove new code runs.
 
-Install the repository hook once per checkout so the curated supply-chain
-evidence is regenerated and staged before each commit:
+Prepare the locked environment explicitly and install the repository hook:
 
 ```bash
+scripts/build-control-wheel
+uv sync --project control --frozen
 scripts/install-git-hooks
 ```
 
-The hook validates authored supply-chain inputs and runs the pinned Ruff lint,
-format, and Python type checks. It does not generate or stage inventory files.
-CI remains the authoritative verification and release evidence producer.
+The hook runs pinned Ruff lint, formatting checks, and Python types on changed
+Python files selected from the index. Changes to Python dependency/type configuration
+trigger the full type check. Checks read the working files; stage the
+version you intend to commit. Filenames containing whitespace are preserved.
+The hook uses the prepared environment offline without syncing, building wheels,
+or generating or staging inventory. Missing tools fail with the setup command.
+Repeat setup after dependency changes. Python checks skip commits without Python changes.
+For TypeScript, prepare `npm ci --prefix control/web`; the hook checks changed
+TypeScript with pinned Biome and runs the source, browser-test and configuration
+type checks. Generated contracts are excluded from Biome and remain generator-owned.
+For Rust, prepare the pinned toolchain and `cargo fetch --locked` explicitly;
+the hook runs formatting and offline Clippy/compiler checks across the workspace.
+On macOS it uses the configured `vonk-ci` Linux VM and its existing Cargo cache.
+CI checks formatting and lint on changed Python files, types across the whole
+repository, and supply-chain inputs in its separate release-evidence job.
 
 ## Remove landed worktrees
 

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "files": {
+    "includes": [
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "e2e/**/*.ts",
+      "*.ts",
+      "!src/api/generated/**",
+      "!src/generated/**",
+      "!src/**/vocabulary.generated.ts",
+      "!src/api/generated.d.ts",
+      "!src/api/runtime.generated.d.ts"
+    ]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": false,
+      "correctness": {
+        "noUnreachable": "error",
+        "noUnsafeFinally": "error",
+        "useValidTypeof": "error"
+      },
+      "suspicious": {
+        "noDebugger": "error",
+        "noDuplicateCase": "error",
+        "noCompareNegZero": "error",
+        "noDoubleEquals": "error"
+      }
+    }
+  },
+  "assist": {
+    "enabled": false
+  }
+}
