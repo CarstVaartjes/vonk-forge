@@ -2935,7 +2935,7 @@ mod tests {
         fs::create_dir(&runs).unwrap();
         let captured = observation_directory_stamp(&runs).unwrap().unwrap();
         let permissions = fs::metadata(&runs).unwrap().permissions();
-        fs::set_permissions(&runs, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&runs, fs::Permissions::from_mode(0o0)).unwrap();
         let refused = open_observation_directory(&runs, &captured);
         fs::set_permissions(&runs, permissions).unwrap();
         assert!(matches!(
