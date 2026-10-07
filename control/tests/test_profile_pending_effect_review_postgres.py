@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
     LifecycleState,
+    OutcomeKind,
     OutcomeUnknown,
     WaitReason,
 )
@@ -43,7 +44,7 @@ from .test_fleet_profile_cancel import (
     _start_profile_stop_child,
     _two_target_stop_case,
 )
-from .test_fleet_profiles import _uuid
+from .test_fleet_profiles import _follow_profile_retry, _uuid
 from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
@@ -209,6 +210,7 @@ def test_postgres_unrelated_damaged_parked_evidence_does_not_starve_exact_gang_c
                 "one rank is not a stopped gang"
             )
     for _ in range(8):
+        _follow_profile_retry(restarted, replacement.id, now)
         switches.tick()
         restarted.tick()
     assert restarted.application(replacement.id).state == LifecycleState.SUCCEEDED
@@ -258,6 +260,7 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
             fence=old_claim.fence,
             state=AgentResultState.OBSERVING,
             result=OutcomeUnknown(
+                kind=OutcomeKind.UNKNOWN,
                 wait_reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 reason="Start effect receipt unavailable",
             ),
@@ -335,6 +338,7 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
                 assert stored_run is not None and stored_run.state != "stopped"
             assert _held_run_claims(sessions, run_id)
     for _ in range(8):
+        _follow_profile_retry(restarted, replacement.id, now)
         switches.tick()
         restarted.tick()
     assert restarted.application(replacement.id).state == LifecycleState.SUCCEEDED
