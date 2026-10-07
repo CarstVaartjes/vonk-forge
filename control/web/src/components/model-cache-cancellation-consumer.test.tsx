@@ -3,6 +3,7 @@ import {render, screen, cleanup} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {vi, test, expect} from "vitest";
 import {ApiClient} from "../api/client";
+import {ContractViolation} from "../api/contract-json";
 import {CancelOperation} from "./cancel-operation";
 import {ToastProvider} from "./toast";
 
@@ -24,6 +25,12 @@ test.skipIf(!responsesPath)("actual model cancellation responses preserve unknow
     expect(screen.queryByText("Cancelled the download.")).toBeNull();
     expect(observed.cancellation!.observation!.effect).toBe(name === "unknown" ? "unknown" : "stopped");
     cleanup();
+    // A terminal state plus an issued stop is not confirmation. The browser
+    // must enforce the owner's evidence constraint, not just its Python reader.
+    const unconfirmedIssue = structuredClone(response);
+    unconfirmedIssue.cancellation.observation.effect = "issued";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(unconfirmedIssue), {status: 200, headers: {"content-type": "application/json"}})));
+    await expect(api.modelCacheOperation(response.operation_id)).rejects.toBeInstanceOf(ContractViolation);
     vi.unstubAllGlobals();
   }
 });
