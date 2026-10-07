@@ -706,23 +706,87 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
             "event_cursor": 0,
             "generated_at": "2026-09-07T00:00:00Z",
             "nodes": [],
-            "unexpected": True,
+            "unexpected": "schema-private-fixture-value",
         },
     ],
 )
 def test_generated_transport_rejects_malformed_raw_response(
-    tmp_path: Path, payload: dict[str, object]
+    tmp_path: Path, payload: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from cluster_profiles.generated_control.models.fleet_snapshot import FleetSnapshot
+
+    peers: list[ObservationHTTPPeer] = []
+    requests: list[urllib.request.Request] = []
+    attrs_calls: list[object] = []
+
+    def opener(
+        request: urllib.request.Request, *, timeout: float
+    ) -> ObservationHTTPPeer:
+        assert timeout > 0 and request.get_method() == "GET"
+        requests.append(request)
+        peer = _fleet_transfer_peer(payload)
+        peer.headers["X-Request-ID"] = "canonical-schema-fixture"
+        peers.append(peer)
+        return peer
+
+    def parse_partial(document: object) -> FleetSnapshot:
+        attrs_calls.append(document)
+        raise AssertionError("malformed full observation reached attrs adoption")
+
+    monkeypatch.setattr(FleetSnapshot, "from_dict", parse_partial)
     client = ControlClient(
-        "https://forge.example.test",
-        _token(tmp_path),
-        opener=lambda *_args, **_kwargs: _fleet_transfer_peer(payload),
+        "https://forge.example.test", _token(tmp_path), opener=opener
     )
 
     with pytest.raises(
         ControlMalformedResponse, match="canonical FleetSnapshot contract"
-    ):
+    ) as failed:
         client.fleet()
+    assert failed.value.context is not None
+    assert failed.value.context.http_status == 200
+    assert failed.value.request_id == "canonical-schema-fixture"
+    assert "retry observation" in str(failed.value)
+    assert "schema-private-fixture-value" not in str(failed.value)
+    assert len(requests) == 1 and not attrs_calls
+    assert len(peers) == 1 and peers[0]._body.closed
+
+
+def test_observation_callback_hides_arbitrary_validation_exception_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cluster_profiles import control_client
+
+    valid = {
+        "authority_revision": "a" * 64,
+        "event_cursor": 0,
+        "generated_at": "2026-09-07T00:00:00Z",
+        "nodes": [],
+    }
+    peer = _fleet_transfer_peer(valid)
+    peer.headers["X-Request-ID"] = "raw-validation-fixture"
+    requests: list[urllib.request.Request] = []
+
+    def opener(
+        request: urllib.request.Request, *, timeout: float
+    ) -> ObservationHTTPPeer:
+        assert timeout > 0 and request.get_method() == "GET"
+        requests.append(request)
+        return peer
+
+    def unsafe_validator(_component: str, _document: object) -> dict[str, object]:
+        raise ValueError("private arbitrary parser value must not be exported")
+
+    monkeypatch.setattr(control_client, "validate_control_document", unsafe_validator)
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    with pytest.raises(ControlMalformedResponse) as failed:
+        client.fleet()
+    assert "transfer or canonical payload validation failed" in str(failed.value)
+    assert "private arbitrary parser value" not in str(failed.value)
+    assert failed.value.context is not None and failed.value.context.http_status == 200
+    assert failed.value.request_id == "raw-validation-fixture"
+    assert len(requests) == 1 and peer._body.closed
 
 
 def test_generated_transport_rejects_malformed_request_before_network() -> None:

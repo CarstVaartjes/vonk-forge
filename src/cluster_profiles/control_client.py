@@ -1180,19 +1180,44 @@ class ControlClient:
                 if not isinstance(record_media, dict):
                     raise TypeError("observation transfer schema is unavailable")
                 record_schema = record_media.get("schema")
+
+                def schema_failure(
+                    error: ControlClientError,
+                ) -> ControlMalformedResponse:
+                    # Only the owning canonical validators reach this boundary.
+                    # Their bounded reasons name schema rules, not payload values.
+                    return ControlMalformedResponse(
+                        f"Complete observation unavailable: {error}; retry observation",
+                        context=replace(
+                            protocol_context(operation=f"GET {path}", endpoint=path),
+                            http_status=status,
+                            request_id=request_id,
+                        ),
+                    )
+
+                def validate_record(record: object) -> None:
+                    try:
+                        _validate_schema(
+                            record,
+                            record_schema,
+                            message="observation record violates canonical schema",
+                        )
+                    except ControlClientError as error:
+                        raise schema_failure(error) from None
+
+                def validate_payload(document: object) -> dict[str, object]:
+                    try:
+                        return validate_control_document(payload, document)
+                    except ControlClientError as error:
+                        raise schema_failure(error) from None
+
                 return receive_observation(
                     response,
                     resource="fleet" if payload == "FleetSnapshot" else "platform",
                     record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES,
                     deadline=deadline,
-                    validate_record=lambda record: _validate_schema(
-                        record,
-                        record_schema,
-                        message="observation record violates canonical schema",
-                    ),
-                    validate_payload=lambda document: validate_control_document(
-                        payload, document
-                    ),
+                    validate_record=validate_record,
+                    validate_payload=validate_payload,
                 )
         except ObservationTransferUnavailable as error:
             raise ControlObservationUnavailable(
