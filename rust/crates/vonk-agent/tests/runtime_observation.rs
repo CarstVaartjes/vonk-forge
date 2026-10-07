@@ -811,6 +811,208 @@ fn historical_runs(root: &Path, count: usize) {
 }
 
 #[test]
+fn retired_filesystem_witness_marks_restart_and_keeps_exact_start() {
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    historical_runs(root.path(), 4097);
+    let tail_name = fs::read_dir(root.path().join("runs"))
+        .unwrap()
+        .nth(4096)
+        .unwrap()
+        .unwrap()
+        .file_name();
+    let run_id = uuid::Uuid::parse_str(tail_name.to_str().unwrap()).unwrap();
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            INSTALLATION,
+            &run_id.to_string(),
+            &placement(&plan),
+            &identity(&plan),
+        )
+        .unwrap();
+    let lifecycle = root
+        .path()
+        .join("run-metadata")
+        .join(run_id.to_string())
+        .join("lifecycle.json");
+    let original = fs::read(&lifecycle).unwrap();
+    let first = runtime.recipe_run_inspection_page(None).unwrap();
+    assert!(!first.complete);
+    assert!(!first.scan_restarted);
+    let checkpoint = first.checkpoint.unwrap();
+    let witness_name = std::str::from_utf8(&checkpoint.witness.as_ref().unwrap().name).unwrap();
+    assert_ne!(witness_name, run_id.to_string());
+    let database = root.path().join("state.sqlite");
+    let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+    state
+        .save_observation_checkpoint(Some(&checkpoint))
+        .unwrap();
+    drop(state);
+    // Retire the actual directory entry which produced the persisted witness;
+    // no manufactured cookie, checkpoint flag or terminal receipt is injected.
+    fs::rename(
+        root.path().join("runs").join(witness_name),
+        root.path()
+            .join("runs")
+            .join(uuid::Uuid::new_v4().to_string()),
+    )
+    .unwrap();
+    let mut reopened_state = StateStore::open(&database, "observation-test-node").unwrap();
+    let retained = reopened_state.observation_checkpoint().unwrap().unwrap();
+    assert_eq!(retained, checkpoint);
+    let restarted = runtime.recipe_run_inspection_page(Some(&retained)).unwrap();
+    assert!(restarted.scan_restarted);
+    assert!(!restarted.empty_snapshot_safe);
+    reopened_state
+        .save_observation_checkpoint(restarted.checkpoint.as_ref())
+        .unwrap();
+    drop(reopened_state);
+    let reopened = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let healthy = reopened
+        .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+        .unwrap();
+    assert_eq!(healthy.len(), 1);
+    assert_eq!(healthy[0].run_id, run_id);
+    assert_eq!(healthy[0].run_generation, 2);
+    assert_eq!(fs::read(lifecycle).unwrap(), original);
+}
+
+/// A legacy collector must not publish stable enumeration (or empty absence)
+/// while directory authority is changing. Positive malformed-neighbor isolation
+/// remains a separate existing contract. Repair/restart must
+/// read the same native retained Start without changing its stored identity.
+#[test]
+fn whole_collection_mutation_stays_unknown_then_same_owner_reopens() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+    struct StopOnDrop(Arc<AtomicBool>);
+    impl Drop for StopOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    for retain_start in [true, false] {
+        let root = tempdir().unwrap();
+        historical_runs(root.path(), 4097);
+        let plan = native_observation_plan(root.path());
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        };
+        let tail_name = fs::read_dir(root.path().join("runs"))
+            .unwrap()
+            .nth(4096)
+            .unwrap()
+            .unwrap()
+            .file_name();
+        let run_id = uuid::Uuid::parse_str(tail_name.to_str().unwrap()).unwrap();
+        if retain_start {
+            runtime
+                .prepare_start_with_inspection_identity(
+                    &plan,
+                    INSTALLATION,
+                    &run_id.to_string(),
+                    &placement(&plan),
+                    &identity(&plan),
+                )
+                .unwrap();
+        }
+        let lifecycle = root
+            .path()
+            .join("run-metadata")
+            .join(run_id.to_string())
+            .join("lifecycle.json");
+        let original = if retain_start {
+            Some(fs::read(&lifecycle).unwrap())
+        } else {
+            None
+        };
+        let first_name = root
+            .path()
+            .join("runs")
+            .join(uuid::Uuid::new_v4().to_string());
+        let second_name = root
+            .path()
+            .join("runs")
+            .join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir(&first_name).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let changes = Arc::new(AtomicUsize::new(0));
+        let cleanup = StopOnDrop(stop.clone());
+        let worker_stop = stop.clone();
+        let worker_changes = changes.clone();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        // Rename one empty historical directory rather than growing unbounded
+        // history. Real filesystem stamp changes, not injected checkpoint facts,
+        // are the fault seen by the production reader.
+        let worker = std::thread::spawn(move || {
+            let mut from = first_name;
+            let mut to = second_name;
+            while !worker_stop.load(Ordering::SeqCst) && Instant::now() < deadline {
+                fs::rename(&from, &to).unwrap();
+                std::mem::swap(&mut from, &mut to);
+                worker_changes.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        while changes.load(Ordering::SeqCst) == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "directory fault producer did not start"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let before = changes.load(Ordering::SeqCst);
+        let faulted = runtime.recipe_run_inspection_plans(deadline);
+        let during = changes.load(Ordering::SeqCst);
+        drop(cleanup);
+        let shutdown_deadline = Instant::now() + Duration::from_secs(2);
+        while !worker.is_finished() {
+            assert!(
+                Instant::now() < shutdown_deadline,
+                "directory fault producer did not stop"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        std::thread::JoinHandle::join(worker).unwrap();
+        assert!(
+            during > before,
+            "the real root changed while collection was in flight"
+        );
+        assert!(
+            matches!(faulted, Err(vonk_agent::oci::OciError::Io(ref error))
+            if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut))
+        );
+        let reopened = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        };
+        let recovered = reopened
+            .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+            .unwrap();
+        if retain_start {
+            assert_eq!(recovered.len(), 1);
+            assert_eq!(recovered[0].run_id, run_id);
+            assert_eq!(recovered[0].run_generation, 2);
+            assert_eq!(fs::read(lifecycle).unwrap(), original.unwrap());
+        } else {
+            assert!(recovered.is_empty());
+        }
+    }
+}
+
+#[test]
 fn history_beyond_4096_keeps_cursor_progress_during_new_arrivals_and_restart() {
     use vonk_agent::state::StateStore;
     let root = tempdir().unwrap();

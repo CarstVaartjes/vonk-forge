@@ -161,6 +161,9 @@ pub struct RecipeRunInspectionPage {
     pub observed_at: chrono::DateTime<chrono::Utc>,
     pub complete: bool,
     pub empty_snapshot_safe: bool,
+    /// Local enumeration restarted instead of resuming its retained witness.
+    /// This is page-local evidence, not a stored checkpoint or wire field.
+    pub scan_restarted: bool,
 }
 
 fn observation_directory_stamp(path: &Path) -> Result<Option<ObservationDirectoryStamp>, OciError> {
@@ -1204,6 +1207,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         &self,
         deadline: Instant,
     ) -> Result<Vec<RecipeRunInspectionPlan>, OciError> {
+        let runs = self.data_root.join("runs");
+        let metadata_root = self.data_root.join("run-metadata");
+        let runs_stamp = observation_directory_stamp(&runs)?;
+        let metadata_stamp = observation_directory_stamp(&metadata_root)?;
         let mut plans = Vec::new();
         let mut checkpoint = None;
         let mut failure = None;
@@ -1223,12 +1230,45 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 )
                 .into());
             }
+            if page.scan_restarted {
+                if plans.is_empty() && page.plans.is_empty() {
+                    if let Some(error) = failure.take() {
+                        return Err(error);
+                    }
+                    if let Some(fault) = page.failures.into_iter().next() {
+                        return Err(fault.error);
+                    }
+                }
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "run inspection enumeration restarted during collection",
+                )
+                .into());
+            }
             plans.extend(page.plans);
             for fault in page.failures {
                 failure.get_or_insert(fault.error);
             }
             checkpoint = page.checkpoint;
             if page.complete {
+                // This is a collection of individually validated positive
+                // plans: malformed neighbors remain isolated, not authoritative
+                // absence. Changed enumeration authority cannot be accepted.
+                if plans.is_empty()
+                    && let Some(error) = failure.take()
+                {
+                    return Err(error);
+                }
+                if observation_directory_stamp(&runs)? != runs_stamp
+                    || observation_directory_stamp(&metadata_root)? != metadata_stamp
+                    || (plans.is_empty() && !page.empty_snapshot_safe)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WouldBlock,
+                        "run inspection coverage changed during collection",
+                    )
+                    .into());
+                }
                 break;
             }
         }
@@ -1259,6 +1299,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 observed_at,
                 complete: true,
                 empty_snapshot_safe: checkpoint.is_none(),
+                scan_restarted: checkpoint.is_some(),
             });
         };
         let file = OpenOptions::new()
@@ -1270,6 +1311,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         let mut directory = rustix::fs::Dir::new(file).map_err(std::io::Error::from)?;
         let metadata_stamp = observation_directory_stamp(&metadata_root)?;
+        let mut scan_restarted = checkpoint.is_some_and(|old| {
+            Path::new(&old.root) != runs || !same_observation_directory(&old.runs_stamp, &stamp)
+        });
         let mut progress = match checkpoint {
             Some(old)
                 if Path::new(&old.root) == runs
@@ -1303,6 +1347,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 directory.seek(0).map_err(std::io::Error::from)?;
                 progress.witness = None;
                 progress.had_failures = true;
+                scan_restarted = true;
             }
         }
         let mut plans = Vec::new();
@@ -1383,6 +1428,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             checkpoint: if complete { None } else { Some(progress) },
             complete,
             empty_snapshot_safe,
+            scan_restarted,
         })
     }
 
