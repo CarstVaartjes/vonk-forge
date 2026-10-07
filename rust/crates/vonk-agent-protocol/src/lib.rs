@@ -2201,7 +2201,7 @@ fn valid_role(value: &str) -> bool {
 fn valid_scalar(value: &generated::RecipeBuildEnvironmentArgumentValue) -> bool {
     match value {
         generated::RecipeBuildEnvironmentArgumentValue::Boolean(_)
-        | generated::RecipeBuildEnvironmentArgumentValue::Int64(_) => true,
+        | generated::RecipeBuildEnvironmentArgumentValue::Integer(_) => true,
         generated::RecipeBuildEnvironmentArgumentValue::String(value) => {
             value.len() <= 1024 && !value.contains('\0')
         }

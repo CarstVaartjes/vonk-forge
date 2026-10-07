@@ -1593,7 +1593,7 @@ pub(crate) fn podman_storage_arguments_with_cgroup_manager(
 fn scalar(value: &RecipeBuildEnvironmentArgumentValue) -> Result<String, RecipeBuildError> {
     match value {
         RecipeBuildEnvironmentArgumentValue::Boolean(value) => Ok(value.to_string()),
-        RecipeBuildEnvironmentArgumentValue::Int64(value) => Ok(value.to_string()),
+        RecipeBuildEnvironmentArgumentValue::Integer(value) => Ok(value.to_string()),
         RecipeBuildEnvironmentArgumentValue::String(value) if !value.contains('\0') => {
             Ok(value.clone())
         }
