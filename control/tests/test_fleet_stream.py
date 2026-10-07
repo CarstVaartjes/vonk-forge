@@ -14,6 +14,7 @@ from sqlalchemy import Table, create_engine, event, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol import canonical_message
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
@@ -1210,7 +1211,9 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
         repaired_fields, repaired_data = _parsed_frame(repaired)
         assert repaired_fields["event"] == "operation-state"
         assert repaired_fields["id"] == str(event_value.id)
-        operation = FleetChangeEvent.model_validate(repaired_data)
+        operation = FleetChangeEvent.model_validate_json(
+            canonical_message(repaired_data), strict=True
+        )
         assert isinstance(operation.change.fields, JobPayload)
         assert operation.change.fields.kind == "deploy"
     finally:
