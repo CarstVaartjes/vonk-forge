@@ -956,22 +956,6 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             tool_receipt = (python.parent.parent / "uv-receipt.toml").read_text()
             assert str(workspace / "old") not in tool_receipt
             assert "vonkctl-update-" in tool_receipt
-            if report := os.environ.get("VONK_SIGNED_UPDATE_REPORT"):
-                Path(report).write_text(
-                    json.dumps(
-                        {
-                            "before": before,
-                            "after": after,
-                            "receipt": receipt,
-                            "tampered_wheel_retained_prior_tool_receipt": True,
-                            "stable_updater_after_platform_ndjson": True,
-                            "real_uv_tool_receipt_changed": receipt_path.read_bytes()
-                            != before_tool_receipt,
-                        },
-                        indent=2,
-                    )
-                    + "\n"
-                )
         finally:
             server.shutdown()
             worker.join(timeout=5)
@@ -1317,37 +1301,6 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                 assert api_responses[boundary:] == [
                     ("/api/platform", 200, OBSERVATION_MEDIA_TYPE)
                 ]
-                Path(os.environ["VONK_SIGNED_UPDATE_REPORT"]).write_text(
-                    json.dumps(
-                        {
-                            "prior_source": prior_source,
-                            "candidate_source": current_source,
-                            "old_control_fingerprint": old_identity.control_contract_sha256,
-                            "new_control_fingerprint": candidate_identity.control_contract_sha256,
-                            "stable_schema_resource_sha256": hashlib.sha256(
-                                old_stable_resource
-                            ).hexdigest(),
-                            "before": before,
-                            "after": after,
-                            "real_controller_ndjson_observed": True,
-                            "actual_complete_fresh_worker_capture": True,
-                            "tampered_wheel_retained_prior_tool_receipt": True,
-                            "real_uv_tool_receipt_changed": True,
-                            "manifest_epoch_requires_signed_bootstrap": True,
-                            "prior_manifest_refusal_retained_tool_receipt": True,
-                            "actual_installed_ndjson_command": True,
-                            "bootstrap_source": current_source,
-                            "bootstrap_sha256": hashlib.sha256(
-                                bootstrap_bytes
-                            ).hexdigest(),
-                            "candidate_wheel_sha256": hashlib.sha256(
-                                candidate_wheel.read_bytes()
-                            ).hexdigest(),
-                        },
-                        indent=2,
-                    )
-                    + "\n"
-                )
             finally:
                 publication.shutdown()
                 publication_thread.join(timeout=5)

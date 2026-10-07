@@ -911,6 +911,10 @@ jobs:
           printf 'VONK_CONSUMER_CORPUS_PROBE=%s/consumer-probe/consumer_corpus_probe\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Build recipe library index and packages
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Provide the Controller image ingress tool
+        uses: ./.github/actions/apt-install
+        with:
+          packages: skopeo
       - name: Pull the pinned test images once
         run: scripts/pull-test-images postgres step-ca python
       - name: Attribute fresh PostgreSQL catalog phase costs
@@ -945,6 +949,7 @@ jobs:
           SHARD_TOTAL: 3
           TIMING_DATA: ${{ needs.changes.outputs.control_timings }}
           VONK_JOURNAL_CA_TEST_IMAGE: vonk-ca-control-test:${{ github.sha }}
+          VONK_CI_PREREQUISITES: needs_skopeo
         run: |
           set -euo pipefail
           timing_file="$RUNNER_TEMP/pytest-durations.json"

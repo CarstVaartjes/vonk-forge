@@ -48,15 +48,26 @@ jobs:
         env:
           VONK_RECIPE_EFFECT_CONSUMER_SOURCE: ${{ github.workspace }}/.proof-recipes
           VONK_EFFECT_PLATFORM_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          VONK_EFFECT_PROOF_OUTPUT: ${{ runner.temp }}/profile-effect-consumer-proof
         run: >-
           uv run --project control --frozen pytest -q -n 0
           control/tests/test_profile_effect_consumer_contract_postgres.py
-      - name: Upload exact-source handoff and wheel provenance
+          --junitxml=${{ runner.temp }}/profile-effect-consumer.xml
+      - name: Require the installed CLI and recipes cleanup case
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'profile-effect-consumer.xml').findall('.//testcase')
+          assert cases, "no consumer cases executed"
+          assert {'test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup'} <= {case.get('name') for case in cases}
+          assert all(case.find(tag) is None for case in cases for tag in ('skipped', 'failure', 'error'))
+          PY
+      - name: Upload consumer outcomes
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: profile-effect-consumer-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ runner.temp }}/profile-effect-consumer-proof
-          if-no-files-found: warn
+          name: profile-effect-consumer-${{ github.run_id }}
+          path: ${{ runner.temp }}/profile-effect-consumer.xml
+          if-no-files-found: error
           retention-days: 7
