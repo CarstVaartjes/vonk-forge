@@ -58,10 +58,13 @@ def test_pinned_openapi_assembler_keeps_framework_output_and_inline_numbers() ->
     from fastapi import Query
     from fastapi.openapi.utils import get_openapi
     from pydantic import BaseModel, Field
+    from pydantic.json_schema import models_json_schema
+    from vonk_control.fleet_projection import FleetSnapshot
     from vonk_control.openapi_numbers import (
         UPSTREAM_ASSEMBLER_SHA256,
         canonical_openapi,
     )
+    from vonk_control.platform_observation import PlatformObservation
 
     assert (
         hashlib.sha256(inspect.getsource(get_openapi).encode()).hexdigest()
@@ -92,6 +95,15 @@ def test_pinned_openapi_assembler_keeps_framework_output_and_inline_numbers() ->
     canonical = canonical_openapi(
         title=app.title, version=app.version, routes=app.routes
     )
+    # Stream records transport these canonical payloads by envelope. The
+    # emitter intentionally retains their complete graph for generated clients;
+    # compare framework output plus those independently derived owner schemas.
+    _, observation_graph = models_json_schema(
+        [(FleetSnapshot, "serialization"), (PlatformObservation, "serialization")],
+        ref_template="#/components/schemas/{model}",
+    )
+    for name, definition in observation_graph["$defs"].items():
+        standard["components"]["schemas"].setdefault(name, definition)
     numeric_keywords = {
         "minimum",
         "maximum",

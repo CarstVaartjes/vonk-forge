@@ -348,6 +348,7 @@ def test_raw_request_rejects_malformed_typed_errors(
 ) -> None:
     headers = Message()
     headers["Content-Type"] = "application/json"
+    headers["X-Request-ID"] = "malformed-error-fixture"
     body = io.BytesIO(json.dumps(problem).encode())
 
     def opener(*_args, **_kwargs):
@@ -363,8 +364,14 @@ def test_raw_request_rejects_malformed_typed_errors(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
 
-    with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
+    with pytest.raises(ControlMalformedResponse, match="OpenAPI schema") as failure:
         client.request("GET", "/api/fleet")
+    context = failure.value.context
+    assert context is not None
+    assert context.http_status == 401
+    assert context.request_id == "malformed-error-fixture"
+    assert context.operation == "GET /api/fleet"
+    assert context.endpoint == "/api/fleet"
 
 
 def test_raw_request_rejects_error_fields_outside_openapi_contract(

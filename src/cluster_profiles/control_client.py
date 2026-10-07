@@ -1132,6 +1132,7 @@ class ControlClient:
         request.add_header("Accept", media_type)
         status: int | None = None
         request_id: str | None = None
+        received_retry_after: int | None = None
         try:
             try:
                 response = self._opener(request, timeout=timeout)
@@ -1144,6 +1145,9 @@ class ControlClient:
                     else response.status
                 )
                 request_id = safe_request_id(response.headers.get("x-request-id"))
+                received_retry_after = _retry_after_seconds(
+                    response.headers.get("retry-after")
+                )
                 if not 200 <= status < 300:
                     return self._request_response(
                         "GET",
@@ -1206,6 +1210,17 @@ class ControlClient:
             ) from None
         except (ControlHTTPError, ControlObservationUnavailable):
             raise
+        except (ControlMalformedResponse, ControlResponseTooLarge) as error:
+            # The bounded HTTP error parser and canonical validators already
+            # classified this failure. Preserve that cause and attach only the
+            # status/correlation evidence received before body validation.
+            if error.context is None:
+                error.context = replace(
+                    protocol_context(operation=f"GET {path}", endpoint=path),
+                    http_status=status,
+                    request_id=request_id,
+                )
+            raise
         except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
             context = replace(
                 transport_context(operation=f"GET {path}", endpoint=path, error=error),
@@ -1213,7 +1228,9 @@ class ControlClient:
                 request_id=request_id,
             )
             raise ControlTransportError(
-                context.render("observation transfer failed"), context=context
+                context.render("observation transfer failed"),
+                context=context,
+                retry_after_seconds=received_retry_after,
             ) from None
         except (
             ValueError,

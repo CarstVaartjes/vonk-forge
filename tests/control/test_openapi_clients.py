@@ -231,9 +231,8 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
         "*/*": {"schema": {"format": "binary", "type": "string"}}
     }
 
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    assert "uploadArtifactJobInput" not in typescript
-    assert "downloadArtifactJobResult" not in typescript
+    # TypeScript declarations describe the complete server contract, including
+    # native transports; they do not generate buffered request methods.
     assert not (PYTHON_CLIENT / "api/default/upload_artifact_job_input.py").exists()
     assert not (PYTHON_CLIENT / "api/default/download_artifact_job_result.py").exists()
 
@@ -295,7 +294,6 @@ def test_admin_schema_is_secret_free() -> None:
 
     by_id = {operation["operationId"]: operation for operation in operation_list}
     for operation_id in (
-        "getFleetStatus",
         "getJob",
         "resumeJob",
     ):
@@ -308,9 +306,29 @@ def test_admin_schema_is_secret_free() -> None:
         component = schema["components"]["schemas"][reference.rsplit("/", 1)[-1]]
         assert component["additionalProperties"] is False
 
-    assert by_id["getFleetStatus"]["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/FleetSnapshot"}
+    fleet = by_id["getFleetStatus"]
+    assert fleet["x-vonk-streaming-transport"] is True
+    assert fleet["responses"]["200"]["content"] == {
+        "application/x-vonk-observation+ndjson": {
+            "schema": {"$ref": "#/components/schemas/ObservationTransferRecord"}
+        }
+    }
+    assert fleet["x-vonk-observation-payload"] == {
+        "$ref": "#/components/schemas/FleetSnapshot"
+    }
+    components = schema["components"]["schemas"]
+    assert components["FleetSnapshot"]["additionalProperties"] is False
+    records = components["ObservationTransferRecord"]
+    assert records["discriminator"]["propertyName"] == "type"
+    assert records["oneOf"] == [
+        {"$ref": f"#/components/schemas/ObservationTransfer{kind}"}
+        for kind in ("Start", "Chunk", "Complete", "Error")
+    ]
+    for variant in records["oneOf"]:
+        assert (
+            components[variant["$ref"].rsplit("/", 1)[-1]]["additionalProperties"]
+            is False
+        )
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (
@@ -472,11 +490,10 @@ def test_stream_resume_header_is_in_openapi_custom_transport_contract() -> None:
         }
     ]
 
-    # Streaming transports are intentionally excluded from generated clients;
-    # the browser hook owns native EventSource reconnect behavior.
+    # The Python generator excludes buffered streaming methods. TypeScript
+    # declares the full contract; FleetEventConnection owns authenticated fetch
+    # streaming and reconnects from the cursor applied by the browser.
     assert not (PYTHON_CLIENT / "api/default/stream_fleet_events.py").exists()
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    assert "streamFleetEvents" not in typescript
 
 
 def test_generated_fleet_projection_vocabulary_is_finite() -> None:

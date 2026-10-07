@@ -90,6 +90,7 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 
 | File | Type | Reason |
 | --- | --- | --- |
+| `control/web/src/api/fleet-event-connection.ts` | `FleetEventStream` | Browser-local event connection handle with listener/disposal methods and its route URL; never serialized as API data. Event payloads use the generated canonical route schema. |
 | `control/web/src/api/types.ts` | `ActivityFilters` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/api/types.ts` | `ArtifactTransferProgress` | browser-local upload hashing progress and worker messages; not API data |
 | `control/web/src/api/types.ts` | `ControlApi` | method-signature interface over the generated schema types (client seam for tests); declares no data fields |
@@ -198,7 +199,7 @@ module defines its own.
 | `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
 | `control/src/vonk_control/fleet_profile_adapter_conversion_contract.py` | controller-contract | 3 | Private one-time retained journal proof inputs and typed conversion outcome; never execution authority. |
 | `control/src/vonk_control/fleet_profile_contract.py` | controller-contract | 50 | Strict public contracts for saved Fleet profiles and their applications. |
-| `control/src/vonk_control/fleet_projection.py` | declared | 12 | Bounded typed projection of PostgreSQL-authoritative Fleet state. |
+| `control/src/vonk_control/fleet_projection.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
 | `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
 | `control/src/vonk_control/gateway_keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
@@ -208,6 +209,7 @@ module defines its own.
 | `control/src/vonk_control/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
 | `control/src/vonk_control/model_cache.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |
 | `control/src/vonk_control/model_cache_contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
+| `control/src/vonk_control/observation_transfer.py` | controller-contract | 5 | Canonical immutable observation transfer records; sequence, identity, byte count and final digest bind the original complete Fleet or platform payload. |
 | `control/src/vonk_control/operation_api.py` | declared | 20 | Strict, secret-free representations for routine administrative operations. |
 | `control/src/vonk_control/operation_blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
 | `control/src/vonk_control/operation_contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
