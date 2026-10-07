@@ -25,7 +25,8 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_payload
+from vonk_agent_protocol.contracts import ArtifactDistributionResult, canonical_payload
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import (
     AgentJobService,
@@ -80,7 +81,7 @@ NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
-STOP_RESULT: dict[str, object] = {}
+STOP_RESULT = RecipeStopResult()
 
 
 def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
@@ -2481,7 +2482,7 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
         )
         assert stored.state in aos.PARKED
         assert aos.attempt_lapsed(attempt)
-        assert attempt.result == STOP_RESULT
+        assert attempt.result == STOP_RESULT.model_dump(mode="json")
     assert jobs.record_late_result(late) is True
 
 
@@ -3006,10 +3007,7 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
         recovered is not None
         and fenced_operation(sessions, recovered).id == operation.id
     )
-    jobs.succeed(
-        recovered,
-        {"downloaded_bytes": 0},
-    )
+    jobs.succeed(recovered, ArtifactDistributionResult(downloaded_bytes=0))
     with sessions() as session:
         assert session.get(AgentOperation, operation.id).state == "succeeded"
 
@@ -3905,10 +3903,25 @@ def test_a_start_budget_begins_when_the_start_is_first_dispatched(service) -> No
     with sessions.begin() as session:
         stored_parent = session.get(Job, holder.id)
         assert stored_parent is not None
+        # A distributed start's parent is a recipe.start job, whose stored
+        # document is the contract the anchoring reads.
+        stored_parent.kind = "recipe.start"
         document = {
-            **stored_parent.payload,
+            "schema_version": 1,
+            "owner_kind": "run",
+            "owner_id": str(uuid.uuid4()),
+            "plan_digest": COMMIT,
+            "workload_intent_ordinal": 1,
             "start_deadline": payload["start_deadline"],
-            "phases": [[{"node_id": NODE_A, "payload": payload}]],
+            "phases": [
+                [
+                    {
+                        "operation_id": operation.id,
+                        "node_id": NODE_A,
+                        "payload": payload,
+                    }
+                ]
+            ],
         }
         stored_parent.payload = document
         stored_parent.payload_digest = hashlib.sha256(
@@ -3936,7 +3949,11 @@ def test_a_start_budget_begins_when_the_start_is_first_dispatched(service) -> No
         )
         stored_parent = session.get(Job, holder.id)
         assert stored_parent is not None
-        assert stored_parent.payload["start_deadline"] == anchored
+        # The parent stores its own deadline as a timestamp (its contract's
+        # spelling), the phase payloads as the wire string they carry.
+        assert datetime.fromisoformat(
+            stored_parent.payload["start_deadline"]
+        ) == datetime.fromisoformat(anchored)
         assert stored_parent.payload["phases"][0][0]["payload"]["start_deadline"] == (
             anchored
         )

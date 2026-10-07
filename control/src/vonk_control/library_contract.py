@@ -66,12 +66,7 @@ Text200 = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 Text256 = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 Text512 = Annotated[str, StringConstraints(min_length=1, max_length=512)]
 Scalar = str | int | bool
-DisplayScalar = (
-    Annotated[str, StringConstraints(max_length=512)]
-    | Annotated[int, Field(ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT)]
-    | bool
-    | None
-)
+DisplayScalar = Annotated[str, StringConstraints(max_length=512)] | int | bool | None
 
 
 class LibraryProjectionReason(StrictModel):
@@ -177,8 +172,8 @@ class LibraryLocalProgress(StrictModel):
     operation_id: UuidId | None = None
     state: ModelCacheOperationState
     phase: Text64 | None = None
-    completed_bytes: int = Field(default=0, ge=0, le=_MAX_SIGNED_BIGINT)
-    total_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    completed_bytes: int = Field(default=0, ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
 
 
 class LibraryLocalState(StrictModel):
@@ -192,10 +187,10 @@ class LibraryLocalState(StrictModel):
 class LibraryResourceProjection(StrictModel):
     """Declared resource facts; unknown values remain null."""
 
-    memory_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
-    disk_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
-    runtime_memory_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
-    image_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    memory_bytes: int | None = Field(default=None, ge=0)
+    disk_bytes: int | None = Field(default=None, ge=0)
+    runtime_memory_bytes: int | None = Field(default=None, ge=0)
+    image_bytes: int | None = Field(default=None, ge=0)
 
 
 class LibraryModelProjection(StrictModel):
@@ -330,7 +325,7 @@ class OperationalBuild(StrictModel):
     recipe_revision_id: UuidId
     state: Literal["planned", "building", "succeeded", "failed"]
     image_digest: ImageDigest | None
-    image_bytes: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+    image_bytes: int | None = Field(default=None, ge=1)
 
 
 class OperationalMappingNode(StrictModel):
@@ -465,31 +460,27 @@ class PlacementNode(StrictModel):
     telemetry_observed_at: datetime
     inventory_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     telemetry_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
-    disk_free_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    disk_reserved_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    disk_required_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    disk_free_after_bytes: int = Field(ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT)
+    disk_free_bytes: int = Field(ge=0)
+    disk_reserved_bytes: int = Field(ge=0)
+    disk_required_bytes: int = Field(ge=0)
+    disk_free_after_bytes: int
     memory_kind: Literal["unified", "host", "accelerator"]
-    memory_available_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    memory_reserved_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    memory_required_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    memory_free_after_bytes: int = Field(ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT)
-    artifact_reuse_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    memory_available_bytes: int = Field(ge=0)
+    memory_reserved_bytes: int = Field(ge=0)
+    memory_required_bytes: int = Field(ge=0)
+    memory_free_after_bytes: int
+    artifact_reuse_bytes: int = Field(ge=0)
     fabric_address: Annotated[str, StringConstraints(max_length=45)] | None
-    fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+    fabric_bandwidth_mbps: int | None = Field(default=None, ge=1)
 
 
 class PlacementScore(StrictModel):
     exact_install_complete: bool
     exact_install_partial: bool
     active_run_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    artifact_reuse_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    minimum_disk_headroom_bytes: int = Field(
-        ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT
-    )
-    minimum_memory_headroom_bytes: int = Field(
-        ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT
-    )
+    artifact_reuse_bytes: int = Field(ge=0)
+    minimum_disk_headroom_bytes: int
+    minimum_memory_headroom_bytes: int
     maximum_telemetry_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
 
 
@@ -519,7 +510,7 @@ class RejectedNode(StrictModel):
 
 class TopologyPlacement(StrictModel):
     topology_name: Text64
-    node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
+    node_count: int = Field(ge=1)
     candidate_node_ids: list[NodeId] = Field(max_length=32)
     recommendations: list[PlacementRecommendation] = Field(max_length=16)
     rejected_nodes: list[RejectedNode] = Field(max_length=32)
@@ -646,7 +637,7 @@ def _bounded_display_scalar(value: Scalar | None) -> DisplayScalar:
         return value
     if isinstance(value, str):
         return value[:512]
-    return max(-_MAX_SIGNED_BIGINT, min(value, _MAX_SIGNED_BIGINT))
+    return value
 
 
 def _reason(

@@ -21,6 +21,8 @@ fn timestamp(value: &Option<String>) -> bool {
 
 impl OperationMemberProgress {
     pub fn validate(&self) -> Result<(), ProtocolError> {
+        crate::validate_generated("OperationMemberProgress", self)
+            .map_err(|_| ProtocolError::Identity("operation progress"))?;
         if !bounded(&self.phase, 80)
             || self.kind.as_ref().is_some_and(|v| !bounded(v, 80))
             || self
@@ -29,10 +31,13 @@ impl OperationMemberProgress {
                 .is_some_and(|v| !valid_sha256(v))
             || self
                 .total_bytes
-                .is_some_and(|total| self.completed_bytes > total)
-            || self
-                .total_items
-                .is_some_and(|total| self.completed_items.unwrap_or(0) > total)
+                .as_ref()
+                .is_some_and(|total| &self.completed_bytes > total)
+            || self.total_items.as_ref().is_some_and(|total| {
+                self.completed_items
+                    .as_ref()
+                    .is_some_and(|done| done > total)
+            })
             || !number(self.bytes_per_second, 1e15)
             || !number(self.smoothed_bytes_per_second, 1e15)
             || !number(self.eta_seconds, 1e9)
@@ -50,6 +55,8 @@ impl OperationMemberProgress {
 
 impl OperationProgress {
     pub fn validate(&self) -> Result<(), ProtocolError> {
+        crate::validate_generated("OperationProgress", self)
+            .map_err(|_| ProtocolError::Identity("operation progress"))?;
         if !bounded(&self.phase, 80)
             || self.kind.as_ref().is_some_and(|v| !bounded(v, 80))
             || self
@@ -58,10 +65,13 @@ impl OperationProgress {
                 .is_some_and(|v| !valid_sha256(v))
             || self
                 .total_bytes
-                .is_some_and(|total| self.completed_bytes > total)
-            || self
-                .total_items
-                .is_some_and(|total| self.completed_items.unwrap_or(0) > total)
+                .as_ref()
+                .is_some_and(|total| &self.completed_bytes > total)
+            || self.total_items.as_ref().is_some_and(|total| {
+                self.completed_items
+                    .as_ref()
+                    .is_some_and(|done| done > total)
+            })
             || !number(self.bytes_per_second, 1e15)
             || !number(self.smoothed_bytes_per_second, 1e15)
             || !number(self.eta_seconds, 1e9)

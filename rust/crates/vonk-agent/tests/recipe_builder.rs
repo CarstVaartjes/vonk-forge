@@ -1078,7 +1078,20 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
 
-    let build_request = request(archive.len(), digest);
+    let mut build_request = request(archive.len(), digest);
+    let wide_integer = "9".repeat(200);
+    build_request.options.environment.push(
+        vonk_agent_protocol::parse_strict::<
+            vonk_agent_protocol::generated::RecipeBuildEnvironmentArgument,
+        >(format!(r#"{{"name":"EXACT_INTEGER","value":{wide_integer}}}"#).as_bytes())
+        .unwrap(),
+    );
+    // Read the retained canonical request again before the real builder path;
+    // serde or argument rendering must not narrow an accepted integer.
+    let retained_request = root.path().join("accepted-build-request.json");
+    fs::write(&retained_request, canonical_json(&build_request).unwrap()).unwrap();
+    let build_request: RecipeBuildRequest =
+        vonk_agent_protocol::parse_strict(&fs::read(&retained_request).unwrap()).unwrap();
     let evidence = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
@@ -1117,6 +1130,12 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         .find(|call| call.1.iter().any(|value| value == "build"))
         .unwrap();
     assert_eq!(build.0, Program::SystemdRun);
+    assert!(
+        build
+            .1
+            .iter()
+            .any(|value| value == &format!("EXACT_INTEGER={wide_integer}"))
+    );
     for required in [
         "--user",
         "--wait",

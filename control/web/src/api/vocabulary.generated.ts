@@ -1090,6 +1090,7 @@ export type RecipeImageCode = (typeof RecipeImageCode)[keyof typeof RecipeImageC
 
 export const RecipeOperationCode = {
   RECIPE_OPERATION_CONFLICT: "recipe.operation_conflict",
+  EVIDENCE_UNPROVEN: "recipe.evidence_unproven",
 } as const;
 export type RecipeOperationCode = (typeof RecipeOperationCode)[keyof typeof RecipeOperationCode];
 

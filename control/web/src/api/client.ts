@@ -1,4 +1,6 @@
-import createClient from "openapi-fetch";
+import createClient, {createQuerySerializer} from "openapi-fetch";
+import {ContractResponse, readControlResponse, serializeControlBody, validateControlBody, validateControlParameters} from "./contract-json";
+import {stringifyContractJson, parseContractJson, isWireNumber, formatWire} from "./contract-numeric";
 import {AuthenticationRequired} from "../auth";
 import type {paths} from "./generated";
 import type {
@@ -10,6 +12,7 @@ import type {
   FleetProfileEndpoints,
   FleetProfilePreview,
   FleetProfile,
+  FleetProfileNumber,
   FleetProfileRead,
   FleetProfileApplicationView,
   FleetProfileLoadInput,
@@ -124,18 +127,43 @@ export class ApiClient implements ControlApi {
     baseUrl: location.origin,
     credentials: "same-origin",
     headers: {Accept: "application/json"},
+    bodySerializer: stringifyContractJson,
+    querySerializer: query => createQuerySerializer()(Object.fromEntries(Object.entries(query).map(([key, value]) => [key, Array.isArray(value) ? value.map(item => isWireNumber(item) ? formatWire(item) : item) : isWireNumber(value) ? formatWire(value) : value]))),
   });
 
   constructor() {
     this.generated.use({
-      onRequest: async ({request}) => {
+      onRequest: async ({request, params, schemaPath}) => {
+        validateControlParameters(request.method, schemaPath, params);
+        const url = new URL(request.url);
+        url.pathname = schemaPath.replace(/\{([^}]+)\}/g, (_, key: string) => {
+          const value = params.path?.[key];
+          if (isWireNumber(value)) return encodeURIComponent(formatWire(value));
+          if (typeof value !== "string" && typeof value !== "boolean") throw new Error("Unsupported API path parameter");
+          return encodeURIComponent(String(value));
+        });
+        request = new Request(url, request);
+        if (request.headers.get("content-type")?.startsWith("application/json") && request.body !== null) {
+          const text = await request.clone().text();
+          serializeControlBody(request.method, request.url, parseContractJson(text));
+        }
         if (["GET", "HEAD"].includes(request.method)) return;
         const headers = new Headers(request.headers);
         headers.set("X-CSRF-Token", await this.requiredCsrfToken());
         return new Request(request, {headers});
       },
-      onResponse: ({response}) => {
+      onResponse: async ({request, response}) => {
+        const text = await response.text();
+        let value: unknown;
+        try { value = validateControlBody(request.method, request.url, response.status, response.headers.get("content-type") ?? "", text); }
+        catch (cause) { this.requireAuthentication(response, cause); throw cause; }
         this.requireAuthentication(response);
+        if (!response.ok) {
+          const detail = typeof value === "object" && value !== null && "detail" in value ? formatApiDetail(value.detail) : "request failed";
+          throw new ApiError(response.status, `Control API returned ${response.status}: ${detail}`, requestIdOf(response));
+        }
+        if (response.status === 204 || request.method === "HEAD") return response;
+        return new ContractResponse(response, value, text);
       },
     });
   }
@@ -147,10 +175,12 @@ export class ApiClient implements ControlApi {
     };
   }
 
-  private requireAuthentication(response: Response): void {
+  private requireAuthentication(response: Response, cause?: unknown): void {
     if (response.status !== 401) return;
     this.authenticationRequired?.();
-    throw new AuthenticationRequired();
+    const error = new AuthenticationRequired();
+    if (cause !== undefined) error.cause = cause;
+    throw error;
   }
 
   private async requiredCsrfToken(): Promise<string> {
@@ -176,11 +206,17 @@ export class ApiClient implements ControlApi {
     // validates origin instead) and the call that issues the first token.
     const method = (init.method ?? "GET").toUpperCase();
     if (!["GET", "HEAD"].includes(method) && path !== "/api/auth/login") headers.set("X-CSRF-Token", await this.requiredCsrfToken());
+    if (init.body !== undefined && init.body !== null) {
+      if (typeof init.body !== "string") throw new Error("JSON API request requires a serialized document");
+      serializeControlBody(method, path, parseContractJson(init.body));
+    }
     const response = await fetch(path, {...init, method, headers, credentials: "same-origin"});
+    let decoded: unknown;
+    try { decoded = await readControlResponse(response, method, path); }
+    catch (cause) { this.requireAuthentication(response, cause); throw cause; }
     this.requireAuthentication(response);
     if (!response.ok) {
-      let problem: unknown;
-      try { problem = await response.json(); } catch { problem = null; }
+      const problem = decoded;
       if (typeof problem === "object" && problem !== null) {
         const body = problem as {code?: unknown; detail?: unknown};
         const code = typeof body.code === "string" ? body.code.slice(0, 128) : `HTTP ${response.status}`;
@@ -189,7 +225,7 @@ export class ApiClient implements ControlApi {
       }
       throw new ApiError(response.status, `Control API returned ${response.status}`, requestIdOf(response));
     }
-    return response.json() as Promise<T>;
+    return decoded as T;
   }
 
   session(): Promise<AuthSession> {
@@ -197,13 +233,15 @@ export class ApiClient implements ControlApi {
   }
 
   login(subject: "admin", password: string): Promise<AuthSession> {
-    return this.request("/api/auth/login", {method: "POST", body: JSON.stringify({subject, password})});
+    return this.request("/api/auth/login", {method: "POST", body: stringifyContractJson({subject, password})});
   }
 
   async logout(): Promise<void> {
     const headers = new Headers({Accept: "application/json"});
     headers.set("X-CSRF-Token", await this.requiredCsrfToken());
     const response = await fetch("/api/auth/logout", {method: "POST", headers, credentials: "same-origin"});
+    try { await readControlResponse(response, "POST", "/api/auth/logout"); }
+    catch (cause) { this.requireAuthentication(response, cause); throw cause; }
     this.requireAuthentication(response);
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`, requestIdOf(response));
   }
@@ -212,10 +250,11 @@ export class ApiClient implements ControlApi {
     const headers = new Headers({Accept: "text/plain"});
     headers.set("X-CSRF-Token", await this.requiredCsrfToken());
     const response = await fetch("/api/auth/cli-token", {method: "POST", headers, credentials: "same-origin"});
-    this.requireAuthentication(response);
     if (!response.ok) {
       let problem: unknown;
-      try { problem = await response.json(); } catch { problem = null; }
+      try { problem = await readControlResponse(response, "POST", "/api/auth/cli-token"); }
+      catch (cause) { this.requireAuthentication(response, cause); throw cause; }
+      this.requireAuthentication(response);
       const detail = typeof problem === "object" && problem !== null && "detail" in problem
         ? formatApiDetail(problem.detail)
         : "request failed";
@@ -295,14 +334,14 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/profile", {signal}));
   }
 
-  async profile(number: number, signal?: AbortSignal): Promise<FleetProfileRead> {
+  async profile(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileRead> {
     return resultData(await this.generated.GET("/api/profile/{number}", {
       params: {path: {number}},
       signal,
     }));
   }
 
-  async autosaveProfile(number: number, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
+  async autosaveProfile(number: FleetProfileNumber, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
     return resultData(await this.generated.PUT("/api/profile/{number}", {
       params: {path: {number}},
       body: input,
@@ -310,14 +349,14 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async previewProfile(number: number, signal?: AbortSignal): Promise<FleetProfilePreview> {
+  async previewProfile(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfilePreview> {
     return resultData(await this.generated.POST("/api/profile/{number}/preview", {
       params: {path: {number}},
       signal,
     }));
   }
 
-  async loadProfile(number: number, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async loadProfile(number: FleetProfileNumber, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.POST("/api/profile/{number}/load", {
       params: {path: {number}},
       body: input,
@@ -325,21 +364,21 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async profileApplicationByRequest(number: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async profileApplicationByRequest(number: FleetProfileNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.GET("/api/profile/{number}/requests/{request_key}", {
       params: {path: {number, request_key: requestKey}},
       signal,
     }));
   }
 
-  async profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async profileProgress(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.GET("/api/profile/{number}/progress", {
       params: {path: {number}},
       signal,
     }));
   }
 
-  async profileEndpoints(number: number, signal?: AbortSignal): Promise<FleetProfileEndpoints> {
+  async profileEndpoints(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileEndpoints> {
     return resultData(await this.generated.GET("/api/profile/{number}/endpoints", {
       params: {path: {number}},
       signal,
@@ -381,13 +420,13 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async profileDefinition(number: number, signal?: AbortSignal): Promise<ProfileDefinition> {
+  async profileDefinition(number: FleetProfileNumber, signal?: AbortSignal): Promise<ProfileDefinition> {
     return resultData(await this.generated.GET("/api/profile/{number}/definition", {
       params: {path: {number}}, signal,
     }));
   }
 
-  async cancelProfileApplication(applicationId: string, profileNumber: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async cancelProfileApplication(applicationId: string, profileNumber: FleetProfileNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.POST("/api/profile/applications/{application_id}/cancel", {
       params: {path: {application_id: applicationId}},
       body: {profile_number: profileNumber, request_key: requestKey},
@@ -517,7 +556,7 @@ export class ApiClient implements ControlApi {
   createArtifactJob(runId: string, input: ArtifactJobCreateInput, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {
       method: "POST",
-      body: JSON.stringify(input),
+      body: stringifyContractJson(input),
       headers: {"X-Request-ID": requestId},
       signal,
     });
@@ -531,7 +570,7 @@ export class ApiClient implements ControlApi {
       const abort = () => request.abort();
       const finish = () => signal?.removeEventListener("abort", abort);
       request.open("PUT", path);
-      request.responseType = "json";
+      request.responseType = "text";
       request.withCredentials = true;
       request.setRequestHeader("Accept", "application/json");
       request.setRequestHeader("Content-Type", file.media_type);
@@ -542,14 +581,22 @@ export class ApiClient implements ControlApi {
       request.onerror = () => { finish(); reject(new ApiError(0, "Artifact upload failed before the controller responded")); };
       request.onload = () => {
         finish();
-        try { this.requireAuthentication(new Response(null, {status: request.status})); }
-        catch (error) { reject(error); return; }
+        const response = new Response(null, {status: request.status});
+        let value: unknown;
+        try {
+          value = validateControlBody("PUT", path, request.status, request.getResponseHeader("Content-Type") ?? "", request.responseText);
+        } catch (cause) {
+          try { this.requireAuthentication(response, cause); } catch (error) { reject(error); return; }
+          reject(cause); return;
+        }
+        try { this.requireAuthentication(response); } catch (error) { reject(error); return; }
         if (request.status < 200 || request.status >= 300) {
-          const response = request.response as {detail?: unknown} | null;
-          reject(new ApiError(request.status, response?.detail === undefined ? `Control API returned ${request.status}` : formatApiDetail(response.detail), requestIdOf(request)));
+          const detail = typeof value === "object" && value !== null && "detail" in value ? formatApiDetail(value.detail) : "request failed";
+          reject(new ApiError(request.status, `Control API returned ${request.status}: ${detail}`, requestIdOf(request)));
           return;
         }
-        resolve(request.response as ArtifactJob);
+        // The sole cast is the declared, runtime-validated network DTO boundary.
+        resolve(value as ArtifactJob);
       };
       if (signal?.aborted) { request.abort(); return; }
       signal?.addEventListener("abort", abort, {once: true});
@@ -572,7 +619,7 @@ export class ApiClient implements ControlApi {
   cancelArtifactJob(jobId: string, reason: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: "POST",
-      body: JSON.stringify({reason}),
+      body: stringifyContractJson({reason}),
       headers: {"X-Request-ID": requestId},
       signal,
     });

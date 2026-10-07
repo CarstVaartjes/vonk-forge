@@ -432,6 +432,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     commands: argparse._SubParsersAction[ControllerParserT],
 ) -> None:
     """Register the Fleet, Model, Recipe, Profile and Key command namespaces."""
+    platform = commands.add_parser(
+        "platform", help="Actual Controller processes and installed contracts"
+    )
+    _add_output(platform)
     fleet = commands.add_parser(
         "fleet",
         help="Sparks, their health, and what they run",
@@ -714,6 +718,11 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         action="store_true",
         help="Show the Controller-owned removal impact without submitting it",
     )
+    recipe_retry = recipe_actions.add_parser(
+        "retry", help="Retry a failed preparation using its frozen recipe intent"
+    )
+    recipe_retry.add_argument("operation_id", type=_uuid_argument)
+    _action_flags(recipe_retry, followable=True)
     recipe_cancel = recipe_actions.add_parser(
         "cancel", help="Cancel one accepted recipe preparation"
     )
@@ -1981,6 +1990,70 @@ def _submit_model_cancellation(
     )
 
 
+def _submit_recipe_retry(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    """Retry the owning frozen intent, never resolve a mutable recipe selector."""
+    original_id = args.operation_id
+    original = client.request("GET", f"/api/recipe/operations/{_quoted(original_id)}")
+    revision = original.get("recipe_revision_id")
+    content = original.get("recipe_content_sha256")
+    if (
+        _cache_operation_id("recipe", original) != original_id
+        or original.get("kind") != "recipe.image.availability.v2"
+        or not isinstance(revision, str)
+        or not revision
+        or not isinstance(content, str)
+        or re.fullmatch(r"[0-9a-f]{64}", content) is None
+    ):
+        raise ControlMalformedResponse(
+            "original recipe preparation has no verifiable frozen identity"
+        )
+    _confirm_action(
+        args,
+        f"Retry recipe preparation {original_id} using its frozen revision {revision}?",
+    )
+    key = _request_key(args, factory)
+
+    def validate(result: Mapping[str, object]) -> str:
+        intent = result.get("request")
+        if (
+            result.get("kind") != "recipe.image.availability.v2"
+            or result.get("request_id") != key
+            or not isinstance(intent, Mapping)
+            or intent.get("kind") != "retry"
+            or intent.get("operation_id") != original_id
+            or result.get("recipe_revision_id") != revision
+            or result.get("recipe_content_sha256") != content
+        ):
+            raise ControlMalformedResponse(
+                "recipe retry receipt identifies another request or frozen intent"
+            )
+        operation_id = _cache_operation_id("recipe", result)
+        if operation_id == original_id:
+            raise ControlMalformedResponse(
+                "recipe retry did not identify a new accepted attempt"
+            )
+        return operation_id
+
+    return _submit_idempotent_request(
+        client,
+        args,
+        key=key,
+        path=f"/api/recipe/operations/{_quoted(original_id)}/retry",
+        lookup=f"/api/recipe/requests/{key}",
+        body={"request_key": key},
+        noun="recipe",
+        action="retry",
+        validate=validate,
+        reconnect=shlex.join(
+            ["vonkctl", "recipe", "progress", "--request-key", key, "--follow"]
+        ),
+    )
+
+
 def _submit_recipe_cancellation(
     client: ControllerClient,
     args: argparse.Namespace,
@@ -2232,6 +2305,9 @@ def _follow_cache_operation(
         result,
         args,
         validate=same_operation,
+        terminal=lambda observed: (
+            _state(observed) in _TERMINAL_STATES and observed.get("residue") is None
+        ),
     )
 
 
@@ -3239,6 +3315,9 @@ def _recipe(
         if args.review:
             return result
         return _follow_mutation(client, "recipe", result, args)
+    if action == "retry":
+        result = _submit_recipe_retry(client, args, factory)
+        return _follow_mutation(client, "recipe", result, args)
     if action == "cancel":
         if not args.yes:
             raise ValueError("recipe cancel requires --yes in noninteractive mode")
@@ -4104,6 +4183,8 @@ def run_controller(
     request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
     command = getattr(args, "command", None) or "profile"
+    if command == "platform":
+        return client.request("GET", "/api/platform")
     if command == "run":
         return _run(args, client, request_id_factory)
     if command == "fleet":

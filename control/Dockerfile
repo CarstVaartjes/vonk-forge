@@ -111,6 +111,9 @@ RUN echo "dependency day: ${DEPENDENCY_DAY}" \
     && find /install -name RECORD -exec sed -i '/\.dist-info\/REQUESTED,/d' {} +
 COPY src/cluster_profiles /vonk-cluster-profiles/src/cluster_profiles
 COPY tools/hatch_build.py /vonk-cluster-profiles/tools/hatch_build.py
+COPY rust/crates/vonk-agent-protocol/schema/wire.json /vonk-cluster-profiles/rust/crates/vonk-agent-protocol/schema/wire.json
+ARG VONK_BUILD_SOURCE_SHA
+ENV VONK_BUILD_SOURCE_SHA=${VONK_BUILD_SOURCE_SHA}
 COPY schemas/install-release-manifest.schema.json /vonk-cluster-profiles/schemas/install-release-manifest.schema.json
 COPY install/installer-release-public.pem /vonk-cluster-profiles/install/installer-release-public.pem
 COPY control/src ./src

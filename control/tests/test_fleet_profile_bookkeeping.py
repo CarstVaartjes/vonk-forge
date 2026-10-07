@@ -18,6 +18,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
     FleetProfileReason,
+    FleetProfileSwitchAdapterState,
     UnavailableFleetProfileView,
 )
 from vonk_control.fleet_profiles import (
@@ -234,7 +235,9 @@ def test_a_damaged_order_is_retired_and_the_worker_continues() -> None:
     assert service.application(second.id).state in {"running", "succeeded"}
 
 
-def test_damaged_choices_remain_unknown_and_assignment_snapshots_rebuild() -> None:
+def test_damaged_choices_remain_unknown_and_native_assignment_snapshots_roundtrip() -> (
+    None
+):
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = _service(sessions)
@@ -265,21 +268,32 @@ def test_damaged_choices_remain_unknown_and_assignment_snapshots_rebuild() -> No
         )
     assert len(service.get(profile.id).assignments) == 1
 
-    # An assignment snapshot that is missing is rebuilt from the accepted intent.
+    # The durable child consumes the canonical assignment snapshot across the
+    # real ORM JSON boundary; it never reparses an internal partial mapping.
     application = service.apply(profile.id, request_key=_uuid(1014), actor="admin")
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        progress = _persisted_profile_progress(row)
+        intent = progress.intended_profile
+        assert intent is not None
+        state = FleetProfileSwitchAdapterState(
+            child_id=row.id,
+            scope_node_ids=list(intent.scope.node_ids),
+            assignment_ids=[item.id for item in intent.assignments],
+            assignments=intent.assignments,
+            queue=[],
+            actor="admin",
+            request_id=_uuid(1015),
+        )
+        RunSwitchFleetProfileAdapter._write_state(session, row, state)
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
-        intent = _persisted_profile_progress(row).intended_profile
-        assert intent is not None
-        state = {
-            "assignment_ids": [item.id for item in intent.assignments],
-            "assignments": "damaged",
-        }
-        rebuilt = RunSwitchFleetProfileAdapter._assignments_from_state(state, row)
-    assert [item.id for item in rebuilt] == sorted(
-        item.id for item in intent.assignments
-    )
+        stored = RunSwitchFleetProfileAdapter._state(row)
+        assert stored is not None
+        retained = RunSwitchFleetProfileAdapter._assignments_from_state(stored, row)
+    assert retained == tuple(intent.assignments)
 
 
 def test_a_damaged_string_list_reads_as_its_fallback() -> None:

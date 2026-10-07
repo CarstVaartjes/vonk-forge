@@ -820,9 +820,9 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
     assert len(projection.recipe_library(limit=1).recipes) == 1
 
 
-@pytest.mark.parametrize("total_bytes", [0, -1])
+@pytest.mark.parametrize("total_bytes", [0, -1, 2**63, 10**199])
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_cached_download_progress_preserves_zero_and_reads_a_negative_total_as_unknown(
+def test_cached_download_progress_preserves_exact_totals_and_reads_negative_as_unknown(
     tmp_path: Path,
     total_bytes: int,
 ) -> None:
@@ -872,7 +872,7 @@ def test_cached_download_progress_preserves_zero_and_reads_a_negative_total_as_u
         assert progress is None
     else:
         assert progress["state"] == "succeeded"
-        assert progress["total_bytes"] == 0
+        assert progress["total_bytes"] == total_bytes
 
 
 @pytest.mark.parametrize("kind", ["model", "recipe"])

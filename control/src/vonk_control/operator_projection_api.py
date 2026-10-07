@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
 
 from . import agent_operation_states
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
+from .agent_upgrade_contract import AgentUpgradePackage, AgentUpgradeRequestIntent
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
 from .auth import MUTATION_ROLES, Actor, CursorError
 from .bounded_json import BoundedJSONError
@@ -43,6 +44,8 @@ from .enrollment_contract import (
     EnrollmentId,
 )
 from .failure_evidence import (
+    AttemptPhase,
+    FailedAttempt,
     FailureEvidenceBundle,
     collect_failure,
     failed_attempt_condition,
@@ -56,6 +59,7 @@ from .library_projection import LibrarySelectorAmbiguous
 from .logging import current_request_id, log_event, redact_text
 from .models import AgentOperation, AgentOperationAttempt
 from .operation_api import bounded_error_responses
+from .operation_item_contract import OperationResultFacts
 from .request_fault import RequestFault
 from .strict_json import StrictJSONModel, stored_document_detail
 
@@ -205,33 +209,33 @@ class FleetEnrollmentProvider(Protocol):
 
 
 class FleetUpgradeProvider(Protocol):
-    def current_package(self) -> Mapping[str, object]: ...
+    def current_package(self) -> AgentUpgradePackage: ...
 
     def get_request(
         self,
         request_id: str,
         *,
         actor: str,
-        request_intent: Mapping[str, object],
+        request_intent: AgentUpgradeRequestIntent,
     ) -> Any | None: ...
 
     def preview(
         self,
         node_ids: Sequence[str],
-        package: Mapping[str, object],
+        package: AgentUpgradePackage,
         *,
-        request_intent: Mapping[str, object],
+        request_intent: AgentUpgradeRequestIntent,
     ) -> Any: ...
 
     def apply(
         self,
         node_ids: Sequence[str],
-        package: Mapping[str, object],
+        package: AgentUpgradePackage,
         *,
         plan_digest: str,
         actor: str,
         request_id: str,
-        request_intent: Mapping[str, object],
+        request_intent: AgentUpgradeRequestIntent,
     ) -> Any: ...
 
 
@@ -589,17 +593,17 @@ class AgentFailureLogProvider:
             clock = _lease_clock(operation, attempt)
             observed_at = _aware(operation.updated_at)
             source_name = _agent_log_source(operation.kind)
-            item = {
-                "id": operation.id,
-                "attempt": attempt.attempt,
-                "kind": operation.kind,
-                "node_ids": [operation.node_id],
-                "updated_at": observed_at.isoformat(),
-                "source": "agent",
-                "progress": attempt.progress,
-                "result": result,
-            }
             try:
+                item = FailedAttempt(
+                    id=operation.id,
+                    attempt=attempt.attempt,
+                    kind=operation.kind,
+                    node_ids=[operation.node_id],
+                    updated_at=observed_at.isoformat(),
+                    source="agent",
+                    progress=AttemptPhase.model_validate(attempt.progress),
+                    result=OperationResultFacts.model_validate(result),
+                )
                 bundle = collect_failure(item, now=now)
             except Exception:  # noqa: BLE001 - one malformed row must not hide the rest
                 headline, level = _ATTEMPT_OUTCOME.get(
@@ -1053,8 +1057,10 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet upgrades unavailable")
         if body.all == (body.selectors is not None):
             raise HTTPException(status_code=422, detail="choose all or selectors")
-        request_intent = {"all": body.all, "selectors": body.selectors}
         try:
+            request_intent = AgentUpgradeRequestIntent(
+                all=body.all, selectors=body.selectors
+            )
             existing = fleet_services.upgrades.get_request(
                 body.request_key,
                 actor=actor.subject,
