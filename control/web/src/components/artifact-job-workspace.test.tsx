@@ -808,5 +808,7 @@ test("checks browser input bytes against the Controller's exact declared transpo
   await user.type(prompt, "a");
   await user.click(screen.getByRole("button", {name: "Submit artifact job"}));
   await waitFor(() => expect(client.submitArtifactJob).toHaveBeenCalled());
-  expect(client.createArtifactJob.mock.calls[0][1].inputs[0].size_bytes).toBe(1);
+  const inputs = client.createArtifactJob.mock.calls[0][1].inputs;
+  if (!inputs?.[0]) throw new Error("accepted input declaration required");
+  expect(inputs[0].size_bytes).toBe(1);
 });
