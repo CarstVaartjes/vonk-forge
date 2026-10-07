@@ -23,6 +23,7 @@ from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import (
+    CertificateResponseCapacityRefused,
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     EnrollmentService,
@@ -1703,3 +1704,29 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine)
     assert outcomes in (("consumed", "refused"), ("refused", "revoked"))
     final = submitter.grant_status(grant.id, actor="admin")
     assert final.state == ("consumed" if authority.calls else "revoked")
+
+
+def test_known_rotation_capacity_refusal_preserves_active_certificate(
+    service, monkeypatch
+) -> None:
+    from vonk_control.step_ca import StepCAError
+
+    enrollment, sessions, _clock, authority = service
+    issued = enroll(enrollment)
+    calls = len(authority.calls)
+
+    def refuse_capacity(*_args: object, **_kwargs: object) -> IssuedCertificate:
+        raise StepCAError(
+            "capacity refused before commit",
+            reason_code="certificate.response_unrepresentable",
+        )
+
+    monkeypatch.setattr(authority, "renew_node", refuse_capacity)
+    with pytest.raises(CertificateResponseCapacityRefused) as refusal:
+        enrollment.renew(NODE_ID, issued.serial, csr())
+    assert refusal.value.reason_code == "certificate.response_unrepresentable"
+    assert len(authority.calls) == calls
+    with sessions() as session:
+        assert session.get(AgentCertificate, issued.serial).state == "active"
+        intent = session.scalar(select(AgentCertificateRotation))
+        assert intent is not None and intent.state == "issuing"
