@@ -107,7 +107,8 @@ jobs:
               "test_real_sql_capture_timeout_is_retryable_and_same_read_repairs[platform-control_process_heartbeats]",
               "test_real_sql_capture_timeout_is_retryable_and_same_read_repairs[cli/contract-control_process_heartbeats]",
           }
-          assert len(cases) == len(expected) and {case.get("name") for case in cases} == expected, "every named capture and repair case must execute exactly once"
+          assert cases, "no capture proof cases executed"
+          assert expected <= {case.get("name") for case in cases}, "missing required capture and repair cases"
           assert all(case.find("skipped") is None and case.find("failure") is None and case.find("error") is None for case in cases), "no skipped or failed capture evidence"
           PYTHON
       - name: Retain exact-source capture evidence

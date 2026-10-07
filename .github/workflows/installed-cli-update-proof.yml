@@ -66,7 +66,8 @@ jobs:
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP'])
           cases = ET.parse(root / 'signed-update-junit.xml').findall('.//testcase')
-          assert len(cases) == 1
+          assert cases, "no proof cases executed"
+          assert {'test_installed_cli_signed_update_replaces_actual_uv_tool'} <= {case.attrib['name'].partition('[')[0] for case in cases}, 'missing required installed CLI case'
           assert not any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error'))
           proof = json.loads((root / 'signed-update-report.json').read_text())
           assert proof['tampered_wheel_retained_prior_tool_receipt']

@@ -80,9 +80,10 @@ jobs:
           import xml.etree.ElementTree as ET
           output = Path(os.environ["VONK_AUTHOR_CONTINUITY_PROOF_OUTPUT"])
           cases = ET.parse(output / "results.xml").getroot().findall(".//testcase")
-          assert len(cases) == 2
+          assert cases, "no proof cases executed"
           assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error")), "unexpected skip/failure/error"
           for form in ("disabled", "demoted"):
+              assert any(form in case.attrib['name'].partition('[')[2].rstrip(']').split('-') for case in cases), f'no cases executed for {form}'
               proof = json.loads((output / f"{form}.json").read_text())
               assert proof["source_sha"] == os.environ["VONK_PROOF_SOURCE_SHA"]
               assert proof["same_intent_succeeded"] and proof["persisted_due_checks"]

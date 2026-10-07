@@ -87,7 +87,8 @@ jobs:
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP'])
           cases = ET.parse(root / 'cli-transition-junit.xml').findall('.//testcase')
-          assert len(cases) == 1
+          assert cases, "no proof cases executed"
+          assert {'test_installed_stable_cli_updates_after_actual_controller_ndjson_transition'} <= {case.attrib['name'].partition('[')[0] for case in cases}, 'missing required installed CLI case'
           assert not any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error'))
           proof = json.loads((root / 'cli-transition-report.json').read_text())
           assert proof['tampered_wheel_retained_prior_tool_receipt']

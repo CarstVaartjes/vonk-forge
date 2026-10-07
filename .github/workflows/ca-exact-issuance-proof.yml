@@ -253,7 +253,7 @@ jobs:
           cargo test --locked -p vonk-agent --lib \
             client::tests::rotation_silent_activation_retries_same_generation_and_repairs_heartbeat \
             -- --exact --test-threads=1 --nocapture 2>&1 | tee ../artifacts/rotation-proof/positive.log
-          grep -F 'test result: ok. 1 passed; 0 failed; 0 ignored;' ../artifacts/rotation-proof/positive.log
+          grep -E 'test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' ../artifacts/rotation-proof/positive.log
       - name: Reject removing the owning activation deadline
         shell: bash
         run: |

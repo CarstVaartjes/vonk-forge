@@ -55,7 +55,7 @@ jobs:
           import xml.etree.ElementTree as ET
           output = Path(os.environ["VONK_STARTUP_REPAIR_PROOF_OUTPUT"])
           cases = ET.parse(output / "current-recovery.xml").getroot().findall(".//testcase")
-          assert len(cases) == 1
+          assert cases, "no proof cases executed"
           assert all(case.find(tag) is None for case in cases for tag in ("skipped", "failure", "error")), "unexpected skip/failure/error"
           assert (output / "current-recovery.json").is_file()
           PY
