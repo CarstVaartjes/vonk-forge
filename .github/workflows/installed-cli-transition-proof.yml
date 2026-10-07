@@ -29,8 +29,11 @@ jobs:
       VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
       VONK_PRIOR_STABLE_SOURCE_SHA: aeefc93a96fd2bf9c209bbe8d2f3e1bded1b87f8
       VONK_PRIOR_STABLE_CLI_ROOT: ${{ github.workspace }}/.prior-stable-cli
+      VONK_TRANSITION_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Check out the frozen prior stable CLI source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -83,7 +86,7 @@ jobs:
           assert proof['actual_complete_fresh_worker_capture']
           assert proof['old_control_fingerprint'] != proof['new_control_fingerprint']
           assert proof['prior_source'] == os.environ['VONK_PRIOR_STABLE_SOURCE_SHA']
-          assert proof['candidate_source'] == os.environ['GITHUB_SHA']
+          assert proof['candidate_source'] == os.environ['VONK_TRANSITION_SOURCE_SHA']
           PY
       - name: Retain scoped signed updater evidence
         if: always()
