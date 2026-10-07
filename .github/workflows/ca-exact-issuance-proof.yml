@@ -142,6 +142,29 @@ jobs:
           subject-path: |
             artifacts/ca-proof/vonk-step-ca
             artifacts/ca-proof/ca-image.tar
+      - name: Bind bootstrap outputs to original candidate inputs
+        if: ${{ always() && steps.mode.outputs.bootstrap == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          root = pathlib.Path('artifacts/ca-proof')
+          root.mkdir(parents=True, exist_ok=True)
+          paths = sorted(str(p) for p in pathlib.Path('deploy/compose/step-ca/service').glob('*') if p.suffix == '.go' or p.name in {'go.mod', 'go.sum'})
+          original = {}
+          for path in paths:
+              entry = subprocess.run(['git', 'rev-parse', 'HEAD:' + path], capture_output=True, text=True)
+              original[path] = entry.stdout.strip() if entry.returncode == 0 else None
+          manifest = {
+              'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'original_git_blob': original,
+              'generated_sha256': {p: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in paths},
+              'acceptance': False,
+              'required_action': 'Review and adopt generated dependency locks and formatting in a signed commit; rerun readonly proofs.',
+          }
+          (root / 'bootstrap-manifest.json').write_text(json.dumps(manifest, sort_keys=True, indent=2) + '\n')
+          PY
       - name: Upload proofs or dependency locks
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
