@@ -38,13 +38,16 @@ from typing import (
     Literal,
     TypeAliasType,
     Union,
+    cast,
     get_args,
     get_origin,
 )
 
 from pydantic import BaseModel, JsonValue, RootModel, TypeAdapter
 from sqlalchemy import JSON
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.types import TypeDecorator
 
 from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from .strict_json import read_stored_document, stored_document_detail
@@ -188,13 +191,54 @@ def binding_for(table: str, column: str) -> JsonColumn:
     return found
 
 
+class ContractJSON[T](TypeDecorator[T | Residue]):
+    """A required JSON column returning its bound contract or a typed unknown.
+
+    Contract identity remains in stored_columns. Malformed bookkeeping is
+    readable; writes follow the existing strict-test/warn-production policy.
+    The SQL storage type remains JSON.
+    """
+
+    impl = JSON
+    cache_ok = True
+
+    def __init__(self, table: str, column: str) -> None:
+        super().__init__()
+        self.table = table
+        self.column = column
+
+    def process_bind_param(self, value: object, dialect: Dialect) -> object:
+        binding = binding_for(self.table, self.column)
+        outcome = _check(binding, value, None)
+        if outcome is not None:
+            if _GUARD_MODE == "strict":
+                raise ValueError(f"{binding.key}: {outcome}")
+            _LOG.warning(
+                "json column written outside its contract",
+                extra={"json_column": binding.key, "json_violation": outcome},
+            )
+            return (
+                value.model_dump(mode="json") if isinstance(value, BaseModel) else value
+            )
+        return dump_column(binding, value)
+
+    def process_result_value(self, value: object, dialect: Dialect) -> T | Residue:
+        return cast(
+            T | Residue, read_column(binding_for(self.table, self.column), value)
+        )
+
+
+def _is_json_type(column_type: object) -> bool:
+    return isinstance(column_type, JSON | ContractJSON)
+
+
 def json_columns(base: type[DeclarativeBase]) -> list[tuple[str, str]]:
     """Every ``JSON`` column of ``base``'s tables as ``(table, column)``."""
 
     found: list[tuple[str, str]] = []
     for table in base.metadata.sorted_tables:
         for column in table.columns:
-            if isinstance(column.type, JSON):
+            if _is_json_type(column.type):
                 found.append((table.name, column.name))
     return sorted(found)
 
@@ -243,6 +287,10 @@ def read_column(
     that only carries fields a newer contract retired is adopted.
     """
 
+    if isinstance(raw, Residue):
+        return raw
+    if isinstance(raw, BaseModel):
+        raw = raw.model_dump(mode="json")
     if raw is None:
         if binding.nullable:
             return None
@@ -363,7 +411,7 @@ def _guard_row(mapper: Any, connection: Any, row: object) -> None:
     table = mapper.local_table.name
     registry = bindings()
     for column in mapper.columns:
-        if not isinstance(column.type, JSON):
+        if not _is_json_type(column.type):
             continue
         binding = registry.get(f"{table}.{column.key}")
         if binding is None:
@@ -412,6 +460,8 @@ def _check(binding: JsonColumn, value: object, kind: str | None) -> str | None:
     adapter = binding.adapter_for(kind)
     if adapter is None:
         return f"no contract for kind {kind!r}"
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json")
     try:
         adapter.validate_json(json.dumps(value, allow_nan=False))
     except (TypeError, ValueError) as error:

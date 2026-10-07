@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 from pydantic import Field, StringConstraints, model_validator
 from vonk_agent_protocol import OperationProgress, canonical_message
 
-from .run_switch_contract import NodeId, RunSwitchCancellation, UuidId
+from .run_switch_identity_contract import NodeId, RunSwitchCancellation, UuidId
 from .strict_json import StrictModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]

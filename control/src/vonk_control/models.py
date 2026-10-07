@@ -63,6 +63,13 @@ from .exact_integer_storage import (
     DecimalIntegerToken,
     ExactNonnegativeInteger,
 )
+from .lifecycle.evidence import Residue
+from .run_switch_journal_contract import (
+    RunSwitchJournalRepairEndEvidence,
+    RunSwitchJournalRepairEvidence,
+    RunSwitchJournalRepairPendingState,
+)
+from .stored_json import ContractJSON
 
 
 class Base(DeclarativeBase):
@@ -169,7 +176,12 @@ class RunSwitchJournalRepairPending(Base):
     job_id: Mapped[str] = mapped_column(
         ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
     )
-    progress: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    progress: Mapped[RunSwitchJournalRepairPendingState | Residue] = mapped_column(
+        ContractJSON[RunSwitchJournalRepairPendingState](
+            "run_switch_journal_repair_pending", "progress"
+        ),
+        nullable=False,
+    )
 
 
 class RunSwitchJournalRepair(Base):
@@ -197,7 +209,14 @@ class RunSwitchJournalRepair(Base):
     record_kind: Mapped[str] = mapped_column(
         String(16), nullable=False, default="repair"
     )
-    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    evidence: Mapped[
+        RunSwitchJournalRepairEvidence | RunSwitchJournalRepairEndEvidence | Residue
+    ] = mapped_column(
+        ContractJSON[
+            RunSwitchJournalRepairEvidence | RunSwitchJournalRepairEndEvidence
+        ]("run_switch_journal_repairs", "evidence"),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

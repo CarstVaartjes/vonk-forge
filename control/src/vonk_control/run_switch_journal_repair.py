@@ -643,7 +643,7 @@ def _try_repair_once(
                     RunSwitchJournalRepair(
                         job_id=job.id,
                         original_digest=original_digest,
-                        evidence=evidence.model_dump(mode="json"),
+                        evidence=evidence,
                         created_at=now,
                     )
                 )
@@ -703,9 +703,7 @@ def _pending(
         state = RunSwitchJournalRepairPendingState(
             deadline_at=now + REPAIR_BUDGET, next_attempt_at=now
         )
-        row = RunSwitchJournalRepairPending(
-            job_id=job.id, progress=state.model_dump(mode="json")
-        )
+        row = RunSwitchJournalRepairPending(job_id=job.id, progress=state)
         session.add(row)
     else:
         state = RunSwitchJournalRepairPendingState.model_validate_json(
@@ -743,7 +741,7 @@ def record_repair_cancellation(
         if state.cancellation is None:
             state.cancellation = cancellation
         state.next_attempt_at = cancellation.requested_at
-        row.progress = state.model_dump(mode="json")
+        row.progress = state
 
 
 def try_repair_zero_transfer_journal(
@@ -823,7 +821,7 @@ def try_repair_zero_transfer_journal(
                 state.deadline_at,
                 now + timedelta(seconds=min(2 ** min(state.attempts, 5), 30)),
             )
-            row.progress = state.model_dump(mode="json")
+            row.progress = state
             job.status_reason = f"{REPAIR_WAIT}: exact child evidence unavailable; next attempt {state.next_attempt_at.isoformat()}; deadline {state.deadline_at.isoformat()}"
     return result
 
@@ -1024,7 +1022,7 @@ def _end_unproven_journal(
                 job_id=job.id,
                 original_digest=original_digest,
                 record_kind="end",
-                evidence=evidence.model_dump(mode="json", exclude_none=True),
+                evidence=evidence,
                 created_at=now,
             )
         )
