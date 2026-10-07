@@ -1,0 +1,115 @@
+name: Exact integer storage proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/exact-integer-storage-proof.yml
+      - control/tests/test_exact_integer_storage.py
+      - control/src/vonk_control/exact_integer_storage.py
+      - control/src/vonk_control/exact_integer_adoption.py
+      - control/src/vonk_control/models.py
+      - control/src/vonk_control/db.py
+      - control/src/vonk_control/unused_storage_collection.py
+      - control/src/vonk_control/model_cache.py
+      - control/src/vonk_control/catalog_entities.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-integer-storage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  storage:
+    name: Native SQLite and PostgreSQL exact integer storage and adoption
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+      VONK_CI_PREREQUISITES: postgres
+      VONK_PROOF_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Check out exact authored head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Record source and proof inputs before preparation
+        run: |
+          mkdir -p exact-integer-storage-proof-output
+          python - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          root = Path.cwd()
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert source == os.environ['VONK_PROOF_SOURCE_SHA']
+          paths = [
+              '.github/workflows/exact-integer-storage-proof.yml',
+              'control/tests/test_exact_integer_storage.py',
+              'control/src/vonk_control/exact_integer_storage.py',
+              'control/src/vonk_control/exact_integer_adoption.py',
+              'control/src/vonk_control/models.py', 'control/src/vonk_control/db.py',
+              'control/src/vonk_control/model_cache.py',
+              'control/src/vonk_control/catalog_entities.py',
+              'control/src/vonk_control/unused_storage_collection.py',
+              'control/tests/test_catalog_entities.py', 'control/tests/test_model_cache.py',
+              'control/tests/conftest.py', 'control/src/vonk_control/settings.py',
+              'control/uv.lock', 'deploy/compose/images.lock.json',
+          ]
+          inputs = {path: {'sha256': hashlib.sha256((root/path).read_bytes()).hexdigest(),
+                          'git_blob': subprocess.check_output(['git','rev-parse',f'{source}:{path}'],text=True).strip()}
+                    for path in paths}
+          (root/'exact-integer-storage-proof-output/source.json').write_text(
+              json.dumps({'source_sha': source, 'inputs': inputs}, sort_keys=True, indent=2)+'\n')
+          PY
+      - name: Provide canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare locked Python dependencies
+        uses: ./.github/actions/python-env
+      - name: Build canonical recipe library index
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Pull pinned disposable PostgreSQL server
+        run: scripts/pull-test-images postgres
+      - name: Execute native producers, baseline counterexample, adoption and fault repair
+        run: |
+          set -o pipefail
+          uv run --project control --frozen pytest -q -n 0 \
+            control/tests/test_exact_integer_storage.py --tb=short \
+            --junitxml=exact-integer-storage-proof-output/storage.xml \
+            2>&1 | tee exact-integer-storage-proof-output/storage.log
+      - name: Require both engines and every proof case actually executed
+        run: |
+          uv run --project control --frozen python - <<'PY'
+          import hashlib, json, os, subprocess
+          from importlib.metadata import version
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          output = Path('exact-integer-storage-proof-output')
+          cases = ET.parse(output/'storage.xml').getroot().findall('.//testcase')
+          assert len(cases) == 34, f'expected 34 cases, got {len(cases)}'
+          assert all(case.find(tag) is None for case in cases for tag in ('skipped','failure','error'))
+          for engine in ('sqlite','postgres'):
+              assert sum(engine in case.attrib['name'].partition('[')[2].rstrip(']').split('-') for case in cases) == 15
+          manifest = json.loads((output/'source.json').read_text())
+          for path, expected in manifest['inputs'].items():
+              assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == expected['sha256'], path
+          assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip() == manifest['source_sha']
+          (output/'execution.json').write_text(json.dumps({
+              'source_sha': manifest['source_sha'], 'cases': [case.attrib for case in cases],
+              'engines': ['sqlite','postgres'], 'failures': 0, 'skips': 0,
+              'recipe_source_sha': subprocess.check_output(['git','-C',os.environ['VONK_RECIPE_LIBRARY_ROOT'],'rev-parse','HEAD'],text=True).strip(),
+              'runtime_versions': {name: version(name) for name in ('SQLAlchemy','alembic','pydantic','pytest')},
+              'input_restoration_verified': True},sort_keys=True,indent=2)+'\n')
+          PY
+          git diff --exit-code -- control/src control/tests/test_exact_integer_storage.py
+      - name: Preserve exact-source proof and failures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: exact-integer-storage-proof-${{ github.event.pull_request.head.sha || github.sha }}
+          path: exact-integer-storage-proof-output
+          if-no-files-found: error
+          retention-days: 7
