@@ -34,12 +34,10 @@ class FleetChangeEvent:
         Attributes:
             change (AgentOperationChange | InstallationNodeChange | JobChange | NodeProfileChange | RecipeInstallationChange
                 | RecipeRunChange | RunNodeChange):
-            event_cursor (int):
             projection_refresh_required (bool | Unset):  Default: True.
      """
 
     change: AgentOperationChange | InstallationNodeChange | JobChange | NodeProfileChange | RecipeInstallationChange | RecipeRunChange | RunNodeChange
-    event_cursor: int
     projection_refresh_required: bool | Unset = True
 
 
@@ -71,8 +69,6 @@ class FleetChangeEvent:
             change = self.change.to_dict()
 
 
-        event_cursor = self.event_cursor
-
         projection_refresh_required = self.projection_refresh_required
 
 
@@ -80,7 +76,6 @@ class FleetChangeEvent:
 
         field_dict.update({
             "change": change,
-            "event_cursor": event_cursor,
         })
         if projection_refresh_required is not UNSET:
             field_dict["projection_refresh_required"] = projection_refresh_required
@@ -171,13 +166,10 @@ class FleetChangeEvent:
         change = _parse_change(d.pop("change"))
 
 
-        event_cursor = d.pop("event_cursor")
-
         projection_refresh_required = d.pop("projection_refresh_required", UNSET)
 
         fleet_change_event = cls(
             change=change,
-            event_cursor=event_cursor,
             projection_refresh_required=projection_refresh_required,
         )
 
