@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from importlib import metadata, resources
 
+from .runtime_identity import packaged_runtime_identity
+
 
 def current_build() -> dict[str, object]:
     try:
@@ -19,10 +21,8 @@ def current_build() -> dict[str, object]:
         )
     except (FileNotFoundError, ValueError):
         value = {}
-    source_sha = value.get("source_sha") if isinstance(value, dict) else None
+    source_sha = packaged_runtime_identity().source_sha
     release_version = value.get("release_version") if isinstance(value, dict) else None
-    if not isinstance(source_sha, str) or len(source_sha) != 40:
-        source_sha = None
     if isinstance(release_version, str) and release_version:
         version = release_version
     return {"version": version, "source_sha": source_sha}
