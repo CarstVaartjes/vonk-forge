@@ -16,14 +16,21 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 test("a failed background refresh keeps the last snapshot and says it is disconnected and how old it is", async () => {
   vi.useFakeTimers();
-  vi.stubGlobal("EventSource", undefined);
   const visualFleet = vi.fn().mockResolvedValueOnce(snapshot).mockRejectedValue(new TypeError("Failed to fetch"));
-  render(<ToastProvider><FleetPage api={{visualFleet} as unknown as ControlApi}/></ToastProvider>);
+  const connection = Object.assign(new EventTarget(), {url: "/api/fleet/stream", close: vi.fn()});
+  const fleetEvents = vi.fn<ControlApi["fleetEvents"]>(() => connection);
+  const api = {visualFleet, fleetEvents} satisfies Pick<ControlApi, "visualFleet" | "fleetEvents">;
+  const {unmount} = render(<ToastProvider><FleetPage api={api as ControlApi}/></ToastProvider>);
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   expect(screen.getByText("Online")).toBeVisible();
   expect(screen.queryByText("disconnected")).toBeNull();
+  expect(fleetEvents).toHaveBeenCalledOnce();
+  act(() => { connection.dispatchEvent(new Event("error")); });
   await act(async () => { await vi.advanceTimersByTimeAsync(25_000); });
   expect(screen.getByText("disconnected")).toBeVisible();
   expect(screen.getByText(/Showing the last known state of the Fleet, updated \d+ s ago/)).toBeVisible();
   expect(screen.getByText("Spark A")).toBeVisible();
+  expect(visualFleet).toHaveBeenCalledTimes(3);
+  unmount();
+  expect(connection.close).toHaveBeenCalledOnce();
 });
