@@ -2459,6 +2459,44 @@ export interface components {
          */
         CatalogSyncState: "syncing" | "current" | "partial" | "failed";
         /**
+         * CertificateCode
+         * @description Owned certificate issuance admission refusals.
+         * @enum {string}
+         */
+        CertificateCode: "certificate.response_unrepresentable";
+        /** CertificateIssuanceBinding */
+        CertificateIssuanceBinding: {
+            /** Csr Sha256 */
+            csr_sha256: string;
+            /** Generation */
+            generation: number;
+            /** Issuer Fingerprint */
+            issuer_fingerprint: string;
+            /** Node Id */
+            node_id: string;
+            /** Not After */
+            not_after: string;
+            /** Not Before */
+            not_before: string;
+            /** Policy Sha256 */
+            policy_sha256: string;
+            /** Provisioner Kid */
+            provisioner_kid: string;
+            /** Provisioner Name */
+            provisioner_name: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "enrollment" | "rotation";
+            /** Request Id */
+            request_id: string;
+            /** Serial */
+            serial: string;
+            /** Source Serial */
+            source_serial: string | null;
+        };
+        /**
          * CertificateState
          * @description The standing of a node's client certificate, as the fleet projection shows it.
          * @enum {string}
@@ -7142,6 +7180,7 @@ export interface components {
             cache_reference_reason: components["schemas"]["CacheReferenceReason"];
             catalog_code: components["schemas"]["CatalogCode"];
             catalog_sync_code: components["schemas"]["CatalogSyncCode"];
+            certificate_code: components["schemas"]["CertificateCode"];
             cluster_mapping_code: components["schemas"]["ClusterMappingCode"];
             controller_error_code: components["schemas"]["ControllerErrorCode"];
             distribution_code: components["schemas"]["DistributionCode"];

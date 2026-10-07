@@ -20,6 +20,8 @@ from ..models.catalog_code import CatalogCode
 from ..models.catalog_code import check_catalog_code
 from ..models.catalog_sync_code import CatalogSyncCode
 from ..models.catalog_sync_code import check_catalog_sync_code
+from ..models.certificate_code import CertificateCode
+from ..models.certificate_code import check_certificate_code
 from ..models.cluster_mapping_code import check_cluster_mapping_code
 from ..models.cluster_mapping_code import ClusterMappingCode
 from ..models.controller_error_code import check_controller_error_code
@@ -128,6 +130,7 @@ class ReasonCodeVocabulary:
             cache_reference_reason (CacheReferenceReason): What keeps a cached artifact from being removed.
             catalog_code (CatalogCode): Refusals of the recipe catalog and the recipe library documents.
             catalog_sync_code (CatalogSyncCode): Catalog synchronisation refusals and per-item problems.
+            certificate_code (CertificateCode): Owned certificate issuance admission refusals.
             cluster_mapping_code (ClusterMappingCode): Refusals of a cluster mapping (recipe-to-Spark assignment) request.
             controller_error_code (ControllerErrorCode): Generic Controller request and fleet-operation problem codes.
             distribution_code (DistributionCode): Why a distribution assignment object cannot be served to a Spark.
@@ -185,6 +188,7 @@ class ReasonCodeVocabulary:
     cache_reference_reason: CacheReferenceReason
     catalog_code: CatalogCode
     catalog_sync_code: CatalogSyncCode
+    certificate_code: CertificateCode
     cluster_mapping_code: ClusterMappingCode
     controller_error_code: ControllerErrorCode
     distribution_code: DistributionCode
@@ -239,6 +243,8 @@ class ReasonCodeVocabulary:
         catalog_code: str = self.catalog_code
 
         catalog_sync_code: str = self.catalog_sync_code
+
+        certificate_code: str = self.certificate_code
 
         cluster_mapping_code: str = self.cluster_mapping_code
 
@@ -324,6 +330,7 @@ class ReasonCodeVocabulary:
             "cache_reference_reason": cache_reference_reason,
             "catalog_code": catalog_code,
             "catalog_sync_code": catalog_sync_code,
+            "certificate_code": certificate_code,
             "cluster_mapping_code": cluster_mapping_code,
             "controller_error_code": controller_error_code,
             "distribution_code": distribution_code,
@@ -396,6 +403,11 @@ class ReasonCodeVocabulary:
 
 
         catalog_sync_code = check_catalog_sync_code(d.pop("catalog_sync_code"))
+
+
+
+
+        certificate_code = check_certificate_code(d.pop("certificate_code"))
 
 
 
@@ -592,6 +604,7 @@ class ReasonCodeVocabulary:
             cache_reference_reason=cache_reference_reason,
             catalog_code=catalog_code,
             catalog_sync_code=catalog_sync_code,
+            certificate_code=certificate_code,
             cluster_mapping_code=cluster_mapping_code,
             controller_error_code=controller_error_code,
             distribution_code=distribution_code,

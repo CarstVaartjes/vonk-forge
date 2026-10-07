@@ -4222,6 +4222,111 @@
         "title": "CatalogSyncState",
         "type": "string"
       },
+      "CertificateCode": {
+        "description": "Owned certificate issuance admission refusals.",
+        "enum": [
+          "certificate.response_unrepresentable"
+        ],
+        "title": "CertificateCode",
+        "type": "string"
+      },
+      "CertificateIssuanceBinding": {
+        "properties": {
+          "csr_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Csr Sha256",
+            "type": "string"
+          },
+          "generation": {
+            "exclusiveMinimum": 0,
+            "maximum": 18446744073709551615,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "issuer_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Issuer Fingerprint",
+            "type": "string"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "not_after": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+            "title": "Not After",
+            "type": "string"
+          },
+          "not_before": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+            "title": "Not Before",
+            "type": "string"
+          },
+          "policy_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Policy Sha256",
+            "type": "string"
+          },
+          "provisioner_kid": {
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "title": "Provisioner Kid",
+            "type": "string"
+          },
+          "provisioner_name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$",
+            "title": "Provisioner Name",
+            "type": "string"
+          },
+          "purpose": {
+            "enum": [
+              "enrollment",
+              "rotation"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "serial": {
+            "pattern": "^[1-9][0-9]{0,47}$",
+            "title": "Serial",
+            "type": "string"
+          },
+          "source_serial": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]{0,47}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Serial"
+          }
+        },
+        "required": [
+          "request_id",
+          "node_id",
+          "csr_sha256",
+          "serial",
+          "not_before",
+          "not_after",
+          "issuer_fingerprint",
+          "provisioner_name",
+          "provisioner_kid",
+          "policy_sha256",
+          "purpose",
+          "source_serial",
+          "generation"
+        ],
+        "title": "CertificateIssuanceBinding",
+        "type": "object"
+      },
       "CertificateState": {
         "description": "The standing of a node's client certificate, as the fleet projection shows it.",
         "enum": [
@@ -18888,6 +18993,9 @@
           "catalog_sync_code": {
             "$ref": "#/components/schemas/CatalogSyncCode"
           },
+          "certificate_code": {
+            "$ref": "#/components/schemas/CertificateCode"
+          },
           "cluster_mapping_code": {
             "$ref": "#/components/schemas/ClusterMappingCode"
           },
@@ -19005,6 +19113,7 @@
           "agent_evidence_code",
           "artifact_lifecycle_code",
           "cache_reference_reason",
+          "certificate_code",
           "catalog_code",
           "catalog_sync_code",
           "cluster_mapping_code",
@@ -41195,6 +41304,12 @@
     }
   },
   "x-vonk-json-columns": {
+    "agent_certificate_rotations.provider_request": [
+      "CertificateIssuanceBinding"
+    ],
+    "agent_enrollments.provider_request": [
+      "CertificateIssuanceBinding"
+    ],
     "agent_operation_attempts.progress": [
       "OperationProgress"
     ],
