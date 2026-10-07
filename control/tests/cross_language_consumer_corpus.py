@@ -207,16 +207,19 @@ def corpus() -> dict:
                 ),
                 consumers=["python", "browser"],
             )
-    for component, document in (
-        ("FailureDiagnostics", diagnostic()),
-        ("OperationProgress", {"phase": "transfer"}),
-    ):
-        spoof = {"$serde_json::private::Number": "2"}
-        if component == "FailureDiagnostics":
-            document["stdout"]["dropped_bytes"] = spoof
-        else:
-            document["completed_bytes"] = spoof
-        add(f"private-number-object-{component}", component, json.dumps(document))
+    spoof = {"$serde_json::private::Number": "2"}
+    diagnostic_spoof = diagnostic()
+    diagnostic_spoof["stdout"]["dropped_bytes"] = spoof
+    add(
+        "private-number-object-FailureDiagnostics",
+        "FailureDiagnostics",
+        json.dumps(diagnostic_spoof),
+    )
+    add(
+        "private-number-object-OperationProgress",
+        "OperationProgress",
+        json.dumps({"phase": "transfer", "completed_bytes": spoof}),
+    )
 
     base = diagnostic()
     add("diagnostics-producer", "FailureDiagnostics", json.dumps(base))
