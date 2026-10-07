@@ -502,7 +502,7 @@
       "path": "control/src/vonk_control/profile_stop_authority.py",
       "function": "validate_profile_stop_owner",
       "kind": "provenance_comparison",
-      "expression": "authorization.recipe_revision_id != run_switch_plan.recipe_revision_id",
+      "expression": "authorization.recipe_revision_id != accepted_revision_id",
       "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
     },
     {
