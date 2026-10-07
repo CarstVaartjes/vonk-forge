@@ -5823,7 +5823,10 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
         assert len(stop_jobs) == 2
         for stop_job in stop_jobs:
             stop_payloads = _typed_stop_payloads(stop_job.payload)
-            run_id = stop_job.payload["owner_id"]
+            stop_parent = RecipeStopParent.model_validate_json(
+                canonical_message(stop_job.payload), strict=True
+            )
+            run_id = stop_parent.owner_id
             assert len(stop_payloads) == len(expected_members[run_id])
             assert tuple(stop_job.targets) == expected_members[run_id]
             members = tuple(
