@@ -1174,7 +1174,7 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
                 .where(FleetStreamEvent.id == event_value.id)
                 .values(payload=payload)
             )
-        stream = FleetStream(repository, Telemetry({}))
+        stream = FleetStream(repository, Telemetry({}), clock=lambda: NOW)
 
         async def read(*, expect_closed: bool = False) -> str:
             generator = _events(stream, 0)

@@ -54,7 +54,9 @@ def _export_saved_event_recovery(output: Path) -> None:
                 .values(payload=payload)
             )
         stream = FleetStream(
-            repository, TelemetryRepository(sessions, clock=lambda: NOW)
+            repository,
+            TelemetryRepository(sessions, clock=lambda: NOW),
+            clock=lambda: NOW,
         )
 
         async def first_frame() -> str:
