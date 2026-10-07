@@ -14,7 +14,8 @@ test.skipIf(!responsesPath)("actual model cancellation responses preserve unknow
   const responses = JSON.parse(readFileSync(responsesPath!, "utf8"));
   for (const name of ["unknown", "confirmed"]) {
     const response = responses[name];
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(response), {status: 200, headers: {"content-type": "application/json"}})));
+    const transport = vi.fn(async () => new Response(JSON.stringify(response), {status: 200, headers: {"content-type": "application/json"}}));
+    vi.stubGlobal("fetch", transport);
     const api = new ApiClient();
     const observed = await api.modelCacheOperation(response.operation_id);
     render(<ToastProvider><CancelOperation what="download" consequence="Keeps partial files." cancel={async () => observed} cancellationEvidence={result => result.cancellation?.observation?.detail ?? "Stopping the writer remains unconfirmed."}/></ToastProvider>);
@@ -29,8 +30,11 @@ test.skipIf(!responsesPath)("actual model cancellation responses preserve unknow
     // must enforce the owner's evidence constraint, not just its Python reader.
     const unconfirmedIssue = structuredClone(response);
     unconfirmedIssue.cancellation.observation.effect = "issued";
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(unconfirmedIssue), {status: 200, headers: {"content-type": "application/json"}})));
+    // openapi-fetch captures its transport when the ApiClient is constructed.
+    // Change that same transport's response, so the negative bytes reach it.
+    transport.mockImplementation(async () => new Response(JSON.stringify(unconfirmedIssue), {status: 200, headers: {"content-type": "application/json"}}));
     await expect(api.modelCacheOperation(response.operation_id)).rejects.toBeInstanceOf(ContractViolation);
+    expect(transport).toHaveBeenCalledTimes(2);
     vi.unstubAllGlobals();
   }
 });
