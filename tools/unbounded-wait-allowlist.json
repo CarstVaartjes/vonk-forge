@@ -165,24 +165,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._renew_claim_loop",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService.advance_removals",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "_is_database_busy",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "_recipe_model_identities",
       "kind": "loop-without-deadline",
