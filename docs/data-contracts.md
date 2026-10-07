@@ -187,6 +187,7 @@ module defines its own.
 | `control/src/vonk_control/catalog_api.py` | declared | 3 | Strict authenticated HTTP surface for the local database recipe catalog. |
 | `control/src/vonk_control/catalog_revision_contract.py` | controller-contract | 9 | Typed readers and writers for immutable catalog revision JSON columns. |
 | `control/src/vonk_control/catalog_sync_contract.py` | controller-contract | 4 | Canonical durable catalog synchronization evidence shared with the API. |
+| `control/src/vonk_control/cli_update_contract.py` | controller-contract | 1 | Authenticated CLI compatibility observation; its canonical schema is generated into the installed updater package. |
 | `control/src/vonk_control/cluster_mappings.py` | declared | 2 | The identity document whose digest binds a cluster mapping plan to its exact placement. |
 | `control/src/vonk_control/compiled_artifact_contract.py` | controller-contract | 12 | Canonical compiled contract for artifact-producing recipe jobs. |
 | `control/src/vonk_control/compiled_execution_plan.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
@@ -211,6 +212,7 @@ module defines its own.
 | `control/src/vonk_control/operation_contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
 | `control/src/vonk_control/operation_item_contract.py` | controller-contract | 3 | One operation of any family as Activity projects it: the typed item, its owner and the failure facts of its stored result. |
 | `control/src/vonk_control/operator_projection_api.py` | declared | 10 | Singular operator API for Fleet, Model and Recipe projections. |
+| `control/src/vonk_control/platform_observation.py` | controller-contract | 3 | API and worker process provenance observations; unavailable producer facts remain nullable. |
 | `control/src/vonk_control/preparation_contract.py` | controller-contract | 10 | Shared schema-2 truth for Controller-owned rollout preparation. |
 | `control/src/vonk_control/profile_stop_authority.py` | declared | 4 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |
 | `control/src/vonk_control/recipe_availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
