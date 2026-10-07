@@ -3305,9 +3305,12 @@ class RecipeOperationService:
             current_order, current_payloads, _targets = self._exact_stop_authority(
                 session, run, admitted
             )
-            if list(current_order) != review.stop_order or canonical_message(
-                current_payloads
-            ) != canonical_message(review.exact_payloads):
+            if (
+                current_order is None
+                or list(current_order) != review.stop_order
+                or canonical_message(current_payloads)
+                != canonical_message(review.exact_payloads)
+            ):
                 raise RecipeStopAuthorityRefused(
                     "accepted Stop runtime payload authority changed"
                 )
@@ -3527,7 +3530,7 @@ class RecipeOperationService:
                     else None,
                     profile_application_id=profile_application_id,
                     profile_stop_owner=profile_owner,
-                    exact_payloads=payloads,
+                    exact_payloads=dict(payloads) if payloads is not None else None,
                     stop_order=list(order) if order is not None else None,
                 ),
             )

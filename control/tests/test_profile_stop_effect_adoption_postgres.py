@@ -177,22 +177,13 @@ def _pending_stop(
             else native_observe(identity)
         ),
     )
-    with sessions() as session:
-        row = session.get(FleetProfileApplication, original.id)
-        assert row is not None
-        intended = _persisted_profile_progress(row).intended_profile
-        assert intended is not None
-        assignments = tuple(intended.assignments)
-    adapter.start(
-        application_id=original.id,
-        assignments=assignments,
-        scope_node_ids=(nodes[0], _node_id(2)),
-        actor="admin",
-        request_id=_uuid(18704),
-    )
+    # Advance the accepted saved-profile lifecycle through its production
+    # worker. Calling adapter.start directly leaves the application queued,
+    # which correctly supplies no current authority for a destructive Stop.
+    profiles._switch_adapter = adapter
     for _ in range(8):
+        profiles.tick()
         coordinator.tick()
-        adapter.advance(original.id)
     stored = _stored(sessions, original.id)
     stop_index = next(i for i, item in enumerate(stored.queue) if item.kind == "stop")
     assert stored.queue[stop_index].id == run.owner_id

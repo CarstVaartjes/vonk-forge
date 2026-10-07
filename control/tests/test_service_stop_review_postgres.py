@@ -7,6 +7,8 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
 from vonk_control.categorized_errors import InvalidRequestError
+from vonk_control.job_documents import RecipeStopParent
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -368,19 +370,17 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
             )
         )
         assert accepted is not None and accepted.state == "running"
+        accepted_parent = RecipeStopParent.model_validate_json(
+            canonical_message(accepted.payload), strict=True
+        )
+        review = accepted_parent.service_stop_review
+        assert review is not None and review.profile_stop_owner is not None
         accepted_id, accepted_key = accepted.id, accepted.request_id
-        reviewed_digest = accepted.payload["plan_digest"]
-        reviewed_payloads = canonical_message(
-            accepted.payload["service_stop_review"]["exact_payloads"]
-        )
-        assert (
-            accepted.payload["service_stop_review"]["profile_stop_owner"][
-                "profile_operation_id"
-            ]
-            == stop_id
-        )
-        assert accepted.payload["service_stop_review"]["stage"] == "withdrawal-claimed"
-        run_id = accepted.payload["owner_id"]
+        reviewed_digest = accepted_parent.plan_digest
+        reviewed_payloads = canonical_message(review.exact_payloads)
+        assert review.profile_stop_owner.profile_operation_id == stop_id
+        assert review.stage == "withdrawal-claimed"
+        run_id = accepted_parent.owner_id
         run = session.get(RecipeRun, run_id)
         assert run is not None
         installation_id = run.installation_id
@@ -407,10 +407,9 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         with sessions() as session:
             selected_row = session.get(FleetProfileApplication, selected.id)
             assert selected_row is not None
-            assert (
-                _persisted_profile_plan(selected_row).effects.adopted
-                == preview.effects.adopted
-            )
+            selected_plan = _persisted_profile_plan(selected_row)
+            assert not isinstance(selected_plan, Residue)
+            assert selected_plan.effects.adopted == preview.effects.adopted
             node = session.get(AgentNode, nodes[0])
             assert node is not None and node.workload_intent_ordinal == ordinal
     if replacement == "cancel":
@@ -447,14 +446,16 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     with sessions() as session:
         accepted = session.get(Job, accepted_id)
         assert accepted is not None
+        accepted_parent = RecipeStopParent.model_validate_json(
+            canonical_message(accepted.payload), strict=True
+        )
+        review = accepted_parent.service_stop_review
+        assert review is not None
         assert (
             accepted.request_id == accepted_key
-            and accepted.payload["plan_digest"] == reviewed_digest
+            and accepted_parent.plan_digest == reviewed_digest
         )
-        assert (
-            canonical_message(accepted.payload["service_stop_review"]["exact_payloads"])
-            == reviewed_payloads
-        )
+        assert canonical_message(review.exact_payloads) == reviewed_payloads
         native = tuple(
             session.scalars(
                 select(AgentOperation).where(
@@ -464,9 +465,7 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         )
         if replacement == "cancel":
             assert not native and accepted.state == "running"
-            assert (
-                accepted.payload["service_stop_review"]["stage"] == "withdrawal-claimed"
-            )
+            assert review.stage == "withdrawal-claimed"
             assert (
                 accepted.status_reason is not None
                 and "deferred" in accepted.status_reason
@@ -475,7 +474,7 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
             return
         assert len(native) == 1
         native_id = native[0].id
-        assert accepted.payload["service_stop_review"]["stage"] == "dispatched"
+        assert review.stage == "dispatched"
     jobs = AgentJobService(sessions, clock=lambda: clock[0])
     jobs.set_result_consumer(restarted.consume_agent_result)
     fresh, stop, _grant = _issue_exact_stop_grant(
