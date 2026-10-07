@@ -90,7 +90,7 @@ from .fleet_projection import (
     FleetSnapshot,
 )
 from .fleet_stream import parse_last_event_id
-from .fleet_stream_contract import FleetStreamEvent
+from .fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
 from .gateway_keys import (
     GatewayKeyService,
     install_gateway_key_routes,
@@ -140,6 +140,10 @@ from .operator_projection_api import (
     FleetOperatorServices,
     build_fleet_operator_services,
     install_operator_projection_routes,
+)
+from .platform_observation_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
 )
 from .profile_application_cancel_api import install_profile_application_cancel_route
 from .recipe_builds import RecipeBuildService
@@ -943,12 +947,17 @@ def create_app(
     )
     def platform_observation(
         _actor: Actor = authenticated_actor,
-    ) -> ObservationTransferResponse:
-        observation = (
-            api_only_observation()
-            if platform_observer is None
-            else platform_observer.read()
-        )
+    ) -> ObservationTransferResponse | Response:
+        try:
+            observation = (
+                api_only_observation()
+                if platform_observer is None
+                else platform_observer.read()
+            )
+        except ObservationCaptureUnavailable as error:
+            return observation_capture_unavailable_response(
+                error, operation="platform observation", endpoint="/api/platform"
+            )
         return observation_response(observation, resource="platform")
 
     @app.get("/api/healthz", response_model=HealthzResponse)
@@ -995,6 +1004,7 @@ def create_app(
         openapi_extra={
             "x-vonk-streaming-transport": True,
             "x-vonk-response-frame-max-bytes": MAX_CONTROL_DOCUMENT_BYTES,
+            "x-vonk-sse-events": FLEET_SSE_EVENTS,
         },
         operation_id="streamFleetEvents",
     )
