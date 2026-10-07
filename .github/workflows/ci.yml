@@ -1070,10 +1070,18 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
-      - name: Install pinned Chromium browser and its system libraries
+      - name: Install Chromium system libraries without replaying package mutations
+        timeout-minutes: 5
+        run: |
+          apt_configuration=/etc/apt/apt.conf.d/99vonk-playwright-ci
+          test ! -e "$apt_configuration"
+          printf 'DPkg::Lock::Timeout "60";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "2";\n' | sudo tee "$apt_configuration" >/dev/null
+          trap 'sudo rm -f "$apt_configuration"' EXIT
+          control/web/node_modules/.bin/playwright install-deps chromium
+      - name: Acquire the pinned Chromium browser
         run: >-
           scripts/retry-dependency-fetch control/web/node_modules/.bin/playwright
-          install --with-deps chromium
+          install chromium
       - name: Save the pinned Chromium browser
         if: steps.playwright-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
