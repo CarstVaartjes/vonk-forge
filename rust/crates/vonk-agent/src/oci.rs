@@ -27,7 +27,7 @@ use vonk_agent_protocol::{
 
 use crate::{
     inventory::{available_disk_bytes, available_memory_bytes},
-    process::{ProcessError, ProcessRunner, Program},
+    process::{ProcessError, ProcessRunner},
     workloads::{
         CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, managed_path,
         same_installed_workload, same_job_workload,

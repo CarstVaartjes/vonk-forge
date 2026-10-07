@@ -3864,7 +3864,10 @@ mod tests {
         wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
-        client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
+        client::{
+            AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence,
+            ExactRecipeRunObservation,
+        },
         oci::OciRuntime,
         outcome::Failure,
         process::{ProcessError, ProcessOutput, ProcessRunner, Program},
