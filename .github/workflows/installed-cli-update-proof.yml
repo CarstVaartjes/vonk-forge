@@ -36,6 +36,15 @@ jobs:
           UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
           UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/signed-update-dependencies" \
             scripts/retry-dependency-fetch uv sync --project . --frozen --no-dev --no-install-project
+          # A frozen sync has exact wheel locations and can bypass index
+          # metadata. The real tool updater resolves from an index, so seed
+          # that metadata using the same frozen versions and verified hashes.
+          uv export --project . --frozen --no-dev --no-emit-project \
+            --output-file "$RUNNER_TEMP/signed-update-requirements.txt"
+          UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
+            scripts/retry-dependency-fetch uv pip install \
+              --python "$RUNNER_TEMP/signed-update-dependencies/bin/python" \
+              --reinstall --require-hashes -r "$RUNNER_TEMP/signed-update-requirements.txt"
           test -d "$RUNNER_TEMP/signed-update-cache"
       - name: Exercise actual installed updater and reject corrupted bytes
         shell: bash
