@@ -161,10 +161,17 @@ def test_rust_enrollment_request_and_controller_issued_response(
 def test_controller_renewal_uses_the_same_issued_response(
     agent_system, enrollment_wire_probe: Path
 ) -> None:
-    client, _, _, _ = agent_system
+    from vonk_control.models import AgentCertificate
+
+    client, services, _, _ = agent_system
+    with services.enrollment._sessions.begin() as session:
+        source = session.get(AgentCertificate, "serial-a")
+        assert source is not None
+        source.serial = "101"
+        source.fingerprint = "fingerprint-101"
     response = client.post(
         "/agent/renew",
-        headers=agent_headers(NODE_A, "serial-a"),
+        headers=agent_headers(NODE_A, "101"),
         json={"node_id": NODE_A, "csr": _csr_for(NODE_A).decode()},
     )
     assert response.status_code == 200

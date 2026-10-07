@@ -1327,10 +1327,7 @@ export interface components {
         AgentUpgradeRequestIntent: {
             /** All */
             all: boolean;
-            /**
-             * Selectors
-             * @default null
-             */
+            /** Selectors */
             selectors: string[] | null;
         };
         /**
@@ -2107,6 +2104,12 @@ export interface components {
          * @enum {string}
          */
         BlockerCategory: "security-edge" | "input-validation" | "already-retried" | "bookkeeping-debt";
+        /**
+         * BookkeepingReason
+         * @description Why bookkeeping was treated as unknown instead of refused.
+         * @enum {string}
+         */
+        BookkeepingReason: "persisted-state-damaged" | "evidence-mismatch" | "evidence-unavailable" | "row-incomplete";
         /** BooleanParameter */
         BooleanParameter: {
             /** Allowed Values */
@@ -2455,6 +2458,44 @@ export interface components {
          * @enum {string}
          */
         CatalogSyncState: "syncing" | "current" | "partial" | "failed";
+        /**
+         * CertificateCode
+         * @description Owned certificate issuance admission refusals.
+         * @enum {string}
+         */
+        CertificateCode: "certificate.response_unrepresentable";
+        /** CertificateIssuanceBinding */
+        CertificateIssuanceBinding: {
+            /** Csr Sha256 */
+            csr_sha256: string;
+            /** Generation */
+            generation: number;
+            /** Issuer Fingerprint */
+            issuer_fingerprint: string;
+            /** Node Id */
+            node_id: string;
+            /** Not After */
+            not_after: string;
+            /** Not Before */
+            not_before: string;
+            /** Policy Sha256 */
+            policy_sha256: string;
+            /** Provisioner Kid */
+            provisioner_kid: string;
+            /** Provisioner Name */
+            provisioner_name: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "enrollment" | "rotation";
+            /** Request Id */
+            request_id: string;
+            /** Serial */
+            serial: string;
+            /** Source Serial */
+            source_serial: string | null;
+        };
         /**
          * CertificateState
          * @description The standing of a node's client certificate, as the fleet projection shows it.
@@ -7139,6 +7180,7 @@ export interface components {
             cache_reference_reason: components["schemas"]["CacheReferenceReason"];
             catalog_code: components["schemas"]["CatalogCode"];
             catalog_sync_code: components["schemas"]["CatalogSyncCode"];
+            certificate_code: components["schemas"]["CertificateCode"];
             cluster_mapping_code: components["schemas"]["ClusterMappingCode"];
             controller_error_code: components["schemas"]["ControllerErrorCode"];
             distribution_code: components["schemas"]["DistributionCode"];
@@ -7930,15 +7972,16 @@ export interface components {
             kind: "recipe.image.availability.v2";
             /** Next Attempt At */
             next_attempt_at?: string | null;
-            progress: components["schemas"]["OperationProgress"];
+            progress: components["schemas"]["OperationProgress"] | null;
             /** Recipe Content Sha256 */
-            recipe_content_sha256: string;
+            recipe_content_sha256: string | null;
             /** Recipe Revision Id */
-            recipe_revision_id: string;
+            recipe_revision_id: string | null;
             /** Request */
-            request: components["schemas"]["RecipeSelectorIntent"] | components["schemas"]["RecipeRevisionIntent"] | components["schemas"]["RecipeRetryIntent"];
+            request: (components["schemas"]["RecipeSelectorIntent"] | components["schemas"]["RecipeRevisionIntent"] | components["schemas"]["RecipeRetryIntent"]) | null;
             /** Request Id */
             request_id: string;
+            residue?: components["schemas"]["Residue"] | null;
             result?: components["schemas"]["RecipeImageAvailabilityResult"] | null;
             /**
              * State
@@ -8464,7 +8507,7 @@ export interface components {
          * @description Recipe operation conflicts.
          * @enum {string}
          */
-        RecipeOperationCode: "recipe.operation_conflict";
+        RecipeOperationCode: "recipe.operation_conflict" | "recipe.evidence_unproven";
         /**
          * RecipeOperationProgressResult
          * @description Partial evidence retained while a multi-node operation is running.
@@ -9568,6 +9611,25 @@ export interface components {
          * @enum {string}
          */
         ReservationState: "active" | "promised" | "released" | "expired";
+        /**
+         * Residue
+         * @description A typed ``unknown``: what was damaged, why, and what the caller does next.
+         *
+         *     It is a value, not an exception: the caller retires the damaged row or skips
+         *     the element and carries on.
+         */
+        Residue: {
+            /** Kind */
+            kind: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            reason: components["schemas"]["BookkeepingReason"];
+            /** Subject */
+            subject: string;
+        };
         /**
          * ResourceBlockerCode
          * @description The capacity-fit codes the resource planner gives a node that cannot fit.
@@ -10946,8 +11008,16 @@ export interface components {
         RunSwitchTargetTransferEvidenceResult: {
             /** Copied Bytes */
             copied_bytes?: number | null;
+            /** Diagnostic */
+            diagnostic?: string | null;
             /** Downloaded Bytes */
             downloaded_bytes?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Failure Kind */
+            failure_kind?: string | null;
             /** Node Id */
             node_id: string;
             /**
@@ -10955,11 +11025,18 @@ export interface components {
              * @constant
              */
             phase: "transfer";
+            /** Reason */
+            reason?: string | null;
             /**
              * Subphase
              * @constant
              */
             subphase: "target-copy";
+            /**
+             * Uncertain
+             * @default false
+             */
+            uncertain: boolean;
         };
         /** RunSwitchTargetTransferResult */
         RunSwitchTargetTransferResult: {

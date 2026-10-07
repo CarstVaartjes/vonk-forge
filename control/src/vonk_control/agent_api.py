@@ -75,10 +75,12 @@ from .contract_graph import raw_json_body
 from .distribution import DistributionError, DistributionService
 from .download_contract import download_responses, upload_request_body
 from .enrollment import (
+    CertificateResponseCapacityRefused,
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     EnrollmentService,
     RenewalInProgress,
+    RenewalIssuanceUncertain,
 )
 from .enrollment_bootstrap import EnrollmentBootstrapConfig, InstallerUrl
 from .enrollment_contract import EnrollmentId
@@ -916,6 +918,11 @@ def install_agent_routes(
             outcome = _require_enrollment(required).submit(
                 submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
             )
+        except CertificateResponseCapacityRefused as error:
+            return _json_response(
+                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
+                status_code=422,
+            )
         except EnrollmentIssuanceUncertain as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
@@ -1536,7 +1543,12 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        except RenewalInProgress as error:
+        except CertificateResponseCapacityRefused as error:
+            return _json_response(
+                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
+                status_code=422,
+            )
+        except (RenewalInProgress, RenewalIssuanceUncertain) as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
@@ -1562,7 +1574,12 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        except RenewalInProgress as error:
+        except CertificateResponseCapacityRefused as error:
+            return _json_response(
+                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
+                status_code=422,
+            )
+        except (RenewalInProgress, RenewalIssuanceUncertain) as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None

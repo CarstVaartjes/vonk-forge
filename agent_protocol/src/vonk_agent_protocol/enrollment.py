@@ -3,13 +3,29 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from .wire_model import WireModel
 
 MAX_CSR_BYTES = 16 * 1024
+# Physical allocation budget for complete enrollment/bootstrap JSON bodies.
+# This includes UTF-8 encoding, JSON escapes, and every envelope field.
+MAX_ENROLLMENT_RESPONSE_BYTES = 64 * 1024
+
+
+def _check_response_budget(value: WireModel) -> None:
+    from .contracts import canonical_message
+
+    observed = len(canonical_message(value))
+    if observed > MAX_ENROLLMENT_RESPONSE_BYTES:
+        raise ValueError(
+            f"enrollment response exceeds {MAX_ENROLLMENT_RESPONSE_BYTES} bytes "
+            f"(observed {observed})"
+        )
+
+
 NodeId = Annotated[str, Field(pattern=r"^spk_[0-9a-f]{32}$")]
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
@@ -45,6 +61,11 @@ class EnrollmentBootstrapResponse(WireModel):
     service_hostnames: list[str] = Field(max_length=16)
     host_helper_authority_public_key: Digest
 
+    @model_validator(mode="after")
+    def bounded_response(self) -> Self:
+        _check_response_budget(self)
+        return self
+
 
 class RenewRequest(WireModel):
     csr: str = Field(min_length=1, max_length=MAX_CSR_BYTES)
@@ -65,6 +86,11 @@ class IssuedCertificateResponse(WireModel):
     not_before: str = Field(min_length=1)
     not_after: str = Field(min_length=1)
     generation: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def bounded_response(self) -> Self:
+        _check_response_budget(self)
+        return self
 
     @field_validator("not_before", "not_after")
     @classmethod

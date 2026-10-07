@@ -20,6 +20,9 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     InvalidRequestError,
+    RecipeBuildCleanupEvidence,
+    RecipeStartResult,
+    RecipeStopResult,
     SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
@@ -27,6 +30,7 @@ from vonk_agent_protocol import (
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.job_documents import DistributedRecoveryMarker
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
 from vonk_control.models import (
     AgentOperation,
@@ -37,6 +41,7 @@ from vonk_control.models import (
     RecipeRun,
 )
 from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.recipe_lifecycle_contract import RecipeOperationProgressResult
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -58,6 +63,7 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.run_admission import RunAdmissionService
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .test_recipe_builds import RecordingQueue as BuildQueue
 from .test_recipe_builds import setup as build_setup
 from .test_recipe_operations import (
@@ -287,9 +293,20 @@ def test_damaged_phases_end_a_start_through_its_recovery_error(tmp_path) -> None
 
 
 def test_stored_phases_are_retired_not_raised() -> None:
-    assert _stored_phases({}, subject="job") == ()
+    parent = Job(
+        id=str(uuid.uuid4()),
+        kind="recipe.start",
+        payload={
+            "schema_version": 1,
+            "owner_kind": "run",
+            "owner_id": str(uuid.uuid4()),
+            "plan_digest": "a" * 64,
+        },
+    )
+    assert _stored_phases(parent) == ()
     for damaged in ("garbage", [], [[]], [[{"operation_id": "x", "node_id": "n"}]]):
-        loaded = _stored_phases({"phases": damaged}, subject="job")
+        parent.payload = {**parent.payload, "phases": damaged}
+        loaded = _stored_phases(parent)
         assert isinstance(loaded, Residue)
         assert loaded.reason is BookkeepingReason.PERSISTED_STATE_DAMAGED
 
@@ -479,22 +496,27 @@ def test_build_evidence_that_does_not_hold_is_reported_not_raised(tmp_path) -> N
 # ------------------------------------------------------- reconcile and recovery
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_a_recovery_with_damaged_authority_is_retired_not_raised(tmp_path) -> None:
     sessions, service, _queue, _installation, run, _nodes = _running_recipe(tmp_path)
     with sessions.begin() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
         stored.route_state = "withdrawn"
+        stored.plan = {"damaged": True}
+        recovery = DistributedRecoveryMarker(
+            schema_version=1, failed_rank=0, deadline=NOW.isoformat()
+        )
         outcome = service.queue_recovery_stop_in_session(
             session,
             stored.id,
-            recovery_context={"schema_version": 1},
+            recovery_context=recovery,
             workload_intent_ordinal=1,
             now=NOW,
         )
         not_current = service.queue_recovery_stop_in_session(
             session,
             "no-such-run",
-            recovery_context={},
+            recovery_context=recovery,
             workload_intent_ordinal=1,
             now=NOW,
         )
@@ -570,7 +592,12 @@ def test_a_profile_stop_whose_parent_is_damaged_retires_nothing_and_ends_failed(
     # does not parse: no JobRun identity is retired, the Stop ends failed and the
     # profile's own retry answers it; nothing is raised into the agent's result.
     assert view.state == "failed"
-    assert _required(view.result)["failed_nodes"] == [nodes[0]]
+    # The exact child receipt succeeded; the damaged parent cannot establish
+    # completion of the operation as a whole, rather than a child failure.
+    result = _required(view.result)
+    assert result["failed_nodes"] == []
+    assert result["successful_nodes"] == [nodes[0]]
+    assert "damaged" in str(result["recovery_error"])
     with sessions() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
         assert stored.state == "failed"
@@ -940,6 +967,34 @@ def test_role_phases_report_a_mismatch_instead_of_raising() -> None:
     assert _role_phases(("head",), (("n", {"compiled_execution_plan": {}}),)) is None
 
 
+def test_role_phases_use_exact_stop_identity_without_launch_history() -> None:
+    head = {**recipe_stop_payload("head", plan_digest="a" * 64), "role": "head"}
+    worker = {
+        **recipe_stop_payload("worker", plan_digest="a" * 64),
+        "role": "worker",
+        "rank": 1,
+    }
+    assert _role_phases(("worker", "head"), (("head", head), ("worker", worker))) == (
+        (("worker", worker),),
+        (("head", head),),
+    )
+
+
+def test_empty_rank_receipts_keep_their_parent_operation_kind() -> None:
+    node_id = "spk_" + "a" * 32
+    for kind, result_type in (
+        ("recipe.start", RecipeStartResult),
+        ("recipe.stop", RecipeStopResult),
+        ("recipe.build.cleanup.v1", RecipeBuildCleanupEvidence),
+    ):
+        loaded = _recorded_result(
+            kind, {"node_evidence": {node_id: {}}}, subject="kind-proof"
+        )
+        assert isinstance(loaded, RecipeOperationProgressResult)
+        assert loaded.node_evidence is not None
+        assert isinstance(loaded.node_evidence[node_id], result_type)
+
+
 # ------------------------------------------------------------------ the guard
 
 
@@ -962,6 +1017,8 @@ _STORED_READS = {
 _OWNERS = {
     "_recorded_result",
     "_validated_result",
+    "_node_result",  # Canonical parse is caught locally and returns unknown.
+    "_parse_recipe_parent",  # Central parser, called through _recorded_parent.
     "_evidence_is_acceptable",
     "_plan_ranks",
     "_run_accepted_ranks",

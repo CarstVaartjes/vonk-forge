@@ -48,8 +48,9 @@ def test_fresh_postgres_initializes_the_litellm_database() -> None:
 def test_preprovisioned_step_ca_bypasses_the_image_initializer() -> None:
     step_ca = _document("compose.yaml")["services"]["step-ca"]
 
-    assert step_ca["entrypoint"] == ["step-ca"]
+    assert step_ca["entrypoint"] == ["vonk-step-ca"]
     assert step_ca["command"] == [
+        "--config",
         "/run/vonk-normalized-secrets/step-ca/ca.json",
         "--password-file",
         "/run/vonk-normalized-secrets/step-ca/password",

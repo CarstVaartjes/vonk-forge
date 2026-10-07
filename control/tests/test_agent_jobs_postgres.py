@@ -11,11 +11,13 @@ import pytest
 from sqlalchemy import event, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_agent_protocol import AgentResult, OperationProgress, canonical_message
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentService
 from vonk_control.models import (
     AgentCertificate,
@@ -26,9 +28,10 @@ from vonk_control.models import (
     Job,
 )
 from vonk_control.operation_api import durable_operation_services
-from vonk_control.pki import CertificateAuthority, IssuedCertificate
+from vonk_control.pki import IssuedCertificate
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
+from .ca_test_authority import FixtureCertificateAuthority
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import exercise_upgrade_reconnect
@@ -37,7 +40,7 @@ NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
-STOP_RESULT = {}
+STOP_RESULT = RecipeStopResult()
 
 
 class Clock:
@@ -51,9 +54,14 @@ class Clock:
         self.now += timedelta(seconds=seconds)
 
 
-class RevokingAuthority(CertificateAuthority):
+class RevokingAuthority(FixtureCertificateAuthority):
     def issue_node(
-        self, node_id: str, csr_pem: bytes, now: datetime
+        self,
+        node_id: str,
+        csr_pem: bytes,
+        now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         raise NotImplementedError
 
@@ -63,7 +71,7 @@ class RevokingAuthority(CertificateAuthority):
         csr_pem: bytes,
         now: datetime,
         *,
-        request_id: str,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         raise NotImplementedError
 
@@ -431,7 +439,9 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
                 action_results.append(claim_agent(jobs, NODE_A, "serial-a"))
             elif agent_action == "heartbeat":
                 assert claim is not None
-                action_results.append(jobs.heartbeat(claim, {"phase": "checking"}, 60))
+                action_results.append(
+                    jobs.heartbeat(claim, OperationProgress(phase="checking"), 60)
+                )
             else:
                 assert claim is not None
                 jobs.succeed(claim, STOP_RESULT)

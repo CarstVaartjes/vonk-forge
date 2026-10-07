@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -13,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[3]
 
 @pytest.mark.needs_docker
 def test_step_ca_binary_executes_with_the_deployed_security_boundary():
-    # Break caught: dropping NET_BIND_SERVICE from the bounding set makes exec
-    # of the pinned file-capability-bearing CA binary fail before it can bind.
+    # The actual managed candidate executable must run with the deployed
+    # read-only, non-root, capability-free boundary.
     from deploy.compose.tests.test_agent_ingress import (
         _rendered,
         _require_docker_runtime,
@@ -22,6 +23,11 @@ def test_step_ca_binary_executes_with_the_deployed_security_boundary():
 
     _require_docker_runtime()
     service = _rendered()["services"]["step-ca"]
+    image = os.environ.get("VONK_JOURNAL_CA_TEST_IMAGE")
+    if image is None:
+        if os.environ.get("CI"):
+            pytest.fail("the exact managed candidate CA image is required")
+        pytest.skip("the exact managed candidate CA image is required")
     command = [
         "docker",
         "run",
@@ -43,9 +49,9 @@ def test_step_ca_binary_executes_with_the_deployed_security_boundary():
         [
             *command,
             "--entrypoint",
-            "/usr/local/bin/step-ca",
-            service["image"],
-            "version",
+            "/usr/local/bin/vonk-step-ca",
+            image,
+            "--help",
         ],
         capture_output=True,
         text=True,

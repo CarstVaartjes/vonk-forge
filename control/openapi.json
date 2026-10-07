@@ -784,12 +784,12 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "title": "Selectors"
           }
         },
         "required": [
-          "all"
+          "all",
+          "selectors"
         ],
         "title": "AgentUpgradeRequestIntent",
         "type": "object"
@@ -855,7 +855,6 @@
               "type": "string"
             },
             "maxItems": 64,
-            "minItems": 1,
             "title": "Node Order",
             "type": "array"
           },
@@ -3134,6 +3133,17 @@
         "title": "BlockerCategory",
         "type": "string"
       },
+      "BookkeepingReason": {
+        "description": "Why bookkeeping was treated as unknown instead of refused.",
+        "enum": [
+          "persisted-state-damaged",
+          "evidence-mismatch",
+          "evidence-unavailable",
+          "row-incomplete"
+        ],
+        "title": "BookkeepingReason",
+        "type": "string"
+      },
       "BooleanParameter": {
         "additionalProperties": false,
         "properties": {
@@ -4211,6 +4221,111 @@
         ],
         "title": "CatalogSyncState",
         "type": "string"
+      },
+      "CertificateCode": {
+        "description": "Owned certificate issuance admission refusals.",
+        "enum": [
+          "certificate.response_unrepresentable"
+        ],
+        "title": "CertificateCode",
+        "type": "string"
+      },
+      "CertificateIssuanceBinding": {
+        "properties": {
+          "csr_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Csr Sha256",
+            "type": "string"
+          },
+          "generation": {
+            "exclusiveMinimum": 0,
+            "maximum": 18446744073709551615,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "issuer_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Issuer Fingerprint",
+            "type": "string"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "not_after": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+            "title": "Not After",
+            "type": "string"
+          },
+          "not_before": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+            "title": "Not Before",
+            "type": "string"
+          },
+          "policy_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Policy Sha256",
+            "type": "string"
+          },
+          "provisioner_kid": {
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "title": "Provisioner Kid",
+            "type": "string"
+          },
+          "provisioner_name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$",
+            "title": "Provisioner Name",
+            "type": "string"
+          },
+          "purpose": {
+            "enum": [
+              "enrollment",
+              "rotation"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "serial": {
+            "pattern": "^[1-9][0-9]{0,47}$",
+            "title": "Serial",
+            "type": "string"
+          },
+          "source_serial": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]{0,47}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Serial"
+          }
+        },
+        "required": [
+          "request_id",
+          "node_id",
+          "csr_sha256",
+          "serial",
+          "not_before",
+          "not_after",
+          "issuer_fingerprint",
+          "provisioner_name",
+          "provisioner_kid",
+          "policy_sha256",
+          "purpose",
+          "source_serial",
+          "generation"
+        ],
+        "title": "CertificateIssuanceBinding",
+        "type": "object"
       },
       "CertificateState": {
         "description": "The standing of a node's client certificate, as the fleet projection shows it.",
@@ -18878,6 +18993,9 @@
           "catalog_sync_code": {
             "$ref": "#/components/schemas/CatalogSyncCode"
           },
+          "certificate_code": {
+            "$ref": "#/components/schemas/CertificateCode"
+          },
           "cluster_mapping_code": {
             "$ref": "#/components/schemas/ClusterMappingCode"
           },
@@ -18995,6 +19113,7 @@
           "agent_evidence_code",
           "artifact_lifecycle_code",
           "cache_reference_reason",
+          "certificate_code",
           "catalog_code",
           "catalog_sync_code",
           "cluster_mapping_code",
@@ -21255,34 +21374,62 @@
             "title": "Next Attempt At"
           },
           "progress": {
-            "$ref": "#/components/schemas/OperationProgress"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "recipe_content_sha256": {
-            "title": "Recipe Content Sha256",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Content Sha256"
           },
           "recipe_revision_id": {
-            "title": "Recipe Revision Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Revision Id"
           },
           "request": {
-            "discriminator": {
-              "mapping": {
-                "retry": "#/components/schemas/RecipeRetryIntent",
-                "revision": "#/components/schemas/RecipeRevisionIntent",
-                "selector": "#/components/schemas/RecipeSelectorIntent"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
+            "anyOf": [
               {
-                "$ref": "#/components/schemas/RecipeSelectorIntent"
+                "discriminator": {
+                  "mapping": {
+                    "retry": "#/components/schemas/RecipeRetryIntent",
+                    "revision": "#/components/schemas/RecipeRevisionIntent",
+                    "selector": "#/components/schemas/RecipeSelectorIntent"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RecipeSelectorIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeRevisionIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeRetryIntent"
+                  }
+                ]
               },
               {
-                "$ref": "#/components/schemas/RecipeRevisionIntent"
-              },
-              {
-                "$ref": "#/components/schemas/RecipeRetryIntent"
+                "type": "null"
               }
             ],
             "title": "Request"
@@ -21292,6 +21439,16 @@
             "minLength": 1,
             "title": "Request Id",
             "type": "string"
+          },
+          "residue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Residue"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "result": {
             "anyOf": [
@@ -23008,7 +23165,8 @@
       "RecipeOperationCode": {
         "description": "Recipe operation conflicts.",
         "enum": [
-          "recipe.operation_conflict"
+          "recipe.operation_conflict",
+          "recipe.evidence_unproven"
         ],
         "title": "RecipeOperationCode",
         "type": "string"
@@ -26272,6 +26430,34 @@
         ],
         "title": "ReservationState",
         "type": "string"
+      },
+      "Residue": {
+        "description": "A typed ``unknown``: what was damaged, why, and what the caller does next.\n\nIt is a value, not an exception: the caller retires the damaged row or skips\nthe element and carries on.",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/BookkeepingReason"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "subject",
+          "reason"
+        ],
+        "title": "Residue",
+        "type": "object"
       },
       "ResourceBlockerCode": {
         "description": "The capacity-fit codes the resource planner gives a node that cannot fit.\n\n``insufficient`` is the family prefix a run admission maps onto\n``run.insufficient_memory``; the planner itself names the exact\n``insufficient_capacity*`` member.",
@@ -30757,6 +30943,18 @@
             ],
             "title": "Copied Bytes"
           },
+          "diagnostic": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostic"
+          },
           "downloaded_bytes": {
             "anyOf": [
               {
@@ -30769,6 +30967,46 @@
             ],
             "title": "Downloaded Bytes"
           },
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
           "node_id": {
             "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
@@ -30779,16 +31017,33 @@
             "title": "Phase",
             "type": "string"
           },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
           "subphase": {
             "const": "target-copy",
             "title": "Subphase",
             "type": "string"
+          },
+          "uncertain": {
+            "default": false,
+            "title": "Uncertain",
+            "type": "boolean"
           }
         },
         "required": [
+          "node_id",
           "phase",
-          "subphase",
-          "node_id"
+          "subphase"
         ],
         "title": "RunSwitchTargetTransferEvidenceResult",
         "type": "object"
@@ -41049,6 +41304,12 @@
     }
   },
   "x-vonk-json-columns": {
+    "agent_certificate_rotations.provider_request": [
+      "CertificateIssuanceBinding"
+    ],
+    "agent_enrollments.provider_request": [
+      "CertificateIssuanceBinding"
+    ],
     "agent_operation_attempts.progress": [
       "OperationProgress"
     ],

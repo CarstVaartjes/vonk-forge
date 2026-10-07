@@ -19,14 +19,27 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 from pydantic import BaseModel, ConfigDict, ValidationError
+from vonk_agent_protocol import CertificateCode, InvalidRequestError, canonical_message
+from vonk_agent_protocol.enrollment import (
+    MAX_ENROLLMENT_RESPONSE_BYTES,
+    IssuedCertificateResponse,
+)
 
+from .ca_issuance_contract import (
+    CertificateAbsentReply,
+    CertificateIssuanceBinding,
+    CertificateIssuedReply,
+    CertificatePendingReply,
+    CertificateRefusalReason,
+    CertificateRefusalReply,
+    CertificateSignRequest,
+)
 from .pki import (
     CertificateAuthority,
     IssuedCertificate,
     _load_node_csr,
     _read_regular_secret_file,
     _utc_timestamp,
-    _validate_provider_request_id,
 )
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
@@ -54,13 +67,8 @@ class _TokenClaims(_StepWire):
     exp: int
     jti: str
     sans: list[str] | None = None
-
-
-class _SignRequest(_StepWire):
-    csr: str
-    ott: str
-    notBefore: str
-    notAfter: str
+    vonk: CertificateIssuanceBinding | None = None
+    cnf: dict[str, str] | None = None
 
 
 class _RevokeRequest(_StepWire):
@@ -73,19 +81,6 @@ class _RevokeRequest(_StepWire):
 
 class _StatusReply(_StepWire):
     status: str
-
-
-class _TlsOptions(BaseModel):
-    """step-ca's own TLS hints; Vonk Forge reads none of them."""
-
-    model_config = ConfigDict(extra="allow")
-
-
-class _SignReply(_StepWire):
-    crt: str
-    ca: str
-    certChain: list[str]
-    tlsOptions: _TlsOptions | None = None
 
 
 class _PublicJwk(BaseModel):
@@ -101,6 +96,27 @@ class _PublicJwk(BaseModel):
 
 class StepCAError(RuntimeError):
     """A bounded provider operation failed without exposing authorization."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: CertificateRefusalReason = "certificate.issuance_unavailable",
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
+class StepCAResponseCapacityRefused(InvalidRequestError, StepCAError):
+    """An owned representability policy refuses before issuance transport."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.reason_code = CertificateCode.RESPONSE_UNREPRESENTABLE
+
+
+class StepCAIssuancePending(StepCAError):
+    """The exact CA journal request is still owned by an issuer epoch."""
 
 
 class StepCertificateAuthority(CertificateAuthority):
@@ -146,12 +162,10 @@ class StepCertificateAuthority(CertificateAuthority):
         if (
             isinstance(certificate_lifetime_seconds, bool)
             or not isinstance(certificate_lifetime_seconds, int)
-            or not 90
-            <= certificate_lifetime_seconds
-            <= _DEFAULT_CERTIFICATE_LIFETIME_SECONDS
+            or certificate_lifetime_seconds != _DEFAULT_CERTIFICATE_LIFETIME_SECONDS
         ):
             raise ValueError(
-                "certificate lifetime must be an integer between 90 and 2592000 seconds"
+                "certificate lifetime must equal the fixed 2592000-second policy"
             )
         if not 0 <= clock_skew_seconds <= 60:
             raise ValueError("CA clock skew must be between zero and 60 seconds")
@@ -232,10 +246,73 @@ class StepCertificateAuthority(CertificateAuthority):
             },
         )
 
+    def prepare_request(
+        self,
+        node_id: str,
+        csr_pem: bytes,
+        now: datetime,
+        *,
+        purpose: str,
+        source_serial: str | None,
+        generation: int,
+    ) -> CertificateIssuanceBinding:
+        timestamp = _utc_timestamp(now)
+        csr = _load_node_csr(node_id, csr_pem)
+        issuer = self._intermediate.fingerprint(hashes.SHA256()).hex()
+        policy = json.dumps(
+            {
+                "certificate_lifetime_seconds": _DEFAULT_CERTIFICATE_LIFETIME_SECONDS,
+                "issuer_fingerprint": issuer,
+                "profile": "vonk-node-client-v1",
+                "provisioner_kid": self._provisioner_kid,
+                "provisioner_name": self._provisioner_name,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        return CertificateIssuanceBinding.model_validate(
+            {
+                "request_id": secrets.token_urlsafe(32),
+                "node_id": node_id,
+                "csr_sha256": hashlib.sha256(
+                    csr.public_bytes(serialization.Encoding.DER)
+                ).hexdigest(),
+                "serial": str(x509.random_serial_number()),
+                "not_before": _rfc3339(timestamp),
+                "not_after": _rfc3339(timestamp + self._certificate_lifetime),
+                "issuer_fingerprint": issuer,
+                "provisioner_name": self._provisioner_name,
+                "provisioner_kid": self._provisioner_kid,
+                "policy_sha256": hashlib.sha256(policy).hexdigest(),
+                "purpose": purpose,
+                "source_serial": source_serial,
+                "generation": generation,
+            }
+        )
+
     def issue_node(
-        self, node_id: str, csr_pem: bytes, now: datetime
+        self,
+        node_id: str,
+        csr_pem: bytes,
+        now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
-        return self._sign(node_id, csr_pem, now)
+        if request.node_id != node_id:
+            raise ValueError("CA request node identity does not match")
+        issued = self._sign(csr_pem, now, request=request, mode="issue")
+        if issued is None:
+            raise StepCAError("CA issue returned absence")
+        return issued
+
+    def observe_node(
+        self,
+        csr_pem: bytes,
+        now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
+    ) -> IssuedCertificate | None:
+        return self._sign(csr_pem, now, request=request, mode="observe")
 
     def check_health(self) -> None:
         if not _is_ok(self._json_request("GET", "/health", None)):
@@ -247,12 +324,11 @@ class StepCertificateAuthority(CertificateAuthority):
         csr_pem: bytes,
         now: datetime,
         *,
-        request_id: str,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
-        # Vonk Forge authorizes renewal with the currently active mTLS identity;
-        # step-ca receives a fresh, fixed-policy sign authorization and CSR.
-        _validate_provider_request_id(request_id)
-        return self._sign(node_id, csr_pem, now, request_id=request_id)
+        if request.purpose != "rotation":
+            raise ValueError("renewal requires a rotation binding")
+        return self.issue_node(node_id, csr_pem, now, request=request)
 
     def revoke_node(self, serial: str, now: datetime) -> None:
         timestamp = _utc_timestamp(now)
@@ -292,37 +368,73 @@ class StepCertificateAuthority(CertificateAuthority):
 
     def _sign(
         self,
-        node_id: str,
         csr_pem: bytes,
         now: datetime,
         *,
-        request_id: str | None = None,
-    ) -> IssuedCertificate:
+        request: CertificateIssuanceBinding,
+        mode: str,
+    ) -> IssuedCertificate | None:
         timestamp = _utc_timestamp(now)
-        if _NODE_ID.fullmatch(node_id) is None:
-            raise ValueError("node ID must be canonical")
-        request = _load_node_csr(node_id, csr_pem)
-        normalized_csr = request.public_bytes(serialization.Encoding.PEM)
-        endpoint = f"{self._ca_url}/1.0/sign"
+        node_id = request.node_id
+        csr = _load_node_csr(node_id, csr_pem)
+        csr_digest = hashlib.sha256(
+            csr.public_bytes(serialization.Encoding.DER)
+        ).hexdigest()
+        # Configuration is still authoritative on every replay; a durable request
+        # cannot authorize a different issuer, provisioner, policy or CSR.
+        expected = self.prepare_request(
+            node_id,
+            csr_pem,
+            datetime.fromisoformat(request.not_before),
+            purpose=request.purpose,
+            source_serial=request.source_serial,
+            generation=request.generation,
+        )
+        if (
+            request.csr_sha256 != csr_digest
+            or request.issuer_fingerprint != expected.issuer_fingerprint
+            or request.provisioner_name != expected.provisioner_name
+            or request.provisioner_kid != expected.provisioner_kid
+            or request.policy_sha256 != expected.policy_sha256
+        ):
+            raise ValueError("CA request no longer matches exact issuer policy or CSR")
+        self._validate_sign_response_capacity(request)
         raw_response = self._json_request(
             "POST",
-            "/1.0/sign",
-            _SignRequest(
-                csr=normalized_csr.decode("ascii"),
-                ott=self._token(
-                    node_id,
-                    endpoint,
-                    timestamp,
-                    sans=[f"spiffe://vonk-forge.local/node/{node_id}"],
-                    request_id=request_id,
-                ),
-                notBefore=_rfc3339(timestamp),
-                notAfter=_rfc3339(timestamp + self._certificate_lifetime),
+            "/1.0/vonk/sign",
+            CertificateSignRequest.model_validate(
+                {
+                    "csr": csr.public_bytes(serialization.Encoding.PEM).decode("ascii"),
+                    "ott": self._token(
+                        node_id,
+                        f"{self._ca_url}/1.0/sign",
+                        timestamp,
+                        sans=[f"spiffe://vonk-forge.local/node/{node_id}"],
+                        request=request,
+                    ),
+                    "request": request,
+                    "mode": mode,
+                }
             ),
         )
         try:
-            response = _SignReply.model_validate(raw_response)
-        except ValidationError as error:
+            if (
+                isinstance(raw_response, dict)
+                and raw_response.get("state") == "pending"
+            ):
+                pending = CertificatePendingReply.model_validate(raw_response)
+                if pending.request != request:
+                    raise ValueError("CA returned another journal binding")
+                raise StepCAIssuancePending("certificate.issuance_in_progress")
+            if isinstance(raw_response, dict) and raw_response.get("state") == "absent":
+                absent = CertificateAbsentReply.model_validate(raw_response)
+                if mode != "observe" or absent.request != request:
+                    raise ValueError("CA returned invalid absence evidence")
+                return None
+            response = CertificateIssuedReply.model_validate(raw_response)
+            if response.request != request:
+                raise ValueError("CA returned another journal binding")
+        except (ValidationError, ValueError) as error:
             raise StepCAError("step-ca returned an invalid sign response") from error
         if len(response.certChain) != 2:
             raise StepCAError("step-ca returned an invalid certificate chain")
@@ -338,7 +450,15 @@ class StepCertificateAuthority(CertificateAuthority):
             hashes.SHA256()
         ):
             raise StepCAError("step-ca returned an unexpected intermediate")
-        self._validate_leaf(node_id, request, leaf, timestamp)
+        self._validate_leaf(
+            node_id, csr, leaf, datetime.fromisoformat(request.not_before)
+        )
+        if (
+            str(leaf.serial_number) != request.serial
+            or _rfc3339(leaf.not_valid_before_utc) != request.not_before
+            or _rfc3339(leaf.not_valid_after_utc) != request.not_after
+        ):
+            raise StepCAError("CA certificate differs from the accepted exact effect")
         return IssuedCertificate(
             node_id=node_id,
             certificate_pem=leaf.public_bytes(serialization.Encoding.PEM),
@@ -347,6 +467,7 @@ class StepCertificateAuthority(CertificateAuthority):
             fingerprint=leaf.fingerprint(hashes.SHA256()).hex(),
             not_before=leaf.not_valid_before_utc,
             not_after=leaf.not_valid_after_utc,
+            generation=request.generation,
         )
 
     def _validate_leaf(
@@ -486,7 +607,7 @@ class StepCertificateAuthority(CertificateAuthority):
         now: datetime,
         *,
         sans: list[str] | None,
-        request_id: str | None = None,
+        request: CertificateIssuanceBinding | None = None,
     ) -> str:
         timestamp = int(now.timestamp())
         claims = _TokenClaims(
@@ -496,44 +617,122 @@ class StepCertificateAuthority(CertificateAuthority):
             iat=timestamp,
             nbf=timestamp - int(self._clock_skew.total_seconds()),
             exp=timestamp + 60,
-            jti=request_id or secrets.token_urlsafe(32),
+            jti=secrets.token_urlsafe(32),
+            vonk=request,
+            cnf=None
+            if request is None
+            else {
+                "x5rt#S256": base64.urlsafe_b64encode(bytes.fromhex(request.csr_sha256))
+                .rstrip(b"=")
+                .decode("ascii")
+            },
             sans=sans,
         )
         return jwt.encode(
-            claims.model_dump(exclude_none=True),
+            {
+                key: value
+                for key, value in claims.model_dump(mode="json").items()
+                if value is not None
+            },
             self._credential,
             algorithm="ES256",
             headers={"kid": self._provisioner_kid, "typ": "JWT"},
         )
 
-    def _json_request(self, method: str, path: str, body: _StepWire | None) -> object:
+    def _json_request(
+        self, method: str, path: str, body: _StepWire | CertificateSignRequest | None
+    ) -> object:
         raw = self._request(method, path, body, accept="application/json")
         try:
             return json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise StepCAError("step-ca returned malformed JSON") from error
 
+    def _validate_sign_response_capacity(
+        self, request: CertificateIssuanceBinding
+    ) -> None:
+        # The private issuer owns a fixed 64 KiB complete-reply contract.
+        # A smaller configured reader cannot accept every valid issued effect;
+        # refuse before observe/issue HTTP rather than lose its committed reply.
+        # Other endpoints (including CRL) retain their independent reader limit.
+        if self._max_response_bytes < MAX_ENROLLMENT_RESPONSE_BYTES:
+            raise StepCAResponseCapacityRefused(
+                "configured CA sign response reader cannot accept the "
+                f"{MAX_ENROLLMENT_RESPONSE_BYTES}-byte issuance contract "
+                f"(configured {self._max_response_bytes} bytes)",
+            )
+        # The CA's committed reply includes each PEM twice (crt/ca and
+        # certChain). A complete sign reply bounded to 64 KiB therefore spends
+        # at most half that budget on the two PEMs in the agent response.
+        # Charge the actual outgoing metadata independently BEFORE CA effects;
+        # do not assume the CA transport bound covers the agent envelope.
+        try:
+            metadata = IssuedCertificateResponse(
+                node_id=request.node_id,
+                certificate_pem="x",
+                chain_pem="x",
+                serial=request.serial,
+                fingerprint="0" * 64,
+                not_before=datetime.fromisoformat(request.not_before).isoformat(),
+                not_after=datetime.fromisoformat(request.not_after).isoformat(),
+                generation=request.generation,
+            )
+        except ValidationError as error:
+            raise StepCAResponseCapacityRefused(
+                "issued response metadata cannot fit the enrollment contract",
+            ) from error
+        maximum_response = (
+            len(canonical_message(metadata)) - 2 + MAX_ENROLLMENT_RESPONSE_BYTES // 2
+        )
+        if maximum_response > MAX_ENROLLMENT_RESPONSE_BYTES:
+            raise StepCAResponseCapacityRefused(
+                f"issued response cannot fit {MAX_ENROLLMENT_RESPONSE_BYTES} bytes "
+                f"(upper bound {maximum_response})",
+            )
+
     def _request(
-        self, method: str, path: str, body: _StepWire | None, *, accept: str
+        self,
+        method: str,
+        path: str,
+        body: _StepWire | CertificateSignRequest | None,
+        *,
+        accept: str,
     ) -> bytes:
         try:
             with self._client.stream(
                 method,
                 f"{self._ca_url}{path}",
-                json=None if body is None else body.model_dump(exclude_none=True),
+                json=None if body is None else body.model_dump(mode="json"),
                 headers={"accept": accept},
             ) as response:
                 if response.is_redirect:
                     raise StepCAError("step-ca redirects are forbidden")
+                output = bytearray()
+                for chunk in response.iter_bytes():
+                    observed = len(output) + len(chunk)
+                    if observed > self._max_response_bytes or (
+                        path == "/1.0/vonk/sign"
+                        and observed > MAX_ENROLLMENT_RESPONSE_BYTES
+                    ):
+                        raise StepCAError("step-ca response is too large")
+                    output.extend(chunk)
                 if not response.is_success:
+                    if path == "/1.0/vonk/sign" and response.status_code != 404:
+                        try:
+                            refusal = CertificateRefusalReply.model_validate_json(
+                                bytes(output)
+                            )
+                        except ValidationError as error:
+                            raise StepCAError(
+                                "CA returned an invalid refusal response"
+                            ) from error
+                        raise StepCAError(
+                            f"CA refused exact certificate request: {refusal.detail}",
+                            reason_code=refusal.reason_code,
+                        )
                     raise StepCAError(
                         f"step-ca request failed with status {response.status_code}"
                     )
-                output = bytearray()
-                for chunk in response.iter_bytes():
-                    if len(output) + len(chunk) > self._max_response_bytes:
-                        raise StepCAError("step-ca response is too large")
-                    output.extend(chunk)
                 return bytes(output)
         except StepCAError:
             raise

@@ -2426,8 +2426,9 @@ mod tests {
 
     use super::{
         AgentHttpClient, AgentResult, ClientError, ControllerError, DISTRIBUTION_CONCURRENCY,
-        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, ObjectPlacement, StreamGovernor,
-        WriteBehind, clamp_inventory_request, controller_rejection_digest, is_rotation_conflict,
+        ExactRecipeRunObservation, HEARTBEAT_REQUEST_TIMEOUT, MAX_REJECTION_CONTEXT_CHARS,
+        ObjectPlacement, ROTATION_REQUEST_TIMEOUT, StreamGovernor, WriteBehind,
+        clamp_inventory_request, controller_rejection_digest, is_rotation_conflict,
         open_trusted_partial, partial_path, preallocate, range_end, valid_reported_hostname,
     };
     use crate::{
@@ -2899,6 +2900,162 @@ mod tests {
                 activation_status == 204
             );
         }
+    }
+
+    #[tokio::test]
+    async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbeat() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // Catch falsely installing a timed-out identity, retaining the writer
+        // after timeout, changing the retry generation, or admitting an old
+        // certificate request while activation can revoke that certificate.
+        let budget = ROTATION_REQUEST_TIMEOUT * 2 + HEARTBEAT_REQUEST_TIMEOUT * 2;
+        let deadline = tokio::time::Instant::now() + budget;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let activation_received = Arc::new(tokio::sync::Notify::new());
+        let expected_progress = progress();
+        let directive = AgentDirective {
+            cancel_requested: false,
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
+            fence: expected_progress.fence,
+        };
+        let response_body = canonical_json(&directive).unwrap();
+        // JoinSet owns the socket task: every assertion failure drops/aborts
+        // the peer, including a peer intentionally withholding its response.
+        let mut peers = tokio::task::JoinSet::new();
+        let received = activation_received.clone();
+        peers.spawn(async move {
+            tokio::time::timeout_at(deadline, async move {
+                let mut requests = Vec::new();
+                for index in 0..4 {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut request = Vec::new();
+                    let mut buffer = [0_u8; 4096];
+                    let header_end = loop {
+                        let size = tokio::time::timeout_at(deadline, stream.read(&mut buffer))
+                            .await.expect("rotation request read deadline").unwrap();
+                        assert_ne!(size, 0, "rotation request ended before its body");
+                        request.extend_from_slice(&buffer[..size]);
+                        if let Some(end) = request.windows(4).position(|v| v == b"\r\n\r\n") {
+                            let header_end = end + 4;
+                            let headers = std::str::from_utf8(&request[..end]).unwrap();
+                            let length: usize = headers.lines().find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse().unwrap())
+                            }).unwrap();
+                            if request.len() >= header_end + length { break header_end; }
+                        }
+                    };
+                    let headers = String::from_utf8_lossy(&request[..header_end]).to_ascii_lowercase();
+                    assert!(headers.contains(if index == 1 {
+                        "x-rotation-marker: old"
+                    } else {
+                        "x-rotation-marker: fresh"
+                    }));
+                    if index == 0 || index == 2 {
+                        assert!(headers.starts_with("post /agent/renew/activate "));
+                    } else {
+                        assert!(headers.starts_with("post /agent/heartbeat "));
+                    }
+                    requests.push(request[header_end..].to_vec());
+                    if index == 0 {
+                        received.notify_one();
+                        assert!(tokio::time::timeout(
+                            Duration::from_millis(200), listener.accept()
+                        ).await.is_err(), "old request overlapped activation");
+                        // Withhold all response bytes. The real reqwest
+                        // activation deadline must close this exact socket.
+                        assert_eq!(stream.read(&mut buffer).await.unwrap(), 0);
+                    } else {
+                        let (status, body) = if index == 2 {
+                            (204, &[][..])
+                        } else {
+                            (200, response_body.as_slice())
+                        };
+                        stream.write_all(format!(
+                            "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()
+                        ).as_bytes()).await.unwrap();
+                        stream.write_all(body).await.unwrap();
+                    }
+                }
+                assert_eq!(requests[0], requests[2], "retry changed accepted generation bytes");
+                for index in [1, 3] {
+                    assert_eq!(serde_json::from_slice::<AgentProgress>(&requests[index]).unwrap(), expected_progress);
+                }
+            }).await.expect("owned rotation peer exceeded request budgets");
+        });
+        let client = AgentHttpClient::for_http_test(&url, TEST_NODE_ID);
+        let mut old_headers = reqwest::header::HeaderMap::new();
+        old_headers.insert(
+            "x-rotation-marker",
+            reqwest::header::HeaderValue::from_static("old"),
+        );
+        *client.client.try_write().unwrap() = reqwest::Client::builder()
+            .default_headers(old_headers)
+            .timeout(HEARTBEAT_REQUEST_TIMEOUT)
+            .build()
+            .unwrap();
+        let replacement = AgentHttpClient::for_http_test(&url, TEST_NODE_ID);
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-rotation-marker",
+            reqwest::header::HeaderValue::from_static("fresh"),
+        );
+        *replacement.client.try_write().unwrap() = reqwest::Client::builder()
+            .default_headers(headers)
+            .timeout(HEARTBEAT_REQUEST_TIMEOUT)
+            .build()
+            .unwrap();
+        tokio::time::timeout_at(deadline, async {
+            let started = tokio::time::Instant::now();
+            let rotation = client.activate_replacement(&replacement, 2);
+            tokio::pin!(rotation);
+            tokio::select! {
+                received = tokio::time::timeout_at(deadline, activation_received.notified()) => {
+                    received.expect("activation peer acceptance deadline");
+                },
+                result = &mut rotation => panic!("activation ended before silent peer: {result:?}"),
+            }
+            assert!(
+                client.client.try_read().is_err(),
+                "activation did not fence old transport"
+            );
+            let probe_progress = progress();
+            assert!(
+                tokio::time::timeout(
+                    Duration::from_millis(200),
+                    client.heartbeat(&probe_progress)
+                )
+                .await
+                .is_err(),
+                "old certificate heartbeat escaped activation fence"
+            );
+            let error = rotation.await.unwrap_err();
+            assert!(
+                started.elapsed() < HEARTBEAT_REQUEST_TIMEOUT,
+                "activation deadline consumed the heartbeat request budget"
+            );
+            assert!(matches!(&error, ClientError::Transport(cause) if cause.is_timeout()));
+            assert!(error.retryable());
+            assert_eq!(
+                error.status(),
+                None,
+                "unknown activation was reported as accepted/refused"
+            );
+            assert!(
+                client.client.try_write().is_ok(),
+                "timed-out activation retained writer"
+            );
+            // Unknown activation keeps the previously accepted transport.
+            // This real request must carry old, not prematurely fresh, identity.
+            assert_eq!(client.heartbeat(&progress()).await.unwrap(), directive);
+            client.activate_replacement(&replacement, 2).await.unwrap();
+            assert_eq!(client.heartbeat(&progress()).await.unwrap(), directive);
+            peers.join_next().await.unwrap().unwrap();
+        })
+        .await
+        .expect("rotation recovery exceeded its owning request budgets");
     }
 
     fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {

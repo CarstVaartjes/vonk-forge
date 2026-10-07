@@ -66,6 +66,7 @@ from .availability_runtime import AvailabilityRuntime
 from .availability_runtime_placement_environment_type_0 import AvailabilityRuntimePlacementEnvironmentType0
 from .availability_supersession import AvailabilitySupersession
 from .blocker_category import BlockerCategory
+from .bookkeeping_reason import BookkeepingReason
 from .boolean_parameter import BooleanParameter
 from .bounded_error_response import BoundedErrorResponse
 from .build_cleanup_phase_operation import BuildCleanupPhaseOperation
@@ -100,6 +101,9 @@ from .catalog_code import CatalogCode
 from .catalog_problem import CatalogProblem
 from .catalog_sync_code import CatalogSyncCode
 from .catalog_sync_state import CatalogSyncState
+from .certificate_code import CertificateCode
+from .certificate_issuance_binding import CertificateIssuanceBinding
+from .certificate_issuance_binding_purpose import CertificateIssuanceBindingPurpose
 from .certificate_state import CertificateState
 from .cli_token_download import CliTokenDownload
 from .cluster_mapping_code import ClusterMappingCode
@@ -649,6 +653,7 @@ from .removed_recipe_node_result import RemovedRecipeNodeResult
 from .request_validation_issue import RequestValidationIssue
 from .request_validation_problem import RequestValidationProblem
 from .reservation_state import ReservationState
+from .residue import Residue
 from .resource_blocker_code import ResourceBlockerCode
 from .resource_demand_evidence import ResourceDemandEvidence
 from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
@@ -899,6 +904,7 @@ __all__ = (
     "AvailabilityRuntimePlacementEnvironmentType0",
     "AvailabilitySupersession",
     "BlockerCategory",
+    "BookkeepingReason",
     "BooleanParameter",
     "BoundedErrorResponse",
     "BuildCleanupPhaseOperation",
@@ -933,6 +939,9 @@ __all__ = (
     "CatalogProblem",
     "CatalogSyncCode",
     "CatalogSyncState",
+    "CertificateCode",
+    "CertificateIssuanceBinding",
+    "CertificateIssuanceBindingPurpose",
     "CertificateState",
     "CliTokenDownload",
     "ClusterMappingCode",
@@ -1482,6 +1491,7 @@ __all__ = (
     "RequestValidationIssue",
     "RequestValidationProblem",
     "ReservationState",
+    "Residue",
     "ResourceBlockerCode",
     "ResourceDemandEvidence",
     "ResourceDemandEvidenceEvidenceState",

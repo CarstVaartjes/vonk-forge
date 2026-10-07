@@ -116,6 +116,7 @@ COMPOSE_IMAGE_ROLES = {
     "worker": "control-worker",
     "hermes": "hermes-agent",
     "litellm": "litellm",
+    "ca": "step-ca",
 }
 
 ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
@@ -2037,6 +2038,9 @@ class SparkLifecycle:
         if containers or volumes:
             raise LifecycleError("isolated Compose project is not empty")
 
+    def _compose_image_roles(self) -> dict[str, str]:
+        return COMPOSE_IMAGE_ROLES
+
     def _assert_compose_image_graph(self) -> None:
         assert self.bundle is not None
         candidate = _read_canonical_document(
@@ -2085,12 +2089,12 @@ class SparkLifecycle:
                 image, self.arguments.channel
             ):
                 raise LifecycleError("base Compose image does not follow its channel")
-        for role, service in COMPOSE_IMAGE_ROLES.items():
+        for role, service in self._compose_image_roles().items():
             configured_service = services.get(service)
             expected_image = str(images.get(role)).split("@", 1)[0].rsplit(":", 1)[
                 0
             ] + (":dev" if self.arguments.channel == "dev" else ":latest")
-            if os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+            if role == "ca" or os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
                 expected_image = str(images.get(role))
             if (
                 not isinstance(configured_service, dict)
@@ -2135,7 +2139,7 @@ class SparkLifecycle:
             "candidate release object",
         )
         images = _object(candidate.get("images"), "candidate image graph")
-        for role, service in COMPOSE_IMAGE_ROLES.items():
+        for role, service in self._compose_image_roles().items():
             if service not in LOCAL_CONTROLLER_SERVICES:
                 continue
             container = self._run_command(
@@ -3574,8 +3578,10 @@ class SparkLifecycle:
                 evidence = {
                     "state": typed.state,
                     "attempt": typed.attempt,
-                    "progress": typed.progress.model_dump(
-                        mode="json", exclude_none=True
+                    "progress": (
+                        None
+                        if typed.progress is None
+                        else typed.progress.model_dump(mode="json", exclude_none=True)
                     ),
                     "failure": (
                         None

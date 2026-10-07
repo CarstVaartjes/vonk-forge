@@ -14,6 +14,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 
+from .ca_issuance_contract import CertificateIssuanceBinding
+
 _PROVIDER_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 
 
@@ -35,8 +37,36 @@ class CertificateAuthority(ABC):
     """Stable CA provider boundary; Smallstep can implement this interface."""
 
     @abstractmethod
+    def prepare_request(
+        self,
+        node_id: str,
+        csr_pem: bytes,
+        now: datetime,
+        *,
+        purpose: str,
+        source_serial: str | None,
+        generation: int,
+    ) -> CertificateIssuanceBinding:
+        """Bind one effect before committing intent and contacting the provider."""
+
+    @abstractmethod
+    def observe_node(
+        self,
+        csr_pem: bytes,
+        now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
+    ) -> IssuedCertificate | None:
+        """Read exact journal evidence; None means authenticated journal absence."""
+
+    @abstractmethod
     def issue_node(
-        self, node_id: str, csr_pem: bytes, now: datetime
+        self,
+        node_id: str,
+        csr_pem: bytes,
+        now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         """Issue a client certificate that represents exactly one node."""
 
@@ -47,7 +77,7 @@ class CertificateAuthority(ABC):
         csr_pem: bytes,
         now: datetime,
         *,
-        request_id: str,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         """Rotate a node certificate after its authenticated renewal request."""
 

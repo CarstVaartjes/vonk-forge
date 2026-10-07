@@ -27,7 +27,12 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
+from .agent_upgrade_contract import (
+    AgentUpgradeRolloutPayload,
+    AgentUpgradeRolloutResult,
+)
 from .artifact_job_evidence import ArtifactJobResultEvidence
+from .ca_issuance_contract import CertificateIssuanceBinding
 from .catalog_revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -58,8 +63,6 @@ from .fleet_profile_contract import (
     LabelValue,
 )
 from .job_documents import (
-    AgentUpgradeRolloutPayload,
-    AgentUpgradeRolloutResult,
     AvailabilityJobPayload,
     AvailabilityJobResult,
     DistributionJobPayload,
@@ -113,6 +116,13 @@ from .stored_json import bind
 ProfileLabels = Annotated[dict[LabelName, LabelValue], Field(max_length=16)]
 
 bind("jobs", "targets", list[str])
+bind("agent_enrollments", "provider_request", CertificateIssuanceBinding, nullable=True)
+bind(
+    "agent_certificate_rotations",
+    "provider_request",
+    CertificateIssuanceBinding,
+    nullable=True,
+)
 bind("agent_node_profiles", "labels", ProfileLabels)
 bind("fleet_profiles", "labels", ProfileLabels)
 bind("node_inventory_snapshots", "capabilities", list[Capability])

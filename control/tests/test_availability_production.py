@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentFailureResult
+from vonk_agent_protocol import AgentFailureResult, canonical_message
 from vonk_control import availability_production
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
@@ -49,6 +49,7 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_image_availability_api import install_recipe_operator_routes
+from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.revision_images import revision_images
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -60,6 +61,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 from .runtime_image_fixtures import place_test_image
 from .test_recipe_builds import _write_controller_build_receipt
 from .test_recipe_builds import setup as _build_setup
+from .test_recipe_image_availability import _typed_availability_payload
 
 
 class _Service(RecipeImageAvailabilityService):
@@ -548,15 +550,18 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
                 authority_revision="revision-builder",
                 targets=["revision-builder"],
                 payload_digest="a" * 64,
-                payload={
-                    "recipe_revision_id": "revision-builder",
-                    "runtime": {
+                payload=_typed_availability_payload(
+                    {
                         "recipe_revision_id": "revision-builder",
-                        "input_intent_sha256": "a" * 64,
+                        "runtime": {
+                            "recipe_revision_id": "revision-builder",
+                            "input_intent_sha256": "a" * 64,
+                        },
+                        "build_input_sha256": None,
+                        "claim_until": (now - timedelta(seconds=1)).isoformat(),
                     },
-                    "build_input_sha256": None,
-                    "claim_until": (now - timedelta(seconds=1)).isoformat(),
-                },
+                    recipe,
+                ),
                 result=None,
                 current_attempt=1,
                 created_at=now,
@@ -653,7 +658,12 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     else:
         result = execute()
         assert not isinstance(result, BuildUnsettled)
-        assert result["build_input_sha256"] == "b" * 64
+        assert (
+            AvailabilityBuildReceipt.model_validate_json(
+                canonical_message(result)
+            ).build_input_sha256
+            == "b" * 64
+        )
     assert builds.plan_calls == 1
     production.close()
 
@@ -685,11 +695,14 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
             authority_revision="revision-builder",
             targets=["revision-builder"],
             payload_digest="a" * 64,
-            payload={
-                "recipe_revision_id": "revision-builder",
-                "build_input_sha256": None,
-                **payload,
-            },
+            payload=_typed_availability_payload(
+                {
+                    "recipe_revision_id": "revision-builder",
+                    "build_input_sha256": None,
+                    **payload,
+                },
+                recipe,
+            ),
             result=None,
             current_attempt=1,
             created_at=now,
@@ -805,7 +818,12 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
         busy.payload = dict(busy.payload) | {"image_result": {"done": True}}
     settled = execute()
     assert not isinstance(settled, BuildUnsettled)
-    assert settled["builder_node_id"] == node_id
+    assert (
+        AvailabilityBuildReceipt.model_validate_json(
+            canonical_message(settled)
+        ).builder_node_id
+        == node_id
+    )
     production.close()
 
 
@@ -868,11 +886,14 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
             authority_revision="revision-builder",
             targets=["revision-builder"],
             payload_digest="a" * 64,
-            payload={
-                "recipe_revision_id": "revision-builder",
-                "build_input_sha256": None,
-                **payload,
-            },
+            payload=_typed_availability_payload(
+                {
+                    "recipe_revision_id": "revision-builder",
+                    "build_input_sha256": None,
+                    **payload,
+                },
+                recipe,
+            ),
             result=None,
             current_attempt=1,
             created_at=now,
@@ -981,7 +1002,12 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
     if prebuilt:
         settled = execute()
         assert not isinstance(settled, BuildUnsettled)
-        assert settled["builder_node_id"] == node_id
+        assert (
+            AvailabilityBuildReceipt.model_validate_json(
+                canonical_message(settled)
+            ).builder_node_id
+            == node_id
+        )
         with sessions() as session:
             waiting = session.get(Job, waiting_id)
             assert waiting is not None
@@ -1022,11 +1048,14 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
             authority_revision="revision-builder",
             targets=["revision-builder"],
             payload_digest="a" * 64,
-            payload={
-                "recipe_revision_id": "revision-builder",
-                "build_input_sha256": None,
-                **payload,
-            },
+            payload=_typed_availability_payload(
+                {
+                    "recipe_revision_id": "revision-builder",
+                    "build_input_sha256": None,
+                    **payload,
+                },
+                recipe,
+            ),
             result=None,
             current_attempt=1,
             created_at=now,
@@ -1148,7 +1177,12 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
         progress=lambda _progress: None,
     )
     assert not isinstance(result, BuildUnsettled)
-    assert result["builder_node_id"] == node_id
+    assert (
+        AvailabilityBuildReceipt.model_validate_json(
+            canonical_message(result)
+        ).builder_node_id
+        == node_id
+    )
     production.close()
 
 
@@ -1462,15 +1496,18 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
                 authority_revision="revision-builder",
                 targets=["revision-builder"],
                 payload_digest="a" * 64,
-                payload={
-                    "recipe_revision_id": "revision-builder",
-                    "runtime": {
+                payload=_typed_availability_payload(
+                    {
                         "recipe_revision_id": "revision-builder",
-                        "builder_node_id": "builder-node",
+                        "runtime": {
+                            "recipe_revision_id": "revision-builder",
+                            "builder_node_id": "builder-node",
+                        },
+                        "build_input_sha256": "b" * 64,
+                        "claim_until": (now - timedelta(seconds=1)).isoformat(),
                     },
-                    "build_input_sha256": "b" * 64,
-                    "claim_until": (now - timedelta(seconds=1)).isoformat(),
-                },
+                    recipe,
+                ),
                 current_attempt=1,
                 created_at=now,
                 updated_at=now,
@@ -1557,14 +1594,17 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                     authority_revision="revision-builder",
                     targets=["revision-builder"],
                     payload_digest="a" * 64,
-                    payload={
-                        "recipe_revision_id": "revision-builder",
-                        "runtime": {
+                    payload=_typed_availability_payload(
+                        {
                             "recipe_revision_id": "revision-builder",
-                            "input_intent_sha256": "a" * 64,
+                            "runtime": {
+                                "recipe_revision_id": "revision-builder",
+                                "input_intent_sha256": "a" * 64,
+                            },
+                            "build_input_sha256": None,
                         },
-                        "build_input_sha256": None,
-                    },
+                        recipe,
+                    ),
                     result=None,
                     current_attempt=0,
                     created_at=now,
@@ -1710,7 +1750,9 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
     selected = {
-        result["builder_node_id"]
+        AvailabilityBuildReceipt.model_validate_json(
+            canonical_message(result)
+        ).builder_node_id
         for result in results
         if not isinstance(result, BuildUnsettled)
     }

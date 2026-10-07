@@ -1,0 +1,9 @@
+{
+  "upstream_commit": "6e8ec61405239cf3f37b2bbf260a587b7d2e4e31",
+  "source_sha256": {
+    "authority/tls.go": "cb114d64becf2c3045e5b56c9f11d3ee375a5dfbf5c8e705f3d896c5f3ad189e",
+    "cas/apiv1/services.go": "c255b10e63cd2f1847b1b2e7f71c1e4f4c9df62115ca4214311683ba8788d66c"
+  },
+  "patch_sha256": "e7e52cff2f89b2aca48a780c50829cb692d783c520b7971d663eee1fd72aa680",
+  "purpose": "Preserve exact issuance context through Authority signing and distinguish internally generated CA TLS issuance. Connected execution is verified by hosted CA proof."
+}

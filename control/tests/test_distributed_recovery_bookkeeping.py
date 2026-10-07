@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import logging
 from pathlib import Path
 from typing import Any, cast
@@ -14,9 +13,12 @@ from vonk_control.distributed_recovery import (
     _accepted_start_authority,
     _decode_phases,
     _enqueue_recovery_stop,
+    _RecoveryAuthority,
 )
+from vonk_control.job_documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
 from vonk_control.models import Job, RecipeRun
+from vonk_control.strict_json import read_stored_model
 
 from .test_recovery_start_wire import _queued_recovery_restart
 
@@ -85,30 +87,29 @@ def test_a_repeated_recovery_stop_request_is_answered_with_the_queued_job(
             )
         )
         assert run is not None and stop is not None
-        payload: dict[str, Any] = dict(stop.payload)
-        marker: dict[str, Any] = payload["recovery"]
-        start_phases = _decode_phases(marker["start_phases"])
+        payload = read_stored_model(RecipeStopParent, stop.payload, from_json=True)
+        marker = payload.recovery
+        assert marker is not None and payload.phases is not None
+        start_phases = _decode_phases(marker.start_phases)
         assert start_phases is not None
-        stop_phases = [
-            [(item["node_id"], item["payload"]) for item in group]
-            for group in payload["phases"]
-        ]
+        stop_phases = tuple(
+            tuple((item.node_id, item.payload) for item in group)
+            for group in payload.phases
+        )
         before = session.scalar(select(func.count()).select_from(Job))
         answer = _enqueue_recovery_stop(
             session,
             cast(Any, None),
             run,
-            {
-                "stop_phases": stop_phases,
-                "start_phases": [
-                    [(node_id, dict(payload)) for node_id, payload in group]
-                    for group in start_phases
-                ],
-                "recipe_content_sha256": hashlib.sha256(b"x").hexdigest(),
-                "deadline": marker["deadline"],
-                "workload_intent_ordinal": payload["workload_intent_ordinal"],
-            },
-            failed_rank=marker["failed_rank"],
+            _RecoveryAuthority(
+                stop_phases=stop_phases,
+                start_phases=start_phases,
+                recipe_content_sha256="a" * 64,
+                deadline=marker.deadline,
+                workload_intent_ordinal=payload.workload_intent_ordinal,
+                failed_rank=marker.failed_rank,
+            ),
+            failed_rank=marker.failed_rank,
             now=run.updated_at,
         )
         assert isinstance(answer, Job) and answer.id == stop.id
@@ -117,7 +118,7 @@ def test_a_repeated_recovery_stop_request_is_answered_with_the_queued_job(
 
 def test_damaged_stored_phases_decode_to_nothing_instead_of_raising() -> None:
     node_payload = {"node_id": "n", "payload": {}}
-    assert _decode_phases([[node_payload]]) is not None
+    assert _decode_phases(cast(Any, [[node_payload]])) is None
     for damaged in (
         None,
         [],
@@ -126,4 +127,4 @@ def test_damaged_stored_phases_decode_to_nothing_instead_of_raising() -> None:
         [[{"node_id": 1, "payload": {}}]],
         [[{**node_payload, "extra": 1}]],
     ):
-        assert _decode_phases(damaged) is None
+        assert _decode_phases(cast(Any, damaged)) is None
