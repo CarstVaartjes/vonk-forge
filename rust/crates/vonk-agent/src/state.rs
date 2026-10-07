@@ -188,9 +188,16 @@ impl StateStore {
         if value.as_ref().is_some_and(|value| value.len() > 16 * 1024) {
             return Err(StateError::Identity);
         }
-        value
+        let checkpoint: Option<crate::oci::RecipeRunObservationCheckpoint> = value
             .map(|value| parse_strict(value.as_bytes()).map_err(StateError::from))
-            .transpose()
+            .transpose()?;
+        if let Some(checkpoint) = &checkpoint {
+            // The canonical formatted string retains the old nanosecond bytes;
+            // native cutoff arithmetic still requires a real aware timestamp.
+            DateTime::parse_from_rfc3339(&checkpoint.started_at)
+                .map_err(|_| StateError::Identity)?;
+        }
+        Ok(checkpoint)
     }
 
     pub fn save_observation_checkpoint(
@@ -199,6 +206,8 @@ impl StateStore {
     ) -> Result<(), StateError> {
         match checkpoint {
             Some(checkpoint) => {
+                DateTime::parse_from_rfc3339(&checkpoint.started_at)
+                    .map_err(|_| StateError::Identity)?;
                 let body = canonical_json(checkpoint)?;
                 if body.len() > 16 * 1024 {
                     return Err(StateError::Identity);

@@ -7,9 +7,10 @@ must still be checked against actual native directory metadata on restart.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 
-from pydantic import AwareDatetime, Field
+from pydantic import Field, field_validator
 
 from .wire_model import WireModel
 
@@ -47,7 +48,16 @@ class RecipeRunObservationCheckpoint(WireModel):
     root: str
     runs_stamp: RecipeRunObservationDirectoryStamp
     metadata_stamp: RecipeRunObservationDirectoryStamp | None
-    started_at: AwareDatetime
+    started_at: str = Field(json_schema_extra={"format": "date-time"})
     witness: RecipeRunObservationCursorWitness | None
     had_plans: bool
     had_failures: bool
+
+    @field_validator("started_at")
+    @classmethod
+    def aware_cutoff_without_normalization(cls, value: str) -> str:
+        # Validation may inspect a timestamp, but this retained record owns the
+        # original nanosecond lexeme. Returning a datetime would lose precision.
+        if datetime.fromisoformat(value).tzinfo is None:
+            raise ValueError("observation cutoff must include its timezone")
+        return value

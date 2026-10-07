@@ -645,11 +645,16 @@ fn legacy_checkpoint_json_reopens_without_rewrite_and_resumes_native_scan() {
     assert!(!first.complete);
     assert!(!first.plans.is_empty());
     assert!(first.failures.is_empty());
-    let checkpoint = first.checkpoint.as_ref().unwrap();
+    let mut checkpoint = first.checkpoint.clone().unwrap();
     assert!(checkpoint.witness.is_some());
+    // This exact nine-digit UTC spelling was emitted by the preceding native
+    // chrono owner; its final 789ns must survive the canonical reader.
+    checkpoint.started_at = "2026-10-07T00:00:00.123456789Z".to_owned();
     let database = root.path().join("agent-state.sqlite");
     let mut state = StateStore::open(&database, "observation-test-node").unwrap();
-    state.save_observation_checkpoint(Some(checkpoint)).unwrap();
+    state
+        .save_observation_checkpoint(Some(&checkpoint))
+        .unwrap();
     drop(state);
 
     // This fixture uses the actual native producer's record, with the spelling
@@ -663,12 +668,10 @@ fn legacy_checkpoint_json_reopens_without_rewrite_and_resumes_native_scan() {
             |row| row.get(0),
         )
         .unwrap();
-    let mut legacy: Value = serde_json::from_str(&stored).unwrap();
-    legacy["started_at"] = json!(
-        checkpoint
-            .started_at
-            .with_timezone(&chrono::Utc)
-            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+    let legacy: Value = serde_json::from_str(&stored).unwrap();
+    assert_eq!(
+        legacy["started_at"],
+        json!("2026-10-07T00:00:00.123456789Z")
     );
     assert!(legacy.as_object().unwrap().contains_key("metadata_stamp"));
     assert!(legacy.as_object().unwrap().contains_key("witness"));
@@ -684,7 +687,7 @@ fn legacy_checkpoint_json_reopens_without_rewrite_and_resumes_native_scan() {
 
     let mut state = StateStore::open(&database, "observation-test-node").unwrap();
     let reopened = state.observation_checkpoint().unwrap().unwrap();
-    assert_eq!(&reopened, checkpoint);
+    assert_eq!(reopened, checkpoint);
     let connection = rusqlite::Connection::open(&database).unwrap();
     let unchanged: String = connection
         .query_row(

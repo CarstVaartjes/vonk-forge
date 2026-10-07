@@ -1262,12 +1262,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 root: runs.to_str().ok_or(OciError::Artifact)?.to_owned(),
                 runs_stamp: stamp.clone(),
                 metadata_stamp: metadata_stamp.clone(),
-                started_at: observed_at.fixed_offset(),
+                started_at: observed_at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
                 witness: None,
                 had_plans: false,
                 had_failures: checkpoint.is_some(),
             },
         };
+        let cutoff = chrono::DateTime::parse_from_rfc3339(&progress.started_at)
+            .map_err(|_| OciError::Artifact)?
+            .with_timezone(&chrono::Utc);
         progress.had_failures |=
             progress.runs_stamp != stamp || progress.metadata_stamp != metadata_stamp;
         if let Some(witness) = &progress.witness {
@@ -1349,12 +1352,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let empty_snapshot_safe = complete
             && !progress.had_plans
             && !progress.had_failures
-            && observed_at - progress.started_at <= MAX_EMPTY_SCAN_AGE;
+            && observed_at - cutoff <= MAX_EMPTY_SCAN_AGE;
         Ok(RecipeRunInspectionPage {
             plans,
             failures,
             observed_at: if empty_snapshot_safe {
-                progress.started_at.with_timezone(&chrono::Utc)
+                cutoff
             } else {
                 observed_at
             },
