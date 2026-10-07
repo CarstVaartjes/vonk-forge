@@ -199,7 +199,7 @@ def test_certificate_rotation_requires_explicit_node_identity(
         body["node_id"] = None
     response = client.post(
         path,
-        headers=agent_headers(NODE_A, "101"),
+        headers=agent_headers(NODE_A, "serial-a"),
         json=body,
     )
     assert response.status_code == 422
