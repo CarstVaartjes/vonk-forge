@@ -122,14 +122,22 @@ def test_authenticated_contract_complete_membership_fault_recovery(
         )
     assert read()["worker_compatibility"] == "compatible"
     worker_identity[0] = RuntimeBuildIdentity("e" * 40, "c" * 64, "d" * 64)
-    recorders[-1].completed_loop()
+    mixed_process = WorkerHeartbeatRecorder(
+        sessions, process_instance_id=f"{257:064x}", clock=lambda: clock[0]
+    )
+    mixed_process.completed_loop()
     mixed = read()
     assert mixed["worker_compatibility"] == "unknown"
     assert mixed["worker_issue"] == "worker-source-mixed"
     assert mixed["worker_membership_sha256"] != complete["worker_membership_sha256"]
-    worker_identity[0] = RuntimeBuildIdentity("b" * 40, "c" * 64, "d" * 64)
-    recorders[-1].completed_loop()
-    assert read()["worker_compatibility"] == "compatible"
+    # An existing process identity is immutable. Let the foreign process cease
+    # renewing while the original compatible processes keep completing loops.
+    clock[0] += timedelta(seconds=31)
+    for recorder in recorders:
+        recorder.completed_loop()
+    repaired = read()
+    assert repaired["worker_compatibility"] == "compatible"
+    assert repaired["worker_count"] == 257
     clock[0] += timedelta(seconds=31)
     expired = read()
     assert expired["worker_compatibility"] == "unknown"
