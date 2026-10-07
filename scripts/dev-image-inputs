@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Bind reusable images to their complete, isolated Git build inputs."""
+
 from __future__ import annotations
 
 import hashlib
@@ -9,6 +10,13 @@ import sys
 from pathlib import Path
 
 CONTEXTS = {
+    "ca": (
+        "deploy/compose/step-ca/source.lock.json",
+        "scripts/prepare-journal-ca.py",
+        "deploy/compose/step-ca/Dockerfile",
+        "deploy/compose/step-ca/service",
+        "deploy/compose/step-ca/upstream/context-signing.patch",
+    ),
     "hermes": ("deploy/compose/hermes-agent",),
     "litellm": (
         "deploy/compose/litellm",
@@ -22,6 +30,7 @@ POLICY = (
     ".github/workflows/dev-images.yml",
     "scripts/dev-image-inputs",
     "scripts/reuse-development-image",
+    ".dockerignore",
     "scripts/accept-development-image-archive",
     "scripts/dev-image-acceptance-receipt",
     "scripts/verify-published-image",
@@ -90,7 +99,9 @@ def main() -> int:
             case ["prepare", role, commit, destination]:
                 prepare(role, commit, Path(destination))
             case _:
-                raise ValueError("usage: dev-image-inputs key ROLE COMMIT | matches ROLE BUILT ACCEPTED | prepare ROLE COMMIT DESTINATION")
+                raise ValueError(
+                    "usage: dev-image-inputs key ROLE COMMIT | matches ROLE BUILT ACCEPTED | prepare ROLE COMMIT DESTINATION"
+                )
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"dev-image-inputs: {error}", file=sys.stderr)
         return 1

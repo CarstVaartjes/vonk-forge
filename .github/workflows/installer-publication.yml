@@ -524,7 +524,8 @@ jobs:
           worker_image=$(image_value worker)
           hermes_image=$(image_value hermes)
           litellm_image=$(image_value litellm)
-          for image in "$api_image" "$worker_image" "$hermes_image" "$litellm_image"; do
+          ca_image=$(image_value ca)
+          for image in "$api_image" "$worker_image" "$hermes_image" "$litellm_image" "$ca_image"; do
             [[ "$image" =~ ^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$ ]]
             [[ "$image" != *:latest@* && "$image" != *:dev@* && "$image" != *:main@* && "$image" != *:edge@* ]]
           done
@@ -548,6 +549,7 @@ jobs:
             --worker-image "$worker_image"
             --hermes-image "$hermes_image"
             --litellm-image "$litellm_image"
+            --ca-image "$ca_image"
             --nas-payload "$payload"
             --cli-wheel "${cli_wheels[0]}"
             --nas-setup "linux-amd64=$RUNNER_TEMP/setups/linux-amd64/vonk-nas-setup"

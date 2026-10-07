@@ -6,7 +6,6 @@
     "postgres": "postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722",
     "prometheus": "prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e",
     "registry": "registry:3.1.2@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8",
-    "step-ca": "smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270",
     "tailscale": "tailscale/tailscale:v1.102.5@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065"
   },
   "build_bases": {
@@ -14,7 +13,9 @@
     "litellm": "ghcr.io/berriai/litellm:v1.103.0@sha256:bd089afdcd35b894b14a93f9743cdc8b591f82da1a38dd43a010a7b0c9de5fd7",
     "node": "node:26-trixie-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1",
     "python": "python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d",
-    "skopeo": "quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5"
+    "skopeo": "quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5",
+    "step-ca": "smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270",
+    "ca-go": "golang:1.25.8-bookworm@sha256:4557cf171e3cdf5053a298d5171b1a5f5734d920260c25f22c79e94760eb2084"
   },
   "release_images": [
     {
@@ -46,6 +47,14 @@
       "dockerfile": "deploy/compose/litellm/Dockerfile",
       "environment": "LITELLM_IMAGE",
       "package": "vonk-forge-litellm",
+      "required": true,
+      "target": "runtime"
+    },
+    {
+      "context": ".",
+      "dockerfile": "deploy/compose/step-ca/Dockerfile",
+      "environment": "STEP_CA_IMAGE",
+      "package": "vonk-forge-ca",
       "required": true,
       "target": "runtime"
     }

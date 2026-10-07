@@ -18,6 +18,7 @@ RENDERER = ROOT / "scripts/render-production-compose"
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 DIGEST = "a" * 64
 IMAGES = {
+    "ca_image": "ghcr.io/carstvaartjes/vonk-forge-ca:v1.2.3@sha256:" + DIGEST,
     "api_image": "ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3",
     "worker_image": "ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3",
     "hermes_image": "ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3",
@@ -258,7 +259,10 @@ def test_installer_compose_follows_the_channel_and_keeps_third_party_pins(
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
     for service in services.values():
         image = service["image"]
-        if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
+        if image.startswith("ghcr.io/carstvaartjes/vonk-forge-ca:"):
+            assert image.endswith("@sha256:" + DIGEST)
+            assert service["entrypoint"] == ["vonk-step-ca"]
+        elif image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
             assert image.endswith(":dev" if channel == "dev" else ":latest")
             assert service["pull_policy"] == "always"
         else:

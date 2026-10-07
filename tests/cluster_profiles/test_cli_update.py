@@ -128,7 +128,7 @@ def _signed_publication(
         "source_sha": source_sha,
         "images": {
             name: "ghcr.io/vonk/" + name + ":v1@sha256:" + "a" * 64
-            for name in ("api", "worker", "hermes", "litellm")
+            for name in ("api", "worker", "hermes", "litellm", "ca")
         },
         "artifacts": artifacts,
         "bootstraps": {"nas": dict(descriptor), "spark": dict(descriptor)},
