@@ -240,8 +240,9 @@ export class ApiClient implements ControlApi {
     const headers = new Headers({Accept: "application/json"});
     headers.set("X-CSRF-Token", await this.requiredCsrfToken());
     const response = await fetch("/api/auth/logout", {method: "POST", headers, credentials: "same-origin"});
+    try { await readControlResponse(response, "POST", "/api/auth/logout"); }
+    catch (cause) { this.requireAuthentication(response, cause); throw cause; }
     this.requireAuthentication(response);
-    await readControlResponse(response, "POST", "/api/auth/logout");
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`, requestIdOf(response));
   }
 
@@ -249,9 +250,11 @@ export class ApiClient implements ControlApi {
     const headers = new Headers({Accept: "text/plain"});
     headers.set("X-CSRF-Token", await this.requiredCsrfToken());
     const response = await fetch("/api/auth/cli-token", {method: "POST", headers, credentials: "same-origin"});
-    this.requireAuthentication(response);
     if (!response.ok) {
-      const problem = await readControlResponse(response, "POST", "/api/auth/cli-token");
+      let problem: unknown;
+      try { problem = await readControlResponse(response, "POST", "/api/auth/cli-token"); }
+      catch (cause) { this.requireAuthentication(response, cause); throw cause; }
+      this.requireAuthentication(response);
       const detail = typeof problem === "object" && problem !== null && "detail" in problem
         ? formatApiDetail(problem.detail)
         : "request failed";
