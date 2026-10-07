@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
 
 from . import agent_operation_states
 from .admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
+from .content_identity import same_image
 from .job_documents import RecipeInstallParent
 from .models import (
     AgentCertificate,
@@ -326,13 +327,9 @@ def _prove(
                 or reference.plan_digest != plan.plan_digest
                 or reference.phase_index != prior_phase.index
                 or reference.item_index != 0
-                or reference.recipe_revision_id != plan.recipe_revision_id
                 or reference.workload_intent_ordinal != parent.workload_intent_ordinal
                 or reference.profile_application_id != progress.profile_application_id
-                or reference.image_digest != receipt.image_digest
-                or reference.archive_sha256 != receipt.oci_layout_sha256
-                or reference.image_bytes != receipt.image_bytes
-                or reference.build_id != receipt.runtime_image.build_id
+                or not same_image(reference, receipt.runtime_image)
                 or reference.build_input_sha256
                 != receipt.runtime_image.build_input_sha256
                 or (
