@@ -65,10 +65,6 @@ deploy/compose/hermes-agent/*
 !inventory/wheels/
 !inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl
 !inventory/wheels/vonk_forge_public_contracts-2.2.0-py3-none-any.whl
-**/__pycache__/**
-**/*.py[cod]
-**/.dev
-**/.dev/**
 !deploy/compose/step-ca/
 deploy/compose/step-ca/**
 !deploy/compose/step-ca/Dockerfile
@@ -82,6 +78,10 @@ deploy/compose/step-ca/**
 !deploy/compose/step-ca/source.lock.json
 !scripts/prepare-journal-ca.py
 
+**/__pycache__/**
+**/*.py[cod]
+**/.dev
+**/.dev/**
 **/.git
 **/.git/**
 **/.env
