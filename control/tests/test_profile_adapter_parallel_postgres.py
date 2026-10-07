@@ -294,6 +294,9 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     run = started_recipe(
         sessions, lifecycle, installation.owner_id, nodes, request_id=_uuid(18601)
     )
+    # The accepted profile and its native receipt use the same current epoch.
+    # The historical Start was established at the recipe fixture's earlier time.
+    lifecycle._clock = lambda: NOW
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -438,7 +441,7 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     # exact-plan grant before accepting the fenced agent receipt. It does not
     # mark the parent complete through the unfenced fixture projection helper.
     claim, stop_plan, _grant = _issue_exact_stop_grant(
-        sessions, node_id=nodes[0], certificate_serial="serial-0"
+        sessions, node_id=nodes[0], certificate_serial="serial-0", grant_now=NOW
     )
     assert stop_plan.run_id == run.owner_id
     issued = fenced_operation(sessions, claim)
