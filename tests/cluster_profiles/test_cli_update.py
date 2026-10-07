@@ -959,7 +959,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
 
 
 @pytest.mark.linux_only
-@pytest.mark.slow(180)  # Real old/new builds, TLS Controller and offline uv install.
+@pytest.mark.slow(60)  # Real old/new builds, TLS Controller and offline uv install.
 def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     transition_signed_update_tool, monkeypatch
 ) -> None:
