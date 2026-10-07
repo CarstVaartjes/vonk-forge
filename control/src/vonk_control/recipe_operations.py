@@ -9012,6 +9012,8 @@ def _project_recipe_operation_progress(
         }
         for child in children:
             expected = payloads[child.id]
+            if child.kind != job.kind:
+                return None
             try:
                 observed = read_stored_model(
                     type(expected), canonical_message(child.payload), from_json=True
