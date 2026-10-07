@@ -376,12 +376,6 @@
     },
     {
       "path": "control/tests/test_artifact_job_lifecycle.py",
-      "function": "test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_artifact_job_lifecycle.py",
       "function": "test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled",
       "kind": "operator-wait-assertion",
       "count": 1
@@ -2662,6 +2656,30 @@
     }
   ],
   "exceptions": [
+    {
+      "path": "control/tests/test_profile_jobrun_host_grant.py",
+      "function": "test_selected_profile_stop_issues_signed_exact_job_target_grant",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests the actual signed grant for an issued selected-profile exact JobRun target and refusal of a forged target. The Stop remains issued with uncertain work retained; this authority test does not acknowledge the effect, end the lifecycle or claim released capacity."
+    },
+    {
+      "path": "control/tests/test_profile_jobrun_host_wire_bridge.py",
+      "function": "test_selected_profile_job_target_grant_is_accepted_by_rust_helper",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests the native Rust verifier accepting the unchanged signed grant produced for an issued selected-profile exact JobRun Stop. Verification authorizes only that target; it does not execute or acknowledge Stop, end the lifecycle or claim released capacity."
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests that a stored typed lease-expiry failure with no explicit active-scope flag remains unknown and issues only a running exact-target Stop, retaining physical authority until acknowledgement. The fixture deliberately supplies failed stored rows and never proves absence or release; the connected real-producer exact-Stop-to-fresh-admission test separately proves recovery."
+    },
     {
       "path": "control/tests/test_fleet_profile_continuity.py",
       "function": "test_selected_cancel_fences_both_original_and_new_node_ordinals",
