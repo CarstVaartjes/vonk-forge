@@ -164,6 +164,7 @@ export function numericMultiple(value: unknown, divisor: string): boolean {
 export function parseContractJson(text: string): unknown { return parse(text, undefined, {onDuplicateKey: ({newValue}) => newValue}); }
 export interface NormalizationShape {
   type?: string | string[];
+  preserveIntegerFloat?: boolean;
   ref?: string;
   alternatives?: {validate: (value: unknown) => boolean; shape: NormalizationShape}[];
   allOf?: NormalizationShape[];
@@ -190,6 +191,10 @@ export function normalizeValidated(value: unknown, shape: NormalizationShape, de
     if (types.includes("number")) {
       const number = Number(value.value);
       if (!Number.isFinite(number)) throw new Error("Non-finite contract number");
+      if (Number.isInteger(number) && shapes.some(item => item.preserveIntegerFloat)) {
+        const token = Object.is(number, -0) ? "-0.0" : String(number);
+        return new LosslessNumber(/[.eE]/.test(token) ? token : `${token}.0`);
+      }
       return number;
     }
     return materialize(value);

@@ -81,7 +81,10 @@ function shape(schema) {
   if (schema.type) result.type = schema.type;
   if (schema.anyOf || schema.oneOf) result.alternatives = (schema.anyOf ?? schema.oneOf).map(option => {
     const name = `normalize${index++}`; register(option, name);
-    const descriptor = shape(option); normalization[name] = descriptor;
+    const descriptor = shape(option);
+    // Canonical scalar unions distinguish strict integers from IEEE floats.
+    if (option.type === "number" && (schema.anyOf ?? schema.oneOf).some(branch => branch.type === "integer")) descriptor.preserveIntegerFloat = true;
+    normalization[name] = descriptor;
     return {validate: name, shape: descriptor};
   });
   if (schema.allOf) result.allOf = schema.allOf.map(shape);
