@@ -292,6 +292,9 @@ class TerminalHistoryCollector:
                         code=type(error).__name__,
                     )
             self._table_index += 1
+        if time.monotonic() >= deadline:
+            self._due_at = now
+            return +removed
         self._table_index = 0
         removed["route_publications"] += self._publications(cutoff)
         return +removed
