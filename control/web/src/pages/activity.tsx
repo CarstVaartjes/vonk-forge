@@ -1,4 +1,4 @@
-import {compareWire, displayRatio, formatWire, type WireNumber} from "../api/contract-numeric";
+import {addWire, compareWire, displayRatio, formatWire, type WireNumber} from "../api/contract-numeric";
 import {availabilityProgress, LibraryAvailabilityProgress} from "../components/library-availability-progress";
 import {availabilityFailure, LibraryAvailabilityFeedback} from "../components/library-availability-feedback";
 import {LEGACY_WAIT_STATE, LifecycleState} from "../api/vocabulary.generated";
@@ -521,7 +521,7 @@ function CanonicalOperationDetails({api, detail, onUpdate}: {
     {availability
       ? <LibraryAvailabilityFeedback failure={availability}/>
       : detail.failure && <><strong>{failureSummary(detail.failure)}</strong>{"detail" in detail.failure && detail.failure.detail && <p style={{margin: 0}}>{detail.failure.detail}</p>}</>}
-    {detail.evidence_download && <DiagnosticDownload id={detail.id} attempt={formatWire(detail.attempt)}/>}
+    {detail.evidence_download && <DiagnosticDownload id={detail.id} attempt={detail.attempt}/>}
     {detail.progress && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress)}/>}
     <p className="activity-job-attempt" style={{margin: 0}}>Attempt {formatWire(detail.attempt)}{detail.progress?.phase ? ` · ${titleCase(detail.progress.phase)}` : ""}{active ? " · Updates automatically" : ""}</p>
     {(detail.recovery?.uncertain || (detail.failure && "uncertain" in detail.failure && detail.failure.uncertain))
@@ -686,7 +686,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     const alreadyLoaded = canonicalIds.current.has(detail.id);
     canonicalIds.current.add(detail.id);
     setCanonicalCount(canonicalIds.current.size);
-    if (!alreadyLoaded) setCanonicalTotal(current => current + 1);
+    if (!alreadyLoaded) setCanonicalTotal(current => addWire(current, 1));
     setEvents(current => [...(current ?? []).filter(event => !(event.source === "operation" && event.request_id === detail.id)), record].sort(sortActivityByTime));
   }, [targetNames]);
 
