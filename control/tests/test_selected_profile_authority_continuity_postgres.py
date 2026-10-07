@@ -24,7 +24,7 @@ from vonk_agent_protocol.runtime_preflight import (
 )
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.fleet_profile_contract import FleetProfileInput, ProfileReasonCode
+from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     _persisted_profile_progress,
     build_production_fleet_profile_service,
@@ -135,10 +135,10 @@ def _follow_due(sessions, worker, application_id, clock):
 
 
 @pytest.mark.parametrize("authority_change", ["disabled", "demoted"])
-def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_author_returns(
+def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authority(
     postgres_engine, tmp_path, authority_change
 ):
-    """Catches withdrawing A, losing B's receipt, admitting cleanup or changing intent."""
+    """Catches withdrawing A, losing B's receipt or gating cleanup on its author."""
     sessions, lifecycle, _queue, mapping_a, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
     )
@@ -348,7 +348,7 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         assert set(session.scalars(select(AgentOperation.id))) == issued_ids
         serving = session.get(RecipeRun, run_a.owner_id)
         assert serving is not None and serving.state == "running"
-    # The issued exact receipt still belongs to B while new child admission is denied.
+    # The issued exact receipt and subsequent cleanup remain platform-owned.
     jobs.record_result(
         AgentResult(
             fence=stop_claim.fence,
@@ -356,41 +356,9 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
             result=RecipeStopResult(),
         )
     )
-    for _ in range(16):
-        due = _follow_due(sessions, worker, accepted.id, clock)
-        if due is not None:
-            due_checks.append(due)
-        worker.tick()
-        current = profiles.application(accepted.id)
-        if any(
-            b.code == ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE
-            for b in current.blockers
-        ):
-            break
-    assert any(
-        b.code == ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE
-        for b in current.blockers
-    )
-    blocked = _journal(sessions, accepted.id)
-    assert any(c.state == "succeeded" for c in blocked.children)
-    assert blocked.request_id == before.request_id and blocked.queue == before.queue
-    assert _selection(sessions) == selection
-    assert publisher.accepted_run(run_a.owner_id, policy) == accepted_a
-    with sessions() as session:
-        stopped = session.get(RecipeRun, run_b.owner_id)
-        cached = session.get(RecipeInstallation, installed_b.owner_id)
-        assert stopped is not None and stopped.state == "stopped"
-        assert cached is not None and cached.state == "installed"
-        assert set(session.scalars(select(AgentOperation.id))) == issued_ids
-    with sessions.begin() as session:
-        author = session.scalar(select(User).where(User.subject == "admin"))
-        assert author is not None
-        author.disabled_at = None
-        author.role = "administrator"
     preflight_receipts = []
     uninstall_fences = []
-    # The stored retry deadline, not another load or changed plan, resumes cleanup.
-    assert current.next_attempt_at is not None
+    # Cleanup continues from the same accepted receipt without restoring the author.
     for _ in range(16):
         due = _follow_due(sessions, worker, accepted.id, clock)
         if due is not None:
