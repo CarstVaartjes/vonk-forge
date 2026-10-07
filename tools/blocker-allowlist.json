@@ -9,7 +9,29 @@
     ],
     "audited_paths": [
       "control/src/vonk_control/admission_locking.py",
-      "control/src/vonk_control/agent_jobs.py",
+      "control/src/vonk_control/agent_jobs/__init__.py",
+      "control/src/vonk_control/agent_jobs/aggregation.py",
+      "control/src/vonk_control/agent_jobs/claim.py",
+      "control/src/vonk_control/agent_jobs/claim_authority.py",
+      "control/src/vonk_control/agent_jobs/claim_notes.py",
+      "control/src/vonk_control/agent_jobs/claim_reconcile.py",
+      "control/src/vonk_control/agent_jobs/completion.py",
+      "control/src/vonk_control/agent_jobs/contracts.py",
+      "control/src/vonk_control/agent_jobs/endings.py",
+      "control/src/vonk_control/agent_jobs/evidence.py",
+      "control/src/vonk_control/agent_jobs/heartbeat.py",
+      "control/src/vonk_control/agent_jobs/identity.py",
+      "control/src/vonk_control/agent_jobs/orchestration.py",
+      "control/src/vonk_control/agent_jobs/persistence.py",
+      "control/src/vonk_control/agent_jobs/predicates.py",
+      "control/src/vonk_control/agent_jobs/reconcile.py",
+      "control/src/vonk_control/agent_jobs/results.py",
+      "control/src/vonk_control/agent_jobs/retirement.py",
+      "control/src/vonk_control/agent_jobs/retry.py",
+      "control/src/vonk_control/agent_jobs/scope.py",
+      "control/src/vonk_control/agent_jobs/service.py",
+      "control/src/vonk_control/agent_jobs/stored.py",
+      "control/src/vonk_control/agent_jobs/supersession.py",
       "control/src/vonk_control/agent_upgrades.py",
       "control/src/vonk_control/artifact_blob_store.py",
       "control/src/vonk_control/artifact_jobs.py",
@@ -25,8 +47,29 @@
       "control/src/vonk_control/run_switch_operations.py"
     ],
     "guard_paths": [
-      "control/src/vonk_control/lifecycle/",
-      "control/src/vonk_control/agent_jobs.py",
+      "control/src/vonk_control/agent_jobs/__init__.py",
+      "control/src/vonk_control/agent_jobs/aggregation.py",
+      "control/src/vonk_control/agent_jobs/claim.py",
+      "control/src/vonk_control/agent_jobs/claim_authority.py",
+      "control/src/vonk_control/agent_jobs/claim_notes.py",
+      "control/src/vonk_control/agent_jobs/claim_reconcile.py",
+      "control/src/vonk_control/agent_jobs/completion.py",
+      "control/src/vonk_control/agent_jobs/contracts.py",
+      "control/src/vonk_control/agent_jobs/endings.py",
+      "control/src/vonk_control/agent_jobs/evidence.py",
+      "control/src/vonk_control/agent_jobs/heartbeat.py",
+      "control/src/vonk_control/agent_jobs/identity.py",
+      "control/src/vonk_control/agent_jobs/orchestration.py",
+      "control/src/vonk_control/agent_jobs/persistence.py",
+      "control/src/vonk_control/agent_jobs/predicates.py",
+      "control/src/vonk_control/agent_jobs/reconcile.py",
+      "control/src/vonk_control/agent_jobs/results.py",
+      "control/src/vonk_control/agent_jobs/retirement.py",
+      "control/src/vonk_control/agent_jobs/retry.py",
+      "control/src/vonk_control/agent_jobs/scope.py",
+      "control/src/vonk_control/agent_jobs/service.py",
+      "control/src/vonk_control/agent_jobs/stored.py",
+      "control/src/vonk_control/agent_jobs/supersession.py",
       "control/src/vonk_control/agent_upgrades.py",
       "control/src/vonk_control/artifact_blob_store.py",
       "control/src/vonk_control/artifact_jobs.py",
@@ -39,6 +82,7 @@
       "control/src/vonk_control/host_runtime_plan_authority.py",
       "control/src/vonk_control/install_admission.py",
       "control/src/vonk_control/jobs.py",
+      "control/src/vonk_control/lifecycle/",
       "control/src/vonk_control/model_cache.py",
       "control/src/vonk_control/profile_stop_authority.py",
       "control/src/vonk_control/recipe_build_cancellation.py",
@@ -68,24 +112,24 @@
   },
   "retry_loops": [
     {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._sweep_lapsed_attempts",
+      "path": "control/src/vonk_control/agent_jobs/reconcile.py",
+      "function": "_sweep_lapsed_attempts",
       "catches": [
         "AdmissionLockBusy"
       ],
       "reason": "The lapsed-attempt sweep skips a node whose admission lock is busy and the next pass retries it."
     },
     {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.fail",
+      "path": "control/src/vonk_control/agent_jobs/results.py",
+      "function": "fail",
       "catches": [
         "UnknownOutcomeError"
       ],
       "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
     },
     {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.succeed",
+      "path": "control/src/vonk_control/agent_jobs/results.py",
+      "function": "succeed",
       "catches": [
         "UnknownOutcomeError"
       ],
@@ -491,7 +535,7 @@
       "reason": "Unknown abandonment retains the plan, logs its next attempt and continues other plans; the tick re-observes the retained plan after a five second backoff."
     },
     {
-      "path": "control/src/vonk_control/agent_jobs.py",
+      "path": "control/src/vonk_control/agent_jobs/evidence.py",
       "function": "_exact_service_stop_receipt_covers_start",
       "catches": [
         "UnknownOutcomeError"
@@ -522,6 +566,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "One oldest due accepted Stop per worker pass retries its exact durable request. A deferred row retains original bytes, claims and meaningful cause and advances its next-attempt clock, releasing transactions before publication and allowing other due rows to advance."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/reconcile.py",
+      "function": "_sweep_gone_targets",
+      "catches": [
+        "AdmissionLockBusy"
+      ],
+      "reason": "The bounded gone-target sweep releases its transaction on a busy admission lock; the next worker pass rechecks target authority and retries the same order."
     }
   ],
   "call_edges": [
@@ -642,13 +694,13 @@
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: Operator retire request refused because live attempts or leases still hold the work; the operator's request is the thing refused.",
       "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "a-live-attempt-still-holds-its-lease", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "another-attempt-is-already-authorised", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "another-issued-operation-is-still-active", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "its-issued-start-still-holds-an-open-launch-budget", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "its-target-scope-changed", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "job-has-no-parked-operation", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "job-is-not-waiting-for-operator", 1]
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "a-live-attempt-still-holds-its-lease", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "another-attempt-is-already-authorised", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "another-issued-operation-is-still-active", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "its-issued-start-still-holds-an-open-launch-budget", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "its-target-scope-changed", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "job-has-no-parked-operation", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "job-is-not-waiting-for-operator", 1]
       ]
     },
     {
@@ -2578,39 +2630,39 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class AgentConfigurationConflict is of the input-validation error type; class InvalidType is of the input-validation error type; class InvalidValue is of the input-validation error type; class MissingRecord is of the input-validation error type; class StaleAgentRequest is of the input-validation error type.",
       "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-contact-consumer-is-already-configured", 1],
-        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-job-service-has-already-started", 1],
-        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-job-service-has-already-started", 1],
-        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-result-consumer-is-already-configured", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.__init__", "agent-contact-consumer-must-be-callable", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.__init__", "agent-result-consumer-must-be-callable", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.set_contact_consumer", "agent-contact-consumer-must-be-callable", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.set_result_consumer", "agent-result-consumer-must-be-callable", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._finish", "agent-result-does-not-match-requested-completion", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._finish", "operation-failure-evidence-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._reason", "failure-reason-is-required", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._runtime_identity", "agent-runtime-identity-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._runtime_identity", "agent-runtime-identity-is-required", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.assess_superseded_agent_effects_in_session", "workload-observation-scope-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.claim", "node-and-certificate-are-required", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-authority-revision-must-match-its-parent", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-is-not-supported-by-the-control-plane", 2],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-node-must-be-a-parent-target", 2],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-node-must-be-active", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-parent-target-scope-changed", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-workload-intent-was-superseded", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "cannot-enqueue-an-agent-operation-beneath-a-terminal-parent", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "workload-operation-requires-a-bound-intent", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.heartbeat", "lease-must-be-positive", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.record_boundary_refusal", "agent-boundary-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.request_superseded_workload_cancellation_in_session", "workload-cancellation-scope-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "authorize_operator_resume_in_session", "job-has-no-current-authorized-resume-action", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "authorize_operator_resume_in_session", "job-is-not-waiting-for-operator", 1],
-        ["control/src/vonk_control/agent_jobs.py", "MissingRecord", "AgentJobService._aggregate_parent_state", "not-found", 1],
-        ["control/src/vonk_control/agent_jobs.py", "MissingRecord", "AgentJobService.enqueue_in_session", "not-found", 3],
-        ["control/src/vonk_control/agent_jobs.py", "MissingRecord", "retire_exhausted_operations_in_session", "not-found", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentRequest", "AgentJobService.record_late_result", "agent-operation-attempt-is-not-expired", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentRequest", "AgentJobService.record_late_result", "expired-attempt-evidence-changed", 1]
+        ["control/src/vonk_control/agent_jobs/service.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-contact-consumer-is-already-configured", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-job-service-has-already-started", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-job-service-has-already-started", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-result-consumer-is-already-configured", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidType", "AgentJobService.__init__", "agent-contact-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidType", "AgentJobService.__init__", "agent-result-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidType", "AgentJobService.set_contact_consumer", "agent-contact-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidType", "AgentJobService.set_result_consumer", "agent-result-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidValue", "AgentJobService._finish", "agent-result-does-not-match-requested-completion", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidValue", "AgentJobService._finish", "operation-failure-evidence-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs/identity.py", "InvalidValue", "_reason", "failure-reason-is-required", 1],
+        ["control/src/vonk_control/agent_jobs/identity.py", "InvalidValue", "_runtime_identity", "agent-runtime-identity-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs/identity.py", "InvalidValue", "_runtime_identity", "agent-runtime-identity-is-required", 1],
+        ["control/src/vonk_control/agent_jobs/supersession.py", "InvalidValue", "assess_superseded_agent_effects_in_session", "workload-observation-scope-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs/claim_notes.py", "InvalidValue", "claim_next_operation", "node-and-certificate-are-required", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-authority-revision-must-match-its-parent", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-is-not-supported-by-the-control-plane", 2],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-node-must-be-a-parent-target", 2],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-node-must-be-active", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-parent-target-scope-changed", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-workload-intent-was-superseded", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "cannot-enqueue-an-agent-operation-beneath-a-terminal-parent", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "workload-operation-requires-a-bound-intent", 1],
+        ["control/src/vonk_control/agent_jobs/heartbeat.py", "InvalidValue", "heartbeat", "lease-must-be-positive", 1],
+        ["control/src/vonk_control/agent_jobs/claim_notes.py", "InvalidValue", "record_boundary_refusal", "agent-boundary-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs/supersession.py", "InvalidValue", "request_superseded_workload_cancellation_in_session", "workload-cancellation-scope-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "InvalidValue", "authorize_operator_resume_in_session", "job-has-no-current-authorized-resume-action", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "InvalidValue", "authorize_operator_resume_in_session", "job-is-not-waiting-for-operator", 1],
+        ["control/src/vonk_control/agent_jobs/aggregation.py", "MissingRecord", "_aggregate_parent_state", "not-found", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "MissingRecord", "enqueue_in_session", "not-found", 3],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "MissingRecord", "retire_exhausted_operations_in_session", "not-found", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentRequest", "record_late_result", "agent-operation-attempt-is-not-expired", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentRequest", "record_late_result", "expired-attempt-evidence-changed", 1]
       ]
     },
     {
@@ -2618,13 +2670,13 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class AgentContactIdentityMismatch is of the security-edge error type; class StaleAgentFence is of the security-edge error type.",
       "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "AgentContactIdentityMismatch", "AgentJobService._consume_contact", "agent-contact-source-does-not-match-its-locked-identity", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService._active", "agent-operation-lease-certificate-or-fence-is-stale", 7],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService._fence_token", "agent-operation-lease-certificate-or-fence-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-certificate-is-no-longer-active", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-operation-authority-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-operation-authority-or-expired-attempt-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-operation-lease-certificate-or-fence-is-stale", 1]
+        ["control/src/vonk_control/agent_jobs/identity.py", "AgentContactIdentityMismatch", "_consume_contact", "agent-contact-source-does-not-match-its-locked-identity", 1],
+        ["control/src/vonk_control/agent_jobs/identity.py", "StaleAgentFence", "_active", "agent-operation-lease-certificate-or-fence-is-stale", 7],
+        ["control/src/vonk_control/agent_jobs/identity.py", "StaleAgentFence", "_fence_token", "agent-operation-lease-certificate-or-fence-is-stale", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentFence", "record_late_result", "agent-certificate-is-no-longer-active", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentFence", "record_late_result", "agent-operation-authority-is-stale", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentFence", "record_late_result", "agent-operation-authority-or-expired-attempt-is-stale", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentFence", "record_late_result", "agent-operation-lease-certificate-or-fence-is-stale", 1]
       ]
     },
     {
@@ -3341,16 +3393,6 @@
       "sites": [
         ["control/src/vonk_control/db.py", "_DatabaseStartupContention", "initialize_database.initialize_once", "controller-schema-owner-is-busy-startup-will-retry", 1],
         ["control/src/vonk_control/db.py", "_DatabaseStartupContention", "initialize_database.initialize_once", "controller-schema-relation-is-busy-startup-will-retry", 2]
-      ]
-    },
-    {
-      "family": "agent_jobs.proven-retry",
-      "category": "already-retried",
-      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
-      "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService._finish", "superseded-operation-has-no-completion-authority", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-expired", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-is-invalid", 1]
       ]
     },
     {

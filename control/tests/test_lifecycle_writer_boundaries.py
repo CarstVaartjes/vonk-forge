@@ -31,7 +31,7 @@ from .lifecycle_writer_boundaries import (
 #: The repository parse is shared setup, not the first test's own time.
 pytestmark = pytest.mark.usefixtures("parsed_repository")
 
-OWNER = "control/src/vonk_control/agent_jobs.py"
+OWNER = "control/src/vonk_control/agent_jobs/completion.py"
 OTHER = "control/src/vonk_control/sample.py"
 
 
