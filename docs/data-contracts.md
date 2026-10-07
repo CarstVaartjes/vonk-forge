@@ -170,6 +170,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/recipe_operations.py` | agent-protocol | 10 | Closed declarative protocol for digest-bound recipe lifecycle work. |
 | `agent_protocol/src/vonk_agent_protocol/route_activation.py` | agent-protocol | 2 | Canonical schema-2 activation receipt shared with the LiteLLM supervisor. |
 | `agent_protocol/src/vonk_agent_protocol/runtime_preflight.py` | agent-protocol | 3 | Current recipe runtime preflight wire contract; no raw host diagnostics. |
+| `agent_protocol/src/vonk_agent_protocol/runtime_scan.py` | agent-protocol | 3 | Node-local durable traversal checkpoint for managed run observation; native filesystem witnesses remain authoritative. |
 | `agent_protocol/src/vonk_agent_protocol/source_bundles.py` | agent-protocol | 3 | Canonical source-bundle digest document and verified storage metadata. |
 | `agent_protocol/src/vonk_agent_protocol/telemetry.py` | agent-protocol | 3 | The authenticated agent telemetry wire contract: a flat sample of host scalars. |
 | `agent_protocol/src/vonk_agent_protocol/wire_model.py` | agent-protocol | 5 | Shared strict JSON boundary helpers for Pydantic wire models. |

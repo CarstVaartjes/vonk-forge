@@ -15,6 +15,8 @@ use vonk_agent_protocol::generated::FailureStage;
 use vonk_agent_protocol::generated::{
     InstallationMetadataEntry, InstallationMetadataReceipt, InstallationReconciliationCheckpoint,
     InstallationReconciliationCheckpointState as InstallationReconciliationState,
+    RecipeRunObservationCursorWitness as ObservationCursorWitness,
+    RecipeRunObservationDirectoryStamp as ObservationDirectoryStamp,
     RunLifecycleRecord as RunLifecycle,
 };
 use vonk_agent_protocol::{
@@ -24,6 +26,8 @@ use vonk_agent_protocol::{
         CompiledOciPaths, start_arguments_for_paths as projected_start_arguments_for_paths,
     },
 };
+
+pub use vonk_agent_protocol::generated::RecipeRunObservationCheckpoint;
 
 use crate::{
     inventory::{available_disk_bytes, available_memory_bytes},
@@ -127,56 +131,22 @@ const MAX_RUN_INSPECTION_PAGE_BYTES: usize = 256 * 1024;
 const RUN_INSPECTION_PAGE_BUDGET: Duration = Duration::from_millis(250);
 const MAX_EMPTY_SCAN_AGE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ObservationDirectoryStamp {
-    // Filesystem identity is opaque, rather than a protocol generation number.
-    device: String,
-    inode: String,
-    modified_seconds: i64,
-    modified_nanoseconds: i64,
-    changed_seconds: i64,
-    changed_nanoseconds: i64,
-}
-impl ObservationDirectoryStamp {
-    fn of(metadata: &fs::Metadata) -> Self {
-        Self {
-            device: format!("{:x}", metadata.dev()),
-            inode: format!("{:x}", metadata.ino()),
-            modified_seconds: metadata.mtime(),
-            modified_nanoseconds: metadata.mtime_nsec(),
-            changed_seconds: metadata.ctime(),
-            changed_nanoseconds: metadata.ctime_nsec(),
-        }
-    }
-    fn same_directory(&self, other: &Self) -> bool {
-        self.device == other.device && self.inode == other.inode
+fn stamp_of_metadata(metadata: &fs::Metadata) -> ObservationDirectoryStamp {
+    ObservationDirectoryStamp {
+        device: format!("{:x}", metadata.dev()),
+        inode: format!("{:x}", metadata.ino()),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ObservationCursorWitness {
-    before: i64,
-    after: i64,
-    name: Vec<u8>,
-    inode: String,
-}
-
-/// One bounded traversal checkpoint, owned by the agent's existing state DB.
-/// The cookie is never trusted alone: reopening must reproduce the last entry
-/// and its inode/after-cookie before traversal can advance. Root mutation makes
-/// coverage unknown while a still-valid witness lets old work keep progressing.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationCheckpoint {
-    root: PathBuf,
-    runs_stamp: ObservationDirectoryStamp,
-    metadata_stamp: Option<ObservationDirectoryStamp>,
-    started_at: chrono::DateTime<chrono::Utc>,
-    witness: Option<ObservationCursorWitness>,
-    pub had_plans: bool,
-    pub had_failures: bool,
+fn same_observation_directory(
+    first: &ObservationDirectoryStamp,
+    second: &ObservationDirectoryStamp,
+) -> bool {
+    first.device == second.device && first.inode == second.inode
 }
 
 pub struct RecipeRunInspectionFailure {
@@ -196,7 +166,7 @@ pub struct RecipeRunInspectionPage {
 fn observation_directory_stamp(path: &Path) -> Result<Option<ObservationDirectoryStamp>, OciError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-            Ok(Some(ObservationDirectoryStamp::of(&metadata)))
+            Ok(Some(stamp_of_metadata(&metadata)))
         }
         Ok(_) => Err(OciError::Artifact),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -1276,18 +1246,23 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .read(true)
             .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
             .open(&runs)?;
-        if ObservationDirectoryStamp::of(&file.metadata()?) != stamp {
+        if stamp_of_metadata(&file.metadata()?) != stamp {
             return Err(OciError::Artifact);
         }
         let mut directory = rustix::fs::Dir::new(file).map_err(std::io::Error::from)?;
         let metadata_stamp = observation_directory_stamp(&metadata_root)?;
         let mut progress = match checkpoint {
-            Some(old) if old.root == runs && old.runs_stamp.same_directory(&stamp) => old.clone(),
+            Some(old)
+                if Path::new(&old.root) == runs
+                    && same_observation_directory(&old.runs_stamp, &stamp) =>
+            {
+                old.clone()
+            }
             _ => RecipeRunObservationCheckpoint {
-                root: runs.clone(),
+                root: runs.to_str().ok_or(OciError::Artifact)?.to_owned(),
                 runs_stamp: stamp.clone(),
                 metadata_stamp: metadata_stamp.clone(),
-                started_at: observed_at,
+                started_at: observed_at.fixed_offset(),
                 witness: None,
                 had_plans: false,
                 had_failures: checkpoint.is_some(),
@@ -1379,7 +1354,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             plans,
             failures,
             observed_at: if empty_snapshot_safe {
-                progress.started_at
+                progress.started_at.with_timezone(&chrono::Utc)
             } else {
                 observed_at
             },
