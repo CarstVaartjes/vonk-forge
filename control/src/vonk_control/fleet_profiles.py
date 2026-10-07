@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import re
-import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
@@ -336,7 +335,6 @@ _VARIABLE_TEXT = re.compile(
 # transaction while taking the reviewed admission snapshot.  Retry the whole
 # SQL transaction after releasing it; the request key keeps a later successful
 # attempt idempotent.  A persistent owner still reaches the normal busy error.
-_PROFILE_ADMISSION_RETRY_DELAYS_SECONDS = (0.05, 0.15, 0.35)
 #: How many parked applications one worker tick observes for a terminal child.
 #: Bounded so a large parked backlog cannot turn one tick into an unbounded
 #: scan, while still letting every parked order record its own ending.
@@ -6441,53 +6439,42 @@ class FleetProfileService:
                 operation_kind="fleet-profile.apply",
                 select_profile=True,
             )
-            for retry_delay in (
-                *_PROFILE_ADMISSION_RETRY_DELAYS_SECONDS,
-                None,
-            ):
-                try:
-                    return self._queue_application(
-                        preview,
-                        request_key=request_key,
-                        actor=actor,
-                        operation_kind="fleet-profile.apply",
-                        pending_application_id=pending.id,
+            # Acceptance already has a durable owner and immutable reviewed
+            # intent. Try admission once; a busy lock is retried by that owner,
+            # rather than repeating SQL and sleeping inside the HTTP request.
+            try:
+                return self._queue_application(
+                    preview,
+                    request_key=request_key,
+                    actor=actor,
+                    operation_kind="fleet-profile.apply",
+                    pending_application_id=pending.id,
+                )
+            except FleetProfileAdmissionBusy as busy:
+                return self._defer_pending_application(
+                    pending.id,
+                    "Profile admission is busy"
+                    + (
+                        f" ({busy.holder} holds a selected Spark)"
+                        if busy.holder
+                        else ""
                     )
-                except FleetProfileAdmissionBusy as busy:
-                    if retry_delay is None:
-                        return self._defer_pending_application(
-                            pending.id,
-                            "Profile admission is busy"
-                            + (
-                                f" ({busy.holder} holds a selected Spark)"
-                                if busy.holder
-                                else ""
-                            )
-                            + "; the Controller will retry automatically.",
-                            retry_delay=timedelta(0),
-                        )
-                    time.sleep(retry_delay)
-                except (
-                    FleetProfileAdmissionEffectBusy,
-                    FleetProfileAdmissionStorageError,
-                ) as error:
-                    return self._defer_pending_application(
-                        pending.id,
-                        str(error),
-                        retry_delay=timedelta(seconds=60)
-                        if isinstance(error, FleetProfileAdmissionStorageError)
-                        else timedelta(0),
-                        code=_deferral_code(error),
-                        storage=_storage_wait_of(error),
-                    )
-            # The last attempt (no delay left) defers and returns above; a spent
-            # schedule is deferred the same way, to be retried automatically.
-            assert pending is not None
-            return self._defer_pending_application(
-                pending.id,
-                "Profile admission is busy; the Controller will retry automatically.",
-                retry_delay=timedelta(0),
-            )
+                    + "; the Controller will retry automatically.",
+                    retry_delay=timedelta(0),
+                )
+            except (
+                FleetProfileAdmissionEffectBusy,
+                FleetProfileAdmissionStorageError,
+            ) as error:
+                return self._defer_pending_application(
+                    pending.id,
+                    str(error),
+                    retry_delay=timedelta(seconds=60)
+                    if isinstance(error, FleetProfileAdmissionStorageError)
+                    else timedelta(0),
+                    code=_deferral_code(error),
+                    storage=_storage_wait_of(error),
+                )
         except (
             FleetProfileConflict,
             FleetProfilePermissionDenied,
