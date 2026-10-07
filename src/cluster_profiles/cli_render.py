@@ -1636,6 +1636,14 @@ def _activity(
         _field("Operation", operation.get("id"))
         _field("Kind", operation.get("kind"))
         _field("State", operation.get("state"))
+        if operation.get("projection_issues") is not None:
+            for issue in _records(operation, "projection_issues"):
+                _warn(
+                    f"{_text(issue.get('field'))} unavailable: response requires "
+                    f"{_text(issue.get('observed_bytes'))} bytes; "
+                    f"reader budget {_text(issue.get('budget_bytes'))} bytes. "
+                    "Operation identity and state remain known."
+                )
         _field("Created", _time(operation.get("created_at")))
         _field("Targets", _words(operation.get("node_ids")))
         if operation.get("attempt") is not None:

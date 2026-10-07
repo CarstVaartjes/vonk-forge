@@ -124,6 +124,8 @@ from .operation_api import (
     _global_get_operation,
     _global_list_operations,
     bounded_error_responses,
+    bounded_operation_detail,
+    bounded_operations_response,
     decode_offset,
     job_response,
     operation_detail_response,
@@ -1087,6 +1089,7 @@ def create_app(
         response_model=OperationsResponse,
         responses=bounded_error_responses(401, 422, 503),
         operation_id="listOperations",
+        openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def operations_view(
         cursor: str | None = Query(default=None, max_length=512),
@@ -1129,10 +1132,13 @@ def create_app(
                 status_code=503, detail="operation projection unavailable"
             ) from None
         items = [activity_detail(item, tolerate_unreadable=True) for item in page.items]
-        return OperationsResponse(
-            operations=items,
-            next_cursor=page.next_cursor,
-            total=page.total,
+        return bounded_operations_response(
+            page,
+            items,
+            cursors=operations.cursor_codec or cursor_codec,
+            state=operation_state,
+            node_id=node_id,
+            request_id=request_id,
         )
 
     @app.get(
@@ -1140,6 +1146,7 @@ def create_app(
         response_model=OperationDetailResponse,
         responses=bounded_error_responses(401, 404, 503),
         operation_id="getOperation",
+        openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def operation_view(
         operation_id: str = ApiPath(min_length=1, max_length=128),
@@ -1158,7 +1165,9 @@ def create_app(
                 status_code=503, detail="operation projection unavailable"
             ) from None
         try:
-            return activity_detail(item, tolerate_unreadable=True)
+            return bounded_operation_detail(
+                activity_detail(item, tolerate_unreadable=True)
+            )
         except BoundedJSONError as error:
             raise HTTPException(status_code=503, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):

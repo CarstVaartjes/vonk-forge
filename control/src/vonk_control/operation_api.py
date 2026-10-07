@@ -35,6 +35,8 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
 from . import agent_operation_states, job_states
 from .agent_jobs import (
     AgentJobService,
@@ -293,7 +295,20 @@ class JobOperationResponse(StrictModel):
         return document
 
 
+class OperationProjectionIssue(StrictModel):
+    """One optional fact unavailable within this response's reader allocation."""
+
+    field: Literal["progress", "cancellation"]
+    reason: Literal["response-budget-exceeded"] = "response-budget-exceeded"
+    observed_bytes: int = Field(ge=1)
+    budget_bytes: int = Field(ge=1)
+
+
 class OperationDetailResponse(StrictModel):
+    # One issue per optional fact: progress and cancellation are the two owners.
+    projection_issues: list[OperationProjectionIssue] | None = Field(
+        default=None, max_length=2
+    )
     id: str = Field(min_length=1, max_length=128)
     parent_id: str | None = Field(default=None, max_length=128)
     node_ids: list[NodeIdentifier] = Field(max_length=1024)
@@ -321,6 +336,7 @@ class OperationDetailResponse(StrictModel):
     def _serialize_without_unset_evidence(self, handler):
         document = handler(self)
         for key in (
+            "projection_issues",
             "failure",
             "evidence_download",
             "cancellation",
@@ -1167,6 +1183,108 @@ def operation_detail_response(
         owner=item.owner,
         blockers=item.blockers or [],
         next_attempt_at=item.next_attempt_at,
+    )
+
+
+def _response_bytes(response: StrictModel) -> int:
+    # JSONResponse emits compact UTF-8; key ordering does not affect byte size.
+    return len(canonical_message(response.model_dump(mode="json")))
+
+
+def bounded_operation_detail(
+    detail: OperationDetailResponse, *, envelope_bytes: int = 0
+) -> OperationDetailResponse:
+    """Keep known durable facts; identify an optional decoration that cannot fit.
+
+    This is an observation projection, never an admission or execution rewrite.
+    The exact outer envelope is included when a detail is the first list item.
+    """
+    observed = _response_bytes(detail) + envelope_bytes
+    if observed <= MAX_CONTROL_DOCUMENT_BYTES:
+        return detail
+    issues = list(detail.projection_issues or [])
+    optional_facts: list[
+        tuple[
+            Literal["progress", "cancellation"],
+            OperationProgress | FleetProfileApplicationCancellationView | None,
+        ]
+    ] = [("progress", detail.progress), ("cancellation", detail.cancellation)]
+    decorations = sorted(
+        optional_facts,
+        key=lambda pair: (
+            len(canonical_message(pair[1].model_dump(mode="json")))
+            if pair[1] is not None
+            else 0
+        ),
+        reverse=True,
+    )
+    for field, value in decorations:
+        if value is None:
+            continue
+        issues.append(
+            OperationProjectionIssue(
+                field=field,
+                observed_bytes=observed,
+                budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+            )
+        )
+        detail = detail.model_copy(update={field: None, "projection_issues": issues})
+        if _response_bytes(detail) + envelope_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
+            return detail
+    # Required identity/membership and all remaining bounded scalar facts fit;
+    # reaching this means the canonical projection has changed without proof.
+    raise AssertionError("required operation facts exceed the response allocation")
+
+
+def bounded_operations_response(
+    page: OperationListPage,
+    details: Sequence[OperationDetailResponse],
+    *,
+    cursors: CursorCodec,
+    state: str | None,
+    node_id: str | None,
+    request_id: str | None,
+) -> OperationsResponse:
+    """Largest contiguous byte-sized page, with true total and signed boundary."""
+    context = {"state": state, "node_id": node_id, "request_id": request_id}
+
+    def continuation(index: int) -> str | None:
+        if index == len(details) - 1:
+            return page.next_cursor
+        created_at, operation_id = _operation_boundary(
+            operation_item(page.items[index])
+        )
+        return cursors.encode(
+            resource="operations",
+            order="created-at-desc/id-desc/v1",
+            context=context,
+            boundary=[created_at.isoformat(), operation_id],
+        )
+
+    projected = []
+    for index, detail in enumerate(details):
+        single = OperationsResponse(
+            operations=[detail], total=page.total, next_cursor=continuation(index)
+        )
+        envelope = _response_bytes(single) - _response_bytes(detail)
+        projected.append(bounded_operation_detail(detail, envelope_bytes=envelope))
+    envelope = OperationsResponse(operations=[], total=page.total, next_cursor=None)
+    envelope_size = _response_bytes(envelope)
+    prefix_sizes = [0]
+    for detail in projected:
+        prefix_sizes.append(prefix_sizes[-1] + _response_bytes(detail))
+    for count in range(len(projected), 0, -1):
+        cursor = continuation(count - 1)
+        cursor_size = len(canonical_message(cursor))
+        size = envelope_size + prefix_sizes[count] + count - 1 + cursor_size - 4
+        if size <= MAX_CONTROL_DOCUMENT_BYTES:
+            return OperationsResponse(
+                operations=projected[:count], total=page.total, next_cursor=cursor
+            )
+    if projected:
+        raise AssertionError("bounded first operation does not fit its exact envelope")
+    return OperationsResponse(
+        operations=[], total=page.total, next_cursor=page.next_cursor
     )
 
 
