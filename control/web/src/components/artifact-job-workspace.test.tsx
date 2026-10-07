@@ -151,7 +151,7 @@ test("derives prompt, parameter, and input constraints from the running recipe a
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
 
   expect(await screen.findByText("No artifact jobs yet")).toBeInTheDocument();
-  expect(screen.getByRole("spinbutton", {name: "Steps"})).toHaveValue(24);
+  expect(screen.getByRole("textbox", {name: "Steps"})).toHaveValue("24");
   expect(screen.getByRole("textbox", {name: "Negative Prompt"})).toHaveValue("");
   expect(screen.getByText(/optional visual reference.*image\/png/i)).toBeInTheDocument();
   const submit = screen.getByRole("button", {name: "Submit artifact job"});
@@ -760,7 +760,7 @@ test("keeps a wide integer recipe setting exact through editing and durable requ
   recipe.definition.settings.knobs.steps.value = new LosslessNumber("9007199254740993");
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={recipe}/>);
   await screen.findByText("No artifact jobs yet");
-  const setting = screen.getByRole("spinbutton", {name: "Steps"});
+  const setting = screen.getByRole("textbox", {name: "Steps"});
   expect(setting).toHaveAttribute("value", "9007199254740993");
   await user.clear(setting);
   await user.type(setting, "9007199254740995");
