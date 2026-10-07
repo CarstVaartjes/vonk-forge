@@ -42,6 +42,15 @@ function transform(value) {
     else if (key === "enum") result.vonkEnum = item.map(entry => stringify(entry));
     else if (!["discriminator", "example", "examples", "xml", "externalDocs"].includes(key)) result[key] = transform(item);
   }
+  // Ajv 8.20 intentionally omits __proto__ from its properties compiler.
+  // Retain the original schema entry and compile that same owner's rule as
+  // an exact-name pattern too, so named-property validation remains complete.
+  if (result.properties && Object.hasOwn(result.properties, "__proto__")) {
+    const patterns = result.patternProperties ??= Object.create(null);
+    const property = result.properties.__proto__;
+    patterns["^__proto__$"] = Object.hasOwn(patterns, "^__proto__$")
+      ? {allOf: [patterns["^__proto__$"], property]} : property;
+  }
   // JSON Schema object keywords ignore numbers. Ajv sees the lossless token
   // class as an object, so apply these keywords only to actual JSON objects.
   const objectKeywords = ["properties", "patternProperties", "additionalProperties", "propertyNames", "required", "minProperties", "maxProperties", "dependentRequired", "dependentSchemas", "dependencies", "unevaluatedProperties"];
