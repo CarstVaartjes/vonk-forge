@@ -32,6 +32,7 @@ from vonk_control.models import (
     NodeInventorySnapshot,
     RecipeBuild,
     RecipeSourceBundle,
+    User,
 )
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import RecipeOperationService
@@ -79,10 +80,18 @@ def _typed_cache_failure(
             application.updated_at = datetime(2020, 1, 1, tzinfo=UTC)
 
 
-def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -> None:
+@pytest.mark.parametrize("remove_author", [False, True])
+def test_typed_cache_loss_queues_one_scope_bound_profile_retry(
+    tmp_path: Path, remove_author: bool
+) -> None:
     sessions, lifecycle, service, _profile, _desired, first, child_id, nodes = (
         _failed_profile(tmp_path)
     )
+    if remove_author:
+        with sessions.begin() as session:
+            author = session.scalar(select(User).where(User.subject == "admin"))
+            assert author is not None
+            session.delete(author)
     _typed_cache_failure(
         sessions,
         first.id,
@@ -152,7 +161,10 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         )
 
 
-def test_selected_profile_reconciles_a_newly_enrolled_spark(tmp_path: Path) -> None:
+@pytest.mark.parametrize("authority_change", ["removed", "disabled", "demoted"])
+def test_selected_profile_reconciles_a_newly_enrolled_spark(
+    tmp_path: Path, authority_change: str
+) -> None:
     sessions, _lifecycle, service, _profile, _desired, first, child_id, _nodes = (
         _failed_profile(tmp_path)
     )
@@ -167,6 +179,15 @@ def test_selected_profile_reconciles_a_newly_enrolled_spark(tmp_path: Path) -> N
                 last_seen_at=NOW,
             )
         )
+    with sessions.begin() as session:
+        author = session.scalar(select(User).where(User.subject == "admin"))
+        assert author is not None
+        if authority_change == "removed":
+            session.delete(author)
+        elif authority_change == "disabled":
+            author.disabled_at = NOW
+        else:
+            author.role = "viewer"
     assert service.tick() is True
     with sessions() as session:
         applications = tuple(session.scalars(select(FleetProfileApplication)))

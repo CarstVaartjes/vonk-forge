@@ -349,7 +349,9 @@ os._exit(23)
         )
 
 
-def test_revoked_authority_observes_issued_child_and_refuses_new_children(update_env):
+def test_revoked_authority_observes_issued_child_and_continues_accepted_children(
+    update_env,
+):
     sessions, recipes, now, fresh = update_env
     service = fresh()
     parent = _start(service, list(recipes))
@@ -361,13 +363,14 @@ def test_revoked_authority_observes_issued_child_and_refuses_new_children(update
     service.run_update_claim(service.claim_update(owner="worker"))
     observed = service.get_operator_operation(parent.id)
     assert observed.children[0].operation_id == issued
-    assert observed.children[1].failure.code == "recipe_update.authority_denied"
+    assert observed.children[1].operation_id is not None
+    assert observed.children[1].failure is None
     assert observed.state in {"queued", "running"}, "issued work is still executing"
     now[0] += timedelta(seconds=3)
     service.run_update_claim(service.claim_update(owner="worker"))
     assert service.get_operator_operation(parent.id).children[0].operation_id == issued
     with sessions() as session:
-        assert len(list(session.scalars(select(Job)))) == 2
+        assert len(list(session.scalars(select(Job)))) == 3
 
 
 def test_stale_parent_cannot_admit_or_replace_new_claim(update_env):
@@ -1118,7 +1121,9 @@ def test_postgres_takeover_fences_old_parent_admission_and_result(
         assert len(list(session.scalars(select(Job)))) == 2
 
 
-def test_postgres_revocation_wins_before_child_acceptance(postgres_update_env):
+def test_postgres_author_revocation_does_not_revoke_accepted_child_scope(
+    postgres_update_env,
+):
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
@@ -1151,10 +1156,11 @@ def test_postgres_revocation_wins_before_child_acceptance(postgres_update_env):
             release.set()
         worker.result(timeout=5)
     observed = fresh().get_operator_operation(parent.id)
-    assert observed.state == "failed"
-    assert observed.children[0].failure.code == "recipe_update.authority_denied"
+    assert observed.state in {"queued", "running"}
+    assert observed.children[0].operation_id is not None
+    assert observed.children[0].failure is None
     with sessions() as session:
-        assert len(list(session.scalars(select(Job)))) == 1
+        assert len(list(session.scalars(select(Job)))) == 2
 
 
 def test_scheduler_keeps_image_slot_available_while_parent_admits_another_child(
