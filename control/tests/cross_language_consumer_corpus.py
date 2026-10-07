@@ -143,7 +143,12 @@ def corpus() -> dict:
                 "text": text,
                 "accepted": accepted,
                 "normalized_text": normalized,
-                "consumers": consumers or ["python", "rust", "browser"],
+                "consumers": consumers
+                or (
+                    ["python", "rust"]
+                    if component == "AgentResult"
+                    else ["python", "rust", "browser"]
+                ),
             }
         )
 

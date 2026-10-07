@@ -79,7 +79,20 @@ jobs:
       - name: Exercise both browser HTTP consumers and exact numbers
         env:
           VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
+          VONK_CONSUMER_OUTPUT: ${{ github.workspace }}/artifacts/consumer-corpus/browser-exports.json
         run: npm exec -- vitest run src/api/contract-json.test.ts src/api/client.test.ts src/api/consumer-corpus.test.ts src/api/official-schema.generated.test.ts src/hooks/fleet-stream-state.test.ts src/hooks/use-fleet-stream.test.tsx
+        working-directory: control/web
+      - name: Verify browser exports through their actual canonical Python owners
+        env:
+          PYTHONPATH: control/src:agent_protocol/src:src
+        run: uv run --project control --frozen python control/tests/verify_browser_consumer_exports.py --corpus artifacts/consumer-corpus/corpus.json --exports artifacts/consumer-corpus/browser-exports.json
+      - name: Install pinned Chromium consumer
+        run: npm exec -- playwright install --with-deps chromium
+        working-directory: control/web
+      - name: Exercise native browser numeric-source capability and HTTP consumers
+        env:
+          VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
+        run: npm exec -- playwright test --config playwright.contracts.config.ts
         working-directory: control/web
       - name: Compile real browser consumers
         run: npm run build --prefix control/web
