@@ -324,6 +324,10 @@ mod raw_integer_shape_tests {
         let wide = "9".repeat(200);
         let value = crate::parse_strict::<crate::integer::Integer>(wide.as_bytes()).unwrap();
         assert_eq!(value.to_string(), wide);
+        let zero = crate::parse_strict::<crate::integer::Integer>(b"-0").unwrap();
+        assert_eq!(zero, crate::integer::Integer::from(0_u64));
+        assert_eq!(zero.to_string(), "0");
+        assert_eq!(serde_json::to_string(&zero).unwrap(), "0");
         for invalid in ["1.0", "1e0", "true", "null", "\"2\""] {
             assert!(crate::parse_strict::<crate::integer::Integer>(invalid.as_bytes()).is_err());
         }
