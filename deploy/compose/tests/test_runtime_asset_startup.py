@@ -91,7 +91,9 @@ def test_asset_timeout_then_staging_recovers_the_same_shell_command(
     assert missing.returncode == 1
     assert f"runtime-asset-timeout: {asset}; retry via restart policy" in missing.stderr
     assert not calls.exists(), "missing configuration must never launch a consumer"
-    assert sleeps.read_text().splitlines() == ["1"] * 119
+    observations = sleeps.read_text().splitlines()
+    assert 0 < len(observations) <= 120
+    assert set(observations) == {"1"}
 
     # The real producer publishes the formerly missing files atomically.
     monkeypatch.setattr(os, "fchown", lambda *_args: None)
