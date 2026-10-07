@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 dd631258759b6dd283e67f04899f3684879fe3478da46e7f836f84a0541d8e12. Do not edit.
+// Generated from canonical OpenAPI SHA256 9f23ddfe905989235221156a343536206e591f9d0ac1210f829fbf350cb423ab. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5973,12 +5973,28 @@ export interface components {
         ModelCacheCancellation: {
             /** Actor */
             actor: string;
+            observation?: components["schemas"]["ModelCacheCancellationObservation"] | null;
             /** Reason */
             reason: string;
             /** Request Key */
             request_key: string;
             /** Requested At */
             requested_at: string;
+        };
+        /**
+         * ModelCacheCancellationObservation
+         * @description The lifecycle owner's actual terminal cancellation evidence.
+         */
+        ModelCacheCancellationObservation: {
+            /** Detail */
+            detail: string;
+            /**
+             * Effect
+             * @enum {string}
+             */
+            effect: "unknown" | "none" | "stopped";
+            /** Observed At */
+            observed_at: string;
         };
         /**
          * ModelCacheCancellationRequest
@@ -6918,6 +6934,7 @@ export interface components {
             id: string;
             /** Kind */
             kind: string;
+            model_cache_cancellation?: components["schemas"]["ModelCacheCancellation"] | null;
             /** Next Attempt At */
             next_attempt_at?: string | null;
             /** Node Ids */
