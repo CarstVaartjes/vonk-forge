@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol import (
+    LifecycleEffect,
     LifecycleState,
     LifecycleSubject,
     ModelCacheBlockerCode,
@@ -221,6 +222,16 @@ class ModelCacheRemovalResult(StrippedStrictModel):
     cancelled_operations: list[str] = Field(default_factory=list, max_length=32)
 
 
+class ModelCacheCancellationObservation(StrippedStrictModel):
+    """The lifecycle owner's actual terminal cancellation evidence."""
+
+    effect: Literal[
+        LifecycleEffect.UNKNOWN, LifecycleEffect.NONE, LifecycleEffect.STOPPED
+    ]
+    observed_at: str = Field(min_length=1, max_length=64)
+    detail: str = Field(min_length=1, max_length=1024)
+
+
 class ModelCacheCancellation(StrippedStrictModel):
     """Durable record of the one accepted cancellation request."""
 
@@ -228,6 +239,7 @@ class ModelCacheCancellation(StrippedStrictModel):
     actor: str = Field(min_length=1, max_length=200)
     reason: str = Field(min_length=1, max_length=512)
     requested_at: str = Field(min_length=1, max_length=64)
+    observation: ModelCacheCancellationObservation | None = None
 
 
 class _ModelCacheOperationPayload(StrippedStrictModel):

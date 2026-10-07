@@ -368,6 +368,7 @@ class ModelCacheOperationProvider:
             supported_actions=["retry"] if retryable else [],
             result=OperationResultFacts.of(operation.result),
             failure=operation.failure,
+            model_cache_cancellation=operation.cancellation,
             blockers=list(operation.blockers),
             next_attempt_at=operation.next_attempt_at,
             owner=OperationOwnerReference(

@@ -1061,6 +1061,23 @@ function canonicalRecord(detail: OperationDetail, names: Map<string, string>): A
   };
 }
 
+export function ModelCacheCancellationEvidence({ detail }: { detail: OperationDetail }) {
+  if (!detail.kind.startsWith("model-cache.")) return null;
+  const cancellation = detail.model_cache_cancellation;
+  if (!cancellation)
+    return detail.state === "cancelled" ? (
+      <p style={{ margin: 0 }}>Writer stop evidence unavailable.</p>
+    ) : null;
+  return (
+    <p style={{ margin: 0 }}>
+      {cancellation.observation?.detail ??
+        (detail.state === "cancelled"
+          ? "Cancellation ended; stopping the writer remains unconfirmed."
+          : "Cancellation requested; writer stop evidence unavailable.")}
+    </p>
+  );
+}
+
 function CanonicalOperationDetails({
   api,
   detail,
@@ -1109,6 +1126,7 @@ function CanonicalOperationDetails({
     detail.failure && "code" in detail.failure ? availabilityFailure(detail.failure) : undefined;
   return (
     <div className="activity-job-reason" style={{ gap: ".5rem" }}>
+      <ModelCacheCancellationEvidence detail={detail} />
       {availability ? (
         <LibraryAvailabilityFeedback failure={availability} />
       ) : (

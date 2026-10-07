@@ -42,7 +42,7 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
         connect_args=(
             db.postgresql_connect_args(component="migration")
-            if "postgres" in database_url
+            if database_url is not None and "postgres" in database_url
             else {}
         ),
     )

@@ -56,7 +56,12 @@ def main() -> None:
             raise SystemExit("Prepare TypeScript tools: npm ci --prefix control/web")
         if web:
             run(
-                [str(biome), "check", *[str(ROOT / file) for file in web]],
+                [
+                    str(biome),
+                    "check",
+                    "--no-errors-on-unmatched",
+                    *[str(ROOT / file) for file in web],
+                ],
                 cwd=directory,
             )
         run(["npm", "run", "typecheck"], cwd=directory)

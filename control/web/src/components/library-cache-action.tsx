@@ -127,7 +127,7 @@ export function LibraryCacheAction({
       }
       const failed =
         current.state === "cancelled"
-          ? "Download cancelled. Partial files are kept; download again to resume."
+          ? `${current.cancellation?.observation?.detail ?? "Cancellation ended; stopping the writer remains unconfirmed."} Partial files are kept; download again to resume.`
           : failureText(current);
       setError(failed);
       if (current.state !== "cancelled") toast.error(failureNotice(failed, requestKey));
@@ -298,6 +298,10 @@ export function LibraryCacheAction({
           consequence="Stops this download. Partial files are kept and the download resumes if you start it again."
           command={`vonkctl model cancel ${operationId}`}
           cancel={(key) => api.cancelModelOperation(operationId, key)}
+          cancellationEvidence={(result) =>
+            result.cancellation?.observation?.detail ??
+            "Cancellation ended; stopping the writer remains unconfirmed."
+          }
         />
       )}
       {error && (

@@ -1083,7 +1083,7 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
             mapfile -d '' -t changed_web < <(git diff --name-only -z --diff-filter=ACMR "${WEB_BASE_SHA:?missing base SHA}" "$GITHUB_SHA" -- '*.ts' '*.tsx')
             if ((${#changed_web[@]})); then
-              node_modules/.bin/biome check "${changed_web[@]/#/$GITHUB_WORKSPACE/}"
+              node_modules/.bin/biome check --no-errors-on-unmatched "${changed_web[@]/#/$GITHUB_WORKSPACE/}"
             fi
           else
             npm run lint
