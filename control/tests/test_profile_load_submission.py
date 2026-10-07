@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import threading
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from email.message import Message
@@ -774,8 +775,21 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
     lock_statements: list[str] = []
     request_backend: list[int] = []
 
-    def before_lock(connection, _cursor, statement, _parameters, _context, _many):
-        if statement.startswith(prefix) and "FOR UPDATE" in statement:
+    def names_locked_owner(value: object) -> bool:
+        if isinstance(value, str):
+            return value == locked_id
+        if isinstance(value, Mapping):
+            return any(names_locked_owner(item) for item in value.values())
+        if isinstance(value, tuple | list):
+            return any(names_locked_owner(item) for item in value)
+        return False
+
+    def before_lock(connection, _cursor, statement, parameters, _context, _many):
+        if (
+            statement.startswith(prefix)
+            and "FOR UPDATE" in statement
+            and names_locked_owner(parameters)
+        ):
             # Capture parameterless SQL and the exact requesting backend. A
             # failure must identify the wait rather than guess from its owner.
             lock_statements.append(statement[:512])
