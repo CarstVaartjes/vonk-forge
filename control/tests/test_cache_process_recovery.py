@@ -10,7 +10,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import ModelCacheCode
 from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache_contract import (
+    ModelCacheDownloadPayload,
+    parse_model_cache_payload,
+)
 from vonk_control.models import Base, ModelCacheOperation
 
 from .test_model_cache import _artifact
@@ -75,7 +80,7 @@ with open(sys.argv[1], "a+b") as lock:
         eligible = _start(service, [other], str(uuid.uuid4()))
         _drain(service, eligible.id, timeout_seconds=2)
         assert service.get_operation(eligible.id).state == "succeeded"
-        for _ in range(5):
+        for cycle in range(5):
             before = now[0]
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
@@ -104,12 +109,46 @@ with open(sys.argv[1], "a+b") as lock:
             with sessions() as session:
                 row = session.get(ModelCacheOperation, waiting.id)
                 assert row is not None and "claim" not in row.payload
-            now[0] = datetime.fromisoformat(retry_time)
+            if cycle < 4:
+                now[0] = datetime.fromisoformat(retry_time)
+        # Leave the final real busy receipt due in the injected clock's
+        # future. This deterministically covers a late asynchronous completion
+        # rather than relying on a CPU-dependent race after the last jump.
+        with sessions() as session:
+            row = session.get(ModelCacheOperation, waiting.id)
+            assert row is not None and row.state == "queued"
+            assert row.next_action_at is not None and row.next_action_at > now[0]
+            assert row.fence is None and row.lease_deadline is None
         holder.stdin.close()
         assert holder.wait(timeout=3) == 0
-        _drain(service, waiting.id, timeout_seconds=3)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            # Production time advances naturally. The fixture follows only a
+            # genuine queued busy receipt's canonical clock, after the actual
+            # process-owned writer has exited, without editing owner rows.
+            with sessions() as session:
+                row = session.get(ModelCacheOperation, waiting.id)
+                assert row is not None
+                if row.state == "queued":
+                    payload = parse_model_cache_payload(row.kind, row.payload)
+                    assert isinstance(payload, ModelCacheDownloadPayload)
+                    assert payload.failure is not None
+                    assert payload.failure.code == ModelCacheCode.OBJECT_BUSY
+                    assert row.fence is None and row.lease_deadline is None
+                    assert row.next_action_at is not None
+                    now[0] = max(now[0], row.next_action_at)
+            service.tick()
+            observed = service.get_operation(waiting.id)
+            if observed.state in {"succeeded", "failed"}:
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError(
+                f"busy artifact did not recover after writer exit: {observed.state}"
+            )
         recovered = service.get_operation(waiting.id)
         assert recovered.state == "succeeded"
+        assert recovered.id == waiting.id and recovered.attempt == 1
         assert recovered.request_key == waiting.request_key
         assert (
             service.root / "objects" / str(busy["sha256"])[:2] / str(busy["sha256"])
