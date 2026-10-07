@@ -2053,8 +2053,14 @@ class RunSwitchFleetProfileAdapter:
             for child in (*state.pending_children, *state.children)
             if child.queue_index not in lost_children
         } | set(state.skipped_indices)
-        while state.position < len(state.queue) and state.position in occupied:
-            state.position += 1
+        state.position = next(
+            (
+                index
+                for index in range(state.position, len(state.queue))
+                if index not in occupied
+            ),
+            max(state.position, len(state.queue)),
+        )
         preceding: list[set[str]] = []
         for index, item in enumerate(state.queue):
             if index in occupied:
@@ -2155,8 +2161,14 @@ class RunSwitchFleetProfileAdapter:
             self._write_state(session, application, state)
             session.flush()
             return self._view_from_child(application_id, state, operation)
-        while state.position < len(state.queue) and state.position in occupied:
-            state.position += 1
+        state.position = next(
+            (
+                index
+                for index in range(state.position, len(state.queue))
+                if index not in occupied
+            ),
+            max(state.position, len(state.queue)),
+        )
         self._write_state(session, application, state)
         if state.pending_children or state.position < len(state.queue):
             doc_state(state, LifecycleState.RUNNING)
@@ -9397,7 +9409,7 @@ class FleetProfileService:
         *,
         code: ProfileReasonCode = ProfileReasonCode.RETRY_CONFLICT,
     ) -> None:
-        """Retry the same accepted queue/child identity without replacement admission."""
+        """Continue the same accepted queue/child identity without replacement admission."""
         progress.attempt += 1
         progress.retry_due_at = FleetProfileAdapter.next_retry(
             row.id, progress.attempt, now
