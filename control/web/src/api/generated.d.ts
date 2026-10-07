@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 181c6374cf4c9b43ecfe7a3a8167d36b54d47203d51afcd24e68a20751799382. Do not edit.
+// Generated from canonical OpenAPI SHA256 dd631258759b6dd283e67f04899f3684879fe3478da46e7f836f84a0541d8e12. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -7515,7 +7515,7 @@ export interface components {
          * @description Warnings and attention items of the fleet and library projections.
          * @enum {string}
          */
-        ProjectionCode: "cpu.low-clock" | "install.partial" | "inventory.missing" | "inventory.stale" | "network.nas-route-wifi-no-wired-port" | "network.nas-route-wifi-wired-port-down" | "network.nas-route-wifi-wired-port-unused" | "node.offline" | "profile.retrying" | "recipe.update_available" | "run.degraded" | "telemetry.delayed" | "telemetry.missing" | "telemetry.stale";
+        ProjectionCode: "cpu.low-clock" | "fleet.frame_budget_exceeded" | "fleet.frame_encoding_unavailable" | "fleet.stored_event_payload_unavailable" | "observation.transfer_unavailable" | "install.partial" | "inventory.missing" | "inventory.stale" | "network.nas-route-wifi-no-wired-port" | "network.nas-route-wifi-wired-port-down" | "network.nas-route-wifi-wired-port-unused" | "node.offline" | "profile.retrying" | "recipe.update_available" | "run.degraded" | "telemetry.delayed" | "telemetry.missing" | "telemetry.stale";
         /** ProjectionReason */
         ProjectionReason: {
             code: components["schemas"]["ProjectionCode"];
