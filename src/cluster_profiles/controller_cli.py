@@ -2013,7 +2013,7 @@ def _submit_recipe_retry(
             return RecipeImageAvailabilityResponse.from_dict(
                 validate_control_document("RecipeImageAvailabilityResponse", value)
             )
-        except (KeyError, TypeError, ValueError) as error:
+        except (ControlClientError, KeyError, TypeError, ValueError) as error:
             raise ControlMalformedResponse(
                 "recipe preparation receipt is malformed"
             ) from error
