@@ -24,6 +24,7 @@ import jwt
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
@@ -354,9 +355,12 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
                 claim = session.scalar(select(AgentEnrollment))
             else:
                 claim = session.get(AgentCertificateRotation, NODE_ID)
+                assert source is not None
                 old = session.get(AgentCertificate, source.serial)
+                assert old is not None
                 assert old.state == "active" and old.revoked_at is None
                 assert old.ca_revoked_at is None
+            assert claim is not None
             assert claim.state == "issuing"
             assert claim.provider_request == binding
             assert claim.csr_pem == request.decode()
@@ -382,7 +386,9 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
         issuer = x509.load_pem_x509_certificate(
             (tmp_path / "intermediate_ca.crt").read_bytes()
         )
-        issuer.public_key().verify(
+        issuer_public_key = issuer.public_key()
+        assert isinstance(issuer_public_key, ed25519.Ed25519PublicKey)
+        issuer_public_key.verify(
             certificate.signature, certificate.tbs_certificate_bytes
         )
         assert certificate.public_key().public_bytes(
@@ -404,6 +410,7 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
         assert len(jtis) == len(set(jtis)) and binding["request_id"] not in jtis
         with sessions() as session:
             stored = session.get(AgentCertificate, recovered["serial"])
+            assert stored is not None
             assert stored.certificate_pem == recovered["certificate_pem"]
             assert (
                 stored.chain_pem
@@ -412,6 +419,7 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
             assert stored.generation == binding["generation"]
             if source:
                 old = session.get(AgentCertificate, source.serial)
+                assert old is not None
                 assert old.state == "active" and old.revoked_at is None
                 assert old.ca_revoked_at is None
                 assert stored.state == "staged"
@@ -429,13 +437,11 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
                     sessions, provider, clock=lambda: datetime.now(UTC)
                 ).activate(NODE_ID, recovered["serial"], recovered["generation"])
                 with sessions() as session:
-                    assert (
-                        session.get(AgentCertificate, recovered["serial"]).state
-                        == "active"
-                    )
-                    assert (
-                        session.get(AgentCertificate, source.serial).state == "revoked"
-                    )
+                    activated = session.get(AgentCertificate, recovered["serial"])
+                    retired = session.get(AgentCertificate, source.serial)
+                    assert activated is not None and retired is not None
+                    assert activated.state == "active"
+                    assert retired.state == "revoked"
         finally:
             provider._client.close()
 
