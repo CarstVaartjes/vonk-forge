@@ -925,6 +925,7 @@ class FleetProfileSwitchChildState(StrictModel):
 
 
 class FleetProfileAssignmentFailure(StrictModel):
+    queue_index: int | None = Field(default=None, ge=0)
     assignment_id: UuidId | None = None
     operation_id: UuidId | None = None
     reason: Annotated[str, StringConstraints(min_length=1, max_length=512)]
@@ -1000,6 +1001,11 @@ class FleetProfileSwitchAdapterState(StrictModel):
             index < 0 or index >= len(self.queue) for index in indices
         ):
             raise ValueError("queue child index is outside the immutable queue")
+        if any(
+            failure.queue_index is not None and failure.queue_index >= len(self.queue)
+            for failure in self.assignment_failures
+        ):
+            raise ValueError("failure index is outside the immutable queue")
         for child in (*self.pending_children, *self.children):
             if child.kind != self.queue[child.queue_index].kind:
                 raise ValueError("queue child kind differs from its reviewed item")
