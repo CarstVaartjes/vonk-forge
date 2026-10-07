@@ -5,7 +5,7 @@ import {useCallback, useEffect, useReducer, useState} from "react";
 import type {
   ControlApi,
   FleetChangeEvent,
-  FleetSnapshotEvent,
+  FleetRefreshEvent,
   FleetTelemetryEvent,
 } from "../api/types";
 import {backoffDelay} from "./use-operation-observer";
@@ -65,6 +65,7 @@ export function useFleetStream(api: ControlApi) {
     let requiredRefreshCursor: WireNumber | null = null;
     let refreshAttempt = 0;
     let timelineGeneration = 0;
+    let pendingReset: string | null = null;
     let sparseRefreshTimer: ReturnType<typeof setTimeout> | undefined;
     let pollingTimer: ReturnType<typeof setInterval> | undefined;
     let reconciliationTimer: ReturnType<typeof setInterval> | undefined;
@@ -100,8 +101,11 @@ export function useFleetStream(api: ControlApi) {
         const snapshot = await api.visualFleet(controller.signal);
         if (active && !controller.signal.aborted
             && requestTimelineGeneration === timelineGeneration
-            && compareWire(snapshot.event_cursor, appliedCursor) >= 0) {
-          dispatch({type: "requested-snapshot", snapshot});
+            && (pendingReset === "cursor-ahead" || compareWire(snapshot.event_cursor, appliedCursor) >= 0)) {
+          if (pendingReset !== null) {
+            dispatch({type: "reset-snapshot", snapshot, reason: pendingReset});
+            pendingReset = null;
+          } else dispatch({type: "requested-snapshot", snapshot});
           setLastUpdatedAt(Date.now()); setRefreshError("");
           appliedCursor = snapshot.event_cursor;
           if (requiredRefreshCursor !== null && compareWire(snapshot.event_cursor, requiredRefreshCursor) >= 0) {
@@ -123,7 +127,7 @@ export function useFleetStream(api: ControlApi) {
           const queued = refreshQueued;
           refreshQueued = false;
           if (queued) scheduleRefresh();
-          else if (requestTimelineGeneration === timelineGeneration) scheduleRefreshRetry();
+          else scheduleRefreshRetry();
         }
       }
     }
@@ -167,25 +171,20 @@ export function useFleetStream(api: ControlApi) {
       startPolling();
     }
 
-    function onSnapshot(rawEvent: Event): void {
+    function onRefresh(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
-      const data = eventData(event, "FleetSnapshotEvent") as FleetSnapshotEvent | null;
-      if (cursor === null || !data
-          || typeof data.reset_reason !== "string"
-          || typeof data.snapshot !== "object" || data.snapshot === null
-          || compareWire(data.snapshot.event_cursor, cursor) !== 0) return;
+      const data = eventData(event, "FleetRefreshEvent") as FleetRefreshEvent | null;
+      if (cursor === null || !data || compareWire(data.event_cursor, cursor) !== 0) return;
+      // Notices carry no roster authority. Only a completed capture can replace
+      // the last model, including a lower cursor after a database timeline reset.
       timelineGeneration += 1;
-      appliedCursor = cursor;
-      requiredRefreshCursor = null;
+      pendingReset = data.reset_reason;
+      requiredRefreshCursor = cursor;
       refreshAttempt = 0;
-      refreshQueued = false;
-      if (sparseRefreshTimer !== undefined) {
-        clearTimeout(sparseRefreshTimer);
-        sparseRefreshTimer = undefined;
-      }
-      dispatch({type: "reset-snapshot", snapshot: data.snapshot, reason: data.reset_reason});
-      setLastUpdatedAt(Date.now()); setRefreshError("");
+      refreshQueued = true;
+      dispatch({type: "refresh-notice", cursor, reason: data.reset_reason});
+      scheduleRefresh();
     }
 
     function onTelemetry(rawEvent: Event): void {
@@ -196,6 +195,12 @@ export function useFleetStream(api: ControlApi) {
           || typeof data.node_id !== "string"
           || typeof data.sample !== "object" || data.sample === null
           || data.sample.node_id !== data.node_id) return;
+      if (requiredRefreshCursor !== null || pendingReset !== null) {
+        if (requiredRefreshCursor === null || compareWire(cursor, requiredRefreshCursor) > 0) requiredRefreshCursor = cursor;
+        dispatch({type: "projection-refresh", cursor});
+        scheduleRefresh();
+        return;
+      }
       if (compareWire(cursor, appliedCursor) <= 0) return;
       appliedCursor = cursor;
       dispatch({type: "node-telemetry", cursor, nodeId: data.node_id, sample: data.sample, receivedAt: new Date()});
@@ -207,7 +212,7 @@ export function useFleetStream(api: ControlApi) {
       const cursor = cursorFrom(event);
       const data = eventData(event, "FleetChangeEvent") as FleetChangeEvent | null;
       if (cursor === null || data?.projection_refresh_required !== true) return;
-      if ((compareWire(cursor, appliedCursor) <= 0 || compareWire(cursor, requiredRefreshCursor ?? -1) <= 0)) return;
+      if ((pendingReset === null && compareWire(cursor, appliedCursor) <= 0) || compareWire(cursor, requiredRefreshCursor ?? -1) <= 0) return;
       requiredRefreshCursor = cursor;
       dispatch({type: "projection-refresh", cursor});
       scheduleRefresh();
@@ -220,7 +225,7 @@ export function useFleetStream(api: ControlApi) {
     if (source) {
       source.addEventListener("open", onOpen);
       source.addEventListener("error", onError);
-      source.addEventListener("fleet-snapshot", onSnapshot);
+      source.addEventListener("fleet-refresh", onRefresh);
       source.addEventListener("node-telemetry", onTelemetry);
       source.addEventListener("node-profile", onSparse);
       source.addEventListener("recipe-state", onSparse);
@@ -237,7 +242,7 @@ export function useFleetStream(api: ControlApi) {
       if (sparseRefreshTimer !== undefined) clearTimeout(sparseRefreshTimer);
       source?.removeEventListener("open", onOpen);
       source?.removeEventListener("error", onError);
-      source?.removeEventListener("fleet-snapshot", onSnapshot);
+      source?.removeEventListener("fleet-refresh", onRefresh);
       source?.removeEventListener("node-telemetry", onTelemetry);
       source?.removeEventListener("node-profile", onSparse);
       source?.removeEventListener("recipe-state", onSparse);

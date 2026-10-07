@@ -135,7 +135,9 @@ afterEach(() => {
 });
 
 test("uses same-origin EventSource and reconciles increments and backward resets", async () => {
-  render(<Probe control={api(async () => snapshot(5))}/>);
+  vi.useFakeTimers();
+  const visualFleet = vi.fn().mockResolvedValueOnce(snapshot(5)).mockResolvedValueOnce(snapshot(2, 22));
+  render(<Probe control={api(visualFleet)}/>);
   await flush();
   const stream = FakeEventSource.instances[0];
 
@@ -154,7 +156,11 @@ test("uses same-origin EventSource and reconciles increments and backward resets
   act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7"));
   expect(screen.getByTestId("gpu")).toHaveTextContent("77");
 
-  act(() => stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(2, 22)}, "2"));
+  act(() => stream.emit("fleet-refresh", {reset_reason: "cursor-ahead", event_cursor: 2}, "2"));
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("77");
+  act(() => vi.advanceTimersByTime(100));
+  await flush();
   expect(screen.getByTestId("cursor")).toHaveTextContent("2");
   expect(screen.getByTestId("gpu")).toHaveTextContent("22");
 });
@@ -208,22 +214,22 @@ test("authoritative cursor-ahead reset cancels old sparse retries and starts a n
   vi.useFakeTimers();
   const visualFleet = vi.fn()
     .mockResolvedValueOnce(snapshot(10))
-    .mockResolvedValueOnce(snapshot(100, 100));
+    .mockResolvedValueOnce(snapshot(21, 21));
   render(<Probe control={api(visualFleet)}/>);
   await flush();
   const stream = FakeEventSource.instances[0];
 
   act(() => {
     stream.emit("recipe-state", change("recipe-state"), "100");
-    stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
+    stream.emit("fleet-refresh", {reset_reason: "cursor-ahead", event_cursor: 20}, "20");
     stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "21");
     vi.advanceTimersByTime(10_000);
   });
   await flush();
 
-  expect(visualFleet).toHaveBeenCalledTimes(1);
+  expect(visualFleet).toHaveBeenCalledTimes(2);
   expect(screen.getByTestId("cursor")).toHaveTextContent("21");
-  expect(screen.getByTestId("gpu")).toHaveTextContent("77");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("21");
 });
 
 test("ignores an old-timeline sparse response already in flight across an authoritative reset", async () => {
@@ -245,7 +251,7 @@ test("ignores an old-timeline sparse response already in flight across an author
   expect(visualFleet).toHaveBeenCalledTimes(2);
 
   act(() => {
-    stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
+    stream.emit("fleet-refresh", {reset_reason: "cursor-ahead", event_cursor: 20}, "20");
     stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "21");
     stream.emit("operation-state", change("operation-state"), "22");
   });

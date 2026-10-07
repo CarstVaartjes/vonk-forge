@@ -1,8 +1,9 @@
+import {readObservationTransfer} from "./observation-transfer";
 import createClient, {createQuerySerializer} from "openapi-fetch";
 import {ContractResponse, readControlResponse, serializeControlBody, validateControlBody, validateControlParameters} from "./contract-json";
 import {stringifyContractJson, parseContractJson, isWireNumber, formatWire} from "./contract-numeric";
 import {AuthenticationRequired} from "../auth";
-import type {paths} from "./generated";
+import type {components, paths} from "./generated";
 import type {
   AuthSession,
   CliTokenDownload,
@@ -274,8 +275,24 @@ export class ApiClient implements ControlApi {
     return {expires_at: response.headers.get("X-Vonk-Token-Expires-At") ?? ""};
   }
 
+  private async observation(path: "/api/fleet" | "/api/platform", signal?: AbortSignal): Promise<unknown> {
+    const response = await fetch(path, {signal, credentials: "same-origin", headers: {Accept: "application/x-vonk-observation+ndjson"}});
+    if (!response.ok) {
+      let value: unknown;
+      try { value = await readControlResponse(response, "GET", path); }
+      catch (cause) { this.requireAuthentication(response, cause); throw cause; }
+      this.requireAuthentication(response);
+      return resultData<unknown>({response, error: value});
+    }
+    return readObservationTransfer(response, path);
+  }
+
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {
-    return resultData(await this.generated.GET("/api/fleet", {signal}));
+    return await this.observation("/api/fleet", signal) as VisualFleetSnapshot;
+  }
+
+  async platformObservation(signal?: AbortSignal): Promise<components["schemas"]["PlatformObservation"]> {
+    return await this.observation("/api/platform", signal) as components["schemas"]["PlatformObservation"];
   }
 
   async enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal) {

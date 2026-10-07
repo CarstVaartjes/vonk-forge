@@ -25,6 +25,7 @@ export const initialFleetStreamState: FleetStreamState = {
 
 export type FleetStreamAction =
   | {type: "requested-snapshot"; snapshot: VisualFleetSnapshot}
+  | {type: "refresh-notice"; cursor: WireNumber; reason: string}
   | {type: "reset-snapshot"; snapshot: VisualFleetSnapshot; reason: string}
   | {type: "node-telemetry"; cursor: WireNumber; nodeId: string; sample: TelemetryPoint; receivedAt: Date}
   | {type: "node-profile-updated"; nodeId: string; displayName: string}
@@ -53,13 +54,18 @@ export function fleetStreamReducer(state: FleetStreamState, action: FleetStreamA
           : state.requiredRefreshCursor,
         snapshot: action.snapshot,
       };
+    case "refresh-notice":
+      return {...state, lastResetReason: action.reason, requiredRefreshCursor: action.cursor,
+        refreshRevision: state.refreshRevision + 1};
     case "reset-snapshot":
       return {
         ...state,
         error: "",
         lastResetReason: action.reason,
         loading: false,
-        requiredRefreshCursor: null,
+        requiredRefreshCursor: state.requiredRefreshCursor !== null
+          && compareWire(action.snapshot.event_cursor, state.requiredRefreshCursor) < 0
+          ? state.requiredRefreshCursor : null,
         snapshot: action.snapshot,
       };
     case "node-telemetry": {
@@ -94,7 +100,8 @@ export function fleetStreamReducer(state: FleetStreamState, action: FleetStreamA
         },
       };
     case "projection-refresh":
-      if (!state.snapshot || (compareWire(action.cursor, state.snapshot.event_cursor) <= 0 || compareWire(action.cursor, state.requiredRefreshCursor ?? -1) <= 0)) return state;
+      if (compareWire(action.cursor, state.requiredRefreshCursor ?? -1) <= 0) return state;
+      if (state.snapshot && (compareWire(action.cursor, state.snapshot.event_cursor) <= 0 || compareWire(action.cursor, state.requiredRefreshCursor ?? -1) <= 0)) return state;
       return {
         ...state,
         refreshRevision: state.refreshRevision + 1,
