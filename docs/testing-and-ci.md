@@ -510,8 +510,8 @@ The commit hook and pull-request CI check changed authored TypeScript files.
 `npm run typecheck --prefix control/web` checks both the application and browser
 tests/configuration; `npm run build` also checks application types. Generated
 contracts remain owned by their generators. Rust hooks run pinned formatting and
-offline Clippy/compiler checks, using the Linux VM on macOS. Dependency acquisition
-is explicit setup, never a commit-hook action.
+offline Clippy/compiler checks, using the Linux VM on macOS. Commit checks prepare missing or stale locked Python and TypeScript dependencies
+automatically, with serialized preparation and a ten-minute deadline.
 
 When acceptance inputs are available, run the actual harness through the same
 OrbStack Docker context, not only its unit tests:

@@ -121,3 +121,31 @@ def test_a_skipped_producer_does_not_skip_publication() -> None:
     for name in sorted(downstream):
         condition = " ".join(str(jobs[name].get("if", "")).split())
         assert any(fn in condition for fn in status), name
+
+
+def test_acceptance_failure_reports_upload_without_forgiving_the_failed_run() -> None:
+    """A failed acceptance step must still upload diagnostics and block signing."""
+    for workflow, gate_jobs in (
+        (RELEASE, ("nas-acceptance", "spark-acceptance")),
+        (WORKFLOWS / "spark-upgrade-acceptance.yml", ("carry",)),
+    ):
+        jobs = load(workflow)["jobs"]
+        for name in gate_jobs:
+            steps = jobs[name]["steps"]
+            uploads = [
+                (index, step)
+                for index, step in enumerate(steps)
+                if "actions/upload-artifact@" in step.get("uses", "")
+                and "report" in step.get("name", "").lower()
+            ]
+            assert uploads, f"{name} lost its failure report upload"
+            for index, step in uploads:
+                assert step["if"] == "always()"
+                runners = [
+                    item for item in steps[:index] if "report" in item.get("run", "")
+                ]
+                assert runners
+                assert all(not item.get("continue-on-error", False) for item in runners)
+    signing = load(RELEASE)["jobs"]["acceptance"]
+    for job in ("nas-acceptance", "spark-acceptance", "spark-upgrade-acceptance"):
+        assert f"needs['{job}'].result == 'success'" in signing["if"]

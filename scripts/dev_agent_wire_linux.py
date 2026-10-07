@@ -30,6 +30,11 @@ import time
 import uuid
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
+# The sibling helper, however this file is loaded.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from check_environment import ensure_catalog
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # --- CI lane contract -------------------------------------------------------
@@ -345,11 +350,7 @@ def resolve_recipe_library(
             f"VONK_RECIPE_LIBRARY_ROOT or pass --recipe-library."
         )
     library = library.resolve()
-    if not (library / "catalog-index.json").is_file():
-        raise LaneError(
-            f"recipe library {library} has no built catalog index. Run "
-            f"scripts/build-recipe-library {library} first, as CI does."
-        )
+    ensure_catalog(REPO_ROOT, library)
     pinned_path = REPO_ROOT / RECIPE_REVISION_FILE
     pinned = pinned_path.read_text(encoding="utf-8").strip()
     code, head = capture(["git", "-C", str(library), "rev-parse", "HEAD"])

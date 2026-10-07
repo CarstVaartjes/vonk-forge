@@ -572,8 +572,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes rclone
+          scripts/ci-apt-install rclone
 
       - name: Revalidate source authority before R2 credentials
         shell: bash
@@ -965,6 +964,7 @@ jobs:
             --output "$RUNNER_TEMP/nas-acceptance/report.json"
 
       - name: Upload NAS behavioral gate report
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: installer-nas-acceptance-${{ needs.candidate.outputs.generation }}
@@ -1223,6 +1223,7 @@ jobs:
             ${{ runner.temp }}/spark-acceptance/renewal-scheduling-clock.json
 
       - name: Upload Spark behavioral gate report
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: installer-spark-acceptance-${{ needs.candidate.outputs.generation }}-linux-arm64
@@ -1394,8 +1395,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes rclone skopeo
+          scripts/ci-apt-install rclone skopeo
 
       - name: Log in to GHCR for accepted channel promotion
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0

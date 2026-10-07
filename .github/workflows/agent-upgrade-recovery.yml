@@ -59,8 +59,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
+          scripts/ci-apt-install \
             acl adduser build-essential ca-certificates crun init-system-helpers \
             fuse-overlayfs iproute2 iptables openssl podman shellcheck \
             slirp4netns systemd uidmap util-linux
