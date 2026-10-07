@@ -182,7 +182,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         )
         assert isinstance(stop_claim.payload, RecipeStopPayload)
         assert stop_claim.payload.run_id == old_start.owner_id
-        assert stop_claim.fence.node_id == node_id
+        assert fenced_operation(sessions, stop_claim).node_id == node_id
         agent_jobs.record_result(
             AgentResult(
                 fence=stop_claim.fence,
