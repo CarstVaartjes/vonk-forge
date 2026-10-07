@@ -107,6 +107,12 @@ from .model_cache_api import (
     install_model_operator_routes,
     register_model_cache_operation_provider,
 )
+from .observation_transfer import (
+    ObservationTransferRecord,
+    ObservationTransferResponse,
+    observation_openapi,
+    observation_response,
+)
 from .operation_api import (
     BoundedErrorResponse,
     ErrorContextResponse,
@@ -527,7 +533,6 @@ def refresh_fleet_metrics(
 
 
 from .platform_observation import (
-    PlatformObservation,
     PlatformObserver,
     api_only_observation,
 )
@@ -927,18 +932,24 @@ def create_app(
 
     @app.get(
         "/api/platform",
-        response_model=PlatformObservation,
+        response_class=ObservationTransferResponse,
+        response_model=None,
         operation_id="getPlatformObservation",
-        responses=bounded_error_responses(401, 503),
+        responses={
+            200: {"model": ObservationTransferRecord},
+            **bounded_error_responses(401, 503),
+        },
+        openapi_extra=observation_openapi("PlatformObservation"),
     )
     def platform_observation(
         _actor: Actor = authenticated_actor,
-    ) -> PlatformObservation:
-        return (
+    ) -> ObservationTransferResponse:
+        observation = (
             api_only_observation()
             if platform_observer is None
             else platform_observer.read()
         )
+        return observation_response(observation, resource="platform")
 
     @app.get("/api/healthz", response_model=HealthzResponse)
     def healthz() -> HealthzResponse:

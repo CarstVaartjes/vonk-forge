@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import http.client
+import io
 import json
 import math
 import os
@@ -149,6 +152,10 @@ class ControlMalformedResponse(ControlClientError):
 
 class ControlResponseTooLarge(ControlClientError):
     pass
+
+
+class ControlObservationUnavailable(ControlClientError):
+    reason_code = "observation.transfer_unavailable"
 
 
 class ControlTransportError(ControlClientError):
@@ -741,6 +748,29 @@ def _read_control_response(
     return status, content, response_headers
 
 
+def _unique_json_members(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate observation JSON member")
+        result[key] = value
+    return result
+
+
+def _observation_payload(path: str, method: str) -> str | None:
+    operation = _operation(path, method)
+    payload = operation.get("x-vonk-observation-payload")
+    if method != "GET" or not isinstance(payload, dict):
+        return None
+    reference = payload.get("$ref")
+    if reference not in (
+        "#/components/schemas/FleetSnapshot",
+        "#/components/schemas/PlatformObservation",
+    ):
+        raise ControlClientError("observation payload contract is invalid")
+    return str(reference).rsplit("/", 1)[1]
+
+
 class _OpenerTransport(httpx2.BaseTransport):
     def __init__(self, opener: Callable[..., _OpenedResponse], timeout: float) -> None:
         self._opener = opener
@@ -1057,6 +1087,11 @@ class ControlClient:
             self._base + path, data=data, headers=headers, method=method
         )
         operation = f"{method} {route_path}"[:160]
+        observation_payload = _observation_payload(route_path, method)
+        if observation_payload is not None:
+            return self._read_observation(
+                request, timeout, route_path, observation_payload
+            )
         status, content, response_headers = _read_control_response(
             self._opener, request, timeout
         )
@@ -1072,6 +1107,198 @@ class ControlClient:
                     request_id=safe_request_id(response_headers.get("x-request-id")),
                 )
             raise
+
+    def _read_observation(
+        self,
+        request: urllib.request.Request,
+        timeout: float,
+        path: str,
+        payload: str,
+    ) -> dict[str, object]:
+        """Verify one frozen whole observation before returning any domain fact.
+
+        Only the declared streaming routes bypass the whole-document allocation.
+        Every record is bounded before retention; bytes are spooled, with no
+        invented aggregate size cap or claim that the final model has bounded RAM.
+        """
+        media_type = "application/x-vonk-observation+ndjson"
+        request.add_header("Accept", media_type)
+        status: int | None = None
+        request_id: str | None = None
+        try:
+            try:
+                response = self._opener(request, timeout=timeout)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response, tempfile.TemporaryFile(mode="w+b") as spool:
+                status = (
+                    response.code
+                    if isinstance(response, urllib.error.HTTPError)
+                    else response.status
+                )
+                request_id = safe_request_id(response.headers.get("x-request-id"))
+                if not 200 <= status < 300:
+                    return self._request_response(
+                        "GET",
+                        path,
+                        status,
+                        response.read(MAX_CONTROL_DOCUMENT_BYTES + 1),
+                        response.headers,
+                    )
+                actual_media = (
+                    response.headers.get("content-type", "")
+                    .split(";", 1)[0]
+                    .strip()
+                    .lower()
+                )
+                _response_media_contract(
+                    path, "GET", status, actual_media, has_content=True
+                )
+                if actual_media != media_type:
+                    raise ValueError("observation transfer content type differs")
+                content = _response_definition(path, "GET", status).get("content")
+                if not isinstance(content, dict) or not isinstance(
+                    content.get(media_type), dict
+                ):
+                    raise TypeError("observation transfer schema is unavailable")
+                record_media = content[media_type]
+                if not isinstance(record_media, dict):
+                    raise TypeError("observation transfer schema is unavailable")
+                record_schema = record_media.get("schema")
+                transfer_id: str | None = None
+                ordinal = 0
+                byte_count = 0
+                digest = hashlib.sha256()
+                complete = False
+                pending = bytearray()
+                while True:
+                    # A partial record can never retain more than its allocation.
+                    if len(pending) >= MAX_CONTROL_DOCUMENT_BYTES:
+                        raise ValueError("observation record exceeds reader allocation")
+                    incoming = response.read(
+                        min(65536, MAX_CONTROL_DOCUMENT_BYTES - len(pending))
+                    )
+                    if not incoming:
+                        break
+                    pending.extend(incoming)
+                    while b"\n" in pending:
+                        line, remainder = pending.split(b"\n", 1)
+                        pending = bytearray(remainder)
+                        if complete:
+                            raise ValueError("observation data follows final receipt")
+                        record = json.loads(
+                            line, object_pairs_hook=_unique_json_members
+                        )
+                        _validate_schema(
+                            record,
+                            record_schema,
+                            message="observation record violates canonical schema",
+                        )
+                        if not isinstance(record, dict):
+                            raise TypeError("observation record is not an object")
+                        kind = record.get("type")
+                        identifier = record.get("transfer_id")
+                        if transfer_id is None:
+                            expected_resource = (
+                                "fleet" if payload == "FleetSnapshot" else "platform"
+                            )
+                            if (
+                                kind != "start"
+                                or record.get("resource") != expected_resource
+                                or not isinstance(identifier, str)
+                            ):
+                                raise ValueError(
+                                    "observation start differs from requested resource"
+                                )
+                            transfer_id = identifier
+                            continue
+                        if identifier != transfer_id:
+                            raise ValueError(
+                                "observation identity changed during transfer"
+                            )
+                        if kind == "chunk":
+                            if record.get("ordinal") != ordinal:
+                                raise ValueError(
+                                    "observation fragments are not contiguous"
+                                )
+                            data = record.get("data")
+                            if not isinstance(data, str):
+                                raise ValueError(
+                                    "observation fragment data is unreadable"
+                                )
+                            raw = base64.b64decode(data, validate=True)
+                            spool.write(raw)
+                            digest.update(raw)
+                            byte_count += len(raw)
+                            ordinal += 1
+                        elif kind == "complete":
+                            if (
+                                record.get("chunks") != ordinal
+                                or ordinal == 0
+                                or record.get("bytes") != byte_count
+                                or record.get("sha256") != digest.hexdigest()
+                            ):
+                                raise ValueError(
+                                    "observation completeness receipt differs"
+                                )
+                            complete = True
+                        elif kind == "error":
+                            detail = record.get("detail")
+                            if not isinstance(detail, str):
+                                raise ValueError(
+                                    "observation error explanation is unreadable"
+                                )
+                            raise ControlObservationUnavailable(
+                                f"{ControlObservationUnavailable.reason_code}: {detail}",
+                                context=replace(
+                                    protocol_context(
+                                        operation=f"GET {path}", endpoint=path
+                                    ),
+                                    http_status=status,
+                                    request_id=request_id,
+                                ),
+                            )
+                        else:
+                            raise ValueError("unexpected observation transfer phase")
+                if pending or not complete:
+                    raise ValueError(
+                        "observation ended without a complete final receipt"
+                    )
+                spool.seek(0)
+                with io.TextIOWrapper(
+                    spool, encoding="utf-8", errors="strict"
+                ) as document:
+                    decoded = json.load(
+                        document, object_pairs_hook=_unique_json_members
+                    )
+                    return validate_control_document(payload, decoded)
+        except (ControlHTTPError, ControlObservationUnavailable):
+            raise
+        except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
+            context = replace(
+                transport_context(operation=f"GET {path}", endpoint=path, error=error),
+                http_status=status,
+                request_id=request_id,
+            )
+            raise ControlTransportError(
+                context.render("observation transfer failed"), context=context
+            ) from None
+        except (
+            ValueError,
+            TypeError,
+            RecursionError,
+            binascii.Error,
+            ControlClientError,
+        ):
+            context = replace(
+                protocol_context(operation=f"GET {path}", endpoint=path),
+                http_status=status,
+                request_id=request_id,
+            )
+            raise ControlMalformedResponse(
+                "Complete observation unavailable: transfer or canonical payload validation failed; retry observation",
+                context=context,
+            ) from None
 
     def _request_response(
         self,
@@ -1536,9 +1763,9 @@ class ControlClient:
         return self.request("GET", path)
 
     def fleet(self) -> FleetSnapshot:
-        from .generated_control.api.default import get_fleet_status
+        from .generated_control.models.fleet_snapshot import FleetSnapshot
 
-        return self._call_generated(get_fleet_status.sync_detailed)  # type: ignore[return-value]
+        return FleetSnapshot.from_dict(self.request("GET", "/api/fleet"))
 
     def job(self, job_id: str) -> JobDetailResponse:
         from .generated_control.api.default import get_job

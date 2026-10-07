@@ -58,6 +58,12 @@ from .fleet_projection import (
 from .library_projection import LibrarySelectorAmbiguous
 from .logging import current_request_id, log_event, redact_text
 from .models import AgentOperation, AgentOperationAttempt
+from .observation_transfer import (
+    ObservationTransferRecord,
+    ObservationTransferResponse,
+    observation_openapi,
+    observation_response,
+)
 from .operation_api import bounded_error_responses
 from .operation_item_contract import OperationResultFacts
 from .request_fault import RequestFault
@@ -815,12 +821,17 @@ def install_operator_projection_routes(
 
     @app.get(
         "/api/fleet",
-        response_model=FleetSnapshot,
-        responses=bounded_error_responses(401, 503),
+        response_class=ObservationTransferResponse,
+        response_model=None,
+        responses={
+            200: {"model": ObservationTransferRecord},
+            **bounded_error_responses(401, 503),
+        },
+        openapi_extra=observation_openapi("FleetSnapshot"),
         operation_id="getFleetStatus",
     )
-    def fleet_status(_actor: Actor = authenticated) -> FleetSnapshot:
-        return snapshot()
+    def fleet_status(_actor: Actor = authenticated) -> ObservationTransferResponse:
+        return observation_response(snapshot(), resource="fleet")
 
     @app.get(
         "/api/fleet/locks",

@@ -260,11 +260,12 @@ class FleetEventRepository:
 
     def high_watermark(self) -> int:
         with self._sessions() as session:
-            value = session.scalar(
-                select(FleetEventCursor.last_id).where(
-                    FleetEventCursor.singleton_id == 1
-                )
-            )
+            return self.high_watermark_in_session(session)
+
+    def high_watermark_in_session(self, session: Session) -> int:
+        value = session.scalar(
+            select(FleetEventCursor.last_id).where(FleetEventCursor.singleton_id == 1)
+        )
         if value is None:
             raise RuntimeError("fleet event cursor singleton is not initialized")
         return value

@@ -24,6 +24,7 @@ from fastapi.openapi.utils import (
     get_model_name_map,
     get_openapi_path,
 )
+from pydantic.json_schema import models_json_schema
 from starlette.routing import BaseRoute
 
 UPSTREAM_ASSEMBLER_SHA256 = (
@@ -124,6 +125,18 @@ def canonical_openapi(
         model_name_map=model_name_map,
         separate_input_output_schemas=separate_input_output_schemas,
     )
+    # Streaming observations transport bytes of these original canonical
+    # models. They remain generated payload contracts even though an individual
+    # HTTP record carries a transfer envelope rather than the whole model.
+    from .fleet_projection import FleetSnapshot
+    from .platform_observation import PlatformObservation
+
+    _, payload_graph = models_json_schema(
+        [(FleetSnapshot, "serialization"), (PlatformObservation, "serialization")],
+        ref_template="#/components/schemas/{model}",
+    )
+    for name, definition in payload_graph.get("$defs", {}).items():
+        definitions.setdefault(name, definition)
     for route_context in routing.iter_route_contexts(routes):
         api_route = _get_api_route_for_openapi(route_context)
         if api_route is not None:
