@@ -215,7 +215,7 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
     adapter_result = FleetProfileSwitchAdapterResult(
         children=[
             FleetProfileSwitchChildState(
-                operation_id=operation_id, kind="run", state="succeeded"
+                queue_index=0, operation_id=operation_id, kind="run", state="succeeded"
             )
         ],
         assignment_ids=[],
@@ -2220,7 +2220,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert current.current_operation_id == application.id
     adapter_progress = current.progress.switch_adapter
     assert isinstance(adapter_progress, FleetProfileSwitchAdapterState)
-    child_id = adapter_progress.active_operation_id
+    child_id = adapter_progress.pending_children[0].operation_id
     assert isinstance(child_id, str)
     child = run_switch.get(child_id)
     assert child.kind == "recipe.run-switch.v2"
@@ -2270,7 +2270,10 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     resumed = restarted_service.application(application.id)
     assert resumed.current_operation_id == application.id
     assert resumed.progress.switch_adapter is not None
-    assert resumed.progress.switch_adapter.active_operation_id == child_id
+    assert any(
+        child.operation_id == child_id
+        for child in resumed.progress.switch_adapter.pending_children
+    )
 
 
 def _transfer_result(nodes: tuple[str, ...]) -> dict[str, object]:
@@ -2387,7 +2390,7 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     assert service.tick() is True
     started = service.application(application.id)
     assert started.progress.switch_adapter is not None
-    child_id = started.progress.switch_adapter.active_operation_id
+    child_id = started.progress.switch_adapter.pending_children[0].operation_id
     assert isinstance(child_id, str)
 
     # The child finishes with its public Run/Switch result tree, exactly as the
@@ -2514,7 +2517,7 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     assert service.tick() is True
     started = service.application(application.id)
     assert started.progress.switch_adapter is not None
-    child_id = started.progress.switch_adapter.active_operation_id
+    child_id = started.progress.switch_adapter.pending_children[0].operation_id
     assert isinstance(child_id, str)
 
     with sessions.begin() as session:
@@ -2528,7 +2531,10 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     waiting = service.application(application.id)
     assert waiting.state in {"queued", "running"}, waiting.status_reason
     assert waiting.progress.switch_adapter is not None
-    assert waiting.progress.switch_adapter.active_operation_id == child_id
+    assert any(
+        child.operation_id == child_id
+        for child in waiting.progress.switch_adapter.pending_children
+    )
 
     with sessions.begin() as session:
         job = session.get(Job, child_id)
@@ -2622,7 +2628,7 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
     assert service.tick() is True
     started = service.application(application.id)
     assert started.progress.switch_adapter is not None
-    child_id = started.progress.switch_adapter.active_operation_id
+    child_id = started.progress.switch_adapter.pending_children[0].operation_id
     assert isinstance(child_id, str)
 
     with sessions.begin() as session:
@@ -2649,11 +2655,14 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
         assert stored is not None
         progress = FleetProfileApplicationProgress.model_validate(stored.progress)
         assert isinstance(progress.switch_adapter, FleetProfileSwitchAdapterState)
-        assert progress.switch_adapter.active_operation_id == child_id
+        assert any(
+            child.operation_id == child_id
+            for child in progress.switch_adapter.pending_children
+        )
 
     committed = service.application(application.id).progress.switch_adapter
     assert committed is not None
-    assert committed.active_operation_id == child_id
+    assert any(child.operation_id == child_id for child in committed.pending_children)
 
 
 def test_profile_tick_advances_a_switch_child_on_postgres(
@@ -2736,14 +2745,17 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
         started = service.application(application.id)
         assert started.current_operation_id == application.id
         assert started.progress.switch_adapter is not None
-        child_id = started.progress.switch_adapter.active_operation_id
+        child_id = started.progress.switch_adapter.pending_children[0].operation_id
         assert isinstance(child_id, str)
         # The next pass reads the child under the same row lock; unchanged
         # progress is not written again.
         assert service.tick() is False
         resumed = service.application(application.id)
         assert resumed.progress.switch_adapter is not None
-        assert resumed.progress.switch_adapter.active_operation_id == child_id
+        assert any(
+            child.operation_id == child_id
+            for child in resumed.progress.switch_adapter.pending_children
+        )
     finally:
         engine.dispose()
 
@@ -2816,7 +2828,7 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
     assert current.current_operation_id == application.id
     state = current.progress.switch_adapter
     assert state is not None
-    child_id = state.active_operation_id
+    child_id = state.pending_children[0].operation_id
     assert isinstance(child_id, str)
     child = run_switch.get(child_id)
     assert child.kind == "recipe.stop.v2"
@@ -2904,7 +2916,7 @@ def test_all_idle_profile_stops_a_lost_run_that_still_has_residue(
     assert service.tick() is True
     state = service.application(application.id).progress.switch_adapter
     assert state is not None
-    child_id = state.active_operation_id
+    child_id = state.pending_children[0].operation_id
     assert isinstance(child_id, str)
     child = run_switch.get(child_id)
     assert child.kind == "recipe.stop.v2"
@@ -4009,22 +4021,21 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
             break
         state = current.progress.switch_adapter
         assert state is not None
-        active_id = state.active_operation_id
-        if active_id is None:
-            continue
-        child = run_switch.get(active_id)
-        operation_id = child.result.child_operation_id if child.result else None
-        if operation_id is None or operation_id in completed_agent_operations:
-            continue
-        with sessions() as session:
-            operation = session.get(Job, operation_id)
-            assert operation is not None
-            kind = operation.kind
-        assert kind in {"recipe.stop", "recipe.uninstall"}
-        lifecycle.record_node_result(
-            operation_id, nodes[0], succeeded=True, evidence={}
-        )
-        completed_agent_operations.add(operation_id)
+        for pending_child in state.pending_children:
+            assert pending_child.kind == state.queue[pending_child.queue_index].kind
+            child = run_switch.get(pending_child.operation_id)
+            operation_id = child.result.child_operation_id if child.result else None
+            if operation_id is None or operation_id in completed_agent_operations:
+                continue
+            with sessions() as session:
+                operation = session.get(Job, operation_id)
+                assert operation is not None
+                kind = operation.kind
+            assert kind in {"recipe.stop", "recipe.uninstall"}
+            lifecycle.record_node_result(
+                operation_id, nodes[0], succeeded=True, evidence={}
+            )
+            completed_agent_operations.add(operation_id)
     else:
         pytest.fail(
             "profile cleanup did not converge: "
@@ -4117,15 +4128,26 @@ def test_persisted_child_progress_is_read_with_json_semantics() -> None:
     valid datetime".
     """
 
-    state = {
-        "state": "running",
-        "child_progress": {
-            "phase": "start",
-            "node_ids": [_node_id(1)],
-            "startup_budget_seconds": 1800,
-            "start_deadline": "2026-09-17T08:48:21.262460Z",
-        },
-    }
+    state = FleetProfileSwitchAdapterState.model_validate_json(
+        json.dumps(
+            {
+                "child_id": _uuid(900),
+                "scope_node_ids": [_node_id(1)],
+                "assignment_ids": [],
+                "assignments": [],
+                "queue": [],
+                "actor": "admin",
+                "request_id": _uuid(901),
+                "state": "running",
+                "child_progress": {
+                    "phase": "start",
+                    "node_ids": [_node_id(1)],
+                    "startup_budget_seconds": 1800,
+                    "start_deadline": "2026-09-17T08:48:21.262460Z",
+                },
+            }
+        )
+    )
 
     view = RunSwitchFleetProfileAdapter._view_from_state(
         cast("FleetProfileApplication", SimpleNamespace(id=_uuid(900))), state
@@ -4243,7 +4265,7 @@ def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
 
     current = service.application(application.id)
     state = current.progress.switch_adapter
-    assert state is not None and state.active_operation_id is None
+    assert state is not None and not state.pending_children
     assert current.state == "succeeded", current.status_reason
 
 
