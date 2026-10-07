@@ -166,9 +166,15 @@ type fault struct {
 	code   string
 	status int
 	cause  error
+	detail string
 }
 
-func (f *fault) Error() string { return f.code }
+func (f *fault) Error() string {
+	if f.detail != "" {
+		return f.code + ": " + f.detail
+	}
+	return f.code
+}
 func refused(code string, status int, cause error) error {
 	return &fault{code: code, status: status, cause: cause}
 }

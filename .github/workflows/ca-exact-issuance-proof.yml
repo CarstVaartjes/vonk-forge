@@ -103,6 +103,19 @@ jobs:
       - name: Provide the canonical recipe library for Controller test imports
         if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         uses: ./.github/actions/recipe-library
+      - name: Prove actual CA refusal causes through the native Python provider
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        working-directory: deploy/compose/step-ca/service
+        env:
+          VONK_CA_REFUSAL_PYTHON: ${{ github.workspace }}/control/.venv/bin/python
+          VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+          CGO_ENABLED: '1'
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          go test -mod=readonly -race -json -count=1 -timeout=180s \
+            -run '^TestAuthorityHTTPCanonicalRefusalsReachNativeProvider$' ./... \
+            | tee ../../../../artifacts/ca-proof/native-refusal-consumer.log
       - name: Pull the reviewed PostgreSQL image for claim and HTTP concurrency proofs
         if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         run: scripts/pull-test-images postgres

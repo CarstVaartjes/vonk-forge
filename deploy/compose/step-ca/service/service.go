@@ -52,13 +52,58 @@ func jsonReply(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
+// refusalReply implements the existing canonical CertificateRefusalReply wire
+// contract. Details come only from owned labels or measured byte counts; raw
+// authorization, CSR, certificate and storage errors never become HTTP data.
+type refusalReply struct {
+	Reason string `json:"reason_code"`
+	Detail string `json:"detail"`
+}
+
+func refusalDetail(code string) string {
+	switch code {
+	case "certificate.request_invalid":
+		return "Certificate request is invalid."
+	case "certificate.authentication_refused":
+		return "Certificate request authentication was refused."
+	case "certificate.binding_refused":
+		return "Authenticated certificate request binding was refused."
+	case "certificate.source_revoked", "certificate.rotation_source_revoked":
+		return "Rotation source certificate is revoked."
+	case "certificate.source_identity_refused":
+		return "Rotation source certificate does not match the accepted node and issuer."
+	case "certificate.request_binding_mismatch":
+		return "Durable certificate request differs from the accepted binding."
+	case "certificate.serial_already_reserved":
+		return "Certificate serial is reserved by another exact request."
+	case "certificate.serial_already_issued":
+		return "Certificate serial was already issued outside this exact request."
+	case "certificate.attempt_superseded":
+		return "Certificate issuance attempt no longer owns the durable request."
+	case "certificate.issuance_revoked":
+		return "Issued certificate is revoked."
+	case "certificate.response_unrepresentable":
+		return "Certificate response exceeds the owned response byte budget."
+	default:
+		return "Exact certificate issuance is temporarily unavailable."
+	}
+}
+
+func refusalHTTP(w http.ResponseWriter, status int, code string) {
+	jsonReply(w, status, refusalReply{code, refusalDetail(code)})
+}
+
 func failReply(w http.ResponseWriter, err error) {
 	var typed *fault
 	if errors.As(err, &typed) {
-		jsonReply(w, typed.status, map[string]string{"reason_code": typed.code})
+		detail := refusalDetail(typed.code)
+		if typed.detail != "" {
+			detail = typed.detail
+		}
+		jsonReply(w, typed.status, refusalReply{typed.code, detail})
 		return
 	}
-	jsonReply(w, http.StatusServiceUnavailable, map[string]string{"reason_code": "certificate.issuance_unavailable"})
+	refusalHTTP(w, http.StatusServiceUnavailable, "certificate.issuance_unavailable")
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -81,41 +126,41 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Service) sign(w http.ResponseWriter, r *http.Request) {
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
 	if err != nil {
-		jsonReply(w, 400, map[string]string{"reason_code": "certificate.request_invalid"})
+		refusalHTTP(w, 400, "certificate.request_invalid")
 		return
 	}
 	var body signRequest
 	if err := strictJSON(raw, &body); err != nil || body.OTT == "" || (body.Mode != "issue" && body.Mode != "observe") {
-		jsonReply(w, 400, map[string]string{"reason_code": "certificate.request_invalid"})
+		refusalHTTP(w, 400, "certificate.request_invalid")
 		return
 	}
 	ctx := provisioner.NewContextWithMethod(r.Context(), provisioner.SignMethod)
 	options, err := s.Authority.Authorize(ctx, body.OTT)
 	if err != nil {
-		jsonReply(w, 401, map[string]string{"reason_code": "certificate.authentication_refused"})
+		refusalHTTP(w, 401, "certificate.authentication_refused")
 		return
 	}
 	binding, err := bindingJSON(body.Request)
 	if err != nil {
-		jsonReply(w, 400, map[string]string{"reason_code": "certificate.request_invalid"})
+		refusalHTTP(w, 400, "certificate.request_invalid")
 		return
 	}
 	block, rest := pem.Decode([]byte(body.CSR))
 	if block == nil || block.Type != "CERTIFICATE REQUEST" || len(rest) != 0 {
-		jsonReply(w, 400, map[string]string{"reason_code": "certificate.request_invalid"})
+		refusalHTTP(w, 400, "certificate.request_invalid")
 		return
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
-		jsonReply(w, 400, map[string]string{"reason_code": "certificate.request_invalid"})
+		refusalHTTP(w, 400, "certificate.request_invalid")
 		return
 	}
 	if err := binding.validate(csr, s.Policy); err != nil {
-		jsonReply(w, 400, map[string]string{"reason_code": "certificate.request_invalid"})
+		refusalHTTP(w, 400, "certificate.request_invalid")
 		return
 	}
 	if err := authenticatedBinding(body.OTT, binding, csr); err != nil {
-		jsonReply(w, 403, map[string]string{"reason_code": "certificate.binding_refused"})
+		refusalHTTP(w, 403, "certificate.binding_refused")
 		return
 	}
 	// Read the durable effect before mutable source admission. Revoking the old
@@ -136,12 +181,12 @@ func (s *Service) sign(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if revoked {
-				jsonReply(w, 403, map[string]string{"reason_code": "certificate.source_revoked"})
+				refusalHTTP(w, 403, "certificate.source_revoked")
 				return
 			}
 			source, err := s.Journal.GetCertificate(*binding.SourceSerial)
 			if err != nil || source.Subject.CommonName != binding.NodeID || len(source.URIs) != 1 || source.URIs[0].String() != "spiffe://vonk-forge.local/node/"+binding.NodeID || source.CheckSignatureFrom(s.Policy.Issuer) != nil {
-				jsonReply(w, 403, map[string]string{"reason_code": "certificate.source_identity_refused"})
+				refusalHTTP(w, 403, "certificate.source_identity_refused")
 				return
 			}
 		}

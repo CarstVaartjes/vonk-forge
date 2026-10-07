@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"fmt"
 	"io"
 	"math/big"
 	"net/url"
@@ -37,7 +38,7 @@ func makeIssuedReply(binding Binding, chain []*x509.Certificate) (issuedReply, e
 	}
 	// jsonReply uses Encoder.Encode, which appends one newline.
 	if len(raw)+1 > maxIssuedResponseBytes {
-		return issuedReply{}, refused("certificate.response_unrepresentable", 422, nil)
+		return issuedReply{}, &fault{code: "certificate.response_unrepresentable", status: 422, detail: fmt.Sprintf("Certificate response requires %d bytes; limit is %d bytes.", len(raw)+1, maxIssuedResponseBytes)}
 	}
 	return reply, nil
 }

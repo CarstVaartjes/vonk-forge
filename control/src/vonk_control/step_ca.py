@@ -727,7 +727,7 @@ class StepCertificateAuthority(CertificateAuthority):
                                 "CA returned an invalid refusal response"
                             ) from error
                         raise StepCAError(
-                            "CA refused exact certificate request",
+                            f"CA refused exact certificate request: {refusal.detail}",
                             reason_code=refusal.reason_code,
                         )
                     raise StepCAError(

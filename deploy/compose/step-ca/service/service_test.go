@@ -11,12 +11,17 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -473,4 +478,101 @@ func TestHTTPRequiredNullableAndDuplicateBindingFieldsFailClosed(t *testing.T) {
 	if err := strictJSON([]byte(`{"outer":{"a":1,"a":2}}`), &parsed); err == nil {
 		t.Fatal("nested duplicate JSON keys accepted")
 	}
+}
+
+// The ordinary Go lane checks actual Authority/Service refusal bodies. The
+// hosted connected lane additionally runs the locked Python provider against
+// this real HTTPS server; no mocked producer or Python transport is involved.
+func TestAuthorityHTTPCanonicalRefusalsReachNativeProvider(t *testing.T) {
+	for _, name := range []string{"authentication", "revoked", "capacity"} {
+		t.Run(name, func(t *testing.T) {
+			f := newAuthorityFixture(t)
+			code, status, mode := "certificate.authentication_refused", 401, "issue"
+			token := "invalid"
+			if name == "revoked" {
+				leaf := issuedLeaf(t, f.call(t, f.binding, f.token(t, f.binding, nil), "issue"))
+				revokeToken := f.token(t, f.binding, func(claims map[string]any) {
+					claims["aud"] = "https://step-ca/1.0/revoke"
+					claims["sub"] = leaf.SerialNumber.String()
+					delete(claims, "sans")
+				})
+				raw, _ := json.Marshal(map[string]any{"serial": leaf.SerialNumber.String(), "ott": revokeToken, "passive": true, "reasonCode": 0})
+				response := httptest.NewRecorder()
+				f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://step-ca/1.0/revoke", bytes.NewReader(raw)))
+				if response.Code != 200 {
+					t.Fatalf("actual native revocation failed: %d", response.Code)
+				}
+				code, status, mode = "certificate.issuance_revoked", 403, "observe"
+				token = f.token(t, f.binding, nil)
+			}
+			if name == "capacity" {
+				issuerTemplate := *f.c.Policy.Issuer
+				issuerTemplate.RawSubject = nil
+				issuerTemplate.Subject = pkix.Name{CommonName: strings.Repeat("i", 24*1024)}
+				der, err := x509.CreateCertificate(rand.Reader, &issuerTemplate, &issuerTemplate, issuerTemplate.PublicKey, f.c.Soft.Signer)
+				if err != nil { t.Fatal(err) }
+				issuer, err := x509.ParseCertificate(der)
+				if err != nil { t.Fatal(err) }
+				f.c.Policy.Issuer = issuer
+				f.c.Soft.CertificateChain = []*x509.Certificate{issuer}
+				f.binding.IssuerFingerprint = digest(issuer.Raw)
+				f.binding.PolicySHA256 = f.c.Policy.policyDigest()
+				f.handler.Policy = f.c.Policy
+				code, status = "certificate.response_unrepresentable", 422
+				token = f.token(t, f.binding, nil)
+			}
+			signerEntered := false
+			f.c.BeforeSign = func() { signerEntered = true }
+			response := f.call(t, f.binding, token, mode)
+			var reply refusalReply
+			if err := strictJSON(response.Body.Bytes(), &reply); err != nil || response.Code != status || reply.Reason != code || reply.Detail == "" || len(reply.Detail) > 512 {
+				t.Fatalf("actual refusal violated canonical contract: %d %s", response.Code, response.Body.String())
+			}
+			if name == "capacity" {
+				var observed, limit int
+				if _, err := fmt.Sscanf(reply.Detail, "Certificate response requires %d bytes; limit is %d bytes.", &observed, &limit); err != nil || observed <= limit || limit != maxIssuedResponseBytes {
+					t.Fatalf("capacity refusal lost measured byte cause: %s", reply.Detail)
+				}
+				// The first refused claim remains truthful pending. Expiry permits
+				// the same immutable request to try again, never a new identity.
+				f.now.Add(11)
+			}
+			if python := os.Getenv("VONK_CA_REFUSAL_PYTHON"); python != "" {
+				server := httptest.NewTLSServer(f.handler)
+				defer server.Close()
+				if name != "authentication" { token = f.token(t, f.binding, nil) }
+				payload, err := json.Marshal(map[string]any{
+					"origin": server.URL,
+					"tls_certificate": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})),
+					"body": signRequest{string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: f.csr.Raw})), token, mustBindingJSON(t, f.binding), mode},
+					"expected": reply,
+				})
+				if err != nil { t.Fatal(err) }
+				root, err := filepath.Abs("../../../..")
+				if err != nil { t.Fatal(err) }
+				childContext, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				command := exec.CommandContext(childContext, python, "-m", "tests.ca_refusal_consumer")
+				command.Dir = filepath.Join(root, "control")
+				command.Stdin = bytes.NewReader(payload)
+				if output, err := command.CombinedOutput(); err != nil {
+					t.Fatalf("native Python provider lost real HTTP refusal: %v %s", err, output)
+				}
+			}
+			if signerEntered { t.Fatal("refused request invoked private signer") }
+			if name == "capacity" {
+				receipt, err := f.j.Observe(f.binding)
+				if err != nil || receipt == nil || len(receipt.Chain) != 0 {
+					t.Fatal("capacity refusal published certificate receipt")
+				}
+			}
+		})
+	}
+}
+
+func mustBindingJSON(t *testing.T, binding Binding) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(binding)
+	if err != nil { t.Fatal(err) }
+	return raw
 }
