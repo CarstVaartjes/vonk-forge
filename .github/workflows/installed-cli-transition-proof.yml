@@ -42,6 +42,14 @@ jobs:
           ref: aeefc93a96fd2bf9c209bbe8d2f3e1bded1b87f8
           path: .prior-stable-cli
           persist-credentials: false
+      - name: Verify exact proof checkouts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$VONK_TRANSITION_SOURCE_SHA"
+          test "$(git -C .prior-stable-cli rev-parse HEAD)" = "$VONK_PRIOR_STABLE_SOURCE_SHA"
+          git diff --exit-code HEAD --
+          git -C .prior-stable-cli diff --exit-code HEAD --
       - name: Provide canonical recipe dependency
         uses: ./.github/actions/recipe-library
       - name: Prepare locked Python tooling

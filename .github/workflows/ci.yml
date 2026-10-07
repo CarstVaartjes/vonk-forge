@@ -110,6 +110,12 @@ jobs:
           fetch-depth: 0
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+      - name: Check principle allowance history outside the unit suites
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: uv run --project control --frozen python scripts/check-principle-history --base "$BASE_SHA"
+
       - name: Run Ruff
         shell: bash
         env:

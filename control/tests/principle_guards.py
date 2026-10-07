@@ -10,7 +10,6 @@ from __future__ import annotations
 import ast
 import json
 import re
-import subprocess
 import sys
 from collections import Counter
 from collections.abc import Sequence
@@ -950,29 +949,6 @@ def history_gate(document: dict, previous: dict) -> list[str]:
     return messages
 
 
-def baseline_history(path: Path, document: dict) -> list[str]:
-    result = subprocess.run(
-        ["git", "show", f"origin/main:{path.relative_to(ROOT).as_posix()}"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
-    if result.returncode:
-        # This track introduces the inventory. Subsequent changes compare it
-        # against main. A missing ref is an error, not permission to bootstrap.
-        subprocess.run(
-            ["git", "rev-parse", "--verify", "origin/main"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            timeout=10,
-        )
-        return []
-    return history_gate(document, json.loads(result.stdout))
-
-
 def main(mode: str, argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     path = ROOT / "tools" / (ALLOWLISTS[mode] + "-allowlist.json")
@@ -983,7 +959,7 @@ def main(mode: str, argv: Sequence[str] | None = None) -> int:
         return 0
     if args:
         raise ValueError("only --lower is supported")
-    messages = evaluate_gate(sites, document) + baseline_history(path, document)
+    messages = evaluate_gate(sites, document)
     for message in messages:
         print(message, file=sys.stderr)
     print(f"{mode}: {len(sites)} site(s), {len(messages)} violation(s)")

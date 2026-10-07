@@ -12,7 +12,6 @@ from .principle_guards import (
     ALLOWLISTS,
     ROOT,
     Site,
-    baseline_history,
     evaluate_gate,
     history_gate,
     load_allowlist,
@@ -155,7 +154,7 @@ def test_principle_debt_only_falls(principle_inventory):
     mode, sites = principle_inventory
     path = ROOT / "tools" / (ALLOWLISTS[mode] + "-allowlist.json")
     document = load_allowlist(path)
-    assert evaluate_gate(sites, document) + baseline_history(path, document) == []
+    assert evaluate_gate(sites, document) == []
 
 
 def test_allowlist_edits_cannot_raise_or_add_debt():

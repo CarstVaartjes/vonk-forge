@@ -14,7 +14,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -65,25 +64,10 @@ def _require_sha1(value: object, *, label: str) -> str:
     return value
 
 
-def _checkout_head(package_root: Path) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(package_root), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        pytest.fail(f"frozen contracts checkout has no immutable Git HEAD: {error}")
-    return _require_sha1(result.stdout.strip(), label="frozen contracts checkout HEAD")
-
-
 def _load_frozen_corpus() -> FrozenCorpus:
     # The normal test/CI checkout is the authority. Missing input fails through
     # recipe_library_root instead of silently skipping an old temporary receipt.
     package_root = recipe_library_root()
-    _checkout_head(package_root)
     index = json.loads(
         (package_root / "catalog-index.json").read_text(encoding="utf-8")
     )

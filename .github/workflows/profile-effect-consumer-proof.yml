@@ -47,6 +47,7 @@ jobs:
       - name: Exercise connected producer and consumer
         env:
           VONK_RECIPE_EFFECT_CONSUMER_SOURCE: ${{ github.workspace }}/.proof-recipes
+          VONK_EFFECT_PLATFORM_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           VONK_EFFECT_PROOF_OUTPUT: ${{ runner.temp }}/profile-effect-consumer-proof
         run: >-
           uv run --project control --frozen pytest -q -n 0
