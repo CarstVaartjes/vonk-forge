@@ -22,6 +22,8 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
@@ -1034,24 +1036,43 @@ class LocalBrowserController:
             for name, value in request_headers.items()
         ):
             raise LifecycleError("local browser observation request is invalid")
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=timeout)
+        from cluster_profiles.control_transport import HTTPSResponse, open_https
+
+        # This acceptance boundary deliberately targets the local Caddy HTTP
+        # listener with its original virtual Host and administrator credentials.
+        # Reuse the cancellable facade; production ControlClient still requires
+        # an HTTPS origin. One budget covers opening and the complete receipt.
+        deadline = time.monotonic() + timeout
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            headers={"Host": self.hostname, **request_headers},
+        )
         try:
-            connection.request(
-                "GET", path, headers={"Host": self.hostname, **request_headers}
-            )
-            response = connection.getresponse()
-            document = selected.decode(
-                response,
-                status=response.status,
-                media_type=response.getheader("Content-Type", ""),
-            )
-            return response.status, document
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("observation attempt deadline elapsed")
+            response: HTTPSResponse | urllib.error.HTTPError
+            try:
+                response = open_https(request, timeout=remaining, trust_env=False)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                status = (
+                    response.code
+                    if isinstance(response, urllib.error.HTTPError)
+                    else response.status
+                )
+                document = selected.decode(
+                    response,
+                    status=status,
+                    media_type=response.headers.get("Content-Type", ""),
+                    deadline=deadline,
+                )
+                return status, document
         except (OSError, http.client.HTTPException, ValueError, ContractSkew) as error:
             raise LifecycleError(
                 "complete source-bound observation is unavailable; retry observation"
             ) from error
-        finally:
-            connection.close()
 
     def raw_request(
         self,

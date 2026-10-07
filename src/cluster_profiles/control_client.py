@@ -1128,6 +1128,7 @@ class ControlClient:
         Every record is bounded before retention; bytes are spooled, with no
         invented aggregate size cap or claim that the final model has bounded RAM.
         """
+        deadline = time.monotonic() + timeout
         media_type = "application/x-vonk-observation+ndjson"
         request.add_header("Accept", media_type)
         status: int | None = None
@@ -1135,7 +1136,10 @@ class ControlClient:
         received_retry_after: int | None = None
         try:
             try:
-                response = self._opener(request, timeout=timeout)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("observation attempt deadline elapsed")
+                response = self._opener(request, timeout=remaining)
             except urllib.error.HTTPError as error:
                 response = error
             with response:
@@ -1180,6 +1184,7 @@ class ControlClient:
                     response,
                     resource="fleet" if payload == "FleetSnapshot" else "platform",
                     record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+                    deadline=deadline,
                     validate_record=lambda record: _validate_schema(
                         record,
                         record_schema,

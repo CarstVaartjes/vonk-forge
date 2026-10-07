@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import threading
+import time
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -68,15 +69,24 @@ def test_verified_source_selects_transport_and_refuses_partial_then_recovers(
             io.BytesIO(response.content),
             status=200,
             media_type=response.headers["content-type"],
+            deadline=time.monotonic() + 10,
         )
         == expected
     )
     damaged = b"".join(response.content.splitlines(keepends=True)[:-1])
     with pytest.raises(ValueError, match="without a complete final receipt"):
-        selected.decode(io.BytesIO(damaged), status=200, media_type=selected.media_type)
+        selected.decode(
+            io.BytesIO(damaged),
+            status=200,
+            media_type=selected.media_type,
+            deadline=time.monotonic() + 10,
+        )
     assert (
         selected.decode(
-            io.BytesIO(response.content), status=200, media_type=selected.media_type
+            io.BytesIO(response.content),
+            status=200,
+            media_type=selected.media_type,
+            deadline=time.monotonic() + 10,
         )
         == expected
     )
@@ -95,11 +105,17 @@ def test_verified_source_selects_transport_and_refuses_partial_then_recovers(
         )
         with pytest.raises(ContractSkew, match="source schema"):
             selected.decode(
-                io.BytesIO(noncanonical), status=200, media_type=selected.media_type
+                io.BytesIO(noncanonical),
+                status=200,
+                media_type=selected.media_type,
+                deadline=time.monotonic() + 10,
             )
     assert (
         selected.decode(
-            io.BytesIO(response.content), status=200, media_type=selected.media_type
+            io.BytesIO(response.content),
+            status=200,
+            media_type=selected.media_type,
+            deadline=time.monotonic() + 10,
         )
         == expected
     )
@@ -108,6 +124,7 @@ def test_verified_source_selects_transport_and_refuses_partial_then_recovers(
             io.BytesIO(json.dumps(expected).encode()),
             status=200,
             media_type="application/json",
+            deadline=time.monotonic() + 10,
         )
 
     # This is a mechanically extracted route + transitive schema closure from
@@ -124,16 +141,23 @@ def test_verified_source_selects_transport_and_refuses_partial_then_recovers(
             io.BytesIO(json.dumps(expected).encode()),
             status=200,
             media_type="application/json",
+            deadline=time.monotonic() + 10,
         )
         == expected
     )
     with pytest.raises(ContractSkew, match="status or media differs"):
         old.decode(
-            io.BytesIO(response.content), status=200, media_type=selected.media_type
+            io.BytesIO(response.content),
+            status=200,
+            media_type=selected.media_type,
+            deadline=time.monotonic() + 10,
         )
     with pytest.raises(ContractSkew, match="source schema"):
         old.decode(
-            io.BytesIO(b'{"nodes":[]}'), status=200, media_type="application/json"
+            io.BytesIO(b'{"nodes":[]}'),
+            status=200,
+            media_type="application/json",
+            deadline=time.monotonic() + 10,
         )
     with pytest.raises(ContractSkew, match="no GET"):
         historical.observation("/api/platform")
@@ -141,7 +165,20 @@ def test_verified_source_selects_transport_and_refuses_partial_then_recovers(
 
 def test_local_acceptance_bearer_keeps_authorization_and_retries_verified_receipt(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Ambient proxy settings must never redirect loopback administrator traffic.
+    for name in (
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ):
+        monkeypatch.setenv(name, "http://127.0.0.1:1")
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "")
     engine = create_engine(f"sqlite:///{tmp_path / 'http-fleet.sqlite'}")
     Base.metadata.create_all(engine)
     snapshot = FleetProjection(

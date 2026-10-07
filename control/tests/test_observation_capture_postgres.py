@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -115,6 +116,7 @@ def _received(body: bytes, resource: str):
         io.BytesIO(body),
         resource=resource,
         record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+        deadline=time.monotonic() + 10,
         validate_record=validate_record,
         validate_payload=validate_payload,
     )

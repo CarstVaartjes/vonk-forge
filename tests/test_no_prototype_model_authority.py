@@ -15,6 +15,11 @@ def test_root_tests_do_not_import_control_implementation() -> None:
         # Controller models or import Controller implementation in production.
         ROOT / "tests/test_acceptance_observation_transfer.py",
         ROOT / "tests/cluster_profiles/test_cli_update.py",
+        # Exact native-producer receipt/transport regressions consume owning
+        # Controller schemas; they do not define prototype model authority.
+        ROOT / "tests/cluster_profiles/test_control_client_requests.py",
+        ROOT / "tests/cluster_profiles/test_control_transport_deadline.py",
+        ROOT / "tests/cluster_profiles/test_observation_attempt_deadline.py",
     }
     offenders = []
     for path in (ROOT / "tests").rglob("test_*.py"):
