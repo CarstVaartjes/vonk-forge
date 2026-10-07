@@ -49,7 +49,7 @@ test("reconnects one request at a time using only the applied cursor and server 
   let secondSignal: AbortSignal | null | undefined;
   const fetcher = vi.fn(async (_path: string, init: RequestInit) => {
     requests.push(init);
-    if (requests.length === 1) return response("retry: 2500\n" + frame.replace("id: 5", "id: 999"));
+    if (requests.length === 1) return response("retry: 2500\n" + frame);
     secondSignal = init.signal;
     return new Response(new ReadableStream({start() { /* live connection */ }}), {headers: {"Content-Type": "text/event-stream"}});
   });
@@ -103,4 +103,26 @@ test("canonical frame issues refuse contradictory cause evidence", () => {
   expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_budget_exceeded", 1048576))).toThrow();
   expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_budget_exceeded", 1048577, 2))).toThrow();
   expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_encoding_unavailable", null))).not.toThrow();
+});
+
+
+test("rejects canonical payload/header mismatch before dispatch and reconnects from applied authority", async () => {
+  vi.useFakeTimers();
+  const requests: RequestInit[] = [];
+  const fetcher = vi.fn(async (_path: string, init: RequestInit) => {
+    requests.push(init);
+    if (requests.length === 1) return response(frame.replace("id: 5", "id: 999999999999999999999999"));
+    return new Response(new ReadableStream({start() { /* live */ }}), {headers: {"Content-Type": "text/event-stream"}});
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const connection = new FleetEventConnection(() => "5");
+  const received = vi.fn(), unavailable = vi.fn();
+  connection.addEventListener("fleet-refresh", received);
+  connection.addEventListener("unavailable", unavailable);
+  await flush();
+  expect(received).not.toHaveBeenCalled();
+  expect(unavailable).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(3000); await flush();
+  expect(new Headers(requests[1].headers).get("Last-Event-ID")).toBe("5");
+  connection.close();
 });

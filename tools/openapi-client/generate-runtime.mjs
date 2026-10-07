@@ -149,6 +149,13 @@ for (const [route, item] of Object.entries(document.paths)) {
       if (!/^[1-9][0-9]*$/.test(token) || BigInt(token) > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`Invalid SSE frame allocation: ${route}`);
       metadata.frameMaxBytes = Number(token);
     }
+    if (operation["x-vonk-sse-events"] !== undefined) {
+      metadata.sseEvents = Object.fromEntries(Object.entries(operation["x-vonk-sse-events"]).map(([event, payload]) => {
+        const ref = payload?.$ref;
+        if (typeof ref !== "string" || !ref.startsWith("#/components/schemas/") || !document.components?.schemas?.[ref.slice(21)]) throw new Error(`Invalid SSE payload owner: ${route}`);
+        return [event, ref.slice(21)];
+      }));
+    }
     routes.push({route, method: method.toUpperCase(), responses, requests, parameters, ...metadata});
   }
 }
@@ -181,7 +188,7 @@ if (schemaOnly) {
 }
 // Ajv's generated code is JavaScript. Keep it JavaScript instead of inventing
 // annotations or suppressing TypeScript errors in a generated .ts file.
-fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>; recordMaxBytes?: number; observationPayload?: string; frameMaxBytes?: number}[];\n');
+fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>; recordMaxBytes?: number; observationPayload?: string; frameMaxBytes?: number; sseEvents?: Readonly<Record<string, string>>}[];\n');
 // Route tables refer to the actual exported functions, never string names.
 const routeCode = JSON.stringify(routes).replace(/"(contract[0-9]+)"/g, "$1");
 const destination = path.join(out, "runtime.generated.js");

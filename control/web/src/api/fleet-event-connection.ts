@@ -1,5 +1,11 @@
 import {contractRoutes} from "./runtime.generated.js";
-import {ContractViolation} from "./contract-json";
+import type {components} from "./generated";
+import {formatWire, type WireNumber} from "./contract-numeric";
+import {ContractViolation, validateComponent} from "./contract-json";
+
+export function matchesFleetCursor(identifier: string, canonicalCursor: WireNumber): boolean {
+  return /^[0-9]+$/.test(identifier) && identifier.replace(/^0+(?=[0-9])/, "") === formatWire(canonicalCursor);
+}
 
 /** WHATWG SSE fields and delimiters, with the canonical route's byte owner.
  * https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream
@@ -125,10 +131,18 @@ export class FleetEventConnection extends EventTarget {
       }
       this.dispatchEvent(new Event("open"));
       await readFleetEvents(response, event => {
+        const owner = contractRoutes.find(route => route.method === "GET" && route.route === this.url)?.sseEvents?.[event.type];
+        if (!owner) throw new ContractViolation("GET", this.url, response.status);
+        const payload = validateComponent(owner, event.data) as components["schemas"]["FleetStreamEvent"];
+        if (!matchesFleetCursor(event.lastEventId, payload.event_cursor)
+            || ("sample" in payload && payload.sample.node_id !== payload.node_id)) {
+          throw new ContractViolation("GET", this.url, response.status);
+        }
         if (!this.closed) this.dispatchEvent(event);
       }, milliseconds => { this.retryMilliseconds = milliseconds; });
-    } catch {
+    } catch (cause) {
       if (controller.signal.aborted) return;
+      if (cause instanceof ContractViolation) this.dispatchEvent(new Event("unavailable"));
     } finally {
       this.controller = undefined;
     }

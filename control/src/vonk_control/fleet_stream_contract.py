@@ -92,6 +92,9 @@ class FleetFrameIssue(_FleetStreamModel):
         return self
 
 
+FleetCursor = Annotated[int, Field(ge=0, le=9_223_372_036_854_775_807)]
+
+
 class FleetRefreshEvent(_FleetStreamModel):
     reset_reason: Literal[
         "initial",
@@ -100,11 +103,12 @@ class FleetRefreshEvent(_FleetStreamModel):
         "missing-telemetry-sample",
         "frame-unavailable",
     ]
-    event_cursor: Annotated[int, Field(ge=0, le=9_223_372_036_854_775_807)]
+    event_cursor: FleetCursor
     issue: FleetFrameIssue | None = None
 
 
 class FleetTelemetryEvent(_FleetStreamModel):
+    event_cursor: FleetCursor
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     sample: TelemetryPoint
 
@@ -190,6 +194,7 @@ FleetChangeAdapter = TypeAdapter(FleetChange)
 
 
 class FleetChangeEvent(_FleetStreamModel):
+    event_cursor: FleetCursor
     projection_refresh_required: Literal[True] = True
     change: FleetChange
 
@@ -200,7 +205,17 @@ class FleetStreamEvent(
     """OpenAPI union for the JSON payload carried by one SSE frame."""
 
 
+FLEET_SSE_EVENTS = {
+    "fleet-refresh": {"$ref": "#/components/schemas/FleetRefreshEvent"},
+    "node-telemetry": {"$ref": "#/components/schemas/FleetTelemetryEvent"},
+    "node-profile": {"$ref": "#/components/schemas/FleetChangeEvent"},
+    "recipe-state": {"$ref": "#/components/schemas/FleetChangeEvent"},
+    "operation-state": {"$ref": "#/components/schemas/FleetChangeEvent"},
+}
+
+
 __all__ = [
+    "FLEET_SSE_EVENTS",
     "FleetChange",
     "FleetChangeAdapter",
     "FleetChangeEvent",

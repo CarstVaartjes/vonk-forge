@@ -267,6 +267,7 @@ class FleetStream:
             if sample is None or sample.node_id != event.node_id:
                 raise RuntimeError("Fleet telemetry event hydration is inconsistent")
             return FleetTelemetryEvent(
+                event_cursor=event.id,
                 node_id=sample.node_id,
                 sample=telemetry_point(sample),
             )
@@ -280,6 +281,7 @@ class FleetStream:
             event.payload,
         )
         return FleetChangeEvent(
+            event_cursor=event.id,
             change=FleetChangeAdapter.validate_python(
                 {
                     "entity_kind": event.entity_kind,
@@ -288,5 +290,5 @@ class FleetStream:
                     "occurred_at": event.occurred_at,
                     "fields": fields,
                 }
-            )
+            ),
         )

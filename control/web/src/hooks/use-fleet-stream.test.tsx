@@ -1,4 +1,4 @@
-import {formatWire, stringifyContractJson} from "../api/contract-numeric";
+import {formatWire, parseContractJson, stringifyContractJson} from "../api/contract-numeric";
 import {act, render, screen} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {ControlApi, FleetChangeEvent, TelemetryPoint, VisualFleetSnapshot} from "../api/types";
@@ -33,7 +33,9 @@ class FakeFleetConnection {
   }
 
   emit(type: string, data: unknown = undefined, lastEventId = ""): void {
-    const event = type === "open" || type === "error"
+    if ((type === "node-telemetry" || type === "node-profile" || type === "recipe-state" || type === "operation-state")
+        && data && typeof data === "object") data = {...data, event_cursor: parseContractJson(lastEventId)};
+    const event = type === "open" || type === "error" || type === "unavailable"
       ? new Event(type)
       : new MessageEvent(type, {data: stringifyContractJson(data), lastEventId});
     for (const listener of this.listeners.get(type) ?? []) listener(event);
@@ -89,16 +91,19 @@ function snapshot(cursor: number, gpu = 10): VisualFleetSnapshot {
 function change(type: "recipe-state" | "node-profile" | "operation-state"): FleetChangeEvent {
   const occurred_at = "2026-08-15T12:00:00Z";
   if (type === "node-profile") return {
+    event_cursor: 0,
     projection_refresh_required: true,
     change: {entity_kind: "node-profile", entity_id: NODE_A, node_id: NODE_A, occurred_at,
       fields: {node_id: NODE_A, profile_changed: true}},
   };
   if (type === "recipe-state") return {
+    event_cursor: 0,
     projection_refresh_required: true,
     change: {entity_kind: "recipe-installation", entity_id: "installation-a", node_id: null, occurred_at,
       fields: {entity_kind: "recipe-installation", entity_id: "installation-a", recipe_revision_id: "revision-a", mapping_id: "mapping-a", mapping_generation: 1, state: "installed"}},
   };
   return {
+    event_cursor: 0,
     projection_refresh_required: true,
     change: {entity_kind: "job", entity_id: "job-a", node_id: null, occurred_at,
       fields: {entity_kind: "job", entity_id: "job-a", kind: "recipe.start", state: "queued", target_count: 1}},
@@ -149,15 +154,15 @@ test("uses same-origin bounded connection and reconciles increments and backward
   expect(screen.getByTestId("gpu")).toHaveTextContent("73");
   act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(99)}, "6"));
   expect(screen.getByTestId("gpu")).toHaveTextContent("73");
-  // Deliberately mismatched envelope/sample ownership must remain ignored.
+  // An invalid ownership envelope fences subsequent increments until capture.
   act(() => stream.emit("node-telemetry", {node_id: NODE_B, sample: point(88)}, "7"));
   expect(screen.getByTestId("cursor")).toHaveTextContent("6");
   act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7"));
-  expect(screen.getByTestId("gpu")).toHaveTextContent("77");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("73");
 
   act(() => stream.emit("fleet-refresh", {reset_reason: "cursor-ahead", event_cursor: 2}, "2"));
-  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
-  expect(screen.getByTestId("gpu")).toHaveTextContent("77");
+  expect(screen.getByTestId("cursor")).toHaveTextContent("6");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("73");
   act(() => vi.advanceTimersByTime(100));
   await flush();
   expect(screen.getByTestId("cursor")).toHaveTextContent("2");
@@ -506,4 +511,33 @@ test("keeps the last completed roster through a refresh notice and failed captur
   expect(screen.getByTestId("cursor")).toHaveTextContent("7");
   expect(screen.getByTestId("gpu")).toHaveTextContent("70");
   expect(visualFleet).toHaveBeenCalledTimes(3);
+});
+
+
+test("malformed sparse authority fences later telemetry until a new complete capture", async () => {
+  vi.useFakeTimers();
+  let complete!: (value: VisualFleetSnapshot) => void;
+  const capture = new Promise<VisualFleetSnapshot>(resolve => { complete = resolve; });
+  const visualFleet = vi.fn().mockResolvedValueOnce(snapshot(5)).mockReturnValueOnce(capture);
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeFleetConnection.instances[0];
+  act(() => {
+    stream.emit("operation-state", {}, "999999999999999999999999999999");
+    stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7");
+  });
+  expect(stream.appliedCursor()).toBe("5");
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("10");
+  act(() => vi.advanceTimersByTime(100));
+  await flush();
+  expect(visualFleet).toHaveBeenCalledTimes(2);
+  await act(async () => complete(snapshot(7, 70)));
+  expect(stream.appliedCursor()).toBe("7");
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("70");
+  // The untrusted, out-of-range header never became a required retry cursor.
+  act(() => vi.advanceTimersByTime(1000));
+  await flush();
+  expect(visualFleet).toHaveBeenCalledTimes(2);
 });

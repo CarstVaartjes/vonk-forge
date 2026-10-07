@@ -1,4 +1,4 @@
-import {LosslessNumber} from "lossless-json";
+import {matchesFleetCursor} from "../api/fleet-event-connection";
 import {compareWire, formatWire, type WireNumber} from "../api/contract-numeric";
 import {validateComponent} from "../api/contract-json";
 import {useCallback, useEffect, useReducer, useRef, useState} from "react";
@@ -20,10 +20,10 @@ const SPARSE_RETRY_MAX_MS = 10_000;
 const STALE_AFTER_MS = 90_000;
 const MAX_ERROR_LENGTH = 512;
 
-function cursorFrom(event: MessageEvent<string>): WireNumber | null {
-  if (!/^[0-9]+$/.test(event.lastEventId)) return null;
-  const cursor = Number(event.lastEventId);
-  return Number.isSafeInteger(cursor) ? cursor : new LosslessNumber(event.lastEventId);
+function cursorFrom(event: MessageEvent<string>, canonicalCursor: WireNumber): WireNumber | null {
+  // The generated payload model owns the SQL cursor bounds. Transport text is
+  // only an identity match, never an independent numeric authority.
+  return matchesFleetCursor(event.lastEventId, canonicalCursor) ? canonicalCursor : null;
 }
 
 function eventData(event: MessageEvent<string>, component: string): Record<string, unknown> | null {
@@ -65,6 +65,7 @@ export function useFleetStream(api: ControlApi) {
     let refreshAttempt = 0;
     let timelineGeneration = 0;
     let pendingReset: string | null = null;
+    let observationGap = false;
     let sparseRefreshTimer: ReturnType<typeof setTimeout> | undefined;
     let pollingTimer: ReturnType<typeof setInterval> | undefined;
     let reconciliationTimer: ReturnType<typeof setInterval> | undefined;
@@ -80,7 +81,7 @@ export function useFleetStream(api: ControlApi) {
     }
 
     function scheduleRefreshRetry(): void {
-      if (requiredRefreshCursor === null) return;
+      if (requiredRefreshCursor === null && !observationGap) return;
       const delay = backoffDelay(refreshAttempt, SPARSE_RETRY_BASE_MS, SPARSE_RETRY_MAX_MS);
       refreshAttempt += 1;
       scheduleRefresh(delay);
@@ -103,12 +104,13 @@ export function useFleetStream(api: ControlApi) {
         const snapshot = await api.visualFleet(controller.signal);
         if (active && !controller.signal.aborted
             && requestTimelineGeneration === timelineGeneration
-            && (pendingReset === "cursor-ahead" || compareWire(snapshot.event_cursor, appliedCursor) >= 0)) {
+            && (pendingReset !== null || compareWire(snapshot.event_cursor, appliedCursor) >= 0)) {
           if (pendingReset !== null) {
             dispatch({type: "reset-snapshot", snapshot, reason: pendingReset});
             pendingReset = null;
           } else dispatch({type: "requested-snapshot", snapshot});
           setLastUpdatedAt(Date.now()); setRefreshError("");
+          observationGap = false;
           appliedCursor = snapshot.event_cursor;
           if (requiredRefreshCursor !== null && compareWire(snapshot.event_cursor, requiredRefreshCursor) >= 0) {
             requiredRefreshCursor = null;
@@ -126,7 +128,7 @@ export function useFleetStream(api: ControlApi) {
         signal?.removeEventListener("abort", abort);
         controllers.delete(controller);
         requestInFlight = false;
-        if (active && requiredRefreshCursor !== null) {
+        if (active && (requiredRefreshCursor !== null || observationGap)) {
           const queued = refreshQueued;
           refreshQueued = false;
           if (queued) scheduleRefresh();
@@ -174,16 +176,30 @@ export function useFleetStream(api: ControlApi) {
       startPolling();
     }
 
+    function unavailableEvent(): void {
+      // A malformed observation is not evidence that its intent can be skipped.
+      // Fence captures started before the gap and every incremental update until
+      // a newly requested complete observation supplies authority again.
+      timelineGeneration += 1;
+      observationGap = true;
+      pendingReset = "stream-event-unavailable";
+      refreshQueued = true;
+      setRefreshError("fleet.event_unavailable: Invalid event observation; capturing complete state");
+      dispatch({type: "stream-gap"});
+      scheduleRefresh();
+    }
+
     function onRefresh(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
-      const cursor = cursorFrom(event);
       const data = eventData(event, "FleetRefreshEvent") as FleetRefreshEvent | null;
-      if (cursor === null || !data || compareWire(data.event_cursor, cursor) !== 0) return;
+      const cursor = data ? cursorFrom(event, data.event_cursor) : null;
+      if (cursor === null || !data || compareWire(data.event_cursor, cursor) !== 0) { unavailableEvent(); return; }
       if (data.issue) setRefreshError(`${data.issue.reason_code}: Fleet event unavailable; capturing complete state`);
       // Notices carry no roster authority. Only a completed capture can replace
       // the last model, including a lower cursor after a database timeline reset.
       timelineGeneration += 1;
       pendingReset = data.reset_reason;
+      observationGap = true;
       requiredRefreshCursor = cursor;
       refreshAttempt = 0;
       refreshQueued = true;
@@ -193,13 +209,13 @@ export function useFleetStream(api: ControlApi) {
 
     function onTelemetry(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
-      const cursor = cursorFrom(event);
       const data = eventData(event, "FleetTelemetryEvent") as FleetTelemetryEvent | null;
+      const cursor = data ? cursorFrom(event, data.event_cursor) : null;
       if (cursor === null || !data
           || typeof data.node_id !== "string"
           || typeof data.sample !== "object" || data.sample === null
-          || data.sample.node_id !== data.node_id) return;
-      if (requiredRefreshCursor !== null || pendingReset !== null) {
+          || data.sample.node_id !== data.node_id) { unavailableEvent(); return; }
+      if (requiredRefreshCursor !== null || pendingReset !== null || observationGap) {
         if (requiredRefreshCursor === null || compareWire(cursor, requiredRefreshCursor) > 0) requiredRefreshCursor = cursor;
         dispatch({type: "projection-refresh", cursor});
         scheduleRefresh();
@@ -213,9 +229,9 @@ export function useFleetStream(api: ControlApi) {
 
     function onSparse(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
-      const cursor = cursorFrom(event);
       const data = eventData(event, "FleetChangeEvent") as FleetChangeEvent | null;
-      if (cursor === null || data?.projection_refresh_required !== true) return;
+      const cursor = data ? cursorFrom(event, data.event_cursor) : null;
+      if (cursor === null || data?.projection_refresh_required !== true) { unavailableEvent(); return; }
       if ((pendingReset === null && compareWire(cursor, appliedCursor) <= 0) || compareWire(cursor, requiredRefreshCursor ?? -1) <= 0) return;
       requiredRefreshCursor = cursor;
       dispatch({type: "projection-refresh", cursor});
@@ -228,6 +244,7 @@ export function useFleetStream(api: ControlApi) {
     if (source) {
       source.addEventListener("open", onOpen);
       source.addEventListener("error", onError);
+      source.addEventListener("unavailable", unavailableEvent);
       source.addEventListener("fleet-refresh", onRefresh);
       source.addEventListener("node-telemetry", onTelemetry);
       source.addEventListener("node-profile", onSparse);
@@ -244,6 +261,7 @@ export function useFleetStream(api: ControlApi) {
       if (sparseRefreshTimer !== undefined) clearTimeout(sparseRefreshTimer);
       source?.removeEventListener("open", onOpen);
       source?.removeEventListener("error", onError);
+      source?.removeEventListener("unavailable", unavailableEvent);
       source?.removeEventListener("fleet-refresh", onRefresh);
       source?.removeEventListener("node-telemetry", onTelemetry);
       source?.removeEventListener("node-profile", onSparse);
@@ -255,6 +273,6 @@ export function useFleetStream(api: ControlApi) {
     };
   }, [api, generation]);
 
-  const stale = Boolean(state.snapshot) && (refreshError !== "" || (lastUpdatedAt !== undefined && now.getTime() - lastUpdatedAt > STALE_AFTER_MS));
+  const stale = Boolean(state.snapshot) && (state.observationGap || state.requiredRefreshCursor !== null || refreshError !== "" || (lastUpdatedAt !== undefined && now.getTime() - lastUpdatedAt > STALE_AFTER_MS));
   return {...state, now, refresh, retry, lastUpdatedAt, refreshError, stale};
 }

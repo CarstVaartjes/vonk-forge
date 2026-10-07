@@ -378,6 +378,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         "event": "node-telemetry",
     }
     assert telemetry_data == {
+        "event_cursor": 6,
         "node_id": NODE_ID,
         "sample": {
             "boot_id": NON_RFC_BOOT_ID,
@@ -390,6 +391,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
     }
     assert recipe_fields == {"id": "7", "event": "recipe-state"}
     assert recipe_data == {
+        "event_cursor": 7,
         "change": {
             "entity_id": "entity-7",
             "entity_kind": "installation-node",
