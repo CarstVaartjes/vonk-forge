@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 30353223a7e6a2fa4a32de64e4933223fb4b6908d25ecd870cc98a23e070a4b9. Do not edit.
+// Generated from canonical OpenAPI SHA256 5abc0f99a0b9dfdb3298660e0eba3d2bd550ab2660360bae72fed36c8893db11. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -2222,10 +2222,16 @@ export interface components {
             allowed_values?: components["schemas"]["ParameterScalar"][];
             /** Default */
             default: boolean;
-            /** Maximum */
-            maximum?: null;
-            /** Minimum */
-            minimum?: null;
+            /**
+             * Maximum
+             * @default null
+             */
+            maximum: null;
+            /**
+             * Minimum
+             * @default null
+             */
+            minimum: null;
             /** Name */
             name: string;
             /** Pattern */
@@ -3191,10 +3197,16 @@ export interface components {
             /** Allowed Values */
             allowed_values: components["schemas"]["ParameterScalar"][];
             default: components["schemas"]["ParameterScalar"];
-            /** Maximum */
-            maximum?: null;
-            /** Minimum */
-            minimum?: null;
+            /**
+             * Maximum
+             * @default null
+             */
+            maximum: null;
+            /**
+             * Minimum
+             * @default null
+             */
+            minimum: null;
             /** Name */
             name: string;
             /** Pattern */
@@ -4758,10 +4770,16 @@ export interface components {
             allowed_values?: components["schemas"]["ParameterScalar"][];
             /** Default */
             default: (number | ExactNumber) | (number | ExactNumber);
-            /** Maximum */
-            maximum?: (number | ExactNumber) | (number | ExactNumber) | null;
-            /** Minimum */
-            minimum?: (number | ExactNumber) | (number | ExactNumber) | null;
+            /**
+             * Maximum
+             * @default null
+             */
+            maximum: (number | ExactNumber) | (number | ExactNumber) | null;
+            /**
+             * Minimum
+             * @default null
+             */
+            minimum: (number | ExactNumber) | (number | ExactNumber) | null;
             /** Name */
             name: string;
             /** Pattern */
@@ -5039,10 +5057,16 @@ export interface components {
             allowed_values?: components["schemas"]["ParameterScalar"][];
             /** Default */
             default: number | ExactNumber;
-            /** Maximum */
-            maximum?: (number | ExactNumber) | null;
-            /** Minimum */
-            minimum?: (number | ExactNumber) | null;
+            /**
+             * Maximum
+             * @default null
+             */
+            maximum: (number | ExactNumber) | null;
+            /**
+             * Minimum
+             * @default null
+             */
+            minimum: (number | ExactNumber) | null;
             /** Name */
             name: string;
             /** Pattern */
@@ -12026,10 +12050,16 @@ export interface components {
             allowed_values?: components["schemas"]["ParameterScalar"][];
             /** Default */
             default: string;
-            /** Maximum */
-            maximum?: null;
-            /** Minimum */
-            minimum?: null;
+            /**
+             * Maximum
+             * @default null
+             */
+            maximum: null;
+            /**
+             * Minimum
+             * @default null
+             */
+            minimum: null;
             /** Name */
             name: string;
             /** Pattern */
