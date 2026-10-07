@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import stat
@@ -634,6 +635,45 @@ def assert_repeatable(first: Path, second: Path) -> None:
     }
     if first_secrets != second_secrets:
         raise AcceptanceError("two clean NAS runs produced different secret contracts")
+
+
+def assert_installer_answer_bindings(
+    bundle: Path,
+    *,
+    nas_ip: str,
+    tailnet_suffix: str,
+    oauth_client_id: str,
+    oauth_client_secret: str,
+    upstream_key: str,
+    hermes: bool,
+    control_service: str,
+    hermes_dashboard_service: str,
+) -> None:
+    """Check sequential answers at the real installer's persisted output boundary."""
+    del hermes_dashboard_service  # derived, not an installer answer
+    environment = parsed_environment(bundle)
+    expected_environment = {
+        "NAS_LAN_IP": nas_ip,
+        "VONK_CONTROL_HOSTNAME": tailscale_service_hostname(
+            control_service, tailnet_suffix
+        ),
+    }
+    for name, expected in expected_environment.items():
+        if environment.get(name) != expected:
+            raise AcceptanceError(f"installer answer was not bound to {name}")
+    expected_profiles = "secure-remote,hermes" if hermes else "secure-remote"
+    if shlex.split(environment.get("COMPOSE_PROFILES", "")) != [expected_profiles]:
+        raise AcceptanceError("installer answers did not select the requested profiles")
+    for name, answer in {
+        "tailscale-oauth-client-id": oauth_client_id,
+        "tailscale-oauth-client-secret": oauth_client_secret,
+        "litellm-upstream-key": upstream_key,
+        "hf-token": "",
+    }.items():
+        expected = f"{answer}\n".encode() if answer else b""
+        if (bundle / "secrets" / name).read_bytes() != expected:
+            # Identify the owner without printing the supplied or observed secret.
+            raise AcceptanceError(f"installer answer was not bound to secret {name}")
 
 
 def assert_tailscale_secret_group(bundle: Path) -> None:
@@ -1909,6 +1949,7 @@ def main() -> None:
             child_environment=child_environment,
             responses=nas_responses(**common, hermes=False),
         )
+        assert_installer_answer_bindings(first, **common, hermes=False)
         if tailscale_mode == "full":
             assert_tailscale_secret_group(first)
         first_secrets = secret_snapshot(first)
@@ -1932,6 +1973,8 @@ def main() -> None:
             child_environment=child_environment,
             responses=nas_responses(**common, hermes=True),
         )
+        assert_installer_answer_bindings(second, **common, hermes=False)
+        assert_installer_answer_bindings(hermes, **common, hermes=True)
         assert_repeatable(first, second)
         if tailscale_mode == "full":
             for bundle in (first, hermes):

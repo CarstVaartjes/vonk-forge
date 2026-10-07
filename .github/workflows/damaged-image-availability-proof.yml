@@ -1,0 +1,51 @@
+name: Damaged image availability recovery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/damaged-image-availability-proof.yml
+      - control/tests/test_damaged_image_availability_recovery.py
+      - control/tests/test_oci_image_store.py
+      - control/src/vonk_control/oci_image_store.py
+      - control/src/vonk_control/runtime_image_preparation.py
+      - control/src/vonk_control/compiled_execution_plan.py
+      - control/src/vonk_control/availability_production.py
+      - control/src/vonk_control/recipe_image_availability.py
+      - control/src/vonk_control/image_store_collection.py
+      - control/src/vonk_control/recipe_builds.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generations:
+    name: Real damaged image availability recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Provide the Controller image ingress tool
+        uses: ./.github/actions/apt-install
+        with:
+          packages: skopeo
+      - name: Prove damaged manifest recovery through production availability
+        env:
+          VONK_CI_DAMAGED_IMAGE_PROOF: "1"
+        run: >-
+          uv run --project control --frozen pytest -q
+          control/tests/test_damaged_image_availability_recovery.py
+          -o junit_family=xunit1 --junitxml=damaged-image-availability.xml
+      - name: Preserve exact case execution evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: damaged-image-availability-${{ github.run_id }}
+          path: damaged-image-availability.xml
+          if-no-files-found: error

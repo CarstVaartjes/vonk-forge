@@ -334,3 +334,22 @@ def test_resource_read_refusal_requires_canonical_owner_handler():
         ),
         doc,
     )
+
+
+def test_compose_embedded_shell_requires_a_bound_in_the_executed_loop():
+    from .principle_guards import scan_compose_shell
+
+    source = """services:
+  consumer:
+    entrypoint: [/bin/sh, -c, 'until [ -f /assets/ready ]; do sleep 1; done']
+    environment: {COMMENT: timeout}
+"""
+    assert scan_compose_shell(source, path="compose.yaml")
+    assert scan_compose_shell(
+        source.replace("do sleep 1", "do echo timeout; sleep 1"), path="compose.yaml"
+    )
+    bounded = source.replace(
+        "do sleep 1; done",
+        'do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then exit 1; fi; sleep 1; done',
+    )
+    assert not scan_compose_shell(bounded, path="compose.yaml")
