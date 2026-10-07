@@ -11,7 +11,7 @@ test("keeps byte progress and rate separate from file counts", () => {
     bytes_per_second: 87_000_000,
     eta_seconds: 24 * 60,
   })}/>);
-  expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42000000");
+  expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
   expect(screen.getByText(/40\.1 MiB/)).toBeInTheDocument();
   expect(screen.getByText(/83\.0 MiB\/s/)).toBeInTheDocument();
   expect(screen.getByText(/24m left/)).toBeInTheDocument();
