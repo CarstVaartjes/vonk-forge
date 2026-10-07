@@ -100,6 +100,7 @@ jobs:
       - name: Exercise native browser numeric-source capability and HTTP consumers
         if: ${{ !cancelled() && steps.corpus.outcome == 'success' }}
         env:
+          VONK_OBSERVATION_TRANSFERS: ${{ github.workspace }}/artifacts/observation-transfers/observation-transfers.json
           VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
         run: npm exec -- playwright test --config playwright.contracts.config.ts
         working-directory: control/web
