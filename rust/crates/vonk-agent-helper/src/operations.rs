@@ -6858,6 +6858,17 @@ mod tests {
             .unwrap();
         nonzero_owner[rank] = "VONK_RANK=1".to_owned();
         assert!(validate_docker_run(&nonzero_owner, &roots, None).is_ok());
+        let mut wide_rank = arguments.clone();
+        wide_rank[world_size_index] = format!("VONK_WORLD_SIZE={}", "9".repeat(200));
+        wide_rank[rank] = format!("VONK_RANK={}", "8".repeat(200));
+        assert!(validate_docker_run(&wide_rank, &roots, None).is_ok());
+        wide_rank[rank] = format!("VONK_RANK={}", "9".repeat(200));
+        assert!(validate_docker_run(&wide_rank, &roots, None).is_err());
+        for invalid in ["-1", "1.0", "1e0", "true"] {
+            let mut invalid_shape = arguments.clone();
+            invalid_shape[rank] = format!("VONK_RANK={invalid}");
+            assert!(validate_docker_run(&invalid_shape, &roots, None).is_err());
+        }
         let mut worker = arguments.clone();
         let local = worker
             .iter()
