@@ -728,6 +728,34 @@ fn legacy_checkpoint_json_reopens_without_rewrite_and_resumes_native_scan() {
     }
     assert_eq!(observed, expected);
     assert!(retained.is_none());
+    // Shared Python/native corpus checks the actual persisted restart boundary,
+    // including ISO spellings accepted by Python but refused by RFC3339.
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../agent_protocol/tests/fixtures/runtime_scan_cutoffs.json"
+    ))
+    .unwrap();
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    for (category, accepted) in [("valid", true), ("invalid", false)] {
+        for cutoff in cases[category].as_array().unwrap() {
+            let mut record = legacy.clone();
+            record["started_at"] = cutoff.clone();
+            connection.execute(
+                "INSERT INTO metadata(key,value) VALUES ('recipe_observation_scan_v1',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [serde_json::to_string(&record).unwrap()],
+            ).unwrap();
+            let restarted = StateStore::open(&database, "observation-test-node").unwrap();
+            let parsed = restarted.observation_checkpoint();
+            assert_eq!(parsed.is_ok(), accepted, "cutoff: {cutoff}");
+            if let Ok(Some(checkpoint)) = parsed {
+                assert_eq!(checkpoint.started_at, cutoff.as_str().unwrap());
+                assert!(
+                    runtime
+                        .recipe_run_inspection_page(Some(&checkpoint))
+                        .is_ok()
+                );
+            }
+        }
+    }
 }
 
 fn historical_runs(root: &Path, count: usize) {
