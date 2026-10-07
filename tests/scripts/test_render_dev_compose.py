@@ -27,6 +27,7 @@ HERMES_IMAGE = (
 LITELLM_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 )
+CA_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 DEV_API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:dev"
 DEV_WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
 
@@ -67,10 +68,7 @@ def _run_renderer(
             "--hermes-image",
             hermes_image,
             "--ca-image",
-            "ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-"
-            + "a" * 40
-            + "@sha256:"
-            + DIGEST,
+            CA_IMAGE,
             "--litellm-image",
             litellm_image,
             "--channel",
@@ -276,7 +274,7 @@ def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> N
     assert "immutable published development image" in result.stderr
 
 
-def test_render_dev_floats_vonk_images_and_keeps_third_party_pins(
+def test_render_dev_keeps_ca_digest_and_other_channel_images(
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "docker-compose.yaml"
@@ -303,7 +301,11 @@ def test_render_dev_floats_vonk_images_and_keeps_third_party_pins(
         services["litellm"]["image"] == "ghcr.io/carstvaartjes/vonk-forge-litellm:dev"
     )
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
-    for service in services.values():
+    assert services["step-ca"]["image"] == CA_IMAGE
+    assert services["step-ca"]["pull_policy"] == "always"
+    for name, service in services.items():
+        if name == "step-ca":
+            continue  # The private issuance protocol is bound to this exact CA.
         if service["image"].startswith("ghcr.io/carstvaartjes/vonk-forge-"):
             assert service["image"].endswith(":dev")
             assert service["pull_policy"] == "always"
