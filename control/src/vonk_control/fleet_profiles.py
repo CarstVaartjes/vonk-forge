@@ -9185,6 +9185,11 @@ class FleetProfileService:
                             completed is None
                             or completed.state != "succeeded"
                             or completed.result is None
+                            or not any(
+                                isinstance(receipt, RunSwitchStopResult)
+                                and receipt.run_id == stop.effect.run_id
+                                for receipt in completed.result.run_switch.phase_results
+                            )
                         ):
                             waiting_for_adopted = True
                     expected_images = {
