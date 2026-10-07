@@ -98,22 +98,20 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
     )
 
 
-def test_agent_orders_driver_and_coldplug_before_private_device_namespace():
+def test_agent_orders_driver_without_udevadm_and_allows_namespace_recovery() -> None:
     from configparser import ConfigParser
 
     unit = ConfigParser(interpolation=None, strict=False)
-    unit.read(ROOT / "packaging/systemd/vonk-forge-agent.service")
+    agent = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()
+    unit.read_string(agent)
     after = unit["Unit"]["After"].split()
     wants = unit["Unit"]["Wants"].split()
-    assert {"nvidia-persistenced.service", "systemd-udev-trigger.service"} <= set(
-        wants
-    ) & set(after)
-    assert {
-        "dev-nvidia0.device",
-        "dev-nvidiactl.device",
-        r"dev-nvidia\x2duvm.device",
-    } <= set(after)
-    assert unit["Service"]["ExecStartPre"] == "/usr/bin/udevadm settle --timeout=30"
+    assert "nvidia-persistenced.service" in set(wants) & set(after)
+    # Startup must work on hosts without udevadm; missing GPU devices are
+    # recovered by the agent's bounded self-restart, not a pre-start command.
+    assert "udevadm" not in agent
+    assert "ExecStartPre" not in unit["Service"]
+    assert unit["Unit"]["StartLimitIntervalSec"] == "0"
     assert unit["Service"]["PrivateDevices"] == "yes"
     assert unit["Service"]["DevicePolicy"] == "closed"
     assert unit["Service"]["Restart"] == "on-failure"

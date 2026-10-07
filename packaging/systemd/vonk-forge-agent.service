@@ -1,10 +1,9 @@
 [Unit]
 Description=Vonk Forge outbound agent
-Wants=network-online.target nvidia-persistenced.service systemd-udev-trigger.service
-After=network-online.target vonk-forge-package-helper.socket nvidia-persistenced.service systemd-udev-trigger.service dev-nvidia0.device dev-nvidiactl.device dev-nvidia\x2duvm.device
-# Order after driver startup and udev coldplug. Device ordering also applies
-# when the distribution tags NVIDIA devices for systemd; do not pull in device
-# jobs that might never activate on distributions without those udev tags.
+Wants=network-online.target nvidia-persistenced.service
+After=network-online.target vonk-forge-package-helper.socket nvidia-persistenced.service
+# Order after driver startup. The agent restarts itself if GPU devices are
+# missing from its private namespace, recreating that namespace on restart.
 # RestartSec bounds the rate without a start-limit latch preventing recovery.
 StartLimitIntervalSec=0
 
@@ -13,7 +12,6 @@ Type=notify
 User=vonk-agent
 Group=vonk-agent
 SupplementaryGroups=
-ExecStartPre=/usr/bin/udevadm settle --timeout=30
 ExecStart=/usr/lib/vonk-forge/vonk-agent --config /etc/vonk-forge-agent/agent.toml run
 Environment=HOME=/var/lib/vonk-forge-agent
 Environment=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config
