@@ -215,6 +215,9 @@ def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp
         "mixed-encoding",
         "unproven-closed-index",
         "wrong-intent",
+        "malformed-child-payload",
+        "foreign-targets",
+        "foreign-closed-receipt",
     ],
 )
 def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retries(
@@ -241,6 +244,15 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
             payload["workload_intent_ordinal"] += 1
             job.payload = payload
             job.payload_digest = _digest(payload)
+        elif damage == "malformed-child-payload":
+            table = Job.__table__
+            assert isinstance(table, Table)
+            session.execute(
+                update(table).where(table.c.id == job.id).values(payload=["damaged"])
+            )
+            session.expire(job, ["payload"])
+        elif damage == "foreign-targets":
+            job.targets = ["spk_" + "2" * 32]
         else:
             progress = deepcopy(row.progress)
             if damage == "mixed-encoding":
@@ -249,6 +261,17 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
                 progress["switch_adapter"]["position"] = 1
                 progress["switch_adapter"]["active_operation_id"] = None
                 progress["switch_adapter"]["active_kind"] = None
+                if damage == "foreign-closed-receipt":
+                    foreign_id = session.scalar(select(Job.id).where(Job.id != stop_id))
+                    assert foreign_id is not None
+                    progress["switch_adapter"]["children"] = [
+                        {
+                            "operation_id": foreign_id,
+                            "kind": "stop",
+                            "state": "succeeded",
+                            "result": None,
+                        }
+                    ]
             _persist_retained(session, row, progress)
             original = deepcopy(progress)
         session.flush()
@@ -293,3 +316,40 @@ def test_postgres_startup_converts_real_stop_and_continuation_is_idempotent(
                 )
             )
         } == claims
+
+
+def test_postgres_future_deferred_journals_do_not_starve_an_untouched_valid_row(
+    postgres_engine, tmp_path
+):
+    """Catches applying conversion backoff after LIMIT and starving later work."""
+    sessions, _lifecycle, _switches, application, _run, _stop_id, _original, _claims = (
+        _retained_stop(tmp_path, postgres_engine)
+    )
+    table = FleetProfileApplication.__table__
+    assert isinstance(table, Table)
+    with sessions.begin() as session:
+        original = dict(
+            session.execute(select(table).where(table.c.id == application.id))
+            .mappings()
+            .one()
+        )
+        # More than one short conversion page of damaged journals has just
+        # received its normal deferred outcome. Those rows are not due yet.
+        for index in range(20):
+            values = deepcopy(original)
+            values.update(
+                id=_uuid(18900 + index),
+                request_key=_uuid(18950 + index),
+                plan_digest=f"{19000 + index:064x}",
+            )
+            session.execute(table.insert().values(**values))
+            row = session.get(FleetProfileApplication, values["id"])
+            assert row is not None
+            assert try_convert_application(session, row, NOW).state == "deferred"
+        valid = session.get(FleetProfileApplication, application.id)
+        assert valid is not None
+        valid.updated_at = NOW + timedelta(seconds=1)
+    assert convert_due_retained_applications(sessions, NOW + timedelta(seconds=1)) == 1
+    with sessions() as session:
+        valid = session.get(FleetProfileApplication, application.id)
+        assert valid is not None and not needs_conversion(valid)
