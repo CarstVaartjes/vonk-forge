@@ -9,6 +9,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import update
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.fleet_stream import FleetStream
@@ -27,7 +29,7 @@ from tests.test_fleet_stream import (
     _operation_draft,
     _production_stream_store,
 )
-from tests.test_observation_transfer import _large_snapshot, _peer
+from tests.test_observation_transfer import _app_peer, _large_snapshot
 
 
 async def _collect(response: ObservationTransferResponse) -> str:
@@ -104,59 +106,64 @@ def _export_saved_event_recovery(output: Path) -> None:
 
 
 def _export_response_errors(output: Path) -> None:
-    from vonk_control.platform_observation_errors import ObservationCaptureUnavailable
-
     records: list[dict[str, object]] = []
-    with (
-        tempfile.TemporaryDirectory() as directory,
-        _peer(_large_snapshot(Path(directory))) as peer,
-    ):
-        for path in ("/api/fleet", "/api/platform", "/api/fleet/stream"):
-            response = peer.get(path, headers={"Authorization": "Bearer invalid"})
-            assert response.status_code == 401
-            records.append(
-                {
-                    "path": path,
-                    "status": response.status_code,
-                    "media_type": response.headers["content-type"],
-                    "body": response.text,
-                }
-            )
-
-        @peer.app.get("/api/observation-validation-fixture")
-        def validation_fixture(value: int) -> dict[str, int]:
-            return {"value": value}
-
-        # The real global validation handler produces these bytes. The
-        # observation GET routes currently have no invalidatable query.
-        response = peer.get("/api/observation-validation-fixture?value=not-an-integer")
-        assert response.status_code == 422
-        records.append(
-            {
-                "path": "/api/platform",
-                "status": response.status_code,
-                "media_type": response.headers["content-type"],
-                "body": response.text,
-            }
-        )
-        with patch(
-            "vonk_control.api.api_only_observation",
-            side_effect=ObservationCaptureUnavailable(phase="stored-worker-validation"),
-        ):
-            response = peer.get("/api/platform")
-        assert response.status_code == 503
-        assert response.headers["Retry-After"] == "5"
-        records.append(
-            {
-                "path": "/api/platform",
-                "status": response.status_code,
-                "media_type": response.headers["content-type"],
-                "body": response.text,
-                "retry_after": response.headers["Retry-After"],
-            }
-        )
+    with tempfile.TemporaryDirectory() as directory:
+        app, peer = _app_peer(_large_snapshot(Path(directory)))
+        with peer:
+            _export_peer_response_errors(app, peer, records)
     (output / "observation-response-errors.json").write_text(
         json.dumps(records, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def _export_peer_response_errors(
+    app: FastAPI, peer: TestClient, records: list[dict[str, object]]
+) -> None:
+    from vonk_control.platform_observation_errors import ObservationCaptureUnavailable
+
+    for path in ("/api/fleet", "/api/platform", "/api/fleet/stream"):
+        response = peer.get(path, headers={"Authorization": "Bearer invalid"})
+        assert response.status_code == 401
+        records.append(
+            {
+                "path": path,
+                "status": response.status_code,
+                "media_type": response.headers["content-type"],
+                "body": response.text,
+            }
+        )
+
+    @app.get("/api/observation-validation-fixture")
+    def validation_fixture(value: int) -> dict[str, int]:
+        return {"value": value}
+
+    # The real global validation handler produces these bytes. The
+    # observation GET routes currently have no invalidatable query.
+    response = peer.get("/api/observation-validation-fixture?value=not-an-integer")
+    assert response.status_code == 422
+    records.append(
+        {
+            "path": "/api/platform",
+            "status": response.status_code,
+            "media_type": response.headers["content-type"],
+            "body": response.text,
+        }
+    )
+    with patch(
+        "vonk_control.api.api_only_observation",
+        side_effect=ObservationCaptureUnavailable(phase="stored-worker-validation"),
+    ):
+        response = peer.get("/api/platform")
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "5"
+    records.append(
+        {
+            "path": "/api/platform",
+            "status": response.status_code,
+            "media_type": response.headers["content-type"],
+            "body": response.text,
+            "retry_after": response.headers["Retry-After"],
+        }
     )
 
 

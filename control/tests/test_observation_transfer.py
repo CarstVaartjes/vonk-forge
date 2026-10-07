@@ -9,12 +9,14 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Request, Response
 from jsonschema import Draft202012Validator
-from pydantic import ValidationError
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection import (
@@ -87,18 +89,20 @@ class Projection:
         return self.snapshot
 
 
-def _peer(snapshot: FleetSnapshot) -> TestClient:
+def _app_peer(snapshot: FleetSnapshot) -> tuple[FastAPI, TestClient]:
     codec = TokenCodec(b"k" * 32)
     token = codec.issue(Actor("viewer", "viewer"), ttl_seconds=100, now=0)
-    return TestClient(
-        create_app(
-            jobs=Jobs(),
-            tokens=codec,
-            now=lambda: 10,
-            fleet_projection=Projection(snapshot),
-        ),
-        headers={"Authorization": f"Bearer {token}"},
+    app = create_app(
+        jobs=Jobs(),
+        tokens=codec,
+        now=lambda: 10,
+        fleet_projection=Projection(snapshot),
     )
+    return app, TestClient(app, headers={"Authorization": f"Bearer {token}"})
+
+
+def _peer(snapshot: FleetSnapshot) -> TestClient:
+    return _app_peer(snapshot)[1]
 
 
 def _client(tmp_path: Path, response: ObservationHTTPResponse) -> ControlClient:
@@ -298,8 +302,9 @@ def test_stream_response_schema_validates_its_actual_canonical_record(
     # FastAPI's raw non-JSON response default must not intersect the owning
     # decoded record model with type:string. This is the actual app graph,
     # including the response declaration, not a second consumer schema.
-    with _peer(_large_snapshot(tmp_path)) as peer:
-        graph = peer.app.openapi()
+    app, peer = _app_peer(_large_snapshot(tmp_path))
+    with peer:
+        graph = app.openapi()
     declared = graph["paths"][path]["get"]["responses"]["200"]["content"][media][
         "schema"
     ]
@@ -315,15 +320,16 @@ def test_stream_response_schema_validates_its_actual_canonical_record(
         )
     )
     validator = source_schema_validator({"components": graph["components"], **declared})
-    record = serialize_json_value(model)
+    record = TypeAdapter(JsonValue).validate_json(canonical_message(model), strict=True)
     assert validator.is_valid(record)
     assert not validator.is_valid(json.dumps(record))
 
 
 @pytest.mark.parametrize("path", ["/api/fleet", "/api/platform", "/api/fleet/stream"])
 def test_stream_authentication_error_retains_declared_json_media(tmp_path, path):
-    with _peer(_large_snapshot(tmp_path)) as peer:
-        graph = peer.app.openapi()
+    app, peer = _app_peer(_large_snapshot(tmp_path))
+    with peer:
+        graph = app.openapi()
         response = peer.get(path, headers={"Authorization": "Bearer invalid"})
     assert response.status_code == 401
     assert response.headers["content-type"].partition(";")[0] == "application/json"
@@ -340,16 +346,17 @@ def test_stream_authentication_error_retains_declared_json_media(tmp_path, path)
 
 
 def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp_path):
-    with _peer(_large_snapshot(tmp_path)) as peer:
+    app, peer = _app_peer(_large_snapshot(tmp_path))
+    with peer:
 
-        @peer.app.get("/api/observation-validation-fixture")
+        @app.get("/api/observation-validation-fixture")
         def validation_fixture(value: int) -> dict[str, int]:
             return {"value": value}
 
         # Exercise the real global validation renderer. Fleet/platform have no
         # query input to invalidate today, but inherit this exact 422 contract.
         response = peer.get("/api/observation-validation-fixture?value=not-an-integer")
-        graph = peer.app.openapi()
+        graph = app.openapi()
     assert response.status_code == 422
     assert response.headers["content-type"].partition(";")[0] == "application/json"
     schema = graph["paths"]["/api/platform"]["get"]["responses"]["422"]["content"][
@@ -373,9 +380,10 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
         raise ObservationCaptureUnavailable(phase="stored-worker-validation")
 
     monkeypatch.setattr(api, "api_only_observation", unreadable_capture)
-    with _peer(_large_snapshot(tmp_path)) as peer:
+    app, peer = _app_peer(_large_snapshot(tmp_path))
+    with peer:
         response = peer.get("/api/platform")
-        graph = peer.app.openapi()
+        graph = app.openapi()
     assert response.status_code == 503
     assert response.headers["Retry-After"] == "5"
     assert response.headers["content-type"].partition(";")[0] == "application/json"
