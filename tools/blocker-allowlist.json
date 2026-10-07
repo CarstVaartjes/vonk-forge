@@ -58,7 +58,7 @@
   "max_debt": 0,
   "debt_ceiling": {
     "total": 59,
-    "unaudited": 240,
+    "unaudited": 222,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
   "categorized_raises": {
@@ -530,6 +530,30 @@
         "UnknownOutcomeError"
       ],
       "reason": "Exact repair evidence is observed again through the durable pending deadline and capped backoff; test_unproven_repair_ends_without_blocking_fresh_same_spark proves expiry releases holds and immediately admits a new request."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.check_source",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.resolve",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.prepare_plan",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
     }
   ],
   "call_edges": [
@@ -1260,16 +1284,16 @@
       "sites": [
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "runtime-image-receipt-does-not-match-the-compiled-runtime-im", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "verified-oci-archive-receipt-is-unavailable-for-the-selected", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "verified-runtime-image-receipt-is-invalid", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-build-receipt-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-revision-digest-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "verified-model-artifact-set-receipt-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_build_package", "successful-controller-build-receipt-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_image_digest", "compiled-runtime-image-digest-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_placement", "compiled-runtime-endpoint-is-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_runtime_receipt_mapping", "runtime-image-receipt-is-invalid", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "compiled-runtime-job-settings-are-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-build-receipt-is-unavailable", 1]
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-build-receipt-is-unavailable", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_runtime_image_receipt", "runtime-image-receipt-is-invalid", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_runtime_image_receipt", "verified-runtime-image-receipt-is-invalid", 1]
       ]
     },
     {
@@ -1799,25 +1823,10 @@
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.persist_plan_in_session", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildResolution.build_input_for_builder", "build.plan_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.capability_missing", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_disk", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_memory", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_missing", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_stale", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.network_capability_missing", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "message", 2],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.check_source", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.node_unknown", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.plan_invalid", 4],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.runtime_changed", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "build.contract_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "build.node_unknown", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.resolve", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_canonical_recipe_document", "build.contract_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_read_recipe_projection", "build.contract_invalid", 2],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_source_bundle_handle", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_validate_builder", "build.node_incompatible", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "canonical_build", "build.contract_invalid", 1]
       ]
@@ -1829,12 +1838,17 @@
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "InvalidType", "_canonical_model_build_inputs", "model-build-inputs-require-canonical-path-sha256-and-size", 1],
         ["control/src/vonk_control/recipe_builds.py", "InvalidType", "_canonical_recipe_document", "stored-recipe-is-not-a-json-object", 1],
-        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.check_source", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.prepare_plan", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.record_success", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.resolve", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService.prepare_plan", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService.resolve", "message", 1]
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService._check_source_once", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService._prepare_plan_once", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService._resolve_once", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._check_source_once", "build.recipe_unresolved", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._prepare_plan_once", "build.recipe_unresolved", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._prepare_plan_once", "build.source_invalid", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._resolve_once", "build.recipe_unresolved", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._resolve_once", "build.source_invalid", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService._prepare_plan_once", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService._resolve_once", "message", 1]
       ]
     },
     {
@@ -2227,8 +2241,7 @@
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_generated_bundle", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.put", "bundle.storage_unavailable", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1]
       ]
     },
     {
@@ -2504,7 +2517,6 @@
       "reason": "Exact-identity fence and ingress check: a build result is accepted only for the exact inputs it was planned under and never over different or failed evidence (digest formats are verified at ingress), and a reservation or resolution is accepted only while the recipe revision still has the content digest it was planned for. A changed identity refuses instead of substituting a different recipe or image into a bound plan; the next request replans.",
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._reserve_in_session", "build.dependencies_stale", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService.prepare_plan", "build.resolution_stale", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService.record_success", "build.evidence_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService.record_success", "build.input_mismatch", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService.record_success", "build.result_conflict", 1],
@@ -2512,22 +2524,10 @@
       ]
     },
     {
-      "family": "recipe_builds.recipe-request",
-      "category": "input-validation",
-      "reason": "Rejects a request that names a revision which is not an active recipe (nothing resolved to check or build) before any effect; the caller names the current revision and asks again.",
-      "sites": [
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.check_source", "build.recipe_unresolved", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.prepare_plan", "build.recipe_unresolved", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.resolve", "build.recipe_unresolved", 1]
-      ]
-    },
-    {
       "family": "recipe_builds.recipe-contract",
       "category": "input-validation",
       "reason": "Validates what the recipe declares against the build contract before any effect: declared build resources and security, the per-node image size, the Dockerfile the verified source bundle must carry, the runtime adapter for its engine and topology. Retrying cannot change the answer; only a new recipe revision does.",
       "sites": [
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.prepare_plan", "build.source_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.resolve", "build.source_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "_canonical_build_resources", "build.resources_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "_canonical_build_resources", "build.security_invalid", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "_declared_image_bytes", "build.image_size_invalid", 1],
@@ -3285,13 +3285,23 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.reserve_in_session", "message", 2],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.capability_missing", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_disk", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_memory", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_missing", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_stale", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.network_capability_missing", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_disk", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_memory", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.inventory_missing", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.inventory_stale", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.node_unknown", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.plan_invalid", 5],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.runtime_changed", 1]
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.runtime_changed", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "message", 2],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_read_recipe_projection", "build.contract_invalid", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_source_bundle_handle", "build.source_unavailable", 1]
       ]
     },
     {
@@ -3437,7 +3447,8 @@
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._heal_source_bundle", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._verified_bundle.read", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "rederive_source_bundle_from_closure", "permission-denied", 1]
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "rederive_source_bundle_from_closure", "permission-denied", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._prepare_plan_once", "build.resolution_stale", 1]
       ]
     },
     {
@@ -3493,7 +3504,8 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RenewalInProgress is a busy/pending/superseded handoff.",
       "sites": [
-        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService._issue_rotation_claim", "certificate-rotation-issuance-is-in-progress", 1]
+        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService._issue_rotation_claim", "certificate-rotation-issuance-is-in-progress", 1],
+        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService.renew", "certificate-rotation-issuance-is-in-progress", 1]
       ]
     },
     {
@@ -3565,7 +3577,12 @@
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-already-exists", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-has-no-certificate-history", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_validate_issued_binding", "certificate-authority-result-differs-from-accepted-issuance", 1]
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_validate_issued_binding", "certificate-authority-result-differs-from-accepted-issuance", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-generation-does-not-match", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-is-not-staged-for-activation", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-serial-does-not-identify-node", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_require_issuance_binding", "enrollment-issuance-binding-changed", 1]
       ]
     },
     {
@@ -3619,31 +3636,12 @@
       ]
     },
     {
-      "family": "enrollment.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RenewalInProgress is a busy/pending/superseded handoff.",
-      "sites": [
-        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService.renew", "certificate-rotation-issuance-is-in-progress", 1]
-      ]
-    },
-    {
       "family": "enrollment.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CertificateResponseCapacityRefused is of the input-validation error type.",
       "sites": [
         ["control/src/vonk_control/enrollment.py", "CertificateResponseCapacityRefused", "EnrollmentService._issue_enrollment_claim", "certificate-response-exceeds-the-supported-wire-budget", 1],
         ["control/src/vonk_control/enrollment.py", "CertificateResponseCapacityRefused", "EnrollmentService._issue_rotation_claim", "certificate-response-exceeds-the-supported-wire-budget", 1]
-      ]
-    },
-    {
-      "family": "enrollment.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
-      "sites": [
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-generation-does-not-match", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-is-not-staged-for-activation", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-serial-does-not-identify-node", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "node-identity-is-retired-or-revoked", 1]
       ]
     },
     {
@@ -3654,14 +3652,6 @@
         ["control/src/vonk_control/step_ca.py", "StepCAResponseCapacityRefused", "StepCertificateAuthority._validate_sign_response_capacity", "configured-ca-sign-response-reader-cannot-accept-the", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAResponseCapacityRefused", "StepCertificateAuthority._validate_sign_response_capacity", "issued-response-cannot-fit", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAResponseCapacityRefused", "StepCertificateAuthority._validate_sign_response_capacity", "issued-response-metadata-cannot-fit-the-enrollment-contract", 1]
-      ]
-    },
-    {
-      "family": "enrollment.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
-      "sites": [
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_require_issuance_binding", "enrollment-issuance-binding-changed", 1]
       ]
     },
     {
@@ -3857,6 +3847,26 @@
       "sites": [
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "RunStopScope.membership_is_exact", "stop-run-membership-is-ambiguous", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "JobRunStopScope.targets_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1]
+      ]
+    },
+    {
+      "family": "source_bundles.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.put", "bundle.storage_unavailable", 1]
+      ]
+    },
+    {
+      "family": "recipe_builds.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeBuildUnknown is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._check_source_once", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.contract_invalid", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.node_unknown", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._resolve_once", "build.source_unavailable", 1]
       ]
     }
   ]

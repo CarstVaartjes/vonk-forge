@@ -259,11 +259,8 @@ class ControllerExecutionPlanService:
                 model_source = ModelCacheObjectSource.from_service(self._model_cache)
                 # Describe the shared verified bytes with this revision's
                 # model identities, whichever revision cached them first.
-                model_objects = tuple(
-                    VerifiedModelObject.model_validate(item)
-                    for item in model_source.verified_model_objects_for_set(
-                        artifact_set_sha256, manifest
-                    )
+                model_objects = model_source.verified_model_objects_for_set(
+                    artifact_set_sha256, manifest
                 )
         except UnknownOutcomeError:
             # Unconfirmed storage or bookkeeping keeps its type: the admitting
@@ -332,20 +329,15 @@ class ControllerExecutionPlanService:
         image_digest = _image_digest(runtime_spec.runtime.image)
         if self._runtime_image_preparer is not None:
             receipt = self._runtime_image_preparer(document, runtime_spec, build)
-            value = _runtime_receipt_mapping(receipt)
+            value = _runtime_image_receipt(receipt)
         elif self._runtime_image_resolver is not None:
             receipt = self._runtime_image_resolver(document, image_digest, runtime_spec)
-            value = _runtime_receipt_mapping(receipt)
+            value = _runtime_image_receipt(receipt)
         else:
             raise ExecutionPlanCompilationError(
                 "verified OCI archive receipt is unavailable for the selected runtime image"
             )
-        try:
-            image = VerifiedRuntimeImage.model_validate(value)
-        except Exception as error:
-            raise ExecutionPlanCompilationError(
-                "verified runtime image receipt is invalid"
-            ) from error
+        image = value
         if image.image_digest != image_digest:
             raise ExecutionPlanCompilationError(
                 "runtime image receipt does not match the compiled runtime image"
@@ -353,7 +345,7 @@ class ControllerExecutionPlanService:
         return image
 
 
-def _runtime_receipt_mapping(receipt: object) -> dict[str, object]:
+def _runtime_image_receipt(receipt: RuntimeImageReceipt) -> VerifiedRuntimeImage:
     """Project a preparation receipt into the strict launch-image DTO.
 
     Runtime-image preparation persists provenance and storage fields alongside
@@ -364,14 +356,19 @@ def _runtime_receipt_mapping(receipt: object) -> dict[str, object]:
 
     if not isinstance(receipt, RuntimeImageReceipt):
         raise ExecutionPlanCompilationError("runtime image receipt is invalid")
-    return {
-        "image_digest": receipt.image_digest,
-        "oci_layout_sha256": receipt.oci_archive_sha256,
-        "image_bytes": receipt.image_bytes,
-        "build_id": receipt.build_id,
-        "local_image_config_id": receipt.local_image_config_id,
-        "runtime_interface_label": receipt.runtime_interface_label,
-    }
+    try:
+        return VerifiedRuntimeImage(
+            image_digest=receipt.image_digest,
+            oci_layout_sha256=receipt.oci_archive_sha256,
+            image_bytes=receipt.image_bytes,
+            build_id=receipt.build_id,
+            local_image_config_id=receipt.local_image_config_id,
+            runtime_interface_label=receipt.runtime_interface_label,
+        )
+    except ValueError as error:
+        raise ExecutionPlanCompilationError(
+            "verified runtime image receipt is invalid"
+        ) from error
 
 
 def _build_package(build: RecipeBuild) -> dict[str, object]:

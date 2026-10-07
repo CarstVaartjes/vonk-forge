@@ -236,6 +236,7 @@ module defines its own.
 | `control/src/vonk_control/resource_planning_contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
 | `control/src/vonk_control/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/run_switch_contract.py` | controller-contract | 66 | Strict, transport-neutral contracts for high-level Run and Switch work. |
+| `control/src/vonk_control/run_switch_identity_contract.py` | controller-contract | 1 | Shared Run/Switch request identity constraints and typed cancellation intent independent of ORM and workers. |
 | `control/src/vonk_control/run_switch_journal_contract.py` | controller-contract | 4 | Typed run-switch journal repair evidence and audit records. |
 | `control/src/vonk_control/run_switch_observation_contract.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
 | `control/src/vonk_control/runtime_image_preparation.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |

@@ -11,8 +11,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from vonk_control.catalog_entities import build_policy_projection
-from vonk_control.compiled_execution_plan import VerifiedRuntimeImage
-from vonk_control.execution_plan_service import _runtime_receipt_mapping
+from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.models import (
     Base,
     CatalogDocumentRevision,
@@ -442,7 +441,7 @@ def test_current_producer_parser_and_compiled_plan_consumer_preserve_archive_ide
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     produced = _prepare(storage=storage)
     parsed = storage.read_receipt(produced.oci_archive_sha256)
-    compiled = VerifiedRuntimeImage.model_validate(_runtime_receipt_mapping(parsed))
+    compiled = _runtime_image_receipt(parsed)
     assert parsed.oci_archive_sha256 == produced.oci_archive_sha256
     assert compiled.oci_layout_sha256 == produced.oci_archive_sha256
     assert compiled.runtime_interface_label == produced.runtime_interface_label

@@ -1059,7 +1059,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
                 RunSwitchJournalRepair(
                     job_id=switch_id,
                     original_digest=original_digest,
-                    evidence=mismatched.model_dump(mode="json"),
+                    evidence=mismatched,
                     created_at=clock[0],
                 )
             )
@@ -1172,7 +1172,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
                     )
                 )
             )
-            assert prior.evidence == mismatched.model_dump(mode="json")
+            assert prior.evidence == mismatched
         retained = RunSwitchJournalRepairEndEvidence.model_validate_json(
             canonical_message(audit.evidence), strict=True
         )
