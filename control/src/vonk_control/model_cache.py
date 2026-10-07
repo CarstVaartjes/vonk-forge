@@ -1469,6 +1469,37 @@ def _unique_artifacts(values: Sequence[ArtifactSpec]) -> dict[str, ArtifactSpec]
     return result
 
 
+def _composed_artifacts(values: Sequence[ArtifactSpec]) -> tuple[ArtifactSpec, ...]:
+    """Name every catalog selection while retaining shared physical objects.
+
+    Ordinary selections keep their existing keys and cache identities. Two
+    models can select the same file ID and bytes, so a colliding key names the
+    immutable source identity instead. Repeated identical sources receive
+    distinct occurrence keys: all model/file provenance stays in the manifest,
+    while its reusable digest remains independent of that provenance. Transfers
+    and storage continue to own one object per SHA, not one per selection.
+    """
+    by_key: dict[str, list[ArtifactSpec]] = {}
+    for spec in values:
+        by_key.setdefault(spec.key, []).append(spec)
+    result: list[ArtifactSpec] = []
+    for group in by_key.values():
+        if len(group) == 1:
+            result.extend(group)
+            continue
+        by_identity: dict[str, list[ArtifactSpec]] = {}
+        for spec in group:
+            identity = _sha256_json(serialize_json_value(spec.cache_identity()))
+            by_identity.setdefault(identity, []).append(spec)
+        for identity, selections in by_identity.items():
+            for index, spec in enumerate(selections):
+                key = f"artifact-{identity}"
+                if len(selections) > 1:
+                    key += f":{index}"
+                result.append(replace(spec, key=key))
+    return tuple(result)
+
+
 def _is_hex(value: str) -> bool:
     if not value:
         return False
@@ -2414,7 +2445,9 @@ class ModelCacheService:
                 model_content_sha256=model_digest,
                 recipe_revision_sha256=recipe_digest,
                 model_content_digests=tuple(sorted(model_rows)),
-                artifacts=tuple(sorted(specs, key=lambda item: item.key)),
+                artifacts=tuple(
+                    sorted(_composed_artifacts(specs), key=lambda item: item.key)
+                ),
                 model_definition_ref=model_ref,
             )
         _validate_manifest(manifest)
