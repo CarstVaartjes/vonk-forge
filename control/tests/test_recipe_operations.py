@@ -4180,7 +4180,7 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     assert first_application.current_operation_id == first.id
     first_adapter = first_application.progress.switch_adapter
     assert first_adapter is not None
-    first_switch = first_adapter.active_operation_id
+    first_switch = first_adapter.pending_children[0].operation_id
     assert first_switch is not None
     assert switch.tick()
     first_job = _child_operation_id(switch.get(first_switch))
@@ -4224,7 +4224,7 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     assert second_application.current_operation_id == retry.id
     second_adapter = second_application.progress.switch_adapter
     assert second_adapter is not None
-    second_switch = second_adapter.active_operation_id
+    second_switch = second_adapter.pending_children[0].operation_id
     assert second_switch is not None, profiles.application(retry.id).status_reason
     assert switch.tick()
     second_job = _child_operation_id(switch.get(second_switch))
