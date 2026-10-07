@@ -73,6 +73,7 @@ from .agent_jobs import (
     release_owned_reservations_in_session,
     superseded_cancellation_deadline,
 )
+from .artifact_job_evidence import ArtifactJobResultEvidence
 from .categorized_errors import (
     InvalidValue,
     MissingRecord,
@@ -119,6 +120,7 @@ from .job_documents import (
     RecipeStopParent,
     RecipeUninstallParent,
     RunSwitchJobPayload,
+    ServiceRunStopReview,
 )
 from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
@@ -161,12 +163,16 @@ from .operation_progress import (
 )
 from .prebuilt_images import policy_prebuilt_reference, prebuilt_reference
 from .profile_stop_authority import (
+    JobRunStopScope,
     ProfileJobRunStopAuthorization,
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
     ProfileStopAuthorityError,
+    ProfileStopOwnerBinding,
+    validate_jobrun_stop_source,
     validate_profile_jobrun_stop_target,
     validate_profile_stop_owner,
+    validate_run_jobrun_stop_target,
 )
 from .recipe_action_plans import (
     StopNodeImpact,
@@ -212,6 +218,7 @@ from .recipe_routes import (
     RecipeRouteError,
     RecipeRouteNotReady,
     RecipeRouteService,
+    publication_is_temporary,
     route_health_recovery_pending,
     route_publication_transaction,
 )
@@ -3011,15 +3018,90 @@ class RecipeOperationService:
             owner_kind="run",
             owner_id=run_id,
         )
-        if existing is not None and not (
-            existing.state == "running"
-            and (
-                self._one_shot_stop_is_pending(request_id)
-                or self._profile_jobrun_stop_is_pending(request_id)
+        pending_service = (
+            self._service_stop_pending(
+                request_id, plan_digest, profile_target_node_ids, profile_application_id
+            )
+            if existing is not None
+            else False
+        )
+        if (
+            existing is not None
+            and not pending_service
+            and not (
+                existing.state == LifecycleState.RUNNING.value
+                and (
+                    self._one_shot_stop_is_pending(request_id)
+                    or self._profile_jobrun_stop_is_pending(request_id)
+                )
             )
         ):
             return existing
-        logical = self._stop_logical_job_run(
+        refused: UnknownOutcomeError | None = None
+        logical: RecipeOperationView | RecipeArtifactJobCancellationPending | None = (
+            None
+        )
+        for _attempt in admission_attempts():
+            try:
+                logical = self._stop_logical_job_run(
+                    run_id,
+                    plan_digest=plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    profile_target_node_ids=profile_target_node_ids,
+                    profile_application_id=profile_application_id,
+                )
+                refused = None
+                break
+            except UnknownOutcomeError as error:
+                refused = error
+                if admission_wait_exhausted(error):
+                    break
+        if refused is not None:
+            raise refused
+        if isinstance(logical, RecipeArtifactJobCancellationPending):
+            raise logical
+        if logical is not None:
+            if logical.state == "running":
+                self._agent_jobs.notify_available()
+            return logical
+        for _attempt in admission_attempts():
+            try:
+                return self._stop_service_run_once(
+                    run_id,
+                    plan_digest=plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    profile_target_node_ids=profile_target_node_ids,
+                    profile_application_id=profile_application_id,
+                )
+            except UnknownOutcomeError as error:
+                refused = error
+                if admission_wait_exhausted(error):
+                    break
+        assert refused is not None
+        raise refused
+
+    def _stop_service_run_once(
+        self,
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None,
+        profile_target_node_ids: Sequence[str] | None,
+        profile_application_id: str | None,
+    ) -> RecipeOperationView:
+        # Claim, effect, conditional completion. The accepted Stop is checked
+        # durably first so a stale or blocked request withdraws nothing; the
+        # route is then withdrawn with no transaction open (the withdrawal
+        # intent is durable with its claim, and a crash resumes from it); only
+        # then is the Stop dispatched, in its own short transaction, and only
+        # while the withdrawal is still complete.
+        accepted = self._accept_service_stop(
             run_id,
             plan_digest=plan_digest,
             actor=actor,
@@ -3028,46 +3110,51 @@ class RecipeOperationService:
             profile_target_node_ids=profile_target_node_ids,
             profile_application_id=profile_application_id,
         )
-        if isinstance(logical, RecipeArtifactJobCancellationPending):
-            raise logical
-        if logical is not None:
-            if logical.state == "running":
-                self._agent_jobs.notify_available()
-            return logical
-        now = self._clock()
-        # Claim, effect, conditional completion. The accepted Stop is checked
-        # read-only first so a stale or blocked request withdraws nothing; the
-        # route is then withdrawn with no transaction open (the withdrawal
-        # intent is durable with its claim, and a crash resumes from it); only
-        # then is the Stop dispatched, in its own short transaction, and only
-        # while the withdrawal is still complete.
-        with self._sessions() as session:
-            admitted = self._stop_plan_in_session(
-                session,
-                run_id,
-                lock=False,
-                profile_target_node_ids=profile_target_node_ids,
+        workload_intent_ordinal = _bound_workload_intent(accepted)
+        assert type(workload_intent_ordinal) is int
+
+        def claim_withdrawal(session: Session) -> None:
+            parent = session.get(Job, accepted.id, with_for_update=True)
+            if parent is None:
+                raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+            document, _admitted = self._check_service_stop(session, parent)
+            review = document.service_stop_review
+            assert review is not None
+            document.service_stop_review = review.model_copy(
+                update={"stage": "withdrawal-claimed"}
             )
-            if not admitted.allowed:
-                raise RecipeRequestInvalid(
-                    "stop plan is stale or blocked",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
-            run = session.get(RecipeRun, run_id)
-            assert run is not None
-            if self._absent_stop_nodes(session, run, admitted, now, lock=False) is None:
-                self._exact_stop_authority(session, run, admitted)
+            self._write_stop_parent(parent, document, now=self._clock())
+
         for _attempt in range(_STOP_WITHDRAWAL_ATTEMPTS):
             if self._route_publications is not None:
                 try:
-                    self._route_publications.withdraw_run(run_id, pending="stop")
+                    self._route_publications.withdraw_run(
+                        run_id, pending="stop", before_withdrawal=claim_withdrawal
+                    )
                 except RecipeRouteNotReady as error:
                     raise RecipeRequestInvalid(
                         "the run's route withdrawal was superseded; retry the stop",
                         reason=InvalidRequestReason.SUPERSEDED,
                     ) from error
+                except PermissionError:
+                    raise
+                except RecipeRouteError as error:
+                    if isinstance(
+                        error.__cause__, PermissionError
+                    ) or not publication_is_temporary(error):
+                        raise
+                    return self._defer_accepted_service_stop(accepted.id, error)
+                except (OSError, UnknownOutcomeError) as error:
+                    return self._defer_accepted_service_stop(accepted.id, error)
             else:
-                self._route_withdrawer(run_id)
+                with route_publication_transaction(self._sessions) as session:
+                    claim_withdrawal(session)
+                try:
+                    self._route_withdrawer(run_id)
+                except PermissionError:
+                    raise
+                except (OSError, UnknownOutcomeError) as error:
+                    return self._defer_accepted_service_stop(accepted.id, error)
             try:
                 job = self._dispatch_stop_after_withdrawal(
                     run_id,
@@ -3079,12 +3166,564 @@ class RecipeOperationService:
                 )
             except _RouteNotWithdrawn:
                 continue
-            if job.state != "succeeded":
+            except UnknownOutcomeError as error:
+                return self._defer_accepted_service_stop(accepted.id, error)
+            if job.state != LifecycleState.SUCCEEDED.value:
                 self._agent_jobs.notify_available()
             return job
-        raise RecipeRetryLater(
-            "the run's route withdrawal has not settled; retry the stop"
+        return self._defer_accepted_service_stop(
+            accepted.id,
+            RecipeRetryLater("the run's route withdrawal has not settled"),
         )
+
+    def _defer_accepted_service_stop(
+        self, parent_id: str, error: OSError | UnknownOutcomeError | RecipeRouteError
+    ) -> RecipeOperationView:
+        # The response was lost after consent was committed. Returning the
+        # SAME running child lets RunSwitch retain its phase/request identity;
+        # the normal bounded Stop continuation owns the external retry.
+        now = self._clock()
+        with self._sessions.begin() as session:
+            parent = session.get(Job, parent_id, with_for_update=True)
+            if parent is None:
+                raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+            self._check_service_stop(session, parent)
+            parent.status_reason = (
+                f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
+            )[:1024]
+            parent.updated_at = now
+            session.flush()
+            return self._view(parent, session=session)
+
+    @staticmethod
+    def _service_stop_document(job: Job) -> RecipeStopParent:
+        if (
+            job.kind != "recipe.stop"
+            or hashlib.sha256(canonical_message(job.payload)).hexdigest()
+            != job.payload_digest
+        ):
+            raise RecipeStopAuthorityRefused(
+                "accepted Stop document does not match its immutable binding"
+            )
+        try:
+            document = RecipeStopParent.model_validate_json(
+                canonical_message(job.payload)
+            )
+        except (TypeError, ValueError) as error:
+            raise RecipeStopAuthorityRefused(
+                "accepted Stop document is unreadable"
+            ) from error
+        if document.owner_kind != "run":
+            raise RecipeStopAuthorityRefused("accepted Stop owner changed")
+        return document
+
+    @staticmethod
+    def _write_stop_parent(
+        job: Job, document: RecipeStopParent, *, now: datetime
+    ) -> None:
+        job.payload = serialize_json_value(document)
+        job.payload_digest = hashlib.sha256(canonical_message(job.payload)).hexdigest()
+        job.updated_at = now
+
+    def _service_stop_pending(
+        self,
+        request_id: str,
+        plan_digest: str,
+        profile_target_node_ids: Sequence[str] | None,
+        profile_application_id: str | None,
+    ) -> bool:
+        with self._sessions() as session:
+            job = session.scalar(select(Job).where(Job.request_id == request_id))
+            assert job is not None
+            if job.payload.get("service_stop_review") is None:
+                return False
+            document = self._service_stop_document(job)
+            review = document.service_stop_review
+            if review is None:
+                # Already-issued and other canonical Stop kinds remain observers;
+                # an absent historical review never authorizes new dispatch.
+                return False
+            if (
+                document.plan_digest != plan_digest
+                or review.profile_target_node_ids
+                != (
+                    sorted(profile_target_node_ids)
+                    if profile_target_node_ids is not None
+                    else None
+                )
+                or review.profile_application_id != profile_application_id
+            ):
+                raise RecipeRequestInvalid(
+                    "request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
+            return (
+                job.state == LifecycleState.RUNNING.value
+                and review.stage != "dispatched"
+            )
+
+    def _check_service_stop(
+        self,
+        session: Session,
+        job: Job,
+    ) -> tuple[RecipeStopParent, StopPlan]:
+        document = self._service_stop_document(job)
+        review = document.service_stop_review
+        if (
+            review is None
+            or review.stage == "dispatched"
+            or job.state != LifecycleState.RUNNING.value
+            or document.phases is not None
+        ):
+            raise RecipeStopAuthorityRefused(
+                "accepted Stop is no longer awaiting withdrawal"
+            )
+        if (
+            session.scalar(
+                select(AgentOperation.id)
+                .where(AgentOperation.parent_job_id == job.id)
+                .limit(1)
+            )
+            is not None
+        ):
+            raise RecipeStopAuthorityRefused("accepted Stop already has issued work")
+        run = session.get(RecipeRun, document.owner_id, with_for_update=True)
+        if run is None or run.run_generation != review.run_generation:
+            raise RecipeStopAuthorityRefused("accepted Stop runtime generation changed")
+        if run.route_state != review.route_state.value and not (
+            review.stage == "withdrawal-claimed"
+            and run.route_state == RouteState.WITHDRAWN
+        ):
+            raise RecipeRequestInvalid(
+                "reviewed Stop route state changed",
+                reason=InvalidRequestReason.SUPERSEDED,
+            )
+        admitted = self._stop_plan_in_session(
+            session,
+            run.id,
+            lock=True,
+            profile_target_node_ids=review.profile_target_node_ids,
+            reviewed_route_state=review.route_state.value,
+        )
+        if (
+            not admitted.allowed
+            or admitted.plan_digest != document.plan_digest
+            or admitted.authority_digest != job.authority_revision
+            or list(admitted.target_node_ids) != review.target_node_ids
+            or list(admitted.missing_node_ids) != review.missing_node_ids
+            or sorted(job.targets) != review.target_node_ids
+        ):
+            raise RecipeRequestInvalid(
+                "reviewed Stop effects changed", reason=InvalidRequestReason.SUPERSEDED
+            )
+        ordinal = _bound_workload_intent(job)
+        if review.profile_application_id is not None:
+            current_owner = self._service_profile_stop_owner(
+                session,
+                run=run,
+                admitted=admitted,
+                profile_application_id=review.profile_application_id,
+                request_id=job.request_id,
+                ordinal=ordinal,
+            )
+            if review.profile_stop_owner is None or canonical_message(
+                current_owner
+            ) != canonical_message(review.profile_stop_owner):
+                raise RecipeStopAuthorityRefused("accepted profile Stop owner changed")
+        elif review.profile_stop_owner is not None:
+            raise RecipeStopAuthorityRefused(
+                "accepted Stop profile binding is inconsistent"
+            )
+        self._admit_workload_intent(
+            session,
+            kind="recipe.stop",
+            targets=job.targets,
+            workload_intent_ordinal=ordinal,
+            now=self._clock(),
+        )
+        if review.exact_payloads is None:
+            if (
+                self._absent_stop_nodes(
+                    session, run, admitted, self._clock(), lock=True
+                )
+                is None
+            ):
+                raise RecipeStopAuthorityRefused(
+                    "accepted absence-only Stop no longer has exact absence evidence"
+                )
+        else:
+            current_order, current_payloads, _targets = self._exact_stop_authority(
+                session, run, admitted
+            )
+            if (
+                current_order is None
+                or list(current_order) != review.stop_order
+                or canonical_message(current_payloads)
+                != canonical_message(review.exact_payloads)
+            ):
+                raise RecipeStopAuthorityRefused(
+                    "accepted Stop runtime payload authority changed"
+                )
+        return document, admitted
+
+    def _service_profile_stop_owner(
+        self,
+        session: Session,
+        *,
+        run: RecipeRun,
+        admitted: StopPlan,
+        profile_application_id: str,
+        request_id: str,
+        ordinal: int | None,
+    ) -> ProfileStopOwnerBinding:
+        from .fleet_profiles import _persisted_profile_progress
+        from .run_switch_contract import RunSwitchOperationResult
+        from .run_switch_operations import _phase_request_key, _stop_child_request_key
+
+        application = session.get(FleetProfileApplication, profile_application_id)
+        if application is None or application.current_step is None or ordinal is None:
+            raise RecipeStopAuthorityRefused(
+                "accepted profile Stop owner is unavailable"
+            )
+        adapter = _persisted_profile_progress(application).switch_adapter
+        children = (
+            [
+                child
+                for child in adapter.pending_children
+                if child.kind in {"stop", "run", "install"}
+            ]
+            if adapter is not None
+            else []
+        )
+        parents: list[Job] = []
+        for child in children:
+            candidate = session.get(Job, child.operation_id)
+            if candidate is None:
+                continue
+            expected_kind = (
+                "recipe.stop.v2" if child.kind == "stop" else "recipe.run-switch.v2"
+            )
+            if (
+                candidate.kind != expected_kind
+                or candidate.payload_digest
+                != hashlib.sha256(canonical_message(candidate.payload)).hexdigest()
+            ):
+                raise RecipeStopAuthorityRefused(
+                    "accepted profile Stop parent binding changed"
+                )
+            try:
+                candidate_root = RunSwitchJobPayload.model_validate_json(
+                    canonical_message(candidate.payload), strict=True
+                )
+                candidate_progress = RunSwitchOperationResult.model_validate_json(
+                    canonical_message(candidate.result), strict=True
+                )
+            except (TypeError, ValueError) as error:
+                raise RecipeStopAuthorityRefused(
+                    "accepted profile Stop authority is unreadable"
+                ) from error
+            if (
+                candidate_root.operation_kind != candidate.kind
+                or candidate_root.action != candidate_root.plan.action
+                or (
+                    candidate_root.action != "stop"
+                    if child.kind == "stop"
+                    else candidate_root.action != "install"
+                    if child.kind == "install"
+                    else candidate_root.action not in {"run", "switch"}
+                )
+            ):
+                raise RecipeStopAuthorityRefused(
+                    "accepted profile Stop child action changed"
+                )
+            phase_index = candidate_progress.phase_index
+            item_index = candidate_progress.item_index
+            if (
+                phase_index is None
+                or item_index is None
+                or phase_index >= len(candidate_root.plan.phases)
+                or item_index >= len(candidate_root.plan.stops)
+            ):
+                continue
+            if (
+                candidate_root.plan.phases[phase_index].kind == "stop"
+                and candidate_root.plan.stops[item_index].run_id == run.id
+            ):
+                parents.append(candidate)
+        if len(parents) != 1:
+            raise RecipeStopAuthorityRefused("accepted profile Stop child is ambiguous")
+        parent = session.get(
+            Job, parents[0].id, with_for_update=True, populate_existing=True
+        )
+        if (
+            parent is None
+            or parent.payload_digest
+            != hashlib.sha256(canonical_message(parent.payload)).hexdigest()
+        ):
+            raise RecipeStopAuthorityRefused(
+                "accepted profile Stop parent binding changed"
+            )
+        try:
+            root = RunSwitchJobPayload.model_validate_json(
+                canonical_message(parent.payload), strict=True
+            )
+            # Immutable payload progress is the acceptance snapshot. The
+            # current phase and retry identity belong to the canonical result.
+            progress = RunSwitchOperationResult.model_validate_json(
+                canonical_message(parent.result), strict=True
+            )
+            phase_index = progress.phase_index
+            item_index = progress.item_index
+            if (
+                progress.profile_application_id != application.id
+                or progress.workload_intent_ordinal != ordinal
+                or progress.cancellation is not None
+                or phase_index is None
+                or item_index is None
+                or phase_index >= len(root.plan.phases)
+                or item_index >= len(root.plan.stops)
+            ):
+                raise RecipeStopAuthorityRefused(
+                    "accepted profile Stop phase is unavailable"
+                )
+            phase = root.plan.phases[phase_index]
+            impact = root.plan.stops[item_index]
+            generation = progress.phase_retry_generation or 0
+            phase_key = (
+                _phase_request_key(
+                    parent.request_id, phase_index, item_index, generation
+                )
+                if generation
+                else parent.request_id
+            )
+            if (
+                phase.kind != "stop"
+                or progress.phase != phase.kind
+                or progress.subphase != phase.subphase
+                or impact.run_id != run.id
+                or request_id
+                != _stop_child_request_key(phase_key, run.id, application.id)
+            ):
+                raise RecipeStopAuthorityRefused(
+                    "accepted profile Stop request does not name its exact phase"
+                )
+            installation = session.get(RecipeInstallation, run.installation_id)
+            if installation is None:
+                raise RecipeStopAuthorityRefused(
+                    "accepted profile Stop installation disappeared"
+                )
+            owner = ProfileStopOwnerBinding(
+                schema_version=1,
+                profile_application_id=application.id,
+                profile_operation_id=parent.id,
+                profile_digest=application.profile_digest,
+                profile_plan_digest=application.plan_digest,
+                profile_step=application.current_step,
+                run_id=run.id,
+                installation_id=run.installation_id,
+                recipe_revision_id=installation.recipe_revision_id,
+                mapping_id=run.mapping_id,
+                mapping_generation=run.mapping_generation,
+                run_generation=run.run_generation,
+                plan_digest=run.plan_digest,
+                stop_plan_digest=impact.plan_digest,
+                workload_intent_ordinal=ordinal,
+                run_node_ids=[node.node_id for node in admitted.nodes],
+                reachable_node_ids=list(admitted.target_node_ids),
+                missing_node_ids=list(admitted.missing_node_ids),
+            )
+            validate_profile_stop_owner(session, owner, now=self._clock())
+        except ProfileStopAuthorityError as error:
+            raise RecipeStopAuthorityRefused(
+                f"accepted profile Stop authority changed: {redact_text(str(error))}"
+            ) from error
+        except (TypeError, ValueError) as error:
+            raise RecipeStopAuthorityRefused(
+                "accepted profile Stop authority is unreadable"
+            ) from error
+        return owner
+
+    def _accept_service_stop(
+        self,
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None,
+        profile_target_node_ids: Sequence[str] | None,
+        profile_application_id: str | None,
+    ) -> Job:
+        transaction = (
+            self._route_publications.publication_transaction()
+            if self._route_publications is not None
+            else route_publication_transaction(self._sessions)
+        )
+        with transaction as session:
+            acquire_admission_keys(
+                session, (job_request_key(request_id),), holder="recipe-stop-admission"
+            )
+            existing = self._idempotent_job_in_session(
+                session,
+                request_id,
+                "recipe.stop",
+                plan_digest,
+                owner_kind="run",
+                owner_id=run_id,
+            )
+            if existing is not None:
+                self._check_service_stop(session, existing)
+                return existing
+            admitted = self._stop_plan_in_session(
+                session,
+                run_id,
+                lock=True,
+                profile_target_node_ids=profile_target_node_ids,
+            )
+            # This check precedes any ordinal, accepted Job or route effect.
+            if not admitted.allowed or admitted.plan_digest != plan_digest:
+                raise RecipeRequestInvalid(
+                    "stop plan is stale or blocked",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
+            run = session.get(RecipeRun, run_id)
+            assert run is not None
+            if (
+                self._absent_stop_nodes(
+                    session, run, admitted, self._clock(), lock=True
+                )
+                is None
+            ):
+                order, payloads, _targets = self._exact_stop_authority(
+                    session, run, admitted
+                )
+            else:
+                order, payloads = None, None
+            profile_owner = (
+                self._service_profile_stop_owner(
+                    session,
+                    run=run,
+                    admitted=admitted,
+                    profile_application_id=profile_application_id,
+                    request_id=request_id,
+                    ordinal=workload_intent_ordinal,
+                )
+                if profile_application_id is not None
+                else None
+            )
+            ordinal = self._admit_workload_intent(
+                session,
+                kind="recipe.stop",
+                targets=admitted.target_node_ids,
+                workload_intent_ordinal=workload_intent_ordinal,
+                now=self._clock(),
+            )
+            document = RecipeStopParent(
+                schema_version=1,
+                owner_kind="run",
+                owner_id=run_id,
+                plan_digest=plan_digest,
+                workload_intent_ordinal=ordinal,
+                service_stop_review=ServiceRunStopReview(
+                    stage="accepted",
+                    route_state=RouteState(run.route_state),
+                    run_generation=run.run_generation,
+                    target_node_ids=list(admitted.target_node_ids),
+                    missing_node_ids=list(admitted.missing_node_ids),
+                    profile_target_node_ids=sorted(profile_target_node_ids)
+                    if profile_target_node_ids is not None
+                    else None,
+                    profile_application_id=profile_application_id,
+                    profile_stop_owner=profile_owner,
+                    exact_payloads=dict(payloads) if payloads is not None else None,
+                    stop_order=list(order) if order is not None else None,
+                ),
+            )
+            now = self._clock()
+            job = new_recipe_job(
+                id=str(uuid.uuid4()),
+                request_id=request_id,
+                kind="recipe.stop",
+                state=LifecycleState.RUNNING.value,
+                actor=actor,
+                authority_revision=admitted.authority_digest,
+                targets=list(admitted.target_node_ids),
+                payload=serialize_json_value(document),
+                payload_digest=hashlib.sha256(canonical_message(document)).hexdigest(),
+                status_reason="accepted exact Stop; route withdrawal pending",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(job)
+            session.flush()
+            return job
+
+    def reconcile_pending_service_stops(self) -> bool:
+        """Give one due Stop the external publication turn for this worker pass."""
+        now = self._clock()
+        with self._sessions() as session:
+            candidates = tuple(
+                session.scalars(
+                    select(Job)
+                    .where(
+                        Job.kind == "recipe.stop",
+                        Job.state == LifecycleState.RUNNING.value,
+                        Job.payload["service_stop_review"]["stage"]
+                        .as_string()
+                        .in_(["accepted", "withdrawal-claimed"]),
+                        Job.updated_at <= now - timedelta(seconds=5),
+                    )
+                    .order_by(Job.updated_at, Job.id)
+                    .limit(1)
+                )
+            )
+        progressed = False
+        for candidate in candidates:
+            # Advance this due clock before external work, in a short claim,
+            # so malformed/unavailable owners cannot monopolize the first page.
+            with self._sessions.begin() as session:
+                claimed = session.get(Job, candidate.id, with_for_update=True)
+                if (
+                    claimed is None
+                    or claimed.state != LifecycleState.RUNNING.value
+                    or claimed.updated_at != candidate.updated_at
+                ):
+                    continue
+                claimed.updated_at = now
+            try:
+                document = self._service_stop_document(candidate)
+                review = document.service_stop_review
+                assert review is not None
+                self.stop(
+                    document.owner_id,
+                    plan_digest=document.plan_digest,
+                    actor=candidate.actor,
+                    request_id=candidate.request_id,
+                    workload_intent_ordinal=_bound_workload_intent(candidate),
+                    profile_target_node_ids=review.profile_target_node_ids,
+                    profile_application_id=review.profile_application_id,
+                )
+                progressed = True
+            except (
+                UnknownOutcomeError,
+                InvalidRequestError,
+                SecurityRefusalError,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+            ) as error:
+                with self._sessions.begin() as session:
+                    retained = session.get(Job, candidate.id, with_for_update=True)
+                    if (
+                        retained is not None
+                        and retained.state == LifecycleState.RUNNING.value
+                    ):
+                        retained.status_reason = (
+                            f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
+                        )[:1024]
+                        retained.updated_at = now
+        return progressed
 
     def _dispatch_stop_after_withdrawal(
         self,
@@ -3106,28 +3745,25 @@ class RecipeOperationService:
                 else route_publication_transaction(self._sessions)
             )
             with transaction as session:
-                existing = self._idempotent_in_session(
+                existing = self._idempotent_job_in_session(
                     session,
                     request_id,
                     "recipe.stop",
-                    None,
+                    plan_digest,
                     owner_kind="run",
                     owner_id=run_id,
                 )
-                if existing is not None:
-                    return existing
-                admitted = self._stop_plan_in_session(
-                    session,
-                    run_id,
-                    lock=True,
-                    profile_target_node_ids=profile_target_node_ids,
-                )
-                if not admitted.allowed:
-                    raise RecipeRequestInvalid(
-                        "stop plan is stale or blocked",
-                        reason=InvalidRequestReason.SUPERSEDED,
-                    )
-                plan_digest = admitted.plan_digest
+                if existing is None:
+                    raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+                document = self._service_stop_document(existing)
+                review = document.service_stop_review
+                if (
+                    review is None
+                    or review.stage == "dispatched"
+                    or existing.state != LifecycleState.RUNNING.value
+                ):
+                    return self._view(existing, session=session)
+                document, admitted = self._check_service_stop(session, existing)
                 if self._route_publications is not None and (
                     not self._route_publications.withdrawal_complete_in_session(
                         session, frozenset({run_id})
@@ -3146,6 +3782,7 @@ class RecipeOperationService:
                     request_id=request_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                     now=now,
+                    accepted_parent=existing,
                 )
                 if job is not None:
                     return self._view(job, session=session)
@@ -3158,6 +3795,7 @@ class RecipeOperationService:
                     workload_intent_ordinal=workload_intent_ordinal,
                     now=now,
                     profile_target_node_ids=profile_target_node_ids,
+                    accepted_parent=existing,
                 )
                 run.route_error = None
         except IntegrityError as error:
@@ -3213,6 +3851,7 @@ class RecipeOperationService:
         request_id: str,
         workload_intent_ordinal: int | None,
         now: datetime,
+        accepted_parent: Job | None = None,
     ) -> Job | None:
         """Finish a Stop whose ranks every Spark already reports as not running.
 
@@ -3232,15 +3871,23 @@ class RecipeOperationService:
             now=now,
         )
         settle_absent_run_in_session(session, run, nodes, now)
+        retained_review = None
+        if accepted_parent is not None:
+            retained_review = self._service_stop_document(
+                accepted_parent
+            ).service_stop_review
+            assert retained_review is not None
+            retained_review = retained_review.model_copy(update={"stage": "dispatched"})
         payload = RecipeStopParent(
             schema_version=1,
             owner_kind="run",
             owner_id=run.id,
             plan_digest=admitted.plan_digest,
+            service_stop_review=retained_review,
             workload_intent_ordinal=ordinal,
         )
         job = new_recipe_job(
-            id=str(uuid.uuid4()),
+            id=accepted_parent.id if accepted_parent is not None else str(uuid.uuid4()),
             request_id=request_id,
             kind="recipe.stop",
             state="succeeded",
@@ -3253,7 +3900,16 @@ class RecipeOperationService:
             created_at=now,
             updated_at=now,
         )
-        session.add(job)
+        if accepted_parent is not None:
+            RecipeOperationAdapter().finish(accepted_parent, now, failed=False)
+            accepted_parent.status_reason = None
+            accepted_parent.result = job.result
+            accepted_parent.payload = job.payload
+            accepted_parent.payload_digest = job.payload_digest
+            accepted_parent.updated_at = now
+            job = accepted_parent
+        else:
+            session.add(job)
         session.flush()
         return job
 
@@ -3480,16 +4136,30 @@ class RecipeOperationService:
         job_context: Mapping[str, object] | None = None,
         stop_run_generation: int | None = None,
         profile_target_node_ids: Sequence[str] | None = None,
+        accepted_parent: Job | None = None,
     ) -> Job:
         stop_order, exact_stop_payloads, target_ids = self._exact_stop_authority(
             session, run, admitted, stop_run_generation=stop_run_generation
         )
+        context = dict(job_context or {})
+        if accepted_parent is not None:
+            parent_document = self._service_stop_document(accepted_parent)
+            review = parent_document.service_stop_review
+            assert review is not None and review.exact_payloads is not None
+            exact_stop_payloads = review.exact_payloads
+            stop_order = (
+                tuple(review.stop_order) if review.stop_order is not None else None
+            )
+            context["service_stop_review"] = review.model_copy(
+                update={"stage": "dispatched"}
+            ).model_dump(mode="json", exclude_none=True)
+
         if stop_order is not None and profile_target_node_ids is not None:
             reachable_roles = {
                 node.role for node in admitted.nodes if node.node_id in target_ids
             }
             stop_order = tuple(role for role in stop_order if role in reachable_roles)
-        context = dict(job_context or {})
+
         if admitted.missing_node_ids:
             context["profile_partial_stop"] = {
                 "target_node_ids": list(admitted.target_node_ids),
@@ -3527,6 +4197,7 @@ class RecipeOperationService:
             now=now,
             workload_intent_ordinal=workload_intent_ordinal,
             job_context=context or None,
+            adopt_stop_parent=accepted_parent,
         )
         session.flush()
         return job
@@ -5443,8 +6114,15 @@ class RecipeOperationService:
                     and bool(failed)
                 )
             )
-            if _parent_execution_mode(job) == "profile-jobrun-stop" and not job_failed:
-                completion = self._complete_profile_jobrun_stop_in_session(
+            stop_parent = _recorded_parent(job)
+            if (
+                _parent_execution_mode(job) == "profile-jobrun-stop"
+                or (
+                    isinstance(stop_parent, RecipeStopParent)
+                    and stop_parent.job_run_stop_authorization is not None
+                )
+            ) and not job_failed:
+                completion = self._complete_jobrun_stop_in_session(
                     session, job, children, now=now
                 )
                 if isinstance(completion, Residue):
@@ -6845,6 +7523,11 @@ class RecipeOperationService:
             )
             if not admitted.allowed:
                 raise RecipeRequestInvalid("stop plan is stale or blocked")
+            if pending_job is None and plan_digest != admitted.plan_digest:
+                raise RecipeRequestInvalid(
+                    "reviewed Stop plan digest does not match current effects",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             plan_digest = admitted.plan_digest
             installation = session.get(RecipeInstallation, run.installation_id)
             if installation is None:
@@ -6917,6 +7600,23 @@ class RecipeOperationService:
                     )
                 if profile_job is not None:
                     return self._view(profile_job, session=session)
+            else:
+                exact_job = self._run_jobrun_stop_in_session(
+                    session,
+                    run=run,
+                    nodes=nodes,
+                    target_node_ids=targets,
+                    stop_plan_digest=plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    now=now,
+                    pending_job=pending_job,
+                )
+                if isinstance(exact_job, RecipeArtifactJobCancellationPending):
+                    return exact_job
+                if exact_job is not None:
+                    return self._view(exact_job, session=session)
             payload = {
                 "schema_version": 1,
                 "owner_kind": "run",
@@ -7000,7 +7700,207 @@ class RecipeOperationService:
                 and job.kind == "recipe.stop"
                 and job.state == "running"
                 and _parent_execution_mode(job) == "one-shot-jobs"
+                and job.payload.get("phases") is None
             )
+
+    def _run_jobrun_stop_in_session(
+        self,
+        session: Session,
+        *,
+        run: RecipeRun,
+        nodes: Sequence[RunNode],
+        target_node_ids: Sequence[str],
+        stop_plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int,
+        now: datetime,
+        pending_job: Job | None,
+    ) -> Job | RecipeArtifactJobCancellationPending | None:
+        """Freeze exact issued targets before admitting ordinary run cleanup."""
+        rows: list[tuple[ProfileJobRunStopTarget, RecipeStopPayload]] = []
+        adapter = ArtifactJobAdapter(session)
+        frozen: JobRunStopScope | None = None
+        if pending_job is not None:
+            from .job_documents import RecipeStopParent
+
+            frozen = RecipeStopParent.model_validate_json(
+                canonical_message(pending_job.payload), strict=True
+            ).job_run_stop_authorization
+        frozen_ids = (
+            {target.artifact_job_id for target in frozen.targets}
+            if frozen is not None
+            else None
+        )
+        needs_stop = False
+        for artifact in session.scalars(
+            select(ArtifactJob)
+            .where(ArtifactJob.run_id == run.id)
+            .order_by(ArtifactJob.created_at, ArtifactJob.id)
+            .with_for_update(of=ArtifactJob)
+        ):
+            effect = adapter.adopt(artifact).effect
+            if artifact.result_evidence is not None:
+                try:
+                    evidence = read_stored_model(
+                        ArtifactJobResultEvidence,
+                        canonical_message(artifact.result_evidence),
+                        from_json=True,
+                    )
+                except (TypeError, ValueError) as error:
+                    retire_as_unknown(
+                        "recipe.jobrun-stop",
+                        artifact.id,
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        f"JobRun effect evidence is unreadable: {error}",
+                    )
+                    effect = Effect.UNKNOWN
+                else:
+                    if evidence.active_scope_may_remain is True:
+                        effect = Effect.UNKNOWN
+            if frozen_ids is not None:
+                if artifact.id not in frozen_ids:
+                    if effect in {Effect.ISSUED, Effect.UNKNOWN}:
+                        raise RecipeStopAuthorityRefused(
+                            "new JobRun effect escaped the accepted Stop scope"
+                        )
+                    continue
+            elif effect not in {Effect.ISSUED, Effect.UNKNOWN}:
+                continue
+            needs_stop |= effect in {Effect.ISSUED, Effect.UNKNOWN}
+            if artifact.operation_id is None:
+                raise RecipeRetryLater("unknown JobRun has no exact source authority")
+            children = tuple(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == artifact.operation_id)
+                    .with_for_update(of=AgentOperation)
+                )
+            )
+            if len(children) != 1 or children[0].node_id not in target_node_ids:
+                raise RecipeRetryLater("unknown JobRun exact target is not reachable")
+            source = children[0]
+            request = read_stored_model(
+                RecipeJobRunRequest, canonical_message(source.payload), from_json=True
+            )
+            payload = stop_payload_from_job_run(request, cancel_pending_start=True)
+            target = ProfileJobRunStopTarget(
+                artifact_job_id=artifact.id,
+                source_job_id=artifact.operation_id,
+                source_operation_id=source.id,
+                node_id=source.node_id,
+                stop_payload_sha256=hashlib.sha256(
+                    canonical_message(payload)
+                ).hexdigest(),
+            )
+            validate_jobrun_stop_source(
+                session,
+                target,
+                payload,
+                run,
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+            rows.append((target, payload))
+        if frozen_ids is not None and frozen_ids != {
+            target.artifact_job_id for target, _payload in rows
+        }:
+            raise RecipeRetryLater("accepted JobRun Stop source disappeared")
+        if not rows:
+            return None
+        installation = session.get(RecipeInstallation, run.installation_id)
+        if installation is None:
+            raise RecipeRetryLater("exact JobRun installation authority is unavailable")
+        scope = JobRunStopScope(
+            schema_version=1,
+            run_id=run.id,
+            installation_id=run.installation_id,
+            recipe_revision_id=installation.recipe_revision_id,
+            mapping_id=run.mapping_id,
+            mapping_generation=run.mapping_generation,
+            run_generation=run.run_generation,
+            plan_digest=run.plan_digest,
+            workload_intent_ordinal=workload_intent_ordinal,
+            run_node_ids=[node.node_id for node in nodes],
+            reachable_node_ids=sorted(target_node_ids),
+            missing_node_ids=sorted(
+                node.node_id for node in nodes if node.node_id not in target_node_ids
+            ),
+            targets=[target for target, _payload in rows],
+            stop_plan_digest=stop_plan_digest,
+        )
+        if frozen is not None and frozen != scope:
+            raise RecipeStopAuthorityRefused(
+                "accepted exact JobRun Stop targets changed"
+            )
+        if not needs_stop:
+            # Each original source has now positively reported a stopped/ended
+            # effect. The frozen scope remains exact; no unseen target is added.
+            return None
+        pending = self._one_shot_stop_prerequisite(
+            session, run.id, now, target_node_ids=target_node_ids
+        )
+        if pending is not None:
+            if pending_job is None:
+                payload = {
+                    "schema_version": 1,
+                    "owner_kind": "run",
+                    "owner_id": run.id,
+                    "plan_digest": stop_plan_digest,
+                    "execution_mode": "one-shot-jobs",
+                    "workload_intent_ordinal": workload_intent_ordinal,
+                    "job_run_stop_authorization": json.loads(canonical_message(scope)),
+                }
+                session.add(
+                    new_recipe_job(
+                        id=str(uuid.uuid4()),
+                        request_id=request_id,
+                        kind="recipe.stop",
+                        state=LifecycleState.RUNNING.value,
+                        actor=actor,
+                        authority_revision=rows[0][1].recipe_content_sha256,
+                        targets=sorted(target_node_ids),
+                        payload_digest=hashlib.sha256(
+                            canonical_message(payload)
+                        ).hexdigest(),
+                        payload=payload,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                session.flush()
+            return pending
+        # One-shot recipes are single-node. Sequential phases bind each distinct
+        # target without creating concurrent cleanup claims on that node.
+        phases = tuple(
+            ((target.node_id, json.loads(canonical_message(payload))),)
+            for target, payload in rows
+        )
+        run.state = RunState.STOPPING
+        run.updated_at = now
+        parent = self._queue_in_session(
+            session,
+            kind="recipe.stop",
+            owner_kind="run",
+            owner_id=run.id,
+            plan_digest=stop_plan_digest,
+            actor=actor,
+            request_id=request_id,
+            node_payloads=phases[0],
+            phases=phases,
+            authority_digest=rows[0][1].recipe_content_sha256,
+            now=now,
+            workload_intent_ordinal=workload_intent_ordinal,
+            job_context={
+                "execution_mode": "one-shot-jobs",
+                "job_run_stop_authorization": json.loads(canonical_message(scope)),
+            },
+            adopt_stop_parent=pending_job,
+        )
+        for target, payload in rows:
+            validate_run_jobrun_stop_target(
+                session, scope, target, payload, stop_parent=parent
+            )
+        return parent
 
     def _profile_jobrun_stop_is_pending(self, request_id: str) -> bool:
         with self._sessions() as session:
@@ -7112,7 +8012,7 @@ class RecipeOperationService:
             )
         return authorization, targets[0]
 
-    def _complete_profile_jobrun_stop_in_session(
+    def _complete_jobrun_stop_in_session(
         self,
         session: Session,
         job: Job,
@@ -7140,19 +8040,43 @@ class RecipeOperationService:
                 BookkeepingReason.EVIDENCE_MISMATCH,
                 "profile JobRun Stop payload digest changed",
             )
-        parent = _profile_jobrun_parent(job)
-        if isinstance(parent, Residue):
-            return parent
-        authorization = parent.profile_stop_authorization
-        try:
-            validate_profile_stop_owner(
-                session, authorization, now=now, require_current=False
-            )
-        except ProfileStopAuthorityError as error:
-            return unproven(
-                BookkeepingReason.EVIDENCE_MISMATCH,
-                f"profile JobRun Stop owner is no longer provable: {error}",
-            )
+        is_profile = job.payload.get("execution_mode") == "profile-jobrun-stop"
+        if is_profile:
+            parent = _profile_jobrun_parent(job)
+            if isinstance(parent, Residue):
+                return parent
+            authorization: JobRunStopScope = parent.profile_stop_authorization
+            try:
+                validate_profile_stop_owner(
+                    session,
+                    parent.profile_stop_authorization,
+                    now=now,
+                    require_current=False,
+                )
+            except ProfileStopAuthorityError as error:
+                return unproven(
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    f"profile JobRun Stop owner is no longer provable: {error}",
+                )
+        else:
+            from .job_documents import RecipeStopParent
+
+            try:
+                direct = RecipeStopParent.model_validate_json(
+                    canonical_message(job.payload), strict=True
+                )
+                direct_scope = direct.job_run_stop_authorization
+                if direct_scope is None:
+                    return unproven(
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        "run JobRun Stop accepted scope is unreadable: exact JobRun Stop scope is missing",
+                    )
+                authorization = direct_scope
+            except (TypeError, ValueError) as error:
+                return unproven(
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    f"run JobRun Stop accepted scope is unreadable: {error}",
+                )
         child_by_identity = {
             (
                 child.node_id,
@@ -7177,11 +8101,33 @@ class RecipeOperationService:
                     BookkeepingReason.EVIDENCE_UNAVAILABLE,
                     "profile JobRun Stop lacks an exact issued receipt",
                 )
-            validated = self._validate_profile_jobrun_stop_child(
-                session, job, child, now=now, require_current=False
-            )
-            if isinstance(validated, Residue):
-                return validated
+            if is_profile:
+                validated = self._validate_profile_jobrun_stop_child(
+                    session, job, child, now=now, require_current=False
+                )
+                if isinstance(validated, Residue):
+                    return validated
+            else:
+                try:
+                    payload = read_stored_model(
+                        RecipeStopPayload,
+                        canonical_message(child.payload),
+                        from_json=True,
+                    )
+                    validate_run_jobrun_stop_target(
+                        session,
+                        authorization,
+                        target,
+                        payload,
+                        stop_parent=job,
+                        operation=child,
+                        require_current=False,
+                    )
+                except (TypeError, ValueError) as error:
+                    return unproven(
+                        BookkeepingReason.EVIDENCE_MISMATCH,
+                        f"run JobRun Stop receipt authority changed: {error}",
+                    )
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
                     AgentOperationAttempt.operation_id == child.id,
@@ -7230,7 +8176,7 @@ class RecipeOperationService:
                 BookkeepingReason.EVIDENCE_MISMATCH,
                 "profile JobRun Stop reachable run membership changed",
             )
-        reason = "runtime stopped by the newer accepted profile intent"
+        reason = "runtime stopped by the newer accepted workload intent"
         for _target, artifact, source_job, source_operation in proven:
             # The exact Stop receipt proves the runtime absent: a definite,
             # confirmed cancellation of the job and of its order.
@@ -7684,6 +8630,7 @@ class RecipeOperationService:
         *,
         lock: bool,
         profile_target_node_ids: Sequence[str] | None = None,
+        reviewed_route_state: str | None = None,
     ) -> StopPlan:
         run_statement = select(RecipeRun).where(RecipeRun.id == run_id)
         if lock:
@@ -7837,7 +8784,9 @@ class RecipeOperationService:
             recipe_revision_id=recipe_revision_id,
             alias=run.alias,
             run_state=run.state,
-            route_state=run.route_state,
+            route_state=run.route_state
+            if reviewed_route_state is None
+            else reviewed_route_state,
             route_generation=run.route_generation,
             route_digest=run.route_digest,
             authority_digest=run.plan_digest,
@@ -8367,6 +9316,7 @@ class RecipeOperationService:
         job_context: Mapping[str, object] | None = None,
         workload_intent_ordinal: int | None = None,
         unattended_guard: Callable[[Session], None] | None = None,
+        adopt_stop_parent: Job | None = None,
     ) -> Job:
         if not node_payloads:
             raise RecipeRequestInvalid("operation group has no target nodes")
@@ -8431,7 +9381,30 @@ class RecipeOperationService:
             owner_id=owner_id,
         )
         if existing is not None:
-            return existing
+            if adopt_stop_parent is None:
+                return existing
+            if (
+                kind != "recipe.stop"
+                or existing.id != adopt_stop_parent.id
+                or existing.state != LifecycleState.RUNNING.value
+                or (
+                    existing.payload.get("execution_mode") != "one-shot-jobs"
+                    and self._service_stop_document(existing).service_stop_review
+                    is None
+                )
+                or existing.payload.get("phases") is not None
+                or existing.targets != targets
+                or existing.payload.get("workload_intent_ordinal")
+                != workload_intent_ordinal
+                or session.scalar(
+                    select(AgentOperation.id).where(
+                        AgentOperation.parent_job_id == existing.id
+                    )
+                )
+                is not None
+            ):
+                raise RecipeRequestInvalid("accepted logical Stop identity changed")
+            job_id = existing.id
         if kind in _WORKLOAD_INTENT_KINDS:
             # Only a standalone request admits a new intent. A child carries
             # its parent's exact ordinal and may not capture newer authority.
@@ -8506,7 +9479,15 @@ class RecipeOperationService:
             created_at=now,
             updated_at=now,
         )
-        session.add(job)
+        if existing is not None:
+            existing.payload = job.payload
+            existing.payload_digest = job.payload_digest
+            existing.authority_revision = job.authority_revision
+            existing.status_reason = None
+            existing.updated_at = now
+            job = existing
+        else:
+            session.add(job)
         try:
             session.flush()
             for operation_id, node_id, payload in phase_groups[0]:

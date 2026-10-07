@@ -28,6 +28,7 @@ from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStop
 
 from .categorized_errors import BookkeepingUnknown, InvalidType
 from .distributed_recovery import DistributedLifecycleError, recovery_start_plan
+from .job_documents import RecipeStopParent
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -43,6 +44,7 @@ from .profile_stop_authority import (
     ProfileJobRunStopJob,
     ProfileStopAuthorityError,
     validate_profile_jobrun_stop_target,
+    validate_run_jobrun_stop_target,
 )
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -202,6 +204,35 @@ def derive_runtime_plan_binding(
         except (TypeError, ValueError) as error:
             raise RuntimePlanAuthorityRefused(
                 "profile JobRun Stop authority is invalid",
+                reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+            ) from error
+    elif parent.payload.get("job_run_stop_authorization") is not None:
+        try:
+            accepted_run = RecipeStopParent.model_validate_json(
+                canonical_message(parent.payload), strict=True
+            )
+            scope = accepted_run.job_run_stop_authorization
+            if scope is None:
+                raise ProfileStopAuthorityError("run JobRun Stop scope is missing")
+            targets = [
+                target
+                for target in scope.targets
+                if target.node_id == node_id
+                and target.stop_payload_sha256 == _payload_sha256(stop)
+            ]
+            if len(targets) != 1:
+                raise ProfileStopAuthorityError("run JobRun Stop target is ambiguous")
+            validate_run_jobrun_stop_target(
+                session,
+                scope,
+                targets[0],
+                stop,
+                operation=operation,
+                stop_parent=parent,
+            )
+        except (TypeError, ValueError) as error:
+            raise RuntimePlanAuthorityRefused(
+                "run JobRun Stop authority is invalid",
                 reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
             ) from error
     else:

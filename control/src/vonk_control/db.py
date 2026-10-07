@@ -15,6 +15,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import (
+    DBAPIError,
     InterfaceError,
     OperationalError,
     SQLAlchemyError,
@@ -35,6 +36,49 @@ _ALEMBIC_CONFIG = (
 _DATABASE_STARTUP_TIMEOUT_SECONDS = 120.0
 _DATABASE_RETRYABLE_ERRORS = (InterfaceError, OperationalError, TimeoutError)
 _LOGGER = logging.getLogger(__name__)
+
+
+class _DatabaseStartupContention(RuntimeError):
+    """The current schema owner remains busy; retry after releasing ownership."""
+
+
+def _database_sqlstate(error: BaseException) -> str | None:
+    if not isinstance(error, DBAPIError):
+        return None
+    code = getattr(error.orig, "sqlstate", None)
+    return code if isinstance(code, str) else None
+
+
+def _startup_retryable(error: BaseException) -> bool:
+    if isinstance(error, (_DatabaseStartupContention, TimeoutError)):
+        return True
+    if not isinstance(error, (InterfaceError, OperationalError)):
+        return False
+    code = _database_sqlstate(error)
+    # Failed connection establishment may lack SQLSTATE even after a server
+    # authentication refusal. Its cause remains unknown: retry is bounded and
+    # never changes credentials or grants access.
+    # Retry only a connection fault or PostgreSQL's cannot-connect-now startup
+    # response. Permissions, schema damage and integrity refusals remain fatal.
+    return code is None or code.startswith("08") or code == "57P03"
+
+
+def postgresql_connect_args(*, component: str) -> dict[str, int | str]:
+    """The shared connection and server budgets for every PostgreSQL engine."""
+    budgets = DATABASE_WAIT_BUDGETS
+    return {
+        "connect_timeout": budgets.connect_timeout_seconds,
+        "options": " ".join(
+            (
+                f"-c application_name=vonk:{component}",
+                f"-c lock_timeout={budgets.lock_timeout_ms}",
+                f"-c statement_timeout={budgets.statement_timeout_ms}",
+                f"-c transaction_timeout={budgets.transaction_timeout_ms}",
+                "-c idle_in_transaction_session_timeout="
+                + f"{budgets.idle_in_transaction_timeout_ms}",
+            )
+        ),
+    }
 
 
 def build_engine(database_url: str, *, component: str = "control") -> Engine:
@@ -60,27 +104,26 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
     if "postgres" in database_url:
         # transaction_timeout exists only on PostgreSQL 17+; the deployed
         # Compose service pins postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722, so the server accepts it.
-        connect_args = {
-            "options": " ".join(
-                (
-                    f"-c application_name=vonk:{component}",
-                    f"-c lock_timeout={budgets.lock_timeout_ms}",
-                    f"-c statement_timeout={budgets.statement_timeout_ms}",
-                    f"-c transaction_timeout={budgets.transaction_timeout_ms}",
-                    "-c idle_in_transaction_session_timeout="
-                    + f"{budgets.idle_in_transaction_timeout_ms}",
-                )
-            )
-        }
         return create_engine(
             database_url,
             pool_pre_ping=True,
             pool_size=budgets.pool_size,
             max_overflow=budgets.max_overflow,
             pool_timeout=budgets.pool_timeout_seconds,
-            connect_args=connect_args,
+            connect_args=postgresql_connect_args(component=component),
         )
-    return create_engine(database_url, pool_pre_ping=True, connect_args={})
+    engine = create_engine(database_url, pool_pre_ping=True, connect_args={})
+    if engine.dialect.name == "sqlite":
+        # The engine has not escaped to a service or worker. Adopt historical
+        # owning projections on one exclusive checkout before any mapped read.
+        from .exact_integer_adoption import reconcile_exact_integer_schema
+
+        try:
+            reconcile_exact_integer_schema(engine)
+        except BaseException:
+            engine.dispose()
+            raise
+    return engine
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:
@@ -99,13 +142,16 @@ def run_with_database_startup_retry[T](
     monotonic: Callable[[], float] = time.monotonic,
     label: str = "database",
 ) -> T:
-    """Retry transient database connection failures for a bounded interval.
+    """Connection failures and startup-owner contention share one deadline.
 
     Container DNS and PostgreSQL can become available in either order after a
     host or Docker restart.  Keep startup deterministic by retrying only
-    connection-class failures, logging a redacted diagnostic, and always
-    re-raising once the fixed deadline expires.  Schema and permission errors
-    remain fatal immediately.
+    typed connection faults, unknown connection establishment and exact startup
+    contention. Diagnostics remain redacted and the fixed deadline never resets.
+    Known schema and permission refusals remain fatal immediately; an untyped
+    handshake failure remains unknown until the bounded attempt expires.
+    The deadline controls retry admission; an individual connection attempt has
+    its own per-host driver budget and can finish after that deadline.
     """
     if timeout_seconds < 0 or timeout_seconds > 900:
         raise ValueError("database startup timeout is outside the safe bound")
@@ -115,15 +161,38 @@ def run_with_database_startup_retry[T](
     while True:
         try:
             return operation()
-        except _DATABASE_RETRYABLE_ERRORS as error:
+        except (*_DATABASE_RETRYABLE_ERRORS, _DatabaseStartupContention) as error:
+            if not _startup_retryable(error):
+                raise
             remaining = deadline - monotonic()
             if remaining <= 0:
+                if (
+                    isinstance(error, (InterfaceError, OperationalError))
+                    and _database_sqlstate(error) is None
+                ):
+                    print(
+                        f"{label} startup deadline expired; connection establishment "
+                        "cause unknown (driver SQLSTATE unavailable); credentials unchanged",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 raise
             wait = min(delay, remaining)
             attempts += 1
+            if isinstance(error, _DatabaseStartupContention):
+                reason = str(error)
+            elif isinstance(error, (InterfaceError, OperationalError)):
+                code = _database_sqlstate(error)
+                reason = (
+                    f"{type(error).__name__}; SQLSTATE {code}"
+                    if code is not None
+                    else "connection establishment cause unknown; driver SQLSTATE unavailable"
+                )
+            else:
+                reason = type(error).__name__
             print(
                 f"{label} unavailable during startup (attempt {attempts}; "
-                f"{type(error).__name__}); retrying in {wait:.1f}s",
+                f"{reason}); retrying in {wait:.1f}s",
                 file=sys.stderr,
                 flush=True,
             )
@@ -149,6 +218,7 @@ def upgrade_schema(
     database_url: str,
     *,
     config_path: Path = _ALEMBIC_CONFIG,
+    connection: Connection | None = None,
 ) -> None:
     """Apply the baseline revision, then let startup reconcile live metadata."""
     if not database_url.strip():
@@ -156,6 +226,8 @@ def upgrade_schema(
     config = Config(str(config_path))
     # ConfigParser treats percent signs as interpolation markers.
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    if connection is not None:
+        config.attributes["connection"] = connection
     command.upgrade(config, "head")
 
 
@@ -487,8 +559,10 @@ def reconcile_schema(connection: Connection) -> None:
     from alembic.operations import Operations
     from sqlalchemy import inspect
 
+    from .exact_integer_adoption import adopt_exact_integer_columns
     from .models import Base
 
+    adopt_exact_integer_columns(connection)
     ops = Operations(MigrationContext.configure(connection))
     differences = [
         difference
@@ -964,49 +1038,50 @@ def initialize_database(
                     "control database initialization requires PostgreSQL"
                 )
             with engine.connect() as lock_connection:
-                lock_connection.execute(
-                    text("SELECT pg_advisory_lock(:key)"),
+                acquired = lock_connection.execute(
+                    text("SELECT pg_try_advisory_lock(:key)"),
                     {"key": _STARTUP_ADVISORY_LOCK},
-                )
+                ).scalar_one()
                 lock_connection.commit()
+                if acquired is not True:
+                    raise _DatabaseStartupContention(
+                        "Controller schema owner is busy; startup will retry"
+                    )
                 try:
-                    upgrade_schema(database_url, config_path=config_path)
+                    # Authentication precedes schema ownership. Alembic and
+                    # reconciliation reuse this connection; no new checkout or
+                    # network establishment occurs while the owner is held.
+                    with lock_connection.begin():
+                        upgrade_schema(
+                            database_url,
+                            config_path=config_path,
+                            connection=lock_connection,
+                        )
                     try:
-                        with engine.begin() as schema_connection:
-                            verify_schema_is_current(schema_connection)
+                        with lock_connection.begin():
+                            verify_schema_is_current(lock_connection)
                             # Adoption is derived bookkeeping, not schema authority.
                             # A savepoint keeps a damaged historical row from undoing
                             # current schema reconciliation; readers heal rows lazily.
                             try:
-                                with schema_connection.begin_nested():
-                                    adopt_legacy_rows(schema_connection)
+                                with lock_connection.begin_nested():
+                                    adopt_legacy_rows(lock_connection)
                             except SQLAlchemyError:
                                 _LOGGER.exception(
                                     "Lifecycle bookkeeping adoption deferred; "
                                     "current schema remains available"
                                 )
                     except SQLAlchemyError as error:
+                        if _database_sqlstate(error) == "55P03":
+                            raise _DatabaseStartupContention(
+                                "Controller schema relation is busy; startup will retry"
+                            ) from None
                         raise RuntimeError(
                             "Controller startup schema reconciliation failed and the "
                             "transaction was rolled back. This error class is not "
                             "retryable, so startup aborts; schema failure: "
                             f"{error}"
                         ) from error
-                    # Retained profile journals need exact SQL child proof before
-                    # the sole current reader can resume them. One short bounded
-                    # page runs under this startup owner; normal worker passes
-                    # continue remaining or temporarily locked rows automatically.
-                    from .fleet_profile_adapter_conversion import (
-                        convert_due_retained_applications,
-                    )
-
-                    converted = convert_due_retained_applications(
-                        sessionmaker(engine, expire_on_commit=False), datetime.now(UTC)
-                    )
-                    if converted:
-                        _LOGGER.info(
-                            "Converted %d retained profile adapter journals", converted
-                        )
                 finally:
                     if lock_connection.in_transaction():
                         lock_connection.rollback()
@@ -1015,6 +1090,26 @@ def initialize_database(
                         {"key": _STARTUP_ADVISORY_LOCK},
                     )
                     lock_connection.commit()
+            # Schema authority is committed and released. Retained journals need
+            # exact SQL child proof, owned by the converter's bounded row locks.
+            # Normal worker passes continue remaining or temporarily locked rows.
+            from .fleet_profile_adapter_conversion import (
+                convert_due_retained_applications,
+            )
+
+            converted = convert_due_retained_applications(
+                sessionmaker(engine, expire_on_commit=False), datetime.now(UTC)
+            )
+            if converted:
+                _LOGGER.info(
+                    "Converted %d retained profile adapter journals", converted
+                )
+        except SQLAlchemyError as error:
+            if _database_sqlstate(error) == "55P03":
+                raise _DatabaseStartupContention(
+                    "Controller schema relation is busy; startup will retry"
+                ) from None
+            raise
         finally:
             engine.dispose()
 

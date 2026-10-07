@@ -61,6 +61,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
+from vonk_control.job_documents import RecipeStopParent
 from vonk_control.litellm import LiteLlmGeneration
 from vonk_control.models import (
     AgentCertificate,
@@ -71,6 +72,7 @@ from vonk_control.models import (
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
+    ClusterMapping,
     InstallationNode,
     Job,
     NodeArtifact,
@@ -357,6 +359,7 @@ def setup_services(
     tmp_path: Path,
     *,
     nodes: int = 1,
+    mapping_node_count: int | None = None,
     endpoint_owner_rank_one: bool = False,
     distributed_lifecycle: bool = False,
     start_order: tuple[str, ...] | None = None,
@@ -368,6 +371,8 @@ def setup_services(
     distributed_start_timeout_seconds: int = 60,
     model_artifact: bool = False,
 ):
+    placement_count = nodes if mapping_node_count is None else mapping_node_count
+    assert 1 <= placement_count <= nodes
     engine = engine or create_engine(
         f"sqlite:///{tmp_path / 'operations.sqlite'}",
         connect_args={"check_same_thread": False},
@@ -456,18 +461,20 @@ def setup_services(
         },
         "memory": {"peak_bytes": 225, "reserve_bytes": 0},
     }
-    if nodes > 1:
+    if placement_count > 1:
         worker = json.loads(json.dumps(role))
-        worker.update({"name": "worker", "count": nodes - 1, "endpoint_owner": False})
+        worker.update(
+            {"name": "worker", "count": placement_count - 1, "endpoint_owner": False}
+        )
         roles = [role, worker]
         if endpoint_owner_rank_one:
             roles = [worker, role]
         document["topology"] = {
             **document["topology"],
-            "name": f"nodes_{nodes}",
-            "node_count": nodes,
+            "name": f"nodes_{placement_count}",
+            "node_count": placement_count,
             "parallelism": {
-                "tensor": nodes,
+                "tensor": placement_count,
                 "pipeline": 1,
                 "data": 1,
                 "backend": "tcp",
@@ -560,7 +567,9 @@ def setup_services(
         )
         session.flush()
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.preview(revision.id, node_ids, {}, "admin")
+    mapping_plan = mappings.preview(
+        revision.id, node_ids[:placement_count], {}, "admin"
+    )
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=NOW)
     image_archive = b"canonical-runtime-image-archive"[:30]
     image_archive_sha256 = hashlib.sha256(image_archive).hexdigest()
@@ -2882,20 +2891,38 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
 
     with sessions() as session:
         assert _required(session.get(RecipeRun, start.owner_id)).state == "running"
-        assert (
-            session.scalar(select(Job).where(Job.request_id == "1" * 35 + "c")) is None
+        accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "c"))
+        assert accepted is not None and accepted.state == "running"
+        assert accepted.payload["plan_digest"] == plan.plan_digest
+        stop_parent = RecipeStopParent.model_validate_json(
+            canonical_message(accepted.payload), strict=True
         )
-    # The route was withdrawn first, with no transaction open; only the Stop's
-    # own state and queue write rolled back, so the retry dispatches it.
+        assert stop_parent.service_stop_review is not None
+        assert stop_parent.service_stop_review.stage == "withdrawal-claimed"
+        assert accepted.payload.get("phases") is None
+        assert (
+            session.scalar(
+                select(AgentOperation.id).where(
+                    AgentOperation.parent_job_id == accepted.id
+                )
+            )
+            is None
+        )
+    # Dispatch rolled back without erasing the reviewed owner. The exact same
+    # accepted Stop resumes after its queue dependency recovers.
     assert withdrawn == [start.owner_id]
 
 
-def test_stop_withdrawal_failure_rolls_back_job_and_run_state(tmp_path: Path) -> None:
+@pytest.mark.parametrize("fault", [RuntimeError, PermissionError, OSError])
+def test_stop_withdrawal_failure_retains_accepted_job_and_run_state(
+    tmp_path: Path,
+    fault: type[RuntimeError | OSError],
+) -> None:
     withdrawn: list[str] = []
 
     def fail_withdrawal(run_id: str) -> None:
         withdrawn.append(run_id)
-        raise RuntimeError("route withdrawal failed")
+        raise fault("route withdrawal failed")
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, route_withdrawer=fail_withdrawal
@@ -2916,12 +2943,26 @@ def test_stop_withdrawal_failure_rolls_back_job_and_run_state(tmp_path: Path) ->
         stored.route_state = "published"
     plan = service.preview_stop(run.owner_id)
 
-    with pytest.raises(RuntimeError, match="route withdrawal failed"):
-        service.stop(
+    if fault is not OSError:
+        # Unclassified failures and permission refusals remain explicit.
+        with pytest.raises(fault, match="route withdrawal failed"):
+            service.stop(
+                run.owner_id,
+                plan_digest=plan.plan_digest,
+                actor="admin",
+                request_id="1" * 35 + "f",
+            )
+    else:
+        pending = service.stop(
             run.owner_id,
             plan_digest=plan.plan_digest,
             actor="admin",
             request_id="1" * 35 + "f",
+        )
+        assert pending.state == "running"
+        assert (
+            pending.status_reason is not None
+            and "route withdrawal failed" in pending.status_reason
         )
 
     assert withdrawn == [run.owner_id]
@@ -2929,12 +2970,43 @@ def test_stop_withdrawal_failure_rolls_back_job_and_run_state(tmp_path: Path) ->
         stored = session.get(RecipeRun, run.owner_id)
         assert stored is not None
         assert (stored.state, stored.route_state) == ("running", "published")
+        accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "f"))
+        assert accepted is not None and accepted.state == "running"
+        assert accepted.payload["plan_digest"] == plan.plan_digest
+        stop_parent = RecipeStopParent.model_validate_json(
+            canonical_message(accepted.payload), strict=True
+        )
+        assert stop_parent.service_stop_review is not None
+        assert stop_parent.service_stop_review.stage == "withdrawal-claimed"
+        assert accepted.payload.get("phases") is None
         assert (
-            session.scalar(select(Job).where(Job.request_id == "1" * 35 + "f")) is None
+            session.scalar(
+                select(AgentOperation.id).where(
+                    AgentOperation.parent_job_id == accepted.id
+                )
+            )
+            is None
         )
 
+    if fault is OSError:
+        original_id = accepted.id
+        original_ordinal = accepted.payload["workload_intent_ordinal"]
+        service._route_withdrawer = withdrawn.append
+        resumed = service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="1" * 35 + "f",
+        )
+        assert resumed.id == original_id
+        with sessions() as session:
+            stored = session.get(Job, resumed.id)
+            assert stored is not None
+            assert stored.payload["workload_intent_ordinal"] == original_ordinal
+            assert stored.payload.get("phases")
 
-def test_stop_commit_failure_after_publication_is_safe_side(tmp_path: Path) -> None:
+
+def test_stop_admission_commit_failure_prevents_publication(tmp_path: Path) -> None:
     withdrawn: list[str] = []
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, route_withdrawer=withdrawn.append
@@ -2977,7 +3049,7 @@ def test_stop_commit_failure_after_publication_is_safe_side(tmp_path: Path) -> N
     finally:
         event.remove(sessions.class_, "before_commit", fail_commit)
 
-    assert withdrawn == [run.owner_id]
+    assert withdrawn == []
     with sessions() as session:
         stored = session.get(RecipeRun, run.owner_id)
         assert stored is not None
@@ -3131,7 +3203,9 @@ def test_stop_preview_is_stable_exact_and_defers_capacity_release(
     assert len(first.plan_digest) == 64
 
 
-def test_stop_replans_when_the_submitted_digest_is_old(tmp_path: Path) -> None:
+def test_stop_refuses_changed_review_before_withdrawal_or_admission(
+    tmp_path: Path,
+) -> None:
     withdrawn: list[str] = []
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, route_withdrawer=withdrawn.append
@@ -3146,18 +3220,24 @@ def test_stop_replans_when_the_submitted_digest_is_old(tmp_path: Path) -> None:
         nodes,
         request_id="3" * 35 + "b",
     )
-    result = service.stop(
-        run.owner_id,
-        plan_digest="0" * 64,
-        actor="admin",
-        request_id="3" * 35 + "c",
-    )
-
-    assert result.state == "running"
-    assert withdrawn == [run.owner_id]
     with sessions() as session:
-        queued = session.scalar(select(Job).where(Job.request_id == "3" * 35 + "c"))
-        assert queued is not None
+        ordinals = {
+            node.node_id: node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode))
+        }
+    with pytest.raises(RecipeRequestInvalid):
+        service.stop(
+            run.owner_id, plan_digest="0" * 64, actor="admin", request_id="3" * 35 + "c"
+        )
+    assert withdrawn == []
+    with sessions() as session:
+        assert (
+            session.scalar(select(Job).where(Job.request_id == "3" * 35 + "c")) is None
+        )
+        assert {
+            node.node_id: node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode))
+        } == ordinals
 
 
 def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
@@ -5663,24 +5743,41 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
 ) -> None:
     Base.metadata.drop_all(postgres_engine)
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, engine=postgres_engine
+        tmp_path, nodes=4, mapping_node_count=2, engine=postgres_engine
     )
+    first_nodes, second_nodes = tuple(nodes[:2]), tuple(nodes[2:])
+    assert set(first_nodes).isdisjoint(second_nodes)
     installation = installed_recipe(
-        service, mapping_id, build_id, nodes, request_id="e" * 35 + "1"
+        service, mapping_id, build_id, first_nodes, request_id="e" * 35 + "1"
     )
     first = started_recipe(
         sessions,
         service,
         installation.owner_id,
-        nodes,
+        first_nodes,
         request_id="e" * 35 + "2",
         alias="first",
     )
-    second_run_id = clone_running_run(sessions, first.owner_id, alias="second")
-    with sessions.begin() as session:
-        for run_id in (first.owner_id, second_run_id):
-            run = _required(session.get(RecipeRun, run_id))
-            run.plan = {**run.plan, "observation_schema_version": 2}
+    with sessions() as session:
+        first_mapping = session.get(ClusterMapping, mapping_id)
+        assert first_mapping is not None
+        revision_id = first_mapping.recipe_revision_id
+    mappings = ClusterMappingService(sessions)
+    second_mapping = mappings.preview(revision_id, second_nodes, {}, "admin")
+    second_mapping_id = mappings.materialize(second_mapping, actor="admin", now=NOW)
+    second_installation = installed_recipe(
+        service, second_mapping_id, build_id, second_nodes, request_id="e" * 35 + "5"
+    )
+    second = started_recipe(
+        sessions,
+        service,
+        second_installation.owner_id,
+        second_nodes,
+        request_id="e" * 35 + "6",
+        alias="second",
+    )
+    second_run_id = second.owner_id
+    expected_members = {first.owner_id: first_nodes, second_run_id: second_nodes}
     mark_current_exact_observations(sessions, first.owner_id, NOW)
     mark_current_exact_observations(sessions, second_run_id, NOW)
     publisher = ConcurrentPublisher()
@@ -5726,8 +5823,46 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
         assert len(stop_jobs) == 2
         for stop_job in stop_jobs:
             stop_payloads = _typed_stop_payloads(stop_job.payload)
-            run_id = stop_job.payload["owner_id"]
-            assert len(stop_payloads) == len(nodes)
+            stop_parent = RecipeStopParent.model_validate_json(
+                canonical_message(stop_job.payload), strict=True
+            )
+            run_id = stop_parent.owner_id
+            assert len(stop_payloads) == len(expected_members[run_id])
+            assert tuple(stop_job.targets) == expected_members[run_id]
+            members = tuple(
+                session.scalars(
+                    select(RunNode)
+                    .where(RunNode.run_id == run_id)
+                    .order_by(RunNode.rank)
+                )
+            )
+            assert [(row.node_id, row.rank, row.role) for row in members] == [
+                (expected_members[run_id][0], 0, "entrypoint"),
+                (expected_members[run_id][1], 1, "worker"),
+            ]
+            assert {
+                row.workload_intent_ordinal
+                for row in session.scalars(
+                    select(AgentNode).where(
+                        AgentNode.node_id.in_(expected_members[run_id])
+                    )
+                )
+            } == {stop_job.payload["workload_intent_ordinal"]}
+            retained_run = _required(session.get(RecipeRun, run_id))
+            assert sorted((stop.rank, stop.role) for stop in stop_payloads) == [
+                (0, "entrypoint"),
+                (1, "worker"),
+            ]
+            assert {
+                (stop.installation_id, stop.run_generation, stop.plan_digest)
+                for stop in stop_payloads
+            } == {
+                (
+                    retained_run.installation_id,
+                    retained_run.run_generation,
+                    retained_run.plan_digest,
+                )
+            }
             assert {stop.run_id for stop in stop_payloads} == {run_id}
             assert {stop.target_runtime_id for stop in stop_payloads} == {run_id}
             assert all(stop.cancel_pending_start for stop in stop_payloads)

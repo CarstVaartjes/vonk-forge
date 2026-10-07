@@ -322,12 +322,6 @@
     },
     {
       "path": "control/tests/test_artifact_job_lifecycle.py",
-      "function": "test_a_legacy_failed_lease_expiry_no_longer_blocks_the_runs_stop",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_artifact_job_lifecycle.py",
       "function": "test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled",
       "kind": "operator-wait-assertion",
       "count": 1
@@ -521,12 +515,6 @@
     {
       "path": "control/tests/test_build_consumer_ownership.py",
       "function": "test_build_cancellation_preserves_each_accepted_availability_consumer",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_build_consumer_ownership.py",
-      "function": "test_new_availability_consumer_committing_before_cancellation_keeps_shared_build",
       "kind": "ending-without-fresh-request",
       "count": 1
     },
@@ -1894,12 +1882,6 @@
     },
     {
       "path": "control/tests/test_recipe_operations.py",
-      "function": "test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
       "function": "test_postgres_failed_start_cleanup_stop_grant_uses_the_queued_run_plan",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -1954,12 +1936,6 @@
     },
     {
       "path": "control/tests/test_recipe_operations.py",
-      "function": "test_stop_commit_failure_after_publication_is_safe_side",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
       "function": "test_stop_preview_blocks_nonexact_reservation_authority",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -1972,12 +1948,6 @@
     },
     {
       "path": "control/tests/test_recipe_operations.py",
-      "function": "test_stop_replans_when_the_submitted_digest_is_old",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
       "function": "test_stop_replay_is_bound_to_selected_run_kind_and_action_digest",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -1985,12 +1955,6 @@
     {
       "path": "control/tests/test_recipe_operations.py",
       "function": "test_stop_state_and_queue_creation_roll_back_together",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
-      "function": "test_stop_withdrawal_failure_rolls_back_job_and_run_state",
       "kind": "ending-without-fresh-request",
       "count": 1
     },
@@ -2203,18 +2167,6 @@
       "function": "test_a_stop_killed_while_withdrawing_resumes_from_the_claim",
       "kind": "ending-without-fresh-request",
       "count": 1
-    },
-    {
-      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
-      "function": "test_a_stop_never_retried_gets_its_route_back_without_a_client",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
-      "function": "test_a_stop_never_retried_gets_its_route_back_without_a_client",
-      "kind": "observation-withdrawal-assertion",
-      "count": 4
     },
     {
       "path": "control/tests/test_route_withdrawal_before_dispatch.py",
@@ -2661,22 +2613,6 @@
       "justification": "Tests retaining live authorized adopted work across aggregate failure and releasing only replaced exact effects; the final lost-child observation intentionally preserves adopted authority."
     },
     {
-      "path": "control/tests/test_profile_jobrun_host_grant.py",
-      "function": "test_selected_profile_stop_issues_signed_exact_job_target_grant",
-      "kind": "ending-without-fresh-request",
-      "count": 1,
-      "reason": "security-edge",
-      "justification": "Helper issues exact Stop grant and verifies signature; wrong runtime target refuses. Does not execute Stop or consume result."
-    },
-    {
-      "path": "control/tests/test_profile_jobrun_host_wire_bridge.py",
-      "function": "test_selected_profile_job_target_grant_is_accepted_by_rust_helper",
-      "kind": "ending-without-fresh-request",
-      "count": 1,
-      "reason": "security-edge",
-      "justification": "Same real signed grant parsed by actual Rust helper and echoed byteexact; no Stop execution or terminal capacity claim."
-    },
-    {
       "path": "control/tests/test_profile_stop_effect_adoption_postgres.py",
       "function": "test_postgres_stop_adoption_loses_authority_on_exact_refusal",
       "kind": "ending-without-fresh-request",
@@ -2731,6 +2667,126 @@
       "count": 1,
       "reason": "security-edge",
       "justification": "Invalid pip locked-command provenance/hashes/cache/venv returns64 before any realchild; fetcher state unchanged. No resource/workload end."
+    },
+    {
+      "path": "control/tests/test_profile_jobrun_host_grant.py",
+      "function": "test_selected_profile_stop_issues_signed_exact_job_target_grant",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests the actual signed grant for an issued selected-profile exact JobRun target and refusal of a forged target. The Stop remains issued with uncertain work retained; this authority test does not acknowledge the effect, end the lifecycle or claim released capacity."
+    },
+    {
+      "path": "control/tests/test_profile_jobrun_host_wire_bridge.py",
+      "function": "test_selected_profile_job_target_grant_is_accepted_by_rust_helper",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests the native Rust verifier accepting the unchanged signed grant produced for an issued selected-profile exact JobRun Stop. Verification authorizes only that target; it does not execute or acknowledge Stop, end the lifecycle or claim released capacity."
+    },
+    {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Tests that a stored typed lease-expiry failure with no explicit active-scope flag remains unknown and issues only a running exact-target Stop, retaining physical authority until acknowledgement. The fixture deliberately supplies failed stored rows and never proves absence or release; the connected real-producer exact-Stop-to-fresh-admission test separately proves recovery."
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_admission_commit_failure_prevents_publication",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Failure before exact native Stop dispatch must preserve the original runtime claims and reviewed owner, or roll back admission before publication. Neither test claims a terminal Stop or capacity release; hosted service Stop recovery separately proves exact receipt and fresh native Start."
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_withdrawal_failure_retains_accepted_job_and_run_state",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Failure before exact native Stop dispatch must preserve the original runtime claims and reviewed owner, or roll back admission before publication. Neither test claims a terminal Stop or capacity release; hosted service Stop recovery separately proves exact receipt and fresh native Start."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_unreviewed_service_stop_has_no_publication_or_admission_effect",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "Reject stale consent or preserve the exact pending native Stop and capacity claims; this safety guard claims no terminal effect or released capacity. The connected adopted profile case separately records a fenced successful receipt and completes a fresh native Start."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_accepted_service_stop_resumes_same_review_after_withdrawal_restart",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2,
+      "reason": "security-edge",
+      "justification": "The withdrawal is an explicitly reviewed Stop effect, not a reaction to observation uncertainty. Fresh exact observations and expired grace must not republish that run while its same accepted destructive owner awaits native dispatch."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_accepted_service_stop_resumes_same_review_after_withdrawal_restart",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Reject stale consent or preserve the exact pending native Stop and capacity claims; this safety guard claims no terminal effect or released capacity. The connected adopted profile case separately records a fenced successful receipt and completes a fresh native Start."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_pending_service_stop_cannot_resume_under_changed_authority",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Reject stale consent or preserve the exact pending native Stop and capacity claims; this safety guard claims no terminal effect or released capacity. The connected adopted profile case separately records a fenced successful receipt and completes a fresh native Start."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_profile_adopts_exact_accepted_stop_before_native_dispatch",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "The withdrawal is an explicitly reviewed Stop effect, not a reaction to observation uncertainty. Fresh exact observations and expired grace must not republish that run while its same accepted destructive owner awaits native dispatch."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_lost_service_start_history_exact_stop_restart_releases_fresh_run",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Unknown observations and deleted Start history preserve the healthy route and active claims until an explicitly reviewed exact Stop is accepted. Withdrawal is that accepted command effect; restart then records a fenced Stop receipt before releasing claims and completing a real fresh Start."
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_refuses_changed_review_before_withdrawal_or_admission",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "The caller supplies an unreviewed digest. The test proves refusal before withdrawal, a new Job, or any node ordinal change; the original run remains owned. No Stop effect occurs and no released capacity or finished lifecycle is claimed."
+    },
+    {
+      "path": "control/tests/test_profile_memory_claims.py",
+      "function": "test_replacement_stop_retains_current_root_after_withdrawal_response_loss",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Checks the immutable accepted Root request, linked child, current phase and retry generation across withdrawal-response loss, and refusal of forged identity fields. The positive branch resumes only to issued native Stop phases; it consumes no Stop acknowledgement and claims no physical completion, released memory or admissible fresh run."
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_accepted_stop_continues_without_client_and_never_republishes",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "dependency-unavailable",
+      "justification": "A lost withdrawal acknowledgement leaves the exact accepted Stop pending. With the client gone, the worker resumes the same root and issues its native phases; the run remains stopping, awaiting the actual agent receipt. This publication/dispatch boundary neither finishes physical Stop nor claims free capacity."
+    },
+    {
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "function": "test_accepted_stop_continues_without_client_and_never_republishes",
+      "kind": "observation-withdrawal-assertion",
+      "count": 5,
+      "reason": "security-edge",
+      "justification": "Withdrawal is bound to the explicit accepted exact Stop and retained root before the simulated publication process dies. The five assertions preserve that authorized withdrawal through grace expiry and same-owner worker dispatch; they do not withdraw a healthy route merely because an observation is missing or grant a new destructive scope."
     }
   ]
 }

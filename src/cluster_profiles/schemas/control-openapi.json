@@ -13069,6 +13069,132 @@
         "title": "JobRunPhaseOperation",
         "type": "object"
       },
+      "JobRunStopScope": {
+        "description": "The exact issued transient targets within an accepted run Stop.",
+        "properties": {
+          "installation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "missing_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 31,
+            "title": "Missing Node Ids",
+            "type": "array"
+          },
+          "plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "reachable_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Reachable Node Ids",
+            "type": "array"
+          },
+          "recipe_revision_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "run_generation": {
+            "maximum": 9223372036854775807,
+            "minimum": 1,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Run Node Ids",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "stop_plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Stop Plan Digest",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileJobRunStopTarget"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "unissued_artifact_job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unissued Artifact Job Ids",
+            "type": "array"
+          },
+          "workload_intent_ordinal": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Workload Intent Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "run_id",
+          "installation_id",
+          "recipe_revision_id",
+          "mapping_id",
+          "mapping_generation",
+          "run_generation",
+          "plan_digest",
+          "workload_intent_ordinal",
+          "run_node_ids",
+          "reachable_node_ids",
+          "stop_plan_digest"
+        ],
+        "title": "JobRunStopScope",
+        "type": "object"
+      },
       "LibraryAssessmentCode": {
         "description": "Why a library entry is not assessed runnable on the current fleet.",
         "enum": [
@@ -19316,7 +19442,7 @@
         "type": "object"
       },
       "ProfileJobRunStopAuthorization": {
-        "description": "Current accepted profile Stop and exact older one-shot effect.",
+        "description": "Current accepted profile Stop owns this immutable JobRun scope.",
         "properties": {
           "installation_id": {
             "maxLength": 36,
@@ -19459,11 +19585,6 @@
         },
         "required": [
           "schema_version",
-          "profile_application_id",
-          "profile_operation_id",
-          "profile_digest",
-          "profile_plan_digest",
-          "profile_step",
           "run_id",
           "installation_id",
           "recipe_revision_id",
@@ -19474,7 +19595,12 @@
           "workload_intent_ordinal",
           "run_node_ids",
           "reachable_node_ids",
-          "stop_plan_digest"
+          "stop_plan_digest",
+          "profile_application_id",
+          "profile_operation_id",
+          "profile_digest",
+          "profile_plan_digest",
+          "profile_step"
         ],
         "title": "ProfileJobRunStopAuthorization",
         "type": "object"
@@ -19715,6 +19841,156 @@
         ],
         "title": "ProfileReasonCode",
         "type": "string"
+      },
+      "ProfileStopOwnerBinding": {
+        "description": "The canonical accepted profile operation that owns this exact Stop.",
+        "properties": {
+          "installation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "missing_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 31,
+            "title": "Missing Node Ids",
+            "type": "array"
+          },
+          "plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "profile_application_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Profile Application Id",
+            "type": "string"
+          },
+          "profile_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Profile Digest",
+            "type": "string"
+          },
+          "profile_operation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Profile Operation Id",
+            "type": "string"
+          },
+          "profile_plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Profile Plan Digest",
+            "type": "string"
+          },
+          "profile_step": {
+            "minimum": 0,
+            "title": "Profile Step",
+            "type": "integer"
+          },
+          "reachable_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Reachable Node Ids",
+            "type": "array"
+          },
+          "recipe_revision_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "run_generation": {
+            "maximum": 9223372036854775807,
+            "minimum": 1,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Run Node Ids",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "stop_plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Stop Plan Digest",
+            "type": "string"
+          },
+          "workload_intent_ordinal": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Workload Intent Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "run_id",
+          "installation_id",
+          "recipe_revision_id",
+          "mapping_id",
+          "mapping_generation",
+          "run_generation",
+          "plan_digest",
+          "workload_intent_ordinal",
+          "run_node_ids",
+          "reachable_node_ids",
+          "stop_plan_digest",
+          "profile_application_id",
+          "profile_operation_id",
+          "profile_digest",
+          "profile_plan_digest",
+          "profile_step"
+        ],
+        "title": "ProfileStopOwnerBinding",
+        "type": "object"
       },
       "ProgressPhase": {
         "description": "What an operation is doing, as the measured progress names it.",
@@ -26120,6 +26396,17 @@
             "default": null,
             "title": "Execution Mode"
           },
+          "job_run_stop_authorization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRunStopScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "owner_id": {
             "maxLength": 128,
             "minLength": 1,
@@ -26185,6 +26472,17 @@
             "const": 1,
             "title": "Schema Version",
             "type": "integer"
+          },
+          "service_stop_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceRunStopReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "workload_intent_ordinal": {
             "anyOf": [
@@ -33125,6 +33423,143 @@
         ],
         "title": "SecurityRefusalReason",
         "type": "string"
+      },
+      "ServiceRunStopReview": {
+        "additionalProperties": false,
+        "description": "The exact service Stop accepted before its route withdrawal claim.",
+        "properties": {
+          "exact_payloads": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/RecipeStopPayload"
+                },
+                "maxProperties": 32,
+                "minProperties": 1,
+                "propertyNames": {
+                  "maxLength": 128,
+                  "minLength": 1
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Exact Payloads"
+          },
+          "missing_node_ids": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 31,
+            "title": "Missing Node Ids",
+            "type": "array"
+          },
+          "profile_application_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile Application Id"
+          },
+          "profile_stop_owner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProfileStopOwnerBinding"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "profile_target_node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile Target Node Ids"
+          },
+          "route_state": {
+            "$ref": "#/components/schemas/RouteState"
+          },
+          "run_generation": {
+            "maximum": 9223372036854775807,
+            "minimum": 1,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "stage": {
+            "enum": [
+              "accepted",
+              "withdrawal-claimed",
+              "dispatched"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "stop_order": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stop Order"
+          },
+          "target_node_ids": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Target Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "stage",
+          "route_state",
+          "run_generation",
+          "target_node_ids",
+          "missing_node_ids"
+        ],
+        "title": "ServiceRunStopReview",
+        "type": "object"
       },
       "SourceBundleCode": {
         "description": "Recipe source bundle validation problems.",

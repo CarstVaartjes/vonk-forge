@@ -342,6 +342,7 @@ from .job_resume_request import JobResumeRequest
 from .job_resume_request_disposition import JobResumeRequestDisposition
 from .job_resume_response import JobResumeResponse
 from .job_run_phase_operation import JobRunPhaseOperation
+from .job_run_stop_scope import JobRunStopScope
 from .library_assessment_code import LibraryAssessmentCode
 from .library_facet_values import LibraryFacetValues
 from .library_filter_values import LibraryFilterValues
@@ -492,6 +493,7 @@ from .profile_job_run_stop_phase_item import ProfileJobRunStopPhaseItem
 from .profile_job_run_stop_target import ProfileJobRunStopTarget
 from .profile_partial_stop import ProfilePartialStop
 from .profile_reason_code import ProfileReasonCode
+from .profile_stop_owner_binding import ProfileStopOwnerBinding
 from .progress_phase import ProgressPhase
 from .projection_code import ProjectionCode
 from .projection_reason import ProjectionReason
@@ -811,6 +813,9 @@ from .runtime_telemetry_projection import RuntimeTelemetryProjection
 from .saved_profile_projection_issue import SavedProfileProjectionIssue
 from .security_refusal import SecurityRefusal
 from .security_refusal_reason import SecurityRefusalReason
+from .service_run_stop_review import ServiceRunStopReview
+from .service_run_stop_review_exact_payloads_type_0 import ServiceRunStopReviewExactPayloadsType0
+from .service_run_stop_review_stage import ServiceRunStopReviewStage
 from .source_bundle_code import SourceBundleCode
 from .source_bundle_file import SourceBundleFile
 from .source_bundle_file_mode import SourceBundleFileMode
@@ -1205,6 +1210,7 @@ __all__ = (
     "JobResumeRequestDisposition",
     "JobResumeResponse",
     "JobRunPhaseOperation",
+    "JobRunStopScope",
     "LibraryAssessmentCode",
     "LibraryFacetValues",
     "LibraryFilterValues",
@@ -1355,6 +1361,7 @@ __all__ = (
     "ProfileJobRunStopTarget",
     "ProfilePartialStop",
     "ProfileReasonCode",
+    "ProfileStopOwnerBinding",
     "ProgressPhase",
     "ProjectionCode",
     "ProjectionReason",
@@ -1674,6 +1681,9 @@ __all__ = (
     "SavedProfileProjectionIssue",
     "SecurityRefusal",
     "SecurityRefusalReason",
+    "ServiceRunStopReview",
+    "ServiceRunStopReviewExactPayloadsType0",
+    "ServiceRunStopReviewStage",
     "SourceBundleCode",
     "SourceBundleFile",
     "SourceBundleFileMode",

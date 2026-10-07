@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
-from vonk_control.models import AgentPresence, Job, RecipeRun, RunNode
+from vonk_control.models import AgentOperation, AgentPresence, Job, RecipeRun, RunNode
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
@@ -153,8 +153,20 @@ def _stop_waits_without_a_transaction(tmp_path: Path, engine) -> None:
             # The supervisor has not acknowledged the withdrawal yet: nothing
             # may hold the owner lock meanwhile, and the Stop is not dispatched.
             _owner_lock_is_free(routes)
-            assert _stop_jobs(sessions) == []
+            accepted = _stop_jobs(sessions)
+            assert len(accepted) == 1 and accepted[0].state == "running"
+            assert accepted[0].request_id == "c" * 36
+            assert accepted[0].payload["plan_digest"] == plan.plan_digest
+            assert accepted[0].payload.get("phases") is None
             with sessions() as session:
+                assert (
+                    session.scalar(
+                        select(AgentOperation.id).where(
+                            AgentOperation.parent_job_id == accepted[0].id
+                        )
+                    )
+                    is None
+                )
                 assert (
                     _required(session.get(RecipeRun, run.owner_id)).state == "running"
                 )
@@ -162,6 +174,7 @@ def _stop_waits_without_a_transaction(tmp_path: Path, engine) -> None:
             gate.release.set()
         stopped = stopping.result(timeout=60)
 
+    assert stopped.id == accepted[0].id
     assert stopped.state in {"queued", "running"}
     assert _aliases(root) == set()
     with sessions() as session:
@@ -230,18 +243,21 @@ def test_a_stop_killed_while_withdrawing_resumes_from_the_claim(
             request_id="e" * 36,
         )
 
-    # The effect happened, the completion and the dispatch did not.
-    assert _stop_jobs(sessions) == []
+    # Consent survived; the completion and native dispatch did not.
+    accepted = _stop_jobs(sessions)
+    assert len(accepted) == 1 and accepted[0].state == "running"
+    assert accepted[0].payload.get("phases") is None
     with sessions() as session:
         assert _required(session.get(RecipeRun, run.owner_id)).state == "running"
 
     gate.die = False
-    service.stop(
+    resumed = service.stop(
         run.owner_id,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id="e" * 36,
     )
+    assert resumed.id == accepted[0].id
     assert _aliases(root) == set()
     assert len(_stop_jobs(sessions)) == 1
 
@@ -331,7 +347,7 @@ def test_recovery_killed_while_withdrawing_resumes_from_the_claim(
     assert _aliases(root) == set()
 
 
-def test_a_stop_never_retried_gets_its_route_back_without_a_client(
+def test_accepted_stop_continues_without_client_and_never_republishes(
     tmp_path: Path,
 ) -> None:
     sessions, service, routes, _queue, run, gate, root, _nodes = _world(tmp_path)
@@ -368,13 +384,26 @@ def test_a_stop_never_retried_gets_its_route_back_without_a_client(
             select(RunNode).where(RunNode.run_id == run.owner_id)
         ):
             node.updated_at = later
-    worker = RecipeOperationWorker(sessions, routes, clock=lambda: later)
+    accepted = _stop_jobs(sessions)
+    assert len(accepted) == 1 and accepted[0].payload.get("phases") is None
+    routes.maintain()
+    assert _aliases(root) == set()
+    gate.die = False
+    service._clock = lambda: later
+    worker = RecipeOperationWorker(
+        sessions,
+        routes,
+        clock=lambda: later,
+        stop_admission_cleanup=service.reconcile_pending_service_stops,
+    )
     for _ in range(3):
         worker.tick()
 
-    assert _aliases(root) == {"qwen"}
+    assert _aliases(root) == set()
     with sessions() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
-        assert (stored.state, stored.route_state) == ("running", "published")
+        assert (stored.state, stored.route_state) == ("stopping", "withdrawn")
         assert stored.route_error is None
-    assert _stop_jobs(sessions) == []
+    continued = _stop_jobs(sessions)
+    assert len(continued) == 1 and continued[0].id == accepted[0].id
+    assert continued[0].payload.get("phases")

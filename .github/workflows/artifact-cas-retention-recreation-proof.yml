@@ -1,0 +1,75 @@
+name: Artifact CAS retention recreation proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/artifact-cas-retention-recreation-proof.yml
+      - control/tests/test_artifact_cas_retention_recreation.py
+      - control/src/vonk_control/artifact_jobs.py
+      - control/src/vonk_control/artifact_blob_store.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: artifact-cas-recreation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  recreation:
+    name: Reference-safe CAS collection through restarted owner and fresh claim
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+      PYTHONPATH: src:control/src:agent_protocol/src
+    steps:
+      - name: Check out exact current producer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Provide canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare locked Python dependencies
+        uses: ./.github/actions/python-env
+      - name: Build canonical recipe library index
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Pull pinned disposable PostgreSQL
+        run: scripts/pull-test-images postgres
+      - name: Demonstrate guard rejects retention without physical CAS deletion
+        run: |
+          owner=control/src/vonk_control/artifact_jobs.py
+          backup=$(mktemp)
+          cp "$owner" "$backup"
+          trap 'cp "$backup" "$owner"; rm -f "$backup"' EXIT
+          python - <<'PY'
+          from pathlib import Path
+          owner = Path("control/src/vonk_control/artifact_jobs.py")
+          original = owner.read_text()
+          needle = "            reclaimable_sha256=reclaimable,"
+          assert original.count(needle) == 1, "counterexample owner seam changed"
+          owner.write_text(original.replace(needle, "            reclaimable_sha256=set(),"))
+          PY
+          if uv run --project control --frozen pytest -q -n 0 \
+            control/tests/test_artifact_cas_retention_recreation.py --tb=short \
+            > /tmp/cas-no-delete-counterexample.log 2>&1; then
+            cat /tmp/cas-no-delete-counterexample.log
+            echo "CAS no-delete counterexample unexpectedly passed"
+            exit 1
+          fi
+          cat /tmp/cas-no-delete-counterexample.log
+          python - <<'PY'
+          from pathlib import Path
+          log = Path("/tmp/cas-no-delete-counterexample.log").read_text()
+          assert "AssertionError: expired exclusive CAS bytes survived" in log, log
+          PY
+          cp "$backup" "$owner"
+          cmp "$backup" "$owner"
+          git diff --exit-code -- "$owner"
+      - name: Prove reference-safe deletion and identical input recreation
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_artifact_cas_retention_recreation.py --tb=short

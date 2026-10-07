@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import GatewayRouteState, RoutePublicationState, RunState
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.enrollment import NodeId
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_forge_contracts import read_recipe
 
@@ -940,14 +941,24 @@ class RecipeRouteService:
         return self._recovery_publication(recovery_job)
 
     def withdraw_run(
-        self, run_id: str, *, pending: WithdrawalFollowUp | None = None
+        self,
+        run_id: str,
+        *,
+        pending: WithdrawalFollowUp | None = None,
+        before_withdrawal: Callable[[Session], None] | None = None,
     ) -> LiteLlmGeneration | None:
         """Withdraw one run's route; the caller returns once a bundle without it is live."""
 
-        return self.withdraw_runs(frozenset({run_id}), pending=pending)
+        return self.withdraw_runs(
+            frozenset({run_id}), pending=pending, before_withdrawal=before_withdrawal
+        )
 
     def withdraw_runs(
-        self, run_ids: Iterable[str], *, pending: WithdrawalFollowUp | None = None
+        self,
+        run_ids: Iterable[str],
+        *,
+        pending: WithdrawalFollowUp | None = None,
+        before_withdrawal: Callable[[Session], None] | None = None,
     ) -> LiteLlmGeneration | None:
         """Withdraw these runs' routes with no transaction held by the caller.
 
@@ -973,7 +984,7 @@ class RecipeRouteService:
         run_ids = frozenset(run_ids)
         for attempt in range(_WITHDRAWAL_ATTEMPTS - 1):
             try:
-                return self._withdraw_runs_once(run_ids, reason)
+                return self._withdraw_runs_once(run_ids, reason, before_withdrawal)
             except RecipeRouteSuperseded:
                 # A newer publication replaced this claim. It was claimed after
                 # our intent committed, so it excludes these runs too: do not
@@ -982,7 +993,7 @@ class RecipeRouteService:
                 # while the bundle still lists them.
                 if self._withdrawn_after_backoff(run_ids, attempt):
                     return None
-        return self._withdraw_runs_once(run_ids, reason)
+        return self._withdraw_runs_once(run_ids, reason, before_withdrawal)
 
     def _withdrawn_after_backoff(self, run_ids: frozenset[str], attempt: int) -> bool:
         time.sleep(random.uniform(0.0, _WITHDRAWAL_BACKOFF_SECONDS) * (attempt + 1))
@@ -990,7 +1001,10 @@ class RecipeRouteService:
             return self.withdrawal_complete_in_session(session, run_ids)
 
     def _withdraw_runs_once(
-        self, run_ids: frozenset[str], reason: str | None = None
+        self,
+        run_ids: frozenset[str],
+        reason: str | None = None,
+        before_withdrawal: Callable[[Session], None] | None = None,
     ) -> LiteLlmGeneration:
         with self.publication_transaction() as session:
             for run_id in sorted(run_ids):
@@ -1003,9 +1017,12 @@ class RecipeRouteService:
                     if run is not None and run.state == RunState.RUNNING and reason:
                         run.route_error = reason[:512]
 
+            withdrawal = self.prepare_withdrawal_in_session(session, run_ids)
+            if before_withdrawal is not None:
+                before_withdrawal(session)
             publication = self._withdrawal_publication(
                 session,
-                self.prepare_withdrawal_in_session(session, run_ids),
+                withdrawal,
                 after=record_reason if reason else None,
             )
         return self._execute(publication)
@@ -1198,6 +1215,20 @@ class RecipeRouteService:
             )
             .with_for_update(of=RecipeRun)
         ):
+            accepted_stop = session.scalar(
+                select(Job.id)
+                .where(
+                    Job.kind == "recipe.stop",
+                    Job.state == LifecycleState.RUNNING.value,
+                    Job.payload["owner_id"].as_string() == run.id,
+                    Job.payload["service_stop_review"]["stage"]
+                    .as_string()
+                    .in_(["accepted", "withdrawal-claimed"]),
+                )
+                .limit(1)
+            )
+            if accepted_stop is not None:
+                continue
             if _aware(run.updated_at) > now - STOP_DISPATCH_GRACE:
                 continue
             run.route_state = RunRouteState.PENDING

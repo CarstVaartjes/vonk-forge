@@ -8,7 +8,7 @@ use the production services and their stored contracts.
 from __future__ import annotations
 
 import hashlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -24,6 +24,10 @@ from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     _persisted_profile_plan,
     _persisted_profile_progress,
+)
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
 )
 from vonk_control.models import (
     AgentNode,
@@ -68,6 +72,18 @@ def _claims(sessions, node_id):
 
 @pytest.fixture
 def pending_stop(postgres_engine, tmp_path, monkeypatch):
+    return _pending_stop(postgres_engine, tmp_path, monkeypatch)
+
+
+def _pending_stop(
+    postgres_engine,
+    tmp_path,
+    monkeypatch,
+    *,
+    lifecycle_before_dispatch=None,
+    issue_grant=True,
+    initial_now: datetime | None = None,
+):
     sessions, fixture_lifecycle, _queue, mapping, build, nodes = setup_services(
         tmp_path, engine=postgres_engine
     )
@@ -81,7 +97,7 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
         nodes,
         request_id=_uuid(18701),
     )
-    clock = [NOW]
+    clock = [NOW if initial_now is None else initial_now]
     jobs = AgentJobService(sessions, clock=lambda: clock[0])
     lifecycle = RecipeOperationService(
         sessions,
@@ -90,6 +106,8 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
         agent_jobs=jobs,
         clock=lambda: clock[0],
     )
+    if lifecycle_before_dispatch is not None:
+        lifecycle_before_dispatch(sessions, lifecycle, clock, run.owner_id)
     jobs.set_result_consumer(lifecycle.consume_agent_result)
     with sessions.begin() as session:
         session.add(
@@ -98,7 +116,7 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
                 state="active",
                 protocol_version=2,
                 architecture="linux-arm64",
-                last_seen_at=NOW,
+                last_seen_at=clock[0],
             )
         )
         revision = session.scalar(
@@ -108,6 +126,26 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
         )
         assert revision is not None
         selector = f"{revision.publisher}/{revision.slug}"
+    # The healthy lane has real Controller inventory facts for admission.
+    # Creating only AgentNode is not evidence of available memory or disk.
+    # Its physical load remains simulated; the offline Stop lane is not given
+    # fresh inventory or an absence report to release its retained claims.
+    InventoryRepository(sessions, clock=lambda: clock[0]).record(
+        InventorySnapshotInput(
+            _node_id(2),
+            clock[0],
+            10_000,
+            8_000,
+            10_000,
+            8_000,
+            10_000,
+            8_000,
+            1,
+            False,
+            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
+            memory_pool="shared",
+        )
+    )
     profiles = FleetProfileService(
         sessions,
         clock=lambda: clock[0],
@@ -137,7 +175,9 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
     original = profiles.apply(
         original_profile.id, request_key=_uuid(18702), actor="admin"
     )
-    coordinator = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    coordinator = _service(sessions, clock[0], lifecycle, RecordingArtifactExecutor())
+    if initial_now is not None:
+        coordinator._clock = lambda: clock[0]
     adapter = RunSwitchFleetProfileAdapter(sessions, coordinator)
     native_start = adapter._start_child
     healthy_child = _running_child(_uuid(18703), _node_id(2))
@@ -165,22 +205,13 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
             else native_observe(identity)
         ),
     )
-    with sessions() as session:
-        row = session.get(FleetProfileApplication, original.id)
-        assert row is not None
-        intended = _persisted_profile_progress(row).intended_profile
-        assert intended is not None
-        assignments = tuple(intended.assignments)
-    adapter.start(
-        application_id=original.id,
-        assignments=assignments,
-        scope_node_ids=(nodes[0], _node_id(2)),
-        actor="admin",
-        request_id=_uuid(18704),
-    )
+    # Advance the accepted saved-profile lifecycle through its production
+    # worker. Calling adapter.start directly leaves the application queued,
+    # which correctly supplies no current authority for a destructive Stop.
+    profiles._switch_adapter = adapter
     for _ in range(8):
+        profiles.tick()
         coordinator.tick()
-        adapter.advance(original.id)
     stored = _stored(sessions, original.id)
     stop_index = next(i for i, item in enumerate(stored.queue) if item.kind == "stop")
     assert stored.queue[stop_index].id == run.owner_id
@@ -196,9 +227,18 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
                 select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
             )
         )
-        assert len(native) == 1
-        assert native[0].payload["run_id"] == run.owner_id
-        native_id = native[0].id
+        if issue_grant:
+            assert len(native) == 1, {
+                job.id: (job.state, job.status_reason, job.result)
+                for job in session.scalars(
+                    select(Job).where(Job.kind.in_(["recipe.stop.v2", "recipe.stop"]))
+                )
+            }
+            assert native[0].payload["run_id"] == run.owner_id
+            native_id = native[0].id
+        else:
+            assert not native
+            native_id = None
         original_row = session.get(FleetProfileApplication, original.id)
         assert original_row is not None
         original_plan_digest = original_row.plan_digest
@@ -206,20 +246,22 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
             original_row
         ).workload_intent_ordinal
     assert len(healthy_dispatches) == 1
-    claim, stop_plan, _grant = _issue_exact_stop_grant(
-        sessions,
-        node_id=nodes[0],
-        certificate_serial="serial-0",
-    )
-    assert stop_plan.run_id == run.owner_id
-    assert stop_plan.target_runtime_id == run.owner_id
+    claim = None
+    if issue_grant:
+        claim, stop_plan, _grant = _issue_exact_stop_grant(
+            sessions,
+            node_id=nodes[0],
+            certificate_serial="serial-0",
+        )
+        assert stop_plan.run_id == run.owner_id
+        assert stop_plan.target_runtime_id == run.owner_id
 
-    assert claim is not None and claim.operation.value == "recipe.stop"
-    assert fenced_operation(sessions, claim).id == native_id
+        assert claim is not None and claim.operation.value == "recipe.stop"
+        assert fenced_operation(sessions, claim).id == native_id
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.last_seen_at = NOW - timedelta(hours=1)
+        node.last_seen_at = clock[0] - timedelta(hours=1)
     return (
         sessions,
         profiles,

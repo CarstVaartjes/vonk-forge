@@ -10,6 +10,7 @@ from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
     AgentNode,
     FleetProfileApplication,
+    Job,
     NodeInventorySnapshot,
     RecipeRun,
     ResourceReservation,
@@ -337,3 +338,150 @@ def test_stale_or_unrelated_work_cannot_supply_replacement_overlap(
         assert totals.unmaterialized_bytes_by_kind == {
             "unified-memory": demand * (2 if change == "owner" else 1)
         }
+
+
+@pytest.mark.parametrize(
+    "changed_field",
+    [None, "workload_intent_ordinal", "phase", "request_id", "child_operation_id"],
+)
+def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
+    tmp_path, postgres_engine, changed_field: str | None
+):
+    from vonk_control.job_documents import RecipeStopParent
+    from vonk_control.recipe_operations import RecipeStopAuthorityRefused
+    from vonk_control.run_switch_contract import RunSwitchOperationResult
+    from vonk_control.run_switch_operations import (
+        _phase_request_key,
+        _stop_child_request_key,
+    )
+
+    sessions, profiles, planner, profile, api, headers, nodes, installation = (
+        _ready_profile(tmp_path, postgres_engine)
+    )
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    old = started_recipe(
+        sessions,
+        lifecycle,
+        installation,
+        nodes,
+        request_id=str(uuid4()),
+        alias="previous",
+    )
+    application_id, _ = _load(profile, api, headers)
+
+    def unavailable_withdrawal(_run_id: str) -> None:
+        raise OSError("lost route withdrawal response")
+
+    lifecycle._route_withdrawer = unavailable_withdrawal
+    stop_id = _drive_to_job(profiles, planner, sessions, "recipe.stop")
+    with sessions() as session:
+        stop = session.get(Job, stop_id)
+        assert stop is not None and stop.state == "running"
+        document = RecipeStopParent.model_validate_json(
+            canonical_message(stop.payload), strict=True
+        )
+        review = document.service_stop_review
+        assert review is not None and review.profile_stop_owner is not None
+        owner = review.profile_stop_owner
+        assert owner.profile_application_id == application_id
+        assert owner.run_id == old.owner_id and owner.run_node_ids == list(nodes)
+        assert stop.payload.get("phases") is None
+        request_id = stop.request_id
+        ordinal = document.workload_intent_ordinal
+        assert ordinal is not None
+        root = session.get(Job, owner.profile_operation_id)
+        assert root is not None and root.kind == "recipe.run-switch.v2"
+        current = RunSwitchOperationResult.model_validate_json(
+            canonical_message(root.result), strict=True
+        )
+        assert current.child_operation_id == stop_id
+        retry_generation = current.phase_retry_generation
+        claims_before = {
+            (row.id, row.state)
+            for row in session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == old.owner_id
+                )
+            )
+        }
+    if changed_field is not None:
+        with sessions.begin() as session:
+            root = session.get(Job, owner.profile_operation_id)
+            assert root is not None and root.result is not None
+            damaged = dict(root.result)
+            if changed_field == "request_id":
+                root.request_id = str(uuid4())
+                damaged["child_operation_id"] = None
+                root.result = damaged
+                # A forged caller follows the altered Root key exactly. Only
+                # the accepted profile queue binding can reject this request.
+                phase_key = (
+                    _phase_request_key(
+                        root.request_id,
+                        current.phase_index,
+                        current.item_index,
+                        current.phase_retry_generation,
+                    )
+                    if current.phase_retry_generation
+                    else root.request_id
+                )
+                request_id = _stop_child_request_key(
+                    phase_key, old.owner_id, application_id
+                )
+            else:
+                damaged[changed_field] = (
+                    ordinal + 1
+                    if changed_field == "workload_intent_ordinal"
+                    else str(uuid4())
+                    if changed_field == "child_operation_id"
+                    else "start"
+                )
+                root.result = damaged
+        with pytest.raises(RecipeStopAuthorityRefused):
+            lifecycle.stop(
+                old.owner_id,
+                plan_digest=document.plan_digest,
+                actor="admin",
+                request_id=request_id,
+                workload_intent_ordinal=ordinal,
+                profile_application_id=application_id,
+            )
+        with sessions() as session:
+            if changed_field == "request_id":
+                assert (
+                    session.scalar(select(Job.id).where(Job.request_id == request_id))
+                    is None
+                )
+            assert {
+                (row.id, row.state)
+                for row in session.scalars(
+                    select(ResourceReservation).where(
+                        ResourceReservation.owner_id == old.owner_id
+                    )
+                )
+            } == claims_before
+        return
+    lifecycle._route_withdrawer = lambda _run_id: None
+    resumed = lifecycle.stop(
+        old.owner_id,
+        plan_digest=document.plan_digest,
+        actor="admin",
+        request_id=request_id,
+        workload_intent_ordinal=ordinal,
+        profile_application_id=application_id,
+    )
+    assert resumed.id == stop_id
+    with sessions() as session:
+        stored = session.get(Job, stop_id)
+        assert stored is not None
+        assert stored.payload["workload_intent_ordinal"] == ordinal
+        assert stored.payload.get("phases")
+        root = session.get(Job, owner.profile_operation_id)
+        assert root is not None and root.result is not None
+        assert root.result["child_operation_id"] == stop_id
+        retained = RunSwitchOperationResult.model_validate_json(
+            canonical_message(root.result), strict=True
+        )
+        assert retained.child_operation_id == stop_id
+        assert retained.phase_retry_generation == retry_generation

@@ -116,6 +116,7 @@ class DatabaseWaitBudgets:
     pool_size: int = 5
     max_overflow: int = 10
     pool_timeout_seconds: float = 30.0
+    connect_timeout_seconds: int = 30
 
 
 DATABASE_WAIT_BUDGETS = DatabaseWaitBudgets()
