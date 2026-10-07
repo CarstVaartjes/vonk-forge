@@ -1,4 +1,4 @@
-import {LosslessNumber, parse, stringify} from "lossless-json";
+import {LosslessNumber, parse} from "lossless-json";
 
 /** The raw numeric token is retained until its canonical schema accepts it. */
 export type ExactInteger = LosslessNumber;
@@ -44,7 +44,7 @@ function signedCompare(a: string, b: string): number {
   return x.negative !== y.negative ? x.negative ? -1 : 1 : unsignedCompare(x.digits, y.digits) * (x.negative ? -1 : 1);
 }
 function decimal(value: string) {
-  const match = /^(-?)([0-9]+)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?$/.exec(value);
+  const match = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?$/.exec(value);
   if (!match) throw new Error("Invalid numeric token");
   const digits = (match[2] + (match[3] ?? "")).replace(/^0+/, "");
   return {negative: !!match[1] && digits !== "", digits, magnitude: addOffset(match[4] ?? "0", digits.length - (match[3]?.length ?? 0))};
@@ -166,16 +166,23 @@ export function materialize(value: unknown): unknown {
 /** Reject unsupported values instead of JSON.stringify silently deleting them. */
 export function stringifyContractJson(value: unknown): string {
   const active = new Set<object>();
-  function inspect(item: unknown): void {
-    if (item === null || typeof item === "string" || typeof item === "boolean" || typeof item === "bigint") return;
-    if (typeof item === "number") { if (!Number.isFinite(item)) throw new Error("Non-finite request number"); return; }
-    if (item instanceof LosslessNumber) { decimal(item.value); return; }
+  function encode(item: unknown): string {
+    if (item === null || typeof item === "string" || typeof item === "boolean") return JSON.stringify(item);
+    if (typeof item === "bigint") return item.toString();
+    if (typeof item === "number") {
+      if (!Number.isFinite(item)) throw new Error("Non-finite request number");
+      return Object.is(item, -0) ? "-0.0" : String(item);
+    }
+    if (item instanceof LosslessNumber) { decimal(item.value); return item.value; }
     if (typeof item !== "object") throw new Error("Unsupported JSON request value");
     if (active.has(item)) throw new Error("Cyclic JSON request"); active.add(item);
     if (!Array.isArray(item) && Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) throw new Error("Unsupported JSON request object");
-    for (const child of Object.values(item)) inspect(child);
+    if (Object.getOwnPropertySymbols(item).length) throw new Error("Unsupported JSON request key");
+    const result = Array.isArray(item)
+      ? `[${Array.from(item, encode).join(",")}]`
+      : `{${Object.entries(item).map(([key, child]) => `${JSON.stringify(key)}:${encode(child)}`).join(",")}}`;
     active.delete(item);
+    return result;
   }
-  inspect(value);
-  const result = stringify(value); if (result === undefined) throw new Error("Missing JSON request"); return result;
+  return encode(value);
 }

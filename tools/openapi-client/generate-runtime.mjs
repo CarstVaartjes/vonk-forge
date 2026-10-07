@@ -6,10 +6,11 @@ import path from "node:path";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import standalone from "ajv/dist/standalone/index.js";
-import {_Code, _} from "ajv/dist/compile/codegen/index.js";
+import codegen from "ajv/dist/compile/codegen/code.js";
 import {parse, stringify, LosslessNumber} from "lossless-json";
 import openapiTS, {astToString} from "openapi-typescript";
 import ts from "typescript";
+const {_Code, _} = codegen;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 // The official JSON Schema corpus exercises mathematical integer semantics;

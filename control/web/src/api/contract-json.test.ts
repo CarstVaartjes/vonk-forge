@@ -35,6 +35,8 @@ describe("canonical numeric boundary", () => {
   test("serializer retains exact integers and rejects unsupported values", () => {
     expect(stringifyContractJson({counter: new LosslessNumber("9007199254740993")})).toBe('{"counter":9007199254740993}');
     expect(stringifyContractJson({counter: 9007199254740993n})).toBe('{"counter":9007199254740993}');
+    expect(stringifyContractJson({isLosslessNumber: true, value: "9007199254740993"})).toBe('{"isLosslessNumber":true,"value":"9007199254740993"}');
+    expect(stringifyContractJson({value: -0})).toBe('{"value":-0.0}');
     for (const value of [NaN, Infinity, {value: undefined}, {value: () => 1}, {value: Symbol("x")}, new Date()]) expect(() => stringifyContractJson(value)).toThrow();
     const cyclic: unknown[] = []; cyclic.push(cyclic); expect(() => stringifyContractJson(cyclic)).toThrow();
   });

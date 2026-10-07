@@ -2,8 +2,11 @@ import * as generated from "./runtime.generated.js";
 import {materialize, parseContractJson, stringifyContractJson} from "./contract-numeric";
 
 export class ContractViolation extends Error {
-  constructor(readonly method: string, readonly path: string, readonly status: number) {
-    super(`Invalid Control API contract: ${method} ${path} (${status})`);
+  readonly path: string;
+  constructor(readonly method: string, path: string, readonly status: number) {
+    const pathname = new URL(path, "http://control.invalid").pathname;
+    super(`Invalid Control API contract: ${method} ${pathname} (${status})`);
+    this.path = pathname;
     this.name = "ContractViolation";
   }
 }
