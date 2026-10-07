@@ -5445,7 +5445,13 @@ class FleetProfileService:
         if record is None:
             return False
         job = session.get(Job, record.operation_id)
-        if job is None or job.kind != "recipe.stop.v2" or job.request_id != request_key:
+        if (
+            job is None
+            or job.kind != "recipe.stop.v2"
+            or job.request_id != request_key
+            or not isinstance(job.payload, dict)
+            or job.payload_digest != _digest(job.payload)
+        ):
             return False
         try:
             child_plan = read_stored_model(
