@@ -4210,6 +4210,147 @@ mod tests {
         assert_eq!((copy.nlink(), object.nlink()), (1, 1));
     }
 
+    // This uses a hosted, owned bind mount: distribution/models is real tmpfs,
+    // installations is the runner filesystem. No fake link function or link=false.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires the hosted owned cross-device model-store fixture"]
+    fn real_cross_device_link_failure_logs_cause_copies_and_recovers() {
+        const ROOT: &str = "VONK_OCI_CROSS_DEVICE_ROOT";
+        const PHASE: &str = "VONK_OCI_CROSS_DEVICE_PHASE";
+        const TEST: &str =
+            "oci::tests::real_cross_device_link_failure_logs_cause_copies_and_recovers";
+        let data = PathBuf::from(std::env::var_os(ROOT).expect("hosted fixture root"));
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        let model_root = data.join("distribution/models");
+        assert_ne!(
+            fs::metadata(&model_root).unwrap().dev(),
+            fs::metadata(&data).unwrap().dev(),
+            "the test must reach the real cross-device hard-link error"
+        );
+        if let Ok(phase) = std::env::var(PHASE) {
+            if phase == "first" {
+                stock_store(&data, &plan);
+            }
+            let runner = NoProcess;
+            // A new process and runtime reopen the actual persisted installation.
+            let instance = runtime(&data, &runner);
+            let mut reports = Vec::new();
+            instance
+                .install_unlocked(
+                    &plan,
+                    FIRST,
+                    &plan.identity.recipe_revision_sha256,
+                    &mut |done, total| reports.push((done, total)),
+                )
+                .unwrap();
+            instance.verify_installation(FIRST).unwrap();
+            let total: u64 = plan
+                .artifacts
+                .iter()
+                .map(|artifact| artifact.size_bytes)
+                .sum();
+            assert_eq!(reports.last(), Some(&(total, total)));
+            for (artifact, bytes) in plan
+                .artifacts
+                .iter()
+                .zip([b"primary".as_slice(), b"secondary".as_slice()])
+            {
+                let destination = data
+                    .join("installations")
+                    .join(FIRST)
+                    .join("models")
+                    .join(&artifact.selection_id)
+                    .join(&artifact.path);
+                let actual = fs::read(&destination).unwrap();
+                assert_eq!(actual, bytes);
+                assert_eq!(vonk_agent_protocol::hex_sha256(&actual), artifact.sha256);
+                let stored = fs::metadata(model_root.join(&artifact.sha256)).unwrap();
+                let copied = fs::metadata(&destination).unwrap();
+                assert_ne!((copied.dev(), copied.ino()), (stored.dev(), stored.ino()));
+                assert_eq!((copied.nlink(), stored.nlink()), (1, 1));
+            }
+            return;
+        }
+        let execute = |phase: &str| {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([TEST, "--exact", "--ignored", "--nocapture"])
+                .env(PHASE, phase)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stderr).unwrap()
+        };
+        let cause = std::io::Error::from_raw_os_error(18).to_string(); // Linux EXDEV.
+        let assert_fallbacks =
+            |stderr: &str, artifacts: &[crate::workloads::CompiledModelArtifact]| {
+                let logs = stderr
+                    .lines()
+                    .filter(|line| line.contains("model.materialization_copy_fallback"))
+                    .collect::<Vec<_>>();
+                assert_eq!(logs.len(), artifacts.len(), "{stderr}");
+                for artifact in artifacts {
+                    let expected = format!(
+                        "vonk-agent: model.materialization_copy_fallback sha256={} bytes={} cause={cause}",
+                        artifact.sha256, artifact.size_bytes
+                    );
+                    assert!(
+                        logs.contains(&expected.as_str()),
+                        "missing safe cause: {stderr}"
+                    );
+                }
+                assert!(
+                    !stderr.contains(data.to_str().unwrap()),
+                    "owned paths must not leak in the cause log"
+                );
+            };
+        let first = execute("first");
+        assert_fallbacks(&first, &plan.artifacts);
+        // Preserve the captured production cause in the hosted proof log.
+        eprint!("{first}");
+        let model = data
+            .join("installations")
+            .join(FIRST)
+            .join("models/primary/config.json");
+        let before = fs::metadata(&model).unwrap();
+        let reused = execute("reuse");
+        assert_fallbacks(&reused, &[]);
+        let after = fs::metadata(&model).unwrap();
+        assert_eq!(
+            (before.dev(), before.ino(), before.ctime_nsec()),
+            (after.dev(), after.ino(), after.ctime_nsec())
+        );
+        // A stale private copy is recovered through the same normal materializer.
+        // Same-size damage prevents a length-only check from accidentally passing.
+        fs::write(&model, b"damaged").unwrap();
+        let recovered = execute("recover");
+        assert_fallbacks(&recovered, &plan.artifacts[..1]);
+        eprint!("{recovered}");
+        assert_eq!(fs::read(&model).unwrap(), b"primary");
+        assert_ne!(fs::metadata(&model).unwrap().ino(), after.ino());
+        let installation = data.join("installations").join(FIRST);
+        assert!(
+            installation
+                .join(super::INSTALLATION_METADATA_FILE)
+                .is_file()
+        );
+        assert!(
+            !fs::read_dir(model.parent().unwrap())
+                .unwrap()
+                .any(|entry| entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".partial"))
+        );
+    }
+
     #[test]
     fn linkable_bytes_count_only_complete_store_objects() {
         let data = tempdir().unwrap();

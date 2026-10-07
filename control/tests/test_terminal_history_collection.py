@@ -3,11 +3,14 @@ from __future__ import annotations
 import uuid
 from collections import Counter
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.engine import Connection, Engine, ExecutionContext
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import terminal_history_collection
 from vonk_control.models import Base, Job, JobAttempt, RecipeRun, RunNode
@@ -26,6 +29,48 @@ def history_sessions(request: pytest.FixtureRequest) -> Iterator[sessionmaker[Se
     yield sessionmaker(engine, expire_on_commit=False)
     if request.param == "sqlite":
         engine.dispose()
+
+
+@dataclass
+class InventoryElapsed:
+    seconds: float = 0.0
+    queries: int = 0
+
+    def monotonic(self) -> float:
+        return self.seconds
+
+
+@pytest.fixture
+def slow_job_inventory(
+    history_sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> Iterator[InventoryElapsed]:
+    """Charge elapsed time to real SQL inventory, without sleeping or changing it."""
+    engine = history_sessions.kw["bind"]
+    assert isinstance(engine, Engine)
+    elapsed = InventoryElapsed()
+
+    def charge_inventory(
+        _connection: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: ExecutionContext,
+        _executemany: bool,
+    ) -> None:
+        if statement.startswith("SELECT jobs.id, jobs.updated_at"):
+            elapsed.seconds += 2.1
+            elapsed.queries += 1
+
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=elapsed.monotonic),
+    )
+    event.listen(engine, "after_cursor_execute", charge_inventory)
+    try:
+        yield elapsed
+    finally:
+        event.remove(engine, "after_cursor_execute", charge_inventory)
 
 
 def _job(
@@ -139,13 +184,13 @@ def test_run_history_requires_complete_current_generation_absence() -> None:
 
 def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_references(
     history_sessions: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    slow_job_inventory: InventoryElapsed,
 ) -> None:
     now = datetime.now(UTC)
     old = now - timedelta(days=2)
     removable = _job(old)
     referenced = _job(old)
-    # Equal timestamps use identity order; retain the first row before yielding.
+    # Equal timestamps use identity order; recheck the reference before deletion.
     referenced.id = str(uuid.UUID(int=1))
     removable.id = str(uuid.UUID(int=2))
     recent = _job(now)
@@ -155,14 +200,8 @@ def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_referenc
     collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
     counts: Counter[str] = Counter()
     protected = {referenced.id, recent.id, live.id}
-    # Force the physical budget to expire between candidates, independently of
-    # database speed. The next pass must resume past the retained first row.
-    observed_times = iter((0.0, 0.0, 2.0, 3.0, 3.0))
-    monkeypatch.setattr(
-        terminal_history_collection,
-        "time",
-        SimpleNamespace(monotonic=lambda: next(observed_times)),
-    )
+    # Successful inventory consumes this pass. Its bounded observation must
+    # survive the yield; the next pass rechecks each row before deleting it.
     for expected_removed in (0, 1):
         counts.update(collector.collect())
         assert counts["jobs"] == expected_removed
@@ -171,6 +210,7 @@ def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_referenc
             assert protected <= remaining
             assert remaining <= protected | {removable.id}
     assert counts["jobs"] == 1
+    assert slow_job_inventory.queries == 1
     with history_sessions() as session:
         assert session.get(Job, removable.id) is None
         assert set(session.scalars(select(Job.id))) == {
@@ -250,3 +290,99 @@ def test_retained_oldest_rows_do_not_starve_later_unreferenced_history(
     with history_sessions() as session:
         assert session.get(Job, retained.id) is not None
         assert session.get(Job, removable.id) is None
+
+
+@pytest.mark.parametrize(
+    "change", ["reference", "recent", "cancelled-with-live-attempt"]
+)
+def test_inventory_budget_continuation_rechecks_current_authority(
+    history_sessions: sessionmaker[Session],
+    slow_job_inventory: InventoryElapsed,
+    change: str,
+) -> None:
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    candidate = _job(old)
+    with history_sessions.begin() as session:
+        session.add(candidate)
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    assert not collector.collect()
+    assert slow_job_inventory.queries == 1
+    with history_sessions.begin() as session:
+        row = session.get(Job, candidate.id)
+        assert row is not None
+        if change == "reference":
+            session.add(_job(now, state="running", payload={"operation_id": row.id}))
+        elif change == "recent":
+            row.updated_at = now
+        else:
+            row.state = "cancelled"
+            session.add(
+                JobAttempt(
+                    id=str(uuid.uuid4()),
+                    job_id=row.id,
+                    attempt=1,
+                    fence=str(uuid.uuid4()),
+                    worker_id="worker",
+                    lease_deadline=old,
+                    state="running",
+                )
+            )
+    assert not collector.collect()
+    # A cached observation is not permission to delete a changed row.
+    assert slow_job_inventory.queries == 1
+    with history_sessions() as session:
+        assert session.get(Job, candidate.id) is not None
+
+
+def test_inventory_budget_restart_recomputes_and_then_progresses(
+    history_sessions: sessionmaker[Session], slow_job_inventory: InventoryElapsed
+) -> None:
+    now = datetime.now(UTC)
+    candidate = _job(now - timedelta(days=2))
+    with history_sessions.begin() as session:
+        session.add(candidate)
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    assert not collector.collect()
+    # Restart discards only observations; repeating the slow successful query
+    # must still lead to progress in the replacement collector's next pass.
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    assert not collector.collect()
+    assert slow_job_inventory.queries == 2
+    assert collector.collect()["jobs"] == 1
+    with history_sessions() as session:
+        assert session.get(Job, candidate.id) is None
+
+
+def test_failed_inventory_does_not_authorize_deletion_or_skip_recovery(
+    history_sessions: sessionmaker[Session], slow_job_inventory: InventoryElapsed
+) -> None:
+    now = datetime.now(UTC)
+    candidate = _job(now - timedelta(days=2))
+    with history_sessions.begin() as session:
+        session.add(candidate)
+    engine = history_sessions.kw["bind"]
+    assert isinstance(engine, Engine)
+
+    def deny_inventory(
+        _connection: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: ExecutionContext,
+        _executemany: bool,
+    ) -> None:
+        if statement.startswith("SELECT jobs.id, jobs.updated_at"):
+            raise SQLAlchemyError("inventory unavailable")
+
+    collector = TerminalHistoryCollector(history_sessions, clock=lambda: now)
+    event.listen(engine, "before_cursor_execute", deny_inventory)
+    try:
+        assert not collector.tick()
+        with history_sessions() as session:
+            assert session.get(Job, candidate.id) is not None
+    finally:
+        event.remove(engine, "before_cursor_execute", deny_inventory)
+    assert not collector.collect()
+    assert slow_job_inventory.queries == 1
+    assert collector.collect()["jobs"] == 1

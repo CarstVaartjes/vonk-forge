@@ -1,0 +1,16 @@
+{
+  "nosql_version": "v0.8.0",
+  "nosql_commit": "94ac97cb831706d7277a98e398a0d9115d040eb4",
+  "nosql_source_sha256": {
+    "badger/v2/badger.go": "479242e10204692fa62fbc5f3c02be8790f132064e07b8f8f868cfe9248389ef",
+    "go.mod": "baba0ef7d90c02ad0b3f35101340ec42bb3cdef7894eded34d2e0345578fe5fe"
+  },
+  "badger_version": "v2.2007.4",
+  "badger_options_source_sha256": "044b83416a6c121de0b2d37b773dd9488322cccaf7464e35d5db3b178ebff3d2",
+  "commit_semantics": "nosql Open uses Badger DefaultOptions; pinned DefaultOptions sets SyncWrites true. Successful atomic Update synchronizes writes before response. Hosted guards check the compiled dependency default and abrupt process termination before/after commit with Badger reopening.",
+  "sources": [
+    "https://github.com/smallstep/nosql/blob/94ac97cb831706d7277a98e398a0d9115d040eb4/badger/v2/badger.go",
+    "https://github.com/smallstep/nosql/blob/94ac97cb831706d7277a98e398a0d9115d040eb4/go.mod",
+    "https://github.com/dgraph-io/badger/blob/v2.2007.4/options.go"
+  ]
+}

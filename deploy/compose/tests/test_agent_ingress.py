@@ -20,6 +20,7 @@ def _environment() -> dict[str, str]:
         "CONTROL_API_IMAGE": "example/control-api:1@sha256:" + "c" * 64,
         "CONTROL_WORKER_IMAGE": "example/control-worker:1@sha256:" + "8" * 64,
         "HERMES_AGENT_IMAGE": "example/hermes:1@sha256:" + "7" * 64,
+        "STEP_CA_IMAGE": "example/ca:1@sha256:" + "a" * 64,
         "LITELLM_IMAGE": "example/litellm:1@sha256:" + "d" * 64,
         "VONK_CONTROL_HOSTNAME": "control.test.example",
         "VONK_MANAGEMENT_CIDRS": "10.0.0.0/24",
