@@ -7,6 +7,8 @@ import hashlib
 import tomllib
 from pathlib import Path
 
+from check_environment import prepare
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -22,8 +24,25 @@ def main() -> None:
         raise SystemExit("Expected one canonical protocol package")
     wheel = (lock.parent / packages[0]["source"]["path"]).resolve()
     pins = [pin for pin in packages[0]["wheels"] if pin["filename"] == wheel.name]
-    if len(pins) != 1 or not wheel.is_file():
-        raise SystemExit("Build the canonical protocol wheel before refreshing its pin")
+    if len(pins) != 1:
+        raise SystemExit("Expected one canonical protocol wheel pin")
+    prepare(
+        ROOT,
+        ROOT / ".state/commit-checks/control.lock",
+        "protocol wheel",
+        wheel.is_file,
+        [
+            [
+                "uv",
+                "build",
+                "--project",
+                "agent_protocol",
+                "--wheel",
+                "--out-dir",
+                "inventory/wheels",
+            ]
+        ],
+    )
     previous = pins[0]["hash"]
     if text.count(previous) != 1:
         raise SystemExit("The canonical protocol wheel pin must be unique")

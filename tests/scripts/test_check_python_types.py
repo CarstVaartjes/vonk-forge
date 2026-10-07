@@ -22,6 +22,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check-python-types"
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def _module(script: Path = SCRIPT) -> ModuleType:
@@ -259,10 +260,10 @@ def test_partial_check_cannot_rewrite_the_full_baseline(
         ("value: int = 1\n", "no unlisted errors"),
     ],
 )
-def test_real_hook_checks_whitespace_paths_without_building_or_syncing(
+def test_real_hook_checks_whitespace_paths_with_prepared_environment(
     tmp_path: Path, source: str, expected: str
 ) -> None:
-    """Catch skipped typing, broken filename splitting and hidden setup effects."""
+    """Catch skipped typing and broken filename splitting after preparation."""
     (tmp_path / "control").mkdir()
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tools").mkdir()
@@ -281,6 +282,11 @@ def test_real_hook_checks_whitespace_paths_without_building_or_syncing(
     )
     shutil.copy2(
         ROOT / "scripts/check-staged-python", tmp_path / "scripts/check-staged-python"
+    )
+    # This fixture tests check dispatch, not dependency acquisition.
+    helper = tmp_path / "scripts/check_environment.py"
+    helper.write_text(
+        "def ensure_control(root, environment): pass\n\ndef ensure_web(root): pass\n"
     )
     probe = tmp_path / 'probe with space and "quote".py'
     probe.write_text(source)
@@ -338,6 +344,7 @@ def test_non_python_check_failure_still_blocks_the_commit(
             return
         raise subprocess.CalledProcessError(1, command)
 
+    monkeypatch.setattr(module, "ensure_web", lambda root: None)
     monkeypatch.setattr(module, "run", refuse)
     with pytest.raises(subprocess.CalledProcessError):
         module.main()
@@ -365,8 +372,8 @@ def test_documentation_commit_needs_no_environment(
     assert module.main() == 0
 
 
-def test_python_commit_reports_missing_environment_without_building(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_python_commit_requests_environment_preparation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     module = _hook_module()
     (tmp_path / "example.py").touch()
@@ -375,8 +382,15 @@ def test_python_commit_reports_missing_environment_without_building(
     monkeypatch.setattr(
         module.subprocess, "check_output", lambda *args, **kwargs: b"example.py\0"
     )
-    assert module.main() == 1
-    assert "uv sync --project control --frozen explicitly" in capsys.readouterr().err
+    prepared = []
+    monkeypatch.setattr(
+        module, "ensure_control", lambda root, env: prepared.append((root, env))
+    )
+    monkeypatch.setattr(
+        module.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0)
+    )
+    assert module.main() == 0
+    assert prepared == [(tmp_path, tmp_path / "control/.venv")]
 
 
 def test_hook_preserves_nul_filenames_and_only_runs_checks(
@@ -396,7 +410,7 @@ def test_hook_preserves_nul_filenames_and_only_runs_checks(
         "check_output",
         lambda *args, **kwargs: (filename + "\0").encode(),
     )
-    monkeypatch.setattr(module.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(module, "ensure_control", lambda root, env: None)
     commands: list[list[str]] = []
 
     def run(command: list[str], **kwargs: object) -> SimpleNamespace:
