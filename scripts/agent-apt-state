@@ -18,7 +18,7 @@ import tempfile
 from dataclasses import dataclass
 from functools import cmp_to_key
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 RECEIPT_KEYS = {
     "channel",
@@ -95,13 +95,38 @@ def canonical_json(value: object) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
-def parse_canonical_json(raw: bytes) -> Any:
+JsonObjectKind = Literal[
+    "unspecified",
+    "versioned-commit",
+    "latest-pointer",
+    "state-bundle-receipt",
+    "public-bundle-receipt",
+]
+
+
+def parse_canonical_json(
+    raw: bytes,
+    *,
+    object_kind: JsonObjectKind = "unspecified",
+    object_key: str | None = None,
+) -> Any:
+    def refusal(message: str, category: str) -> StateError:
+        # Never include decoder messages, payload values, or private object keys.
+        key_digest = sha256(object_key.encode()) if object_key is not None else "none"
+        return StateError(
+            f"{message}: phase=canonical-json-validation "
+            f"object_kind={object_kind} key_sha256={key_digest} "
+            f"bytes={len(raw)} sha256={sha256(raw)} parse_category={category}"
+        )
+
     try:
         value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise StateError("JSON object is invalid") from error
+    except UnicodeDecodeError as error:
+        raise refusal("JSON object is invalid", "unicode-decode") from error
+    except json.JSONDecodeError as error:
+        raise refusal("JSON object is invalid", "json-decode") from error
     if canonical_json(value) != raw:
-        raise StateError("JSON object is not canonical")
+        raise refusal("JSON object is not canonical", "noncanonical")
     return value
 
 
@@ -211,7 +236,15 @@ def validate_bundle(
         raise StateError("bundle is invalid") from error
     if root not in directories or "publication-receipt.json" not in files:
         raise StateError("bundle is incomplete")
-    receipt = _validate_receipt(parse_canonical_json(files["publication-receipt.json"]))
+    receipt = _validate_receipt(
+        parse_canonical_json(
+            files["publication-receipt.json"],
+            object_kind=(
+                "state-bundle-receipt" if kind == "state" else "public-bundle-receipt"
+            ),
+            object_key="publication-receipt.json",
+        )
+    )
     if expected_receipt is not None and receipt != _validate_receipt(expected_receipt):
         raise StateError("publication receipt does not match request")
     if kind == "public":
@@ -345,7 +378,9 @@ def _prefix(receipt: dict[str, Any]) -> str:
 
 
 def _validate_latest_pointer(raw: bytes, channel: str) -> dict[str, Any]:
-    value = parse_canonical_json(raw)
+    value = parse_canonical_json(
+        raw, object_kind="latest-pointer", object_key="latest.json"
+    )
     commit_match = (
         value.get("commit")
         if isinstance(value, dict) and isinstance(value.get("commit"), str)
@@ -401,7 +436,7 @@ def _manifest(
 
 
 def _validate_manifest(raw: bytes, key: str) -> dict[str, Any]:
-    value = parse_canonical_json(raw)
+    value = parse_canonical_json(raw, object_kind="versioned-commit", object_key=key)
     if (
         not isinstance(value, dict)
         or set(value) != {"objects", "publication", "schema_version"}
