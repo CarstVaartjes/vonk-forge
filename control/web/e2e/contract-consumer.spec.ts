@@ -41,8 +41,8 @@ test("Chromium recipe setting editor sends the exact wide integer through the re
   const requests: string[] = [];
   await context.addCookies([{name: "vonk_csrf", value: "fixture-csrf", url: "http://127.0.0.1:4174"}]);
   await page.route(url => url.pathname === "/api/artifact-jobs/capabilities", route => route.fulfill({status: 200, contentType: "application/json", body: routing.capabilities_json}));
-  const run = JSON.parse(routing.run_json);
-  await page.route(url => url.pathname === `/api/recipe/runs/${run.run_id}/artifact-jobs`, async route => {
+  await page.route(url => url.pathname === "/api/fleet", route => route.fulfill({status: 200, contentType: routing.fleet_media_type, body: routing.fleet_body}));
+  await page.route(url => url.pathname === `/api/recipe/runs/${routing.run_id}/artifact-jobs`, async route => {
     if (route.request().method() === "GET") {
       await route.fulfill({status: 200, contentType: "application/json", body: routing.jobs_json});
     } else {
@@ -57,7 +57,7 @@ test("Chromium recipe setting editor sends the exact wide integer through the re
     const path = "/e2e/artifact-workspace-mount.tsx";
     const {mountArtifactWorkspace} = await import(path);
     const fixture = JSON.parse(source);
-    mountArtifactWorkspace(fixture.definition_json, fixture.run_json, fixture.revision_id, fixture.content_sha256);
+    await mountArtifactWorkspace(fixture.definition_json, fixture.revision_id, fixture.content_sha256);
   }, source);
   const seed = page.getByRole("textbox", {name: "Seed", exact: true});
   await expect(seed).toHaveValue("9007199254740993");
