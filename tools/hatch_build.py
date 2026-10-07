@@ -14,7 +14,7 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 class CustomBuildHook(BuildHookInterface):
     def initialize(self, version: str, build_data: dict[str, object]) -> None:
-        source_sha = os.environ.get("VONK_BUILD_SOURCE_SHA")
+        source_sha = os.environ.get("VONK_BUILD_SOURCE_SHA") or None
         release_version = os.environ.get("VONK_BUILD_RELEASE_VERSION")
         if source_sha is not None and re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
             raise ValueError("VONK_BUILD_SOURCE_SHA must be a 40-character source SHA")

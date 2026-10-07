@@ -677,6 +677,18 @@ def assemble(arguments: argparse.Namespace) -> str:
                 / "rust/crates/vonk-agent-protocol/schema/wire.json"
             ).read_text()
         )
+        control_schema = json.loads(
+            (
+                Path(__file__).resolve().parents[1]
+                / "src/cluster_profiles/schemas/control-openapi.json"
+            ).read_text()
+        )
+        if build_identity.control_contract_sha256 != contract_fingerprint(
+            control_schema
+        ):
+            raise PublicationError(
+                "CLI package API contract differs from release source"
+            )
         if build_identity.worker_contract_sha256 != contract_fingerprint(wire):
             raise PublicationError(
                 "CLI package worker contract differs from release source"
