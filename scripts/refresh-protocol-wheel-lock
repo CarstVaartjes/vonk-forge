@@ -9,6 +9,9 @@ from pathlib import Path
 
 import sys
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
+import os
+# The sibling helper, however this file is loaded.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from check_environment import prepare
 
 ROOT = Path(__file__).resolve().parents[1]
