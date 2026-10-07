@@ -27,8 +27,6 @@ from cryptography.hazmat.primitives import serialization
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
-from test_enrollment import NODE_ID, csr, evidence
-from test_step_ca import STEP_CA_IMAGE
 from vonk_control.enrollment import (
     EnrollmentIssuanceUncertain,
     EnrollmentService,
@@ -41,6 +39,9 @@ from vonk_control.models import (
     Base,
 )
 from vonk_control.step_ca import StepCAError, StepCertificateAuthority
+
+from .test_enrollment import NODE_ID, csr, evidence
+from .test_step_ca import STEP_CA_IMAGE
 
 
 def _provider(settings):
@@ -210,7 +211,13 @@ step crypto jwk thumbprint < agent-ca-public.jwk
 def _controller_process(payload):
     """All credentials enter on stdin, never argv or diagnostic output."""
     completed = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), "--controller-child"],
+        [
+            sys.executable,
+            "-m",
+            "tests.test_ca_image_controller_postgres",
+            "--controller-child",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
