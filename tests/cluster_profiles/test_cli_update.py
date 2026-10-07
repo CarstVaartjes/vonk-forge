@@ -32,7 +32,7 @@ def _control_schema():
     )
 
 
-def _controller_observation():
+def _controller_observation() -> dict[str, object]:
     return {
         "api": {
             "source_sha": "a" * 40,
