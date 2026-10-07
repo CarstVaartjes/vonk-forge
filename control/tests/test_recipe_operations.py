@@ -2900,14 +2900,16 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
     assert withdrawn == [start.owner_id]
 
 
+@pytest.mark.parametrize("fault", [RuntimeError, PermissionError, OSError])
 def test_stop_withdrawal_failure_retains_accepted_job_and_run_state(
     tmp_path: Path,
+    fault: type[RuntimeError | OSError],
 ) -> None:
     withdrawn: list[str] = []
 
     def fail_withdrawal(run_id: str) -> None:
         withdrawn.append(run_id)
-        raise RuntimeError("route withdrawal failed")
+        raise fault("route withdrawal failed")
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, route_withdrawer=fail_withdrawal
@@ -2928,12 +2930,26 @@ def test_stop_withdrawal_failure_retains_accepted_job_and_run_state(
         stored.route_state = "published"
     plan = service.preview_stop(run.owner_id)
 
-    with pytest.raises(RuntimeError, match="route withdrawal failed"):
-        service.stop(
+    if fault is not OSError:
+        # Unclassified failures and permission refusals remain explicit.
+        with pytest.raises(fault, match="route withdrawal failed"):
+            service.stop(
+                run.owner_id,
+                plan_digest=plan.plan_digest,
+                actor="admin",
+                request_id="1" * 35 + "f",
+            )
+    else:
+        pending = service.stop(
             run.owner_id,
             plan_digest=plan.plan_digest,
             actor="admin",
             request_id="1" * 35 + "f",
+        )
+        assert pending.state == "running"
+        assert (
+            pending.status_reason is not None
+            and "route withdrawal failed" in pending.status_reason
         )
 
     assert withdrawn == [run.owner_id]
@@ -2958,6 +2974,23 @@ def test_stop_withdrawal_failure_retains_accepted_job_and_run_state(
             )
             is None
         )
+
+    if fault is OSError:
+        original_id = accepted.id
+        original_ordinal = accepted.payload["workload_intent_ordinal"]
+        service._route_withdrawer = withdrawn.append
+        resumed = service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="1" * 35 + "f",
+        )
+        assert resumed.id == original_id
+        with sessions() as session:
+            stored = session.get(Job, resumed.id)
+            assert stored is not None
+            assert stored.payload["workload_intent_ordinal"] == original_ordinal
+            assert stored.payload.get("phases")
 
 
 def test_stop_admission_commit_failure_prevents_publication(tmp_path: Path) -> None:
@@ -3157,7 +3190,9 @@ def test_stop_preview_is_stable_exact_and_defers_capacity_release(
     assert len(first.plan_digest) == 64
 
 
-def test_stop_replans_when_the_submitted_digest_is_old(tmp_path: Path) -> None:
+def test_stop_refuses_changed_review_before_withdrawal_or_admission(
+    tmp_path: Path,
+) -> None:
     withdrawn: list[str] = []
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, route_withdrawer=withdrawn.append
@@ -3172,18 +3207,24 @@ def test_stop_replans_when_the_submitted_digest_is_old(tmp_path: Path) -> None:
         nodes,
         request_id="3" * 35 + "b",
     )
-    result = service.stop(
-        run.owner_id,
-        plan_digest="0" * 64,
-        actor="admin",
-        request_id="3" * 35 + "c",
-    )
-
-    assert result.state == "running"
-    assert withdrawn == [run.owner_id]
     with sessions() as session:
-        queued = session.scalar(select(Job).where(Job.request_id == "3" * 35 + "c"))
-        assert queued is not None
+        ordinals = {
+            node.node_id: node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode))
+        }
+    with pytest.raises(RecipeRequestInvalid):
+        service.stop(
+            run.owner_id, plan_digest="0" * 64, actor="admin", request_id="3" * 35 + "c"
+        )
+    assert withdrawn == []
+    with sessions() as session:
+        assert (
+            session.scalar(select(Job).where(Job.request_id == "3" * 35 + "c")) is None
+        )
+        assert {
+            node.node_id: node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode))
+        } == ordinals
 
 
 def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(

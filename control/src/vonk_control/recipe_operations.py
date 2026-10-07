@@ -218,6 +218,7 @@ from .recipe_routes import (
     RecipeRouteError,
     RecipeRouteNotReady,
     RecipeRouteService,
+    publication_is_temporary,
     route_health_recovery_pending,
     route_publication_transaction,
 )
@@ -3135,10 +3136,25 @@ class RecipeOperationService:
                         "the run's route withdrawal was superseded; retry the stop",
                         reason=InvalidRequestReason.SUPERSEDED,
                     ) from error
+                except PermissionError:
+                    raise
+                except RecipeRouteError as error:
+                    if isinstance(
+                        error.__cause__, PermissionError
+                    ) or not publication_is_temporary(error):
+                        raise
+                    return self._defer_accepted_service_stop(accepted.id, error)
+                except (OSError, UnknownOutcomeError) as error:
+                    return self._defer_accepted_service_stop(accepted.id, error)
             else:
                 with route_publication_transaction(self._sessions) as session:
                     claim_withdrawal(session)
-                self._route_withdrawer(run_id)
+                try:
+                    self._route_withdrawer(run_id)
+                except PermissionError:
+                    raise
+                except (OSError, UnknownOutcomeError) as error:
+                    return self._defer_accepted_service_stop(accepted.id, error)
             try:
                 job = self._dispatch_stop_after_withdrawal(
                     run_id,
@@ -3150,12 +3166,34 @@ class RecipeOperationService:
                 )
             except _RouteNotWithdrawn:
                 continue
+            except UnknownOutcomeError as error:
+                return self._defer_accepted_service_stop(accepted.id, error)
             if job.state != "succeeded":
                 self._agent_jobs.notify_available()
             return job
-        raise RecipeRetryLater(
-            "the run's route withdrawal has not settled; retry the stop"
+        return self._defer_accepted_service_stop(
+            accepted.id,
+            RecipeRetryLater("the run's route withdrawal has not settled"),
         )
+
+    def _defer_accepted_service_stop(
+        self, parent_id: str, error: OSError | UnknownOutcomeError | RecipeRouteError
+    ) -> RecipeOperationView:
+        # The response was lost after consent was committed. Returning the
+        # SAME running child lets RunSwitch retain its phase/request identity;
+        # the normal bounded Stop continuation owns the external retry.
+        now = self._clock()
+        with self._sessions.begin() as session:
+            parent = session.get(Job, parent_id, with_for_update=True)
+            if parent is None:
+                raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+            self._check_service_stop(session, parent)
+            parent.status_reason = (
+                f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
+            )[:1024]
+            parent.updated_at = now
+            session.flush()
+            return self._view(parent, session=session)
 
     @staticmethod
     def _service_stop_document(job: Job) -> RecipeStopParent:
@@ -3349,18 +3387,73 @@ class RecipeOperationService:
             [
                 child
                 for child in adapter.pending_children
-                if child.kind == "stop"
-                and adapter.queue[child.queue_index].id == run.id
+                if child.kind in {"stop", "run", "install"}
             ]
             if adapter is not None
             else []
         )
-        if len(children) != 1:
+        parents: list[Job] = []
+        for child in children:
+            candidate = session.get(Job, child.operation_id)
+            if candidate is None:
+                continue
+            expected_kind = (
+                "recipe.stop.v2" if child.kind == "stop" else "recipe.run-switch.v2"
+            )
+            if (
+                candidate.kind != expected_kind
+                or candidate.payload_digest
+                != hashlib.sha256(canonical_message(candidate.payload)).hexdigest()
+            ):
+                raise RecipeStopAuthorityRefused(
+                    "accepted profile Stop parent binding changed"
+                )
+            try:
+                candidate_root = RunSwitchJobPayload.model_validate_json(
+                    canonical_message(candidate.payload), strict=True
+                )
+                candidate_progress = RunSwitchOperationResult.model_validate_json(
+                    canonical_message(candidate.result), strict=True
+                )
+            except (TypeError, ValueError) as error:
+                raise RecipeStopAuthorityRefused(
+                    "accepted profile Stop authority is unreadable"
+                ) from error
+            if (
+                candidate_root.operation_kind != candidate.kind
+                or candidate_root.action != candidate_root.plan.action
+                or (
+                    candidate_root.action != "stop"
+                    if child.kind == "stop"
+                    else candidate_root.action != "install"
+                    if child.kind == "install"
+                    else candidate_root.action not in {"run", "switch"}
+                )
+            ):
+                raise RecipeStopAuthorityRefused(
+                    "accepted profile Stop child action changed"
+                )
+            phase_index = candidate_progress.phase_index
+            item_index = candidate_progress.item_index
+            if (
+                phase_index is None
+                or item_index is None
+                or phase_index >= len(candidate_root.plan.phases)
+                or item_index >= len(candidate_root.plan.stops)
+            ):
+                continue
+            if (
+                candidate_root.plan.phases[phase_index].kind == "stop"
+                and candidate_root.plan.stops[item_index].run_id == run.id
+            ):
+                parents.append(candidate)
+        if len(parents) != 1:
             raise RecipeStopAuthorityRefused("accepted profile Stop child is ambiguous")
-        parent = session.get(Job, children[0].operation_id, with_for_update=True)
+        parent = session.get(
+            Job, parents[0].id, with_for_update=True, populate_existing=True
+        )
         if (
             parent is None
-            or parent.kind != "recipe.stop.v2"
             or parent.payload_digest
             != hashlib.sha256(canonical_message(parent.payload)).hexdigest()
         ):
@@ -3802,7 +3895,7 @@ class RecipeOperationService:
             updated_at=now,
         )
         if accepted_parent is not None:
-            accepted_parent.state = job.state
+            RecipeOperationAdapter().finish(accepted_parent, now, failed=False)
             accepted_parent.status_reason = None
             accepted_parent.result = job.result
             accepted_parent.payload = job.payload

@@ -224,13 +224,20 @@ def validate_profile_stop_owner(
 
     # Imports are local because FleetProfileService composes this module's
     # lifecycle owner through RunSwitch.
+    from .fleet_profile_contract import profile_switch_child_request_key
     from .fleet_profiles import (
         FleetProfileService,
         _persisted_profile_plan,
         _persisted_profile_progress,
     )
+    from .job_documents import RecipeStopParent, RunSwitchJobPayload
     from .lifecycle.evidence import Residue
-    from .run_switch_contract import RunSwitchPlan
+    from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
+    from .run_switch_operations import (
+        _phase_request_key,
+        _plan_target_node_ids,
+        _stop_child_request_key,
+    )
 
     application = session.get(
         FleetProfileApplication, authorization.profile_application_id
@@ -241,7 +248,10 @@ def validate_profile_stop_owner(
         raise ProfileStopAuthorityError("current profile Stop owner is unavailable")
     if application.profile_id is None:
         raise ProfileStopAuthorityError("profile Stop has no saved profile owner")
-    if profile_operation.kind != "recipe.stop.v2":
+    switch_stop = profile_operation.kind == "recipe.run-switch.v2" and not isinstance(
+        authorization, ProfileJobRunStopAuthorization
+    )
+    if profile_operation.kind != "recipe.stop.v2" and not switch_stop:
         raise ProfileStopAuthorityError("profile Stop parent operation kind changed")
     if (
         hashlib.sha256(canonical_message(profile_operation.payload)).hexdigest()
@@ -283,6 +293,7 @@ def validate_profile_stop_owner(
     ):
         raise ProfileStopAuthorityError("current profile Stop progress is inconsistent")
 
+    current: RunSwitchOperationResult | None = None
     try:
         progress = _persisted_profile_progress(application)
         current_plan = _persisted_profile_plan(application)
@@ -296,6 +307,40 @@ def validate_profile_stop_owner(
             strict=True,
             from_json=True,
         )
+        if switch_stop:
+            root = RunSwitchJobPayload.model_validate_json(
+                canonical_message(profile_operation.payload), strict=True
+            )
+            current = RunSwitchOperationResult.model_validate_json(
+                canonical_message(profile_operation.result), strict=True
+            )
+            phase_index, item_index = current.phase_index, current.item_index
+            if (
+                root.operation_kind != profile_operation.kind
+                or root.action != run_switch_plan.action
+                or run_switch_plan.action not in {"run", "install", "switch"}
+                or current.profile_application_id != application.id
+                or current.workload_intent_ordinal
+                != authorization.workload_intent_ordinal
+                or current.cancellation is not None
+                or phase_index is None
+                or item_index is None
+                or phase_index >= len(run_switch_plan.phases)
+                or item_index >= len(run_switch_plan.stops)
+            ):
+                raise ProfileStopAuthorityError(
+                    "profile replacement Stop phase is inconsistent"
+                )
+            phase = run_switch_plan.phases[phase_index]
+            if (
+                phase.kind != "stop"
+                or current.phase != phase.kind
+                or current.subphase != phase.subphase
+                or run_switch_plan.stops[item_index].run_id != run.id
+            ):
+                raise ProfileStopAuthorityError(
+                    "profile replacement does not own this current Stop phase"
+                )
     except (TypeError, ValueError) as error:
         raise ProfileStopAuthorityError(
             "current profile Stop plan is invalid"
@@ -310,15 +355,72 @@ def validate_profile_stop_owner(
         raise ProfileStopAuthorityError("current profile Stop plan is invalid")
 
     switch_adapter = progress.switch_adapter
+    if switch_adapter is None or switch_adapter.child_id != application.id:
+        raise ProfileStopAuthorityError("profile Stop is not the active reviewed child")
+    pending = [
+        child
+        for child in switch_adapter.pending_children
+        if child.operation_id == profile_operation.id
+    ]
+    if len(pending) != 1:
+        raise ProfileStopAuthorityError("profile Stop is not the active reviewed child")
+    child = pending[0]
+    item = switch_adapter.queue[child.queue_index]
+    expected_kind = (
+        ("install" if run_switch_plan.action == "install" else "run")
+        if switch_stop
+        else "stop"
+    )
     if (
-        switch_adapter is None
-        or switch_adapter.child_id != application.id
-        or not any(
-            child.kind == "stop" and child.operation_id == profile_operation.id
-            for child in switch_adapter.pending_children
+        child.kind != expected_kind
+        or profile_operation.request_id
+        != profile_switch_child_request_key(
+            application.id, child.queue_index, item.kind, item.id
         )
     ):
-        raise ProfileStopAuthorityError("profile Stop is not the active reviewed child")
+        raise ProfileStopAuthorityError("profile Stop queue request binding changed")
+    if switch_stop and current is not None and current.child_operation_id is not None:
+        linked = session.get(Job, current.child_operation_id)
+        phase_key = (
+            _phase_request_key(
+                profile_operation.request_id,
+                current.phase_index,
+                current.item_index,
+                current.phase_retry_generation,
+            )
+            if current.phase_retry_generation
+            else profile_operation.request_id
+        )
+        expected_key = _stop_child_request_key(phase_key, run.id, application.id)
+        if (
+            linked is None
+            or linked.kind != "recipe.stop"
+            or linked.request_id != expected_key
+            or linked.payload_digest
+            != hashlib.sha256(canonical_message(linked.payload)).hexdigest()
+        ):
+            raise ProfileStopAuthorityError(
+                "profile Stop linked child identity changed"
+            )
+        try:
+            linked_document = RecipeStopParent.model_validate_json(
+                canonical_message(linked.payload), strict=True
+            )
+        except (TypeError, ValueError) as error:
+            raise ProfileStopAuthorityError(
+                "profile Stop linked child is unreadable"
+            ) from error
+        linked_review = linked_document.service_stop_review
+        if (
+            linked_document.owner_kind != "run"
+            or linked_document.owner_id != run.id
+            or linked_document.workload_intent_ordinal
+            != authorization.workload_intent_ordinal
+            or linked_review is None
+            or linked_review.profile_stop_owner != authorization
+            or linked.targets != authorization.reachable_node_ids
+        ):
+            raise ProfileStopAuthorityError("profile Stop linked child scope changed")
 
     profile = session.get(FleetProfile, application.profile_id)
     selection = session.get(FleetProfileSelection, 1)
@@ -398,7 +500,11 @@ def validate_profile_stop_owner(
         (node.rank, node.node_id, node.role)
         for node in run_switch_plan.spark_group.nodes
     )
-    profile_scope = run_switch_plan.profile_stop_scope
+    profile_scope = (
+        effect_matches[0].profile_stop_scope
+        if switch_stop and len(effect_matches) == 1
+        else run_switch_plan.profile_stop_scope
+    )
     expected_target_ids = (
         tuple(profile_scope.target_node_ids) if profile_scope is not None else node_ids
     )
@@ -447,12 +553,17 @@ def validate_profile_stop_owner(
                 and effect_matches[0].profile_stop_scope != profile_scope
             )
         )
-        or run_switch_plan.action != "stop"
-        or run_switch_plan.run_id != run.id
+        or (not switch_stop and run_switch_plan.action != "stop")
+        or (not switch_stop and run_switch_plan.run_id != run.id)
         or run_switch_plan.plan_digest != profile_operation.payload.get("plan_digest")
-        or switch_members != run_members
+        or (not switch_stop and switch_members != run_members)
         or mapping_members != run_members
-        or profile_operation.targets != list(expected_reachable_ids)
+        or profile_operation.targets
+        != (
+            list(_plan_target_node_ids(run_switch_plan))
+            if switch_stop
+            else list(expected_reachable_ids)
+        )
         or authorization.reachable_node_ids != list(expected_reachable_ids)
         or authorization.missing_node_ids != list(expected_missing_ids)
         or stop is None
@@ -465,13 +576,19 @@ def validate_profile_stop_owner(
     ):
         raise ProfileStopAuthorityError("accepted profile does not own this exact Stop")
 
+    accepted_revision_id = run_switch_plan.recipe_revision_id
+    if switch_stop:
+        installation = session.get(RecipeInstallation, run.installation_id)
+        if installation is None:
+            raise ProfileStopAuthorityError("profile Stop installation disappeared")
+        accepted_revision_id = installation.recipe_revision_id
     if (
         authorization.installation_id != run.installation_id
         or authorization.mapping_id != run.mapping_id
         or authorization.mapping_generation != run.mapping_generation
         or authorization.run_generation != run.run_generation
         or authorization.plan_digest != run.plan_digest
-        or authorization.recipe_revision_id != run_switch_plan.recipe_revision_id
+        or authorization.recipe_revision_id != accepted_revision_id
         or (require_current and authorization.profile_step != application.current_step)
         or (require_current and now.tzinfo is None)
     ):

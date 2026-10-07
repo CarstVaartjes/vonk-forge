@@ -167,27 +167,47 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
         QuietRoutes(),
         clock=lambda: now[0],
         retirement_cleanup=restarted.reconcile_retired_operations,
+        stop_admission_cleanup=restarted.reconcile_pending_service_stops,
     )
-    assert not worker.tick()
+    assert worker.tick()
     with sessions() as session:
-        assert session.scalar(select(Job.id).where(Job.kind == "recipe.stop")) is None
+        accepted = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
+        assert accepted is not None and accepted.state == "running"
+        accepted_id = accepted.id
+        assert accepted.payload.get("phases") is None
+        assert "route publication temporarily unavailable" in (
+            accepted.status_reason or ""
+        )
         retired = session.get(Job, started.id)
         assert retired is not None
-        assert "route publication temporarily unavailable" in (
-            retired.status_reason or ""
-        )
+        assert accepted_id in (retired.status_reason or "")
         assert "next reconciliation" in (retired.status_reason or "")
-    now[0] += timedelta(seconds=6)
-    # Two workers recovering the same durable handoff may race. The normal
-    # stop request key and admission transaction still create one child.
+    now[0] += timedelta(seconds=4)
+    assert not worker.tick()
+    with sessions() as session:
+        before_due = session.get(Job, accepted_id)
+        assert before_due is not None and before_due.state == "running"
+        assert before_due.payload["workload_intent_ordinal"] == ordinal
+        assert before_due.payload.get("phases") is None
+        assert (
+            session.scalar(
+                select(AgentOperation.id).where(
+                    AgentOperation.parent_job_id == accepted_id
+                )
+            )
+            is None
+        )
+    now[0] += timedelta(seconds=2)
+    # Two workers recovering the same durable handoff may race. The bounded
+    # accepted Stop continuation retains one original child and request.
     with ThreadPoolExecutor(max_workers=2) as workers:
         outcomes = tuple(
-            workers.map(lambda _: restarted.reconcile_retired_operations(), range(2))
+            workers.map(lambda _: restarted.reconcile_pending_service_stops(), range(2))
         )
     assert any(outcomes)
     with sessions() as session:
         cleanup = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert cleanup is not None
+        assert cleanup is not None and cleanup.id == accepted_id
         assert cleanup.payload["workload_intent_ordinal"] == ordinal
         assert cleanup.payload["owner_id"] == started.owner_id
         original = session.get(AgentOperation, fenced_operation(sessions, claim).id)
