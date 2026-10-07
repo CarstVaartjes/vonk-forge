@@ -28,6 +28,7 @@ def main() -> int:
     staged = subprocess.check_output(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRD", "-z"],
         cwd=ROOT,
+        timeout=30,
     )
     paths = [os.fsdecode(path) for path in staged.split(b"\0") if path]
     files = [path for path in paths if path.endswith(".py") and (ROOT / path).is_file()]
@@ -46,7 +47,10 @@ def main() -> int:
         return 1
     if Path(sys.prefix).resolve() != environment.resolve():
         return subprocess.run(
-            [str(python), str(Path(__file__).resolve())], cwd=ROOT, check=False
+            [str(python), str(Path(__file__).resolve())],
+            cwd=ROOT,
+            check=False,
+            timeout=600,
         ).returncode
     missing = [
         name
@@ -95,7 +99,9 @@ def main() -> int:
         [sys.executable, "scripts/check-python-types", *([] if full_types else files)]
     )
     for command in commands:
-        result = subprocess.run(command, cwd=ROOT, env=check_env, check=False)
+        result = subprocess.run(
+            command, cwd=ROOT, env=check_env, check=False, timeout=600
+        )
         if result.returncode:
             return result.returncode
     return 0

@@ -191,6 +191,14 @@
   ],
   "exceptions": [
     {
+      "path": "scripts/check-staged-code",
+      "function": "main",
+      "kind": "imperative-remedy",
+      "count": 1,
+      "reason": "dependency-unavailable",
+      "justification": "A local developer commit requires an explicitly prepared TypeScript tool environment. The hook reports the npm setup command when tools are absent, as requested, instead of installing dependencies during a commit. This is developer setup, not a Controller runtime recovery path; it introduces no operator-only fleet recovery."
+    },
+    {
       "path": "control/src/vonk_control/platform_observation_errors.py",
       "function": "observation_capture_unavailable_response",
       "kind": "imperative-remedy",
