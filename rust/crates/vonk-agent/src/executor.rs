@@ -3886,7 +3886,7 @@ mod tests {
             atomic::{AtomicBool, Ordering},
         },
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
     use tempfile::tempdir;
     use uuid::Uuid;
