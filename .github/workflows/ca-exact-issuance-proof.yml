@@ -51,7 +51,7 @@ jobs:
           EXPLICIT_BOOTSTRAP: ${{ inputs.bootstrap_lock }}
         run: |
           set -euo pipefail
-          if [ "$EXPLICIT_BOOTSTRAP" = true ] || [ ! -f deploy/compose/step-ca/service/go.sum ]; then
+          if [ "$EXPLICIT_BOOTSTRAP" = true ] || [ ! -f deploy/compose/step-ca/service/go.sum ] || [ -n "$(gofmt -l deploy/compose/step-ca/service)" ]; then
             echo bootstrap=true >> "$GITHUB_OUTPUT"
           else
             echo bootstrap=false >> "$GITHUB_OUTPUT"
