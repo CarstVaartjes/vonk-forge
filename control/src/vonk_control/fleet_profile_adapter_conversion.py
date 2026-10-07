@@ -60,6 +60,11 @@ class _RetainedChild(StrictModel):
     result: FleetProfileSwitchChildResult | None = None
 
 
+class _AcceptedRequestBinding(StrictModel):
+    request_key: UuidId
+    retry_of_application_id: UuidId | None
+
+
 class _UnprovenJournal(ValueError):
     pass
 
@@ -222,7 +227,24 @@ def _accepted_review(row: FleetProfileApplication) -> FleetProfilePreview:
     # Omit fields introduced since acceptance rather than adding their defaults
     # to the exact old decision's bytes.
     wire = _retained_wire(json.loads(canonical_message(canonical_decision)), decision)
-    if _digest(wire) != row.plan_digest:
+    binding = _AcceptedRequestBinding.model_validate_json(
+        canonical_message(
+            {
+                "request_key": row.request_key,
+                "retry_of_application_id": row.progress.get("retry_of_application_id"),
+            }
+        ),
+        strict=True,
+    )
+    execution_digest = _digest(
+        {
+            "schema_version": 2,
+            "reconciliation_digest": _digest(wire),
+            "retry_of_application_id": binding.retry_of_application_id,
+            "request_key": binding.request_key,
+        }
+    )
+    if execution_digest != row.plan_digest:
         raise _UnprovenJournal("accepted profile decision integrity differs from SQL")
     if (reviewed.profile_id, reviewed.profile_digest, reviewed.plan_digest) != (
         row.profile_id,
