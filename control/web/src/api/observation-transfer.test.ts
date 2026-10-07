@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {readFileSync} from "node:fs";
 import {contractEqual} from "./contract-numeric";
-import {validateComponent} from "./contract-json";
+import {validateControlBody, validateComponent} from "./contract-json";
 import {ObservationUnavailable, readObservationTransfer} from "./observation-transfer";
 import {stringifyContractJson} from "./contract-numeric";
 
@@ -67,4 +67,34 @@ test("rejects a record UTF-8 BOM instead of removing it", async () => {
   const values = await records();
   const body = new Uint8Array([239, 187, 191, ...new TextEncoder().encode(values.map(value => stringifyContractJson(value) + "\n").join(""))]);
   await expect(readObservationTransfer(new Response(body, {headers: {"Content-Type": "application/x-vonk-observation+ndjson"}}), "/api/fleet")).rejects.toThrow();
+});
+
+
+interface ProducerErrorFixture {path: string; status: number; media_type: string; body: string; retry_after?: string}
+const errorFixtures: ProducerErrorFixture[] = fixturePath
+  ? JSON.parse(readFileSync(fixturePath.replace(/[^/]+$/, "observation-response-errors.json"), "utf8")) : [];
+test.runIf(Boolean(fixturePath))("actual Controller refusal bytes retain strict JSON media and browser error authority", async () => {
+  vi.stubGlobal("location", {origin: "https://control.invalid"});
+  const {ApiClient, ApiError} = await import("./client");
+  const {AuthenticationRequired} = await import("../auth");
+  try {
+    expect(errorFixtures.map(item => item.status)).toEqual([401, 401, 401, 422, 503]);
+    for (const item of errorFixtures) {
+      expect(() => validateControlBody("GET", item.path, item.status, item.media_type, item.body)).not.toThrow();
+      expect(() => validateControlBody("GET", item.path, item.status, "application/x-vonk-observation+ndjson", item.body)).toThrow();
+      if (item.path === "/api/fleet/stream") continue;
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(item.body, {status: item.status,
+        headers: {"Content-Type": item.media_type, ...(item.retry_after ? {"Retry-After": item.retry_after} : {})}})));
+      const api = new ApiClient(), authenticationRequired = vi.fn();
+      api.onAuthenticationRequired(authenticationRequired);
+      const observed = item.path === "/api/fleet" ? api.visualFleet() : api.platformObservation();
+      if (item.status === 401) {
+        await expect(observed).rejects.toBeInstanceOf(AuthenticationRequired);
+        expect(authenticationRequired).toHaveBeenCalledTimes(1);
+      } else {
+        await expect(observed).rejects.toMatchObject({status: item.status, name: new ApiError(item.status, "").name});
+        expect(authenticationRequired).not.toHaveBeenCalled();
+      }
+    }
+  } finally { vi.unstubAllGlobals(); }
 });
