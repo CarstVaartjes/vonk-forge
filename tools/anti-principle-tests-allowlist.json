@@ -376,7 +376,7 @@
     },
     {
       "path": "control/tests/test_artifact_job_lifecycle.py",
-      "function": "test_a_legacy_failed_lease_expiry_no_longer_blocks_the_runs_stop",
+      "function": "test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt",
       "kind": "ending-without-fresh-request",
       "count": 1
     },
