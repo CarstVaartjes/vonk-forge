@@ -34,12 +34,9 @@ def _recipe_transform(document: dict[str, object]) -> None:
     _mapping(knobs["prompt"])["value"] = "fox"
     interfaces = document["interfaces"]
     assert isinstance(interfaces, list)
-    _mapping(interfaces[0])["input"] = {
-        "required": False,
-        "media_types": [],
-        "max_bytes": 0,
-        "slots": [],
-    }
+    # RecipeJobInterface owns an optional input declaration. Omission is the
+    # canonical no-input recipe; zero-sized/empty RecipeJobInput is invalid.
+    _mapping(interfaces[0]).pop("input")
 
 
 def export(output: Path) -> None:
@@ -77,6 +74,8 @@ def export(output: Path) -> None:
                 }
             )
         compiled = compile_artifact_contract(definition, "image-job")
+        assert compiled.input.required is False
+        assert compiled.input.slots == ()
         expected_request = ArtifactJobCreate.model_validate_json(
             canonical_message(
                 {
