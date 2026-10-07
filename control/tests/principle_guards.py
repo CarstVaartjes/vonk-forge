@@ -465,7 +465,7 @@ def scan_source(
         receiver: ast.FunctionDef | None = None
         deadline_caught = False
 
-        def visit_Try(self, node: ast.Try):
+        def visit_Try(self, node: ast.Try | ast.TryStar):
             old = self.deadline_caught
             # Conservative: no handler surrounding this loop may swallow expiry.
             self.deadline_caught = old or bool(node.handlers)
