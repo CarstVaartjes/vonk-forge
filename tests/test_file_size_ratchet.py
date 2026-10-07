@@ -1,14 +1,13 @@
 """Refuse new oversized sources, growth, and stale size exemptions.
 
-The baseline is a ceiling, not permission to grow: even editing both a source
-and its listed count cannot increase a ceiling from origin/main. After a split
-or reduction, record the smaller exact count (remove entries at 1500 or below).
+Hermetic: no git. The allowlist is the reviewed ceiling; any raise is a visible
+diff of that file. After a split or reduction, record the smaller exact count
+(remove entries at 1500 or below).
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -78,48 +77,12 @@ def evaluate(
     return problems
 
 
-def _git_source(path: str) -> str | None:
-    result = subprocess.run(
-        ["git", "show", f"origin/main:{path}"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    if result.returncode == 0:
-        return result.stdout
-    return None
-
-
-def _base_available() -> bool:
-    return (
-        subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", "origin/main"],
-            cwd=ROOT,
-            capture_output=True,
-            timeout=30,
-            check=False,
-        ).returncode
-        == 0
-    )
-
-
 def test_source_file_sizes_only_fall() -> None:
     listed: dict[str, int] = json.loads((ROOT / ALLOWLIST).read_text())["files"]
-    if not _base_available():
-        # A checkout without origin/main (CI) checks counts against the
-        # allowlist itself; raising a listed ceiling is a reviewed diff.
-        previous = dict(listed)
-    elif (baseline := _git_source(ALLOWLIST)) is not None:
-        previous = json.loads(baseline)["files"]
-    else:
-        # First introduction: only files already oversized on main qualify.
-        previous = {
-            path: len((_git_source(path) or "").splitlines()) for path in listed
-        }
-    assert not (problems := evaluate(source_counts(ROOT), listed, previous)), "\n".join(
-        problems
+    # Hermetic: actual sizes against the reviewed allowlist only. Raising a
+    # listed ceiling is a visible, reviewed diff of the allowlist file.
+    assert not (problems := evaluate(source_counts(ROOT), listed, dict(listed))), (
+        "\n".join(problems)
     )
 
 
