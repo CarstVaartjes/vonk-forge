@@ -25,17 +25,18 @@ from vonk_control.models import (
     ResourceReservation,
 )
 
+from .profile_due_fixtures import next_profile_due
 from .test_attempt_residues import _at_phase, _load, _loop, _switch
 
 
 def _settle(load, *, rounds: int = 40) -> bool:
-    """Run to success, skipping the (clock-independent) retry backoff waits."""
+    """Run to success at the actual persisted child and parent retry times."""
 
     for _ in range(rounds):
         if load.profiles.application(load.application.id).state == "succeeded":
             return True
         _loop(load, lambda: False, rounds=1)
-        _skip_backoff(load)
+        _follow_due(load)
     return load.profiles.application(load.application.id).state == "succeeded"
 
 
@@ -45,15 +46,13 @@ def _the_switch(load) -> Job:
     return switch
 
 
-def _skip_backoff(load) -> None:
-    switch = _switch(load)
-    if switch is None:
-        return
-    with load.sessions.begin() as session:
-        job = session.get(Job, switch.id)
-        assert job is not None and isinstance(job.result, dict)
-        if job.state == "running" and job.result.get("observation_due_at"):
-            job.result = {**job.result, "observation_due_at": None}
+def _follow_due(load) -> None:
+    """Advance the shared clock to the next actual persisted retry fence."""
+
+    due = next_profile_due(load.profiles, load.planner, load.application.id)
+    if due is not None:
+        assert due > load.now[0]
+        load.now[0] = due
 
 
 def _application(load):
@@ -199,7 +198,7 @@ def test_active_claims_with_different_owners_are_named_not_adopted(
         job.result = {**job.result, "phase_index": 0, "item_index": 0}
     for _ in range(20):
         _loop(load, lambda: False, rounds=1)
-        _skip_backoff(load)
+        _follow_due(load)
         if "run-switch.installation-handoff-inconsistent" in (
             _the_switch(load).status_reason or ""
         ):
@@ -232,7 +231,7 @@ def test_without_room_a_lost_claim_waits_visibly_and_resumes(tmp_path: Path) -> 
 
     for _ in range(12):
         _loop(load, lambda: False, rounds=1)
-        _skip_backoff(load)
+        _follow_due(load)
         if stalled():
             break
     application = _application(load)

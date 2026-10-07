@@ -50,7 +50,7 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, pathlib, shutil, subprocess
           root = pathlib.Path("artifacts/browser-contracts")
-          paths = ["control/uv.lock", "control/openapi.json", "control/web/src/api/generated.d.ts", "control/web/src/api/runtime.generated.js", "control/web/src/api/runtime.generated.d.ts", "src/cluster_profiles/schemas/control-openapi.json", "src/cluster_profiles/schemas/cli-update-contract.schema.json", "src/cluster_profiles/generated_control"]
+          paths = ["control/uv.lock", "control/openapi.json", "control/web/src/api/generated.d.ts", "control/web/src/api/runtime.generated.js", "control/web/src/api/runtime.generated.d.ts", "control/web/src/api/vocabulary.generated.ts", "src/cluster_profiles/schemas/control-openapi.json", "src/cluster_profiles/schemas/cli-update-contract.schema.json", "src/cluster_profiles/generated_control"]
           records = {}
           for name in paths:
               source = pathlib.Path(name)
@@ -76,6 +76,10 @@ jobs:
         run: |
           uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
           PYTHONPATH=control:control/src:agent_protocol/src:src uv run --project control --frozen python control/tests/export_artifact_workspace_fixture.py --output artifacts/consumer-corpus/artifact-workspace.json
+      - name: Emit actual immutable observation producer transfers
+        env:
+          PYTHONPATH: control:control/src:agent_protocol/src:src
+        run: uv run --project control --frozen python control/tests/export_observation_transfer_fixtures.py --output artifacts/observation-transfers
       - name: Check out pinned official JSON Schema semantics
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,8 +92,9 @@ jobs:
       - name: Exercise both browser HTTP consumers and exact numbers
         env:
           VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
+          VONK_OBSERVATION_TRANSFERS: ${{ github.workspace }}/artifacts/observation-transfers/observation-transfers.json
           VONK_CONSUMER_OUTPUT: ${{ github.workspace }}/artifacts/consumer-corpus/browser-exports.json
-        run: npm exec -- vitest run src/api/contract-json.test.ts src/api/client.test.ts src/api/consumer-corpus.test.ts src/api/official-schema.generated.test.ts src/hooks/fleet-stream-state.test.ts src/hooks/use-fleet-stream.test.tsx
+        run: npm exec -- vitest run src/api/contract-json.test.ts src/api/observation-transfer.test.ts src/api/fleet-event-connection.test.ts src/api/client.test.ts src/api/consumer-corpus.test.ts src/api/official-schema.generated.test.ts src/hooks/fleet-stream-state.test.ts src/hooks/use-fleet-stream.test.tsx
         working-directory: control/web
       - name: Verify browser exports through their actual canonical Python owners
         if: ${{ !cancelled() && steps.corpus.outcome == 'success' }}
@@ -103,6 +108,7 @@ jobs:
       - name: Exercise native browser numeric-source capability and HTTP consumers
         if: ${{ !cancelled() && steps.corpus.outcome == 'success' }}
         env:
+          VONK_OBSERVATION_TRANSFERS: ${{ github.workspace }}/artifacts/observation-transfers/observation-transfers.json
           VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
         run: npm exec -- playwright test --config playwright.contracts.config.ts
         working-directory: control/web

@@ -1,4 +1,5 @@
 import {LosslessNumber} from "lossless-json";
+import type {NormalizationShape} from "./runtime.generated";
 
 /** The raw numeric token is retained until its canonical schema accepts it. */
 export type ExactNumber = LosslessNumber;
@@ -177,16 +178,6 @@ export function parseContractJson(text: string): unknown {
     if (typeof context?.source !== "string") throw new UnsupportedContractRuntime();
     return new LosslessNumber(context.source);
   });
-}
-export interface NormalizationShape {
-  type?: string | string[];
-  preserveIntegerFloat?: boolean;
-  ref?: string;
-  alternatives?: {validate: (value: unknown) => boolean; shape: NormalizationShape}[];
-  allOf?: NormalizationShape[];
-  properties?: Record<string, NormalizationShape>;
-  items?: NormalizationShape;
-  additionalProperties?: NormalizationShape;
 }
 /** Projection uses the successful compiled schema branch, never a second validator. */
 export function normalizeValidated(value: unknown, shape: NormalizationShape, definitions: Record<string, NormalizationShape>): unknown {

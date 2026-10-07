@@ -38,6 +38,7 @@ from .test_fleet_profiles import (
     NOW,
     _assessment,
     _exact_preparation,
+    _follow_profile_retry,
     _recipe_document,
     _SwitchAdapter,
     _uuid,
@@ -173,9 +174,10 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     _seed(sessions)
     second_revision_id = _add_second_recipe_revision(sessions)
     adapter = _PairedReceiptAdapter()
+    now = [NOW]
     profiles = FleetProfileService(
         sessions,
-        clock=lambda: NOW,
+        clock=lambda: now[0],
         switch_adapter=adapter,
         assessment_provider=lambda _session, _assignment, expected_nodes, **_kwargs: (
             _assessment(_exact_preparation(tuple(expected_nodes)))
@@ -305,6 +307,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
         completed = profiles.application(application_id)
         if completed.state == "succeeded":
             break
+        _follow_profile_retry(profiles, application_id, now)
         assert profiles.tick() is True
     else:
         pytest.fail("paired application did not reach a terminal success")

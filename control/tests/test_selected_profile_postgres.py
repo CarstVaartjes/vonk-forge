@@ -56,6 +56,19 @@ def _service(
     )
 
 
+def _tick_selected_when_due(service: FleetProfileService, application_id: str) -> None:
+    """Observe the selected accepted child only at its durable retry time."""
+    before = service.application(application_id)
+    due = before.progress.retry_due_at
+    if due is not None and due > service._clock():
+        service.tick()
+        held = service.application(application_id)
+        assert held.current_operation_id == before.current_operation_id
+        assert held.progress.step_results == before.progress.step_results
+        service._clock = lambda due=due: due
+    service.tick()
+
+
 class _BusyOnceAdapter(_SwitchAdapter):
     def __init__(self) -> None:
         super().__init__()
@@ -127,7 +140,7 @@ def test_selected_running_profile_reconciles_drift_without_roster_change(
     for _ in range(8):
         if accepted.state == "succeeded":
             break
-        service.tick()
+        _tick_selected_when_due(service, accepted.id)
         accepted = service.application(accepted.id)
     assert accepted.state == "succeeded"
     initial_selection = _selected(postgres_engine)
@@ -624,7 +637,7 @@ def test_retry_uses_selected_snapshot_after_saved_profile_edit(
     for _ in range(8):
         if accepted.state == "succeeded":
             break
-        service.tick()
+        _tick_selected_when_due(service, accepted.id)
         accepted = service.application(accepted.id)
     assert accepted.state == "succeeded"
     assert accepted.progress.intended_profile is not None
@@ -653,7 +666,7 @@ def test_retry_uses_selected_snapshot_after_saved_profile_edit(
     for _ in range(8):
         if retried.state == "succeeded":
             break
-        service.tick()
+        _tick_selected_when_due(service, retried.id)
         retried = service.application(retried.id)
 
     assert retried.state == "succeeded"

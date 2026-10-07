@@ -929,6 +929,7 @@ export type NodeOfflineReason = (typeof NodeOfflineReason)[keyof typeof NodeOffl
 export const OperationFailureCode = {
   FLEET_PROFILE_APPLICATION_FAILED: "fleet_profile_application_failed",
   ARTIFACT_PROCESS_FAILED: "artifact_process_failed",
+  STORED_RESULT_UNREADABLE: "stored_operation_result_unreadable",
 } as const;
 export type OperationFailureCode = (typeof OperationFailureCode)[keyof typeof OperationFailureCode];
 

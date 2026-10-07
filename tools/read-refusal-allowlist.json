@@ -365,6 +365,22 @@
       "count": 2,
       "reason": "security-edge",
       "justification": "The authenticated agent source transfer must preserve explicit denied-access HTTP403; its existing HTTP503 reports actual source storage outage without inventing bundle bytes. These are transport authorization/dependency refusals, not damaged stored progress admission gates."
+    },
+    {
+      "path": "control/src/vonk_control/api.py",
+      "function": "create_app.operations_view",
+      "kind": "get-resource-refusal",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "The canonical OperationResponseTooLarge handler protects the installed reader 1MiB response allocation after optional progress/cancellation projections are replaced by explicit typed unavailable evidence. It measures UTF-8 bytes and reports observed/allowed bytes; identity, authority, durable operation state and continuation are preserved. List paging returns any fitting earlier prefix with its signed cursor, so only an indivisible remaining first row can refuse. Malformed stored observations are not this exception and remain separate read debt."
+    },
+    {
+      "path": "control/src/vonk_control/api.py",
+      "function": "create_app.operation_view",
+      "kind": "get-resource-refusal",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "The canonical OperationResponseTooLarge handler protects the installed reader 1MiB response allocation after optional progress/cancellation projections are replaced by explicit typed unavailable evidence. It measures UTF-8 bytes and reports observed/allowed bytes; identity, authority, durable operation state and continuation are preserved. List paging returns any fitting earlier prefix with its signed cursor, so only an indivisible remaining first row can refuse. Malformed stored observations are not this exception and remain separate read debt."
     }
   ]
 }

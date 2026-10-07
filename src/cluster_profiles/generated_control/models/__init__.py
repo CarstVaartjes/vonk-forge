@@ -188,6 +188,8 @@ from .fleet_assignment_recipe_view import FleetAssignmentRecipeView
 from .fleet_cache_summary import FleetCacheSummary
 from .fleet_change_event import FleetChangeEvent
 from .fleet_enroll_request import FleetEnrollRequest
+from .fleet_frame_issue import FleetFrameIssue
+from .fleet_frame_issue_reason_code import FleetFrameIssueReasonCode
 from .fleet_lock_holder import FleetLockHolder
 from .fleet_locks_response import FleetLocksResponse
 from .fleet_log_entry import FleetLogEntry
@@ -290,9 +292,10 @@ from .fleet_profile_view import FleetProfileView
 from .fleet_profile_view_installation_policy import FleetProfileViewInstallationPolicy
 from .fleet_profile_view_labels import FleetProfileViewLabels
 from .fleet_reenroll_request import FleetReenrollRequest
+from .fleet_refresh_event import FleetRefreshEvent
+from .fleet_refresh_event_reset_reason import FleetRefreshEventResetReason
 from .fleet_rename_request import FleetRenameRequest
 from .fleet_snapshot import FleetSnapshot
-from .fleet_snapshot_event import FleetSnapshotEvent
 from .fleet_telemetry_event import FleetTelemetryEvent
 from .fleet_upgrade_request import FleetUpgradeRequest
 from .float_parameter import FloatParameter
@@ -435,6 +438,11 @@ from .node_profile_change import NodeProfileChange
 from .node_profile_payload import NodeProfilePayload
 from .node_telemetry_payload import NodeTelemetryPayload
 from .observation_cause import ObservationCause
+from .observation_transfer_chunk import ObservationTransferChunk
+from .observation_transfer_complete import ObservationTransferComplete
+from .observation_transfer_error import ObservationTransferError
+from .observation_transfer_start import ObservationTransferStart
+from .observation_transfer_start_resource import ObservationTransferStartResource
 from .observed_assignment_state import ObservedAssignmentState
 from .operation_blocker import OperationBlocker
 from .operation_blocker_severity import OperationBlockerSeverity
@@ -448,6 +456,8 @@ from .operation_member_progress_activity_type_0 import OperationMemberProgressAc
 from .operation_owner_reference import OperationOwnerReference
 from .operation_progress import OperationProgress
 from .operation_progress_activity_type_0 import OperationProgressActivityType0
+from .operation_projection_issue import OperationProjectionIssue
+from .operation_projection_issue_field import OperationProjectionIssueField
 from .operation_recovery import OperationRecovery
 from .operation_recovery_action import OperationRecoveryAction
 from .operations_response import OperationsResponse
@@ -1036,6 +1046,8 @@ __all__ = (
     "FleetCacheSummary",
     "FleetChangeEvent",
     "FleetEnrollRequest",
+    "FleetFrameIssue",
+    "FleetFrameIssueReasonCode",
     "FleetLockHolder",
     "FleetLocksResponse",
     "FleetLogEntry",
@@ -1138,9 +1150,10 @@ __all__ = (
     "FleetProfileViewInstallationPolicy",
     "FleetProfileViewLabels",
     "FleetReenrollRequest",
+    "FleetRefreshEvent",
+    "FleetRefreshEventResetReason",
     "FleetRenameRequest",
     "FleetSnapshot",
-    "FleetSnapshotEvent",
     "FleetTelemetryEvent",
     "FleetUpgradeRequest",
     "FloatParameter",
@@ -1283,6 +1296,11 @@ __all__ = (
     "NodeProfilePayload",
     "NodeTelemetryPayload",
     "ObservationCause",
+    "ObservationTransferChunk",
+    "ObservationTransferComplete",
+    "ObservationTransferError",
+    "ObservationTransferStart",
+    "ObservationTransferStartResource",
     "ObservedAssignmentState",
     "OperationBlocker",
     "OperationBlockerSeverity",
@@ -1296,6 +1314,8 @@ __all__ = (
     "OperationOwnerReference",
     "OperationProgress",
     "OperationProgressActivityType0",
+    "OperationProjectionIssue",
+    "OperationProjectionIssueField",
     "OperationRecovery",
     "OperationRecoveryAction",
     "OperationsResponse",

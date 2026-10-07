@@ -237,6 +237,11 @@ from .recipe_jobs import (
 from .recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
+from .runtime_scan import (
+    RecipeRunObservationCheckpoint,
+    RecipeRunObservationCursorWitness,
+    RecipeRunObservationDirectoryStamp,
+)
 from .recipe_observations import (
     RecipeRunObservationsWire,
     RecipeRunObservationWire,
@@ -437,6 +442,9 @@ __all__ = [
     "RecipeReconcileResult",
     "RecipeReconciliationIdentity",
     "RecipeRunInspectionRequest",
+    "RecipeRunObservationCheckpoint",
+    "RecipeRunObservationCursorWitness",
+    "RecipeRunObservationDirectoryStamp",
     "RecipeRunObservationWire",
     "RecipeRunObservationsWire",
     "RecipeStartPayload",

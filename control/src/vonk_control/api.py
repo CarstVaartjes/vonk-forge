@@ -90,7 +90,7 @@ from .fleet_projection import (
     FleetSnapshot,
 )
 from .fleet_stream import parse_last_event_id
-from .fleet_stream_contract import FleetStreamEvent
+from .fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
 from .gateway_keys import (
     GatewayKeyService,
     install_gateway_key_routes,
@@ -107,6 +107,12 @@ from .model_cache_api import (
     install_model_operator_routes,
     register_model_cache_operation_provider,
 )
+from .observation_transfer import (
+    ObservationTransferRecord,
+    ObservationTransferResponse,
+    observation_openapi,
+    observation_response,
+)
 from .operation_api import (
     BoundedErrorResponse,
     ErrorContextResponse,
@@ -117,6 +123,7 @@ from .operation_api import (
     OperationApiServices,
     OperationDetailResponse,
     OperationOwnerReference,
+    OperationResponseTooLarge,
     OperationsResponse,
     ReadyzResponse,
     RequestValidationIssue,
@@ -124,6 +131,8 @@ from .operation_api import (
     _global_get_operation,
     _global_list_operations,
     bounded_error_responses,
+    bounded_operation_detail,
+    bounded_operations_response,
     decode_offset,
     job_response,
     operation_detail_response,
@@ -134,6 +143,10 @@ from .operator_projection_api import (
     FleetOperatorServices,
     build_fleet_operator_services,
     install_operator_projection_routes,
+)
+from .platform_observation_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
 )
 from .profile_application_cancel_api import install_profile_application_cancel_route
 from .recipe_builds import RecipeBuildService
@@ -527,7 +540,6 @@ def refresh_fleet_metrics(
 
 
 from .platform_observation import (
-    PlatformObservation,
     PlatformObserver,
     api_only_capture,
     api_only_observation,
@@ -571,7 +583,7 @@ def create_app(
         version="1.0",
         docs_url=None,
         redoc_url=None,
-        responses={422: {"model": RequestValidationProblem}},
+        responses=bounded_error_responses(422),
         lifespan=lifespan,
     )
     app.router.route_class = ControllerAPIRoute
@@ -938,20 +950,20 @@ def create_app(
 
     @app.get(
         "/api/platform",
-        response_model=PlatformObservation,
+        response_class=ObservationTransferResponse,
+        response_model=None,
         operation_id="getPlatformObservation",
-        responses=bounded_error_responses(401, 503),
+        responses={
+            200: {"model": ObservationTransferRecord},
+            **bounded_error_responses(401, 503),
+        },
+        openapi_extra=observation_openapi("PlatformObservation"),
     )
     def platform_observation(
         _actor: Actor = authenticated_actor,
-    ) -> PlatformObservation | Response:
-        from .platform_observation_errors import (
-            ObservationCaptureUnavailable,
-            observation_capture_unavailable_response,
-        )
-
+    ) -> ObservationTransferResponse | Response:
         try:
-            return (
+            observation = (
                 api_only_observation()
                 if platform_observer is None
                 else platform_observer.read()
@@ -960,6 +972,7 @@ def create_app(
             return observation_capture_unavailable_response(
                 error, operation="getPlatformObservation", endpoint="/api/platform"
             )
+        return observation_response(observation, resource="platform")
 
     @app.get("/api/healthz", response_model=HealthzResponse)
     def healthz() -> HealthzResponse:
@@ -996,12 +1009,17 @@ def create_app(
                 "model": FleetStreamEvent,
                 "description": (
                     "Durable Fleet event stream. The schema describes the JSON "
-                    "data in each snapshot, telemetry, or change SSE frame."
+                    "data in each refresh notice, telemetry, or change SSE frame. "
+                    "A refresh notice requires a verified complete Fleet read."
                 ),
             },
             **bounded_error_responses(400, 401, 503),
         },
-        openapi_extra={"x-vonk-streaming-transport": True},
+        openapi_extra={
+            "x-vonk-streaming-transport": True,
+            "x-vonk-response-frame-max-bytes": MAX_CONTROL_DOCUMENT_BYTES,
+            "x-vonk-sse-events": FLEET_SSE_EVENTS,
+        },
         operation_id="streamFleetEvents",
     )
     async def fleet_event_stream(
@@ -1108,6 +1126,7 @@ def create_app(
         response_model=OperationsResponse,
         responses=bounded_error_responses(401, 422, 503),
         operation_id="listOperations",
+        openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def operations_view(
         cursor: str | None = Query(default=None, max_length=512),
@@ -1150,17 +1169,24 @@ def create_app(
                 status_code=503, detail="operation projection unavailable"
             ) from None
         items = [activity_detail(item, tolerate_unreadable=True) for item in page.items]
-        return OperationsResponse(
-            operations=items,
-            next_cursor=page.next_cursor,
-            total=page.total,
-        )
+        try:
+            return bounded_operations_response(
+                page,
+                items,
+                cursors=operations.cursor_codec or cursor_codec,
+                state=operation_state,
+                node_id=node_id,
+                request_id=request_id,
+            )
+        except OperationResponseTooLarge as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
 
     @app.get(
         "/api/operations/{operation_id}",
         response_model=OperationDetailResponse,
         responses=bounded_error_responses(401, 404, 503),
         operation_id="getOperation",
+        openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def operation_view(
         operation_id: str = ApiPath(min_length=1, max_length=128),
@@ -1179,7 +1205,11 @@ def create_app(
                 status_code=503, detail="operation projection unavailable"
             ) from None
         try:
-            return activity_detail(item, tolerate_unreadable=True)
+            return bounded_operation_detail(
+                activity_detail(item, tolerate_unreadable=True)
+            )
+        except OperationResponseTooLarge as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
         except BoundedJSONError as error:
             raise HTTPException(status_code=503, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):
@@ -1367,7 +1397,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     visual_fleet_stream = FleetStream(
         fleet_event_repository,
         telemetry_repository,
-        visual_fleet,
         clock=clock,
     )
     metrics = MetricsRegistry()

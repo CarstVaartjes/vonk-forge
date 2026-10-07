@@ -33,10 +33,10 @@ class Jobs:
 
 
 class HttpResponse:
-    def __init__(self, status: int, content: bytes) -> None:
+    def __init__(self, status: int, content: bytes, media_type: str) -> None:
         self.status = status
         self.headers = Message()
-        self.headers["Content-Type"] = "application/json"
+        self.headers["Content-Type"] = media_type
         self._body = io.BytesIO(content)
 
     def __enter__(self) -> Self:
@@ -83,7 +83,9 @@ def test_platform_worker_fault_repair_through_authenticated_native_cli(
     def opener(request, timeout):
         assert timeout <= 15
         response = peer.get("/api/platform", headers=dict(request.header_items()))
-        return HttpResponse(response.status_code, response.content)
+        return HttpResponse(
+            response.status_code, response.content, response.headers["content-type"]
+        )
 
     client = ControlClient("https://control.invalid", token_path, opener=opener)
     monkeypatch.setattr(cli.ControlClient, "from_environment", lambda: client)

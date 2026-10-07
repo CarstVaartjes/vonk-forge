@@ -259,6 +259,29 @@ def test_ending_inventory_requires_a_later_fresh_operation():
     assert not scan_source(helper, path="test_service.py", mode="tests")
 
 
+def test_sqlalchemy_hook_cleanup_is_not_a_service_lifecycle_ending():
+    for imported, call in (
+        ("from sqlalchemy import event", "event.remove"),
+        ("from sqlalchemy import event as hooks", "hooks.remove"),
+        ("import sqlalchemy as sa", "sa.event.remove"),
+        ("from sqlalchemy.event import remove", "remove"),
+    ):
+        source = f"{imported}\ndef test_hook():\n    {call}(engine, 'before_cursor_execute', deny)"
+        assert not scan_source(source, path="test_hook.py", mode="tests")
+        assert scan_source(
+            source + "\n    service.remove(operation)",
+            path="test_hook.py",
+            mode="tests",
+        )
+    for source in (
+        "def test_hook():\n    event.remove(operation)",
+        "from sqlalchemy import event\ndef test_hook(event):\n    event.remove(operation)",
+        "from sqlalchemy import event\ndef test_hook():\n    event = service\n    event.remove(operation)",
+        "from sqlalchemy import event\nevent = service\ndef test_hook():\n    event.remove(operation)",
+    ):
+        assert scan_source(source, path="test_hook.py", mode="tests")
+
+
 def test_builtin_raise_inventory_is_report_only_and_excludes_custom_classes():
     assert scan_source(
         "raise RuntimeError('lost response')", path="owner.py", mode="raises"
@@ -267,3 +290,66 @@ def test_builtin_raise_inventory_is_report_only_and_excludes_custom_classes():
     assert not scan_source(
         "raise PermissionDenied('revoked')", path="owner.py", mode="raises"
     )
+
+
+def test_resource_read_refusal_requires_canonical_owner_handler():
+    """A resource exception cannot hide a generic damaged-row refusal."""
+    source = (
+        "from .operation_api import OperationResponseTooLarge as TooLarge\n"
+        "@router.get('/operations')\n"
+        "def observe():\n"
+        "    try:\n        project()\n"
+        "    except TooLarge:\n        raise HTTPException(status_code=503)\n"
+    )
+    sites = scan_source(source, path="api.py", mode="reads")
+    assert [site.kind for site in sites] == ["get-resource-refusal"]
+    for changed in (
+        source.replace(".operation_api", ".unrelated"),
+        source.replace("except TooLarge:", "except ValueError:"),
+        source.replace("@router", "class TooLarge(Exception): pass\n@router"),
+    ):
+        assert [
+            site.kind for site in scan_source(changed, path="api.py", mode="reads")
+        ] == ["get-refusal"]
+    doc = {
+        "schema": 1,
+        "debt": [],
+        "exceptions": [
+            {
+                "path": "api.py",
+                "function": "observe",
+                "kind": "get-resource-refusal",
+                "count": 1,
+                "reason": "resource-bound",
+                "justification": "Exact owning reader byte allocation after optional projections are exhausted.",
+            }
+        ],
+    }
+    assert not evaluate_gate(sites, doc)
+    assert evaluate_gate(
+        scan_source(
+            source.replace("except TooLarge:", "except ValueError:"),
+            path="api.py",
+            mode="reads",
+        ),
+        doc,
+    )
+
+
+def test_compose_embedded_shell_requires_a_bound_in_the_executed_loop():
+    from .principle_guards import scan_compose_shell
+
+    source = """services:
+  consumer:
+    entrypoint: [/bin/sh, -c, 'until [ -f /assets/ready ]; do sleep 1; done']
+    environment: {COMMENT: timeout}
+"""
+    assert scan_compose_shell(source, path="compose.yaml")
+    assert scan_compose_shell(
+        source.replace("do sleep 1", "do echo timeout; sleep 1"), path="compose.yaml"
+    )
+    bounded = source.replace(
+        "do sleep 1; done",
+        'do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then exit 1; fi; sleep 1; done',
+    )
+    assert not scan_compose_shell(bounded, path="compose.yaml")

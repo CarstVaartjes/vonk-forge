@@ -193,3 +193,165 @@ def test_an_observed_phase_that_passes_leaves_its_evidence_in_the_report(
     (record,) = lane.evidence.observed
     assert record["status"] == "passed"
     assert str(record["image_digest"]).startswith("sha256:")
+
+
+HISTORICAL_CLEANUP_SOURCE = "3d0bc507c4917f7d41f0938d29c7a64b26b8d0ea"
+CLEANUP_ID = "11111111-1111-4111-8111-111111111111"
+STOP_ID = "22222222-2222-4222-8222-222222222222"
+REMOVE_ID = "33333333-3333-4333-8333-333333333333"
+RUN_ID = "44444444-4444-4444-8444-444444444444"
+INSTALLATION_ID = "55555555-5555-4555-8555-555555555555"
+
+
+def _historical_cleanup() -> tuple[carry.UpgradeCarryLifecycle, dict]:
+    """Authored receipt in the actual identical baseline/candidate schema.
+
+    This is a schema/semantic boundary proof, not a captured physical receipt;
+    the real hosted carry lane must still complete its producer effects.
+    """
+    from tests.acceptance.controller_contract import ControllerContract
+
+    fixture = json.loads(
+        (
+            Path(__file__).parent / "fixtures/historical-profile-cleanup-contracts.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert {entry["source_sha"] for entry in fixture["provenance"]} == {
+        HISTORICAL_CLEANUP_SOURCE,
+        "f8a65ee9eeb6ab82e3e31004fcc159140f5b2b44",
+    }
+    contract = ControllerContract(
+        fixture["openapi"], label="published historical source"
+    )
+    release = carry.ReleaseInput(
+        generation="a" * 64,
+        source_sha=HISTORICAL_CLEANUP_SOURCE,
+        caddyfile="",
+        release=Path("release.json"),
+        signature=Path("release.sig"),
+        overlay=Path("overlay.yml"),
+        version="1.0.0",
+        package_version="1.0.0",
+        contract=contract,
+    )
+    lane = _lane([])
+    lane.baseline = release
+    lane.candidate = release
+    lane.controller_generation = release.generation
+    children = [
+        {
+            "operation_id": STOP_ID,
+            "kind": "stop",
+            "state": "succeeded",
+            "result": {
+                "run_switch_operation_id": STOP_ID,
+                "run_switch": {"phase_results": [{"phase": "stop", "run_id": RUN_ID}]},
+            },
+        },
+        {
+            "operation_id": REMOVE_ID,
+            "kind": "cleanup",
+            "state": "succeeded",
+            "result": {
+                "run_switch_operation_id": REMOVE_ID,
+                "run_switch": {
+                    "phase_results": [
+                        {"phase": "uninstall", "installation_id": INSTALLATION_ID},
+                        {
+                            "phase": "final_verify",
+                            "installation_id": INSTALLATION_ID,
+                            "final_verified": True,
+                            "removed": True,
+                            "active_runs": 0,
+                            "installation_state": "uninstalled",
+                        },
+                    ]
+                },
+            },
+        },
+    ]
+    result = {"children": children, "assignment_ids": []}
+    application = {
+        "id": CLEANUP_ID,
+        "request_key": CLEANUP_ID,
+        "profile_id": CLEANUP_ID,
+        "profile_digest": "a" * 64,
+        "plan_digest": "b" * 64,
+        "state": "succeeded",
+        "current_step": 1,
+        "total_steps": 1,
+        "current_operation_id": None,
+        "status_reason": None,
+        "created_at": "2026-10-07T00:00:00Z",
+        "updated_at": "2026-10-07T00:00:01Z",
+        "result": {"changed": True, "completed_steps": 1},
+        "progress": {
+            "step_results": {
+                "0": {"operation_id": CLEANUP_ID, "kind": "switch", "result": result}
+            },
+            "switch_adapter": {
+                "child_id": CLEANUP_ID,
+                "scope_node_ids": [],
+                "assignment_ids": [],
+                "assignments": [],
+                "queue": [
+                    {"kind": "stop", "id": RUN_ID},
+                    {"kind": "cleanup", "id": INSTALLATION_ID},
+                ],
+                "position": 2,
+                "actor": "acceptance",
+                "request_id": CLEANUP_ID,
+                "active_operation_id": None,
+                "active_kind": None,
+                "children": children,
+                "state": "succeeded",
+                "result": result,
+            },
+        },
+    }
+    return lane, application
+
+
+def test_cleanup_uses_the_receipt_producers_historical_schema() -> None:
+    from tests.acceptance.test_spark_lifecycle import (
+        _validate_canary_cleanup_application,
+    )
+
+    lane, application = _historical_cleanup()
+    with pytest.raises(LifecycleError, match="cleanup application is invalid"):
+        _validate_canary_cleanup_application(
+            application, installation_ids=[INSTALLATION_ID], run_id=RUN_ID
+        )
+    lane._validate_cleanup_application(
+        application, installation_ids=[INSTALLATION_ID], run_id=RUN_ID
+    )
+
+
+@pytest.mark.parametrize(
+    "damage", ["required", "foreign-child", "foreign-run", "unverified"]
+)
+def test_historical_schema_does_not_weaken_cleanup_evidence(damage: str) -> None:
+    from tests.acceptance.controller_contract import ContractSkew
+
+    lane, application = _historical_cleanup()
+    children = application["progress"]["switch_adapter"]["result"]["children"]
+    if damage == "required":
+        del application["request_key"]
+    elif damage == "foreign-child":
+        children[0]["result"]["run_switch_operation_id"] = CLEANUP_ID
+    elif damage == "foreign-run":
+        children[0]["result"]["run_switch"]["phase_results"][0]["run_id"] = CLEANUP_ID
+    else:
+        children[1]["result"]["run_switch"]["phase_results"][1]["final_verified"] = (
+            False
+        )
+    reason = {
+        "required": r"source schema.*\(required\)",
+        "foreign-child": "receipt identity differs",
+        "foreign-run": "stop receipt is incomplete",
+        "unverified": "removal receipt is incomplete",
+    }[damage]
+    with pytest.raises((LifecycleError, ContractSkew), match=reason):
+        lane._validate_cleanup_application(
+            application, installation_ids=[INSTALLATION_ID], run_id=RUN_ID
+        )

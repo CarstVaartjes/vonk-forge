@@ -20,6 +20,7 @@ if TYPE_CHECKING:
   from ..models.operation_failure_evidence import OperationFailureEvidence
   from ..models.operation_owner_reference import OperationOwnerReference
   from ..models.operation_progress import OperationProgress
+  from ..models.operation_projection_issue import OperationProjectionIssue
   from ..models.operation_recovery import OperationRecovery
 
 
@@ -48,6 +49,7 @@ class OperationDetailResponse:
             owner (None | OperationOwnerReference | Unset):
             parent_id (None | str | Unset):
             progress (None | OperationProgress | Unset):
+            projection_issues (list[OperationProjectionIssue] | None | Unset):
             recovery (None | OperationRecovery | Unset):
             status_reason (None | str | Unset):
             updated_at (None | str | Unset):
@@ -67,6 +69,7 @@ class OperationDetailResponse:
     owner: None | OperationOwnerReference | Unset = UNSET
     parent_id: None | str | Unset = UNSET
     progress: None | OperationProgress | Unset = UNSET
+    projection_issues: list[OperationProjectionIssue] | None | Unset = UNSET
     recovery: None | OperationRecovery | Unset = UNSET
     status_reason: None | str | Unset = UNSET
     updated_at: None | str | Unset = UNSET
@@ -84,6 +87,7 @@ class OperationDetailResponse:
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         from ..models.operation_owner_reference import OperationOwnerReference # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
+        from ..models.operation_projection_issue import OperationProjectionIssue # noqa: PLC0415
         from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
         attempt = self.attempt
 
@@ -164,6 +168,19 @@ class OperationDetailResponse:
         else:
             progress = self.progress
 
+        projection_issues: list[dict[str, Any]] | None | Unset
+        if isinstance(self.projection_issues, Unset):
+            projection_issues = UNSET
+        elif isinstance(self.projection_issues, list):
+            projection_issues = []
+            for projection_issues_type_0_item_data in self.projection_issues:
+                projection_issues_type_0_item = projection_issues_type_0_item_data.to_dict()
+                projection_issues.append(projection_issues_type_0_item)
+
+
+        else:
+            projection_issues = self.projection_issues
+
         recovery: dict[str, Any] | None | Unset
         if isinstance(self.recovery, Unset):
             recovery = UNSET
@@ -211,6 +228,8 @@ class OperationDetailResponse:
             field_dict["parent_id"] = parent_id
         if progress is not UNSET:
             field_dict["progress"] = progress
+        if projection_issues is not UNSET:
+            field_dict["projection_issues"] = projection_issues
         if recovery is not UNSET:
             field_dict["recovery"] = recovery
         if status_reason is not UNSET:
@@ -232,6 +251,7 @@ class OperationDetailResponse:
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         from ..models.operation_owner_reference import OperationOwnerReference # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
+        from ..models.operation_projection_issue import OperationProjectionIssue # noqa: PLC0415
         from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
         d = dict(src_dict)
         attempt = d.pop("attempt")
@@ -399,6 +419,31 @@ class OperationDetailResponse:
         progress = _parse_progress(d.pop("progress", UNSET))
 
 
+        def _parse_projection_issues(data: object) -> list[OperationProjectionIssue] | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, list):
+                    raise TypeError()
+                projection_issues_type_0 = []
+                _projection_issues_type_0 = data
+                for projection_issues_type_0_item_data in (_projection_issues_type_0):
+                    projection_issues_type_0_item = OperationProjectionIssue.from_dict(projection_issues_type_0_item_data)
+
+
+
+                    projection_issues_type_0.append(projection_issues_type_0_item)
+
+                return projection_issues_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(list[OperationProjectionIssue] | None | Unset, data)
+
+        projection_issues = _parse_projection_issues(d.pop("projection_issues", UNSET))
+
+
         def _parse_recovery(data: object) -> None | OperationRecovery | Unset:
             if data is None:
                 return data
@@ -454,6 +499,7 @@ class OperationDetailResponse:
             owner=owner,
             parent_id=parent_id,
             progress=progress,
+            projection_issues=projection_issues,
             recovery=recovery,
             status_reason=status_reason,
             updated_at=updated_at,

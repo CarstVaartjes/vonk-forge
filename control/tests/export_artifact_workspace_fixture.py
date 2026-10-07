@@ -15,12 +15,12 @@ from vonk_control.artifact_job_api import ArtifactJobCreate
 from vonk_control.artifact_jobs import ArtifactJobListResponse
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
-from vonk_control.library_contract import LibraryRunSummary
-from vonk_control.models import CatalogDocumentRevision, RecipeRun, RunNode
+from vonk_control.fleet_projection import FleetProjection, RunPresence
+from vonk_control.models import CatalogDocumentRevision, RecipeRun
 from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts import RecipeDefinition
 
-from tests.test_artifact_jobs import _mapping, running_artifact_service
+from tests.test_artifact_jobs import NOW, _mapping, running_artifact_service
 from tests.test_platform_observation import Jobs
 
 INITIAL = 9_007_199_254_740_993
@@ -57,22 +57,16 @@ def export(output: Path) -> None:
             definition = RecipeDefinition.model_validate_json(
                 canonical_message(revision.document), strict=True
             )
-            members = session.scalars(
-                select(RunNode).where(RunNode.run_id == run_id)
-            ).all()
-            healthy_count = sum(member.state == "running" for member in members)
-            observed_run = LibraryRunSummary.model_validate(
-                {
-                    "run_id": run.id,
-                    "installation_id": run.installation_id,
-                    "recipe_revision_id": revision.id,
-                    "state": run.state,
-                    "route_state": run.route_state,
-                    "healthy_rank_count": healthy_count,
-                    "expected_rank_count": len(members),
-                    "healthy": bool(members) and healthy_count == len(members),
-                }
-            )
+        projection = FleetProjection(sessions, clock=lambda: NOW)
+        observed_fleet = projection.read()
+        assert any(
+            isinstance(presence, RunPresence)
+            and presence.run_id == run_id
+            and presence.recipe_revision_id == revision.id
+            and presence.run_state == "running"
+            for node in observed_fleet.nodes
+            for presence in node.loaded
+        )
         compiled = compile_artifact_contract(definition, "image-job")
         assert compiled.input.required is False
         assert compiled.input.slots == ()
@@ -91,9 +85,13 @@ def export(output: Path) -> None:
         codec = TokenCodec(b"k" * 32)
         token = codec.issue(Actor("operator", "operator"), ttl_seconds=100, now=0)
         with TestClient(
-            create_app(jobs=Jobs(), tokens=codec, now=lambda: 10),
+            create_app(
+                jobs=Jobs(), tokens=codec, now=lambda: 10, fleet_projection=projection
+            ),
             headers={"Authorization": f"Bearer {token}"},
         ) as peer:
+            fleet_response = peer.get("/api/fleet")
+            assert fleet_response.status_code == 200, fleet_response.text
             refusal = peer.post(
                 f"/api/recipe/runs/{run_id}/artifact-jobs",
                 content=canonical_message(expected_request),
@@ -105,7 +103,9 @@ def export(output: Path) -> None:
         assert refusal.status_code == 503, refusal.text
         fixture = {
             "definition_json": canonical_message(definition).decode(),
-            "run_json": canonical_message(observed_run).decode(),
+            "run_id": run_id,
+            "fleet_body": fleet_response.text,
+            "fleet_media_type": fleet_response.headers["content-type"],
             "revision_id": revision.id,
             "content_sha256": revision.content_digest,
             "capabilities_json": canonical_message(service.capabilities()).decode(),

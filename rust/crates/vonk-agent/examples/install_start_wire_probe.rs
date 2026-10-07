@@ -65,12 +65,8 @@ fn runtime_plan(
 }
 
 fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
-    // Keep this explicit even though RecipeOperationRequest::parse validates
-    // the claim too: the wire probe must exercise the authenticated claim
-    // boundary before touching the operation payload.
-    claim
-        .validate()
-        .map_err(|_| "agent claim is invalid".to_owned())?;
+    // The production parser validates this exact claim before touching its
+    // payload. Exercise that boundary once, as the normal worker does.
     let request = RecipeOperationRequest::parse(claim)
         .map_err(|_| "recipe operation payload is invalid".to_owned())?;
     let result = match request {
@@ -83,9 +79,9 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
         }
         RecipeOperationRequest::Start(request) => {
             let spec = request.compiled_execution_plan.clone();
-            spec.validate()
-                .map_err(|_| "compiled execution plan is invalid".to_owned())?;
-            // Projecting the runtime plan still proves the launch is derivable.
+            // The production OCI projection validates this same immutable spec
+            // before building arguments; do not repeat its full document and
+            // per-artifact validation immediately before that boundary.
             let plan = runtime_plan(&request, &spec)?;
             let _ = runtime_arguments_for_plan(&plan, &plan.main);
             recipe_start_success(&request)

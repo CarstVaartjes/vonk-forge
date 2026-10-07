@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import stat
@@ -636,6 +637,45 @@ def assert_repeatable(first: Path, second: Path) -> None:
         raise AcceptanceError("two clean NAS runs produced different secret contracts")
 
 
+def assert_installer_answer_bindings(
+    bundle: Path,
+    *,
+    nas_ip: str,
+    tailnet_suffix: str,
+    oauth_client_id: str,
+    oauth_client_secret: str,
+    upstream_key: str,
+    hermes: bool,
+    control_service: str,
+    hermes_dashboard_service: str,
+) -> None:
+    """Check sequential answers at the real installer's persisted output boundary."""
+    del hermes_dashboard_service  # derived, not an installer answer
+    environment = parsed_environment(bundle)
+    expected_environment = {
+        "NAS_LAN_IP": nas_ip,
+        "VONK_CONTROL_HOSTNAME": tailscale_service_hostname(
+            control_service, tailnet_suffix
+        ),
+    }
+    for name, expected in expected_environment.items():
+        if environment.get(name) != expected:
+            raise AcceptanceError(f"installer answer was not bound to {name}")
+    expected_profiles = "secure-remote,hermes" if hermes else "secure-remote"
+    if shlex.split(environment.get("COMPOSE_PROFILES", "")) != [expected_profiles]:
+        raise AcceptanceError("installer answers did not select the requested profiles")
+    for name, answer in {
+        "tailscale-oauth-client-id": oauth_client_id,
+        "tailscale-oauth-client-secret": oauth_client_secret,
+        "litellm-upstream-key": upstream_key,
+        "hf-token": "",
+    }.items():
+        expected = f"{answer}\n".encode() if answer else b""
+        if (bundle / "secrets" / name).read_bytes() != expected:
+            # Identify the owner without printing the supplied or observed secret.
+            raise AcceptanceError(f"installer answer was not bound to secret {name}")
+
+
 def assert_tailscale_secret_group(bundle: Path) -> None:
     """The capability-free Tailscale services read secrets through group_add.
 
@@ -683,14 +723,23 @@ def verify_deployed_controller_identity(bundle: Path) -> None:
 import json, time, urllib.request
 from dataclasses import asdict
 from cluster_profiles.runtime_identity import packaged_runtime_identity
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from cluster_profiles.observation_transfer_reader import receive_observation
+from vonk_control.observation_transfer import OBSERVATION_MEDIA_TYPE, ObservationTransferRecord
+from vonk_control.platform_observation import PlatformObservation
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.settings import Settings
 identity = packaged_runtime_identity()
 token = TokenCodec(Settings.from_env_and_secrets().token_signing_key).issue(Actor("acceptance-runtime", "viewer"), ttl_seconds=30, now=int(time.time()))
-request = urllib.request.Request("http://127.0.0.1:8000/api/platform", headers={"Authorization": "Bearer " + token})
+request = urllib.request.Request("http://127.0.0.1:8000/api/platform", headers={"Authorization": "Bearer " + token, "Accept": OBSERVATION_MEDIA_TYPE})
+def validate_record(value):
+    ObservationTransferRecord.model_validate(value)
+def validate_payload(value):
+    return PlatformObservation.model_validate_json(json.dumps(value)).model_dump(mode="json")
 with urllib.request.urlopen(request, timeout=10) as response:
     assert response.status == 200
-    observation = json.loads(response.read(2000000))
+    assert response.headers.get_content_type() == OBSERVATION_MEDIA_TYPE
+    observation = receive_observation(response, resource="platform", record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES, validate_record=validate_record, validate_payload=validate_payload)
 print(json.dumps({"package": asdict(identity), "observation": observation}))
 """
     result = run(
@@ -1900,6 +1949,7 @@ def main() -> None:
             child_environment=child_environment,
             responses=nas_responses(**common, hermes=False),
         )
+        assert_installer_answer_bindings(first, **common, hermes=False)
         if tailscale_mode == "full":
             assert_tailscale_secret_group(first)
         first_secrets = secret_snapshot(first)
@@ -1923,6 +1973,8 @@ def main() -> None:
             child_environment=child_environment,
             responses=nas_responses(**common, hermes=True),
         )
+        assert_installer_answer_bindings(second, **common, hermes=False)
+        assert_installer_answer_bindings(hermes, **common, hermes=True)
         assert_repeatable(first, second)
         if tailscale_mode == "full":
             for bundle in (first, hermes):

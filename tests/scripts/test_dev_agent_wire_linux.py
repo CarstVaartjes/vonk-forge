@@ -112,3 +112,67 @@ def test_local_lane_refuses_a_base_image_pinned_by_tag_alone(tmp_path: Path) -> 
     problems = module.check_lane_consistency(root)
 
     assert any(module.CI_RUNNER in problem for problem in problems), problems
+
+
+def test_stream_preserves_split_unicode_and_output_without_newline(capsys):
+    module = _module()
+    code, output = module.stream(
+        [
+            sys.executable,
+            "-c",
+            "import os; os.write(1, b'\\xe2'); os.write(1, b'\\x82\\xac tail')",
+        ],
+        timeout=2,
+    )
+    assert code == 0 and output == "€ tail"
+    assert capsys.readouterr().out == output
+
+
+def test_stream_times_out_a_silent_child_and_reaps_it(tmp_path):
+    import subprocess
+
+    import pytest
+
+    module = _module()
+    pidfile = tmp_path / "pid"
+    with pytest.raises(subprocess.TimeoutExpired):
+        module.stream(
+            [
+                sys.executable,
+                "-c",
+                "import os,sys,time; from pathlib import Path; Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)",
+                str(pidfile),
+            ],
+            timeout=0.2,
+        )
+    assert pidfile.exists()
+    with pytest.raises(ProcessLookupError):
+        module.os.kill(int(pidfile.read_text()), 0)
+
+
+def test_container_timeout_removes_only_owned_scope_and_preserves_log(
+    tmp_path, monkeypatch
+):
+    import subprocess
+
+    import pytest
+
+    module = _module()
+    commands = []
+
+    def expired(command):
+        commands.append(command)
+        raise subprocess.TimeoutExpired(command, 1200, output="compiler progress\n")
+
+    def removed(command):
+        commands.append(command)
+        return 0, ""
+
+    monkeypatch.setattr(module, "stream", expired)
+    monkeypatch.setattr(module, "capture", removed)
+    log = tmp_path / "lane.log"
+    with pytest.raises(module.LaneError, match="partial output"):
+        module.stream_owned_container(["docker", "run", "--rm", "image"], log)
+    name = commands[0][commands[0].index("--name") + 1]
+    assert commands[1] == ["docker", "rm", "--force", name]
+    assert log.read_text() == "compiler progress\n"

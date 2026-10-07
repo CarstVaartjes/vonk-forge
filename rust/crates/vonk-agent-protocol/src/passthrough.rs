@@ -35,8 +35,8 @@ impl WireDocument {
     }
 
     /// Validate against the named contract model, as its deserializer would.
-    pub fn validate_as(mut self, model: &str) -> Result<(), String> {
-        crate::wire_schema::validate_and_materialize(model, &mut self.0)
+    pub fn validate_as(self, model: &str) -> Result<(), String> {
+        crate::wire_schema::validate_constructed_document(model, &self.0)
     }
 
     /// Parse through the type's generated deserializer.
