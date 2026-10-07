@@ -979,12 +979,9 @@ class RunSwitchTargetTransferResult(_RunSwitchPhaseBase):
     assignments: dict[NodeId, NodeDistributionAssignment] = Field(min_length=1)
 
 
-class RunSwitchTargetTransferEvidenceResult(_RunSwitchPhaseBase):
+class RunSwitchTargetTransferEvidenceResult(ArtifactVerificationEvidence):
     phase: Literal["transfer"]
     subphase: Literal["target-copy"]
-    node_id: NodeId
-    downloaded_bytes: int | None = Field(default=None, ge=0)
-    copied_bytes: int | None = Field(default=None, ge=0)
 
 
 class RunSwitchCachedTransferResult(_RunSwitchPhaseBase):

@@ -3295,8 +3295,10 @@ class SparkLifecycle:
                 evidence = {
                     "state": typed.state,
                     "attempt": typed.attempt,
-                    "progress": typed.progress.model_dump(
-                        mode="json", exclude_none=True
+                    "progress": (
+                        None
+                        if typed.progress is None
+                        else typed.progress.model_dump(mode="json", exclude_none=True)
                     ),
                     "failure": (
                         None

@@ -14,6 +14,7 @@ from typing import Any, cast
 
 import pytest
 from vonk_agent_protocol import (
+    RecipeStopResult,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -126,7 +127,7 @@ def test_direct_agent_completion_never_retries_security(monkeypatch):
 
     monkeypatch.setattr(service, "_finish", finish)
     with pytest.raises(SecurityRefusalError):
-        service.succeed("exact-fence", {})
+        service.succeed("exact-fence", RecipeStopResult.model_validate({}))
     assert len(calls) == 1
 
 

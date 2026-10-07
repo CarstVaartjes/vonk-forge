@@ -51,6 +51,7 @@ def park_for_operator(
 
     from vonk_control.agent_jobs import (
         AgentJobService,
+        _document,  # pyright: ignore[reportPrivateUsage]
         _failure_result,  # pyright: ignore[reportPrivateUsage]
     )
     from vonk_control.recovery_policy import FailureKind
@@ -66,11 +67,13 @@ def park_for_operator(
         operation = session.get(AgentOperation, attempt.operation_id)
         assert operation is not None
         attempt.state = "waiting-for-operator"
-        attempt.result = _failure_result(
-            "operation_requires_operator",
-            reason,
-            uncertain=True,
-            failure_kind=FailureKind.INVALID_AUTHORITY,
+        attempt.result = _document(
+            _failure_result(
+                "operation_requires_operator",
+                reason,
+                uncertain=True,
+                failure_kind=FailureKind.INVALID_AUTHORITY,
+            )
         )
         operation.state = "waiting-for-operator"
         operation.next_action_at = None

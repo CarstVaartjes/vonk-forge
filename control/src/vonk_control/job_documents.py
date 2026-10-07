@@ -13,9 +13,17 @@ code enqueues into) keeps its document opaque: see :class:`GenericJobDocument`.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, ConfigDict, Field, JsonValue, StringConstraints
+from pydantic import (
+    AwareDatetime,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StringConstraints,
+    field_validator,
+)
 from vonk_agent_protocol import (
     OperationProgress,
     RecipeBuildCleanupRequest,
@@ -26,7 +34,6 @@ from vonk_agent_protocol import (
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.contracts import RecipeBuildRequest
-from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_forge_contracts import RecipeDefinition
 
@@ -36,7 +43,7 @@ from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure
 from .recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
 from .recipe_build_cancellation import RecipeBuildIntent
-from .recipe_image_availability_api import (
+from .recipe_image_availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )
@@ -134,8 +141,17 @@ class DistributedRecoveryMarker(_Document):
 
     schema_version: Literal[1]
     failed_rank: int = Field(ge=0)
-    deadline: AwareDatetime
+    # Request identities bind the timestamp spelling as well as its instant.
+    # JSON's date-time format does not authorize rewriting a persisted string.
+    deadline: Annotated[str, Field(json_schema_extra={"format": "date-time"})]
     start_phases: list[list[RecoveryStartItem]] | None = None
+
+    @field_validator("deadline")
+    @classmethod
+    def aware_deadline(cls, value: str) -> str:
+        if datetime.fromisoformat(value).utcoffset() is None:
+            raise ValueError("recovery deadline must include a timezone")
+        return value
 
 
 class _RecipeParent(_Document):
@@ -375,68 +391,6 @@ class AvailabilityJobResult(_Document):
     image_bytes: int = Field(ge=1)
     build_id: str | None = None
     model_child: AvailabilityModelChild | None = None
-
-
-# --------------------------------------------------------- agent upgrade rollout
-
-_UPGRADE_URL = (
-    r"^https://install\.vonkforge\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}"
-    r"/vonk-forge-agent\.deb$"
-)
-
-
-class AgentUpgradePackage(_Document):
-    """The signed package a rollout installs on every Spark it targets."""
-
-    architecture: Literal["linux-arm64"]
-    package_bytes: int = Field(ge=1, le=1024**3)
-    package_sha256: DigestText
-    package_signature: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{128}$")]
-    package_url: Annotated[str, StringConstraints(pattern=_UPGRADE_URL)]
-    package_version: Annotated[
-        str, StringConstraints(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
-    ]
-    schema_version: Literal[1]
-    target_binary_digest: DigestText
-    target_build_digest: Annotated[
-        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ]
-
-
-class AgentUpgradeRepairManifest(_Document):
-    """The repair capsule's authority, bound to one Spark and the package."""
-
-    authority_sha256: DigestText
-    kind: Literal["agent-upgrade-repair"]
-    node_id: Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
-    package: AgentUpgradePackage
-    schema_version: Literal[2]
-
-
-class AgentUpgradeRequestIntent(_Document):
-    """Which Sparks the operator asked for: all of them, or an explicit list."""
-
-    all: bool
-    selectors: list[Annotated[str, StringConstraints(min_length=1)]] | None = Field(
-        default=None, max_length=64
-    )
-
-
-class AgentUpgradeRolloutPayload(_Document):
-    """An upgrade rollout: the package, the order, and each Spark's rollback source."""
-
-    node_order: list[NodeText] = Field(min_length=1, max_length=64)
-    package: AgentUpgradePackage
-    request_intent: AgentUpgradeRequestIntent
-    sources: dict[NodeText, AgentPackageSource]
-    repair_manifest: AgentUpgradeRepairManifest | None = None
-
-
-class AgentUpgradeRolloutResult(_Document):
-    """What a rollout skipped, and the newer rollout that replaced it."""
-
-    skipped: dict[NodeText, str] | None = None
-    superseded_by: UuidText | None = None
 
 
 # --------------------------------------------------------- artifact distribution
