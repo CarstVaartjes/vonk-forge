@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import InstallationState, RunState, adopt_machine_state
@@ -55,7 +55,11 @@ from .library_contract import (
 )
 from .library_image_presence import ImageKey, ImagePresenceIndex
 from .machine_states import RUN_LIVE
-from .model_cache_contract import DIGEST_PATTERN, UUID_PATTERN
+from .model_cache_contract import (
+    DIGEST_PATTERN,
+    UUID_PATTERN,
+    ModelCacheOperationProgress,
+)
 from .models import (
     CatalogDocumentRevision,
     ModelCacheOperation,
@@ -538,7 +542,6 @@ class LibraryProjection:
         are large and grow with the catalog and the operation history; none of
         them is transferred or decoded here.
         """
-        operation_progress = ModelCacheOperation.progress
         operation_payload = ModelCacheOperation.payload
         with self._sessions() as session:
             cache_sets = session.execute(
@@ -556,11 +559,7 @@ class LibraryProjection:
                     ModelCacheOperation.artifact_set_sha256,
                     operation_payload["model_content_sha256"].as_json(),
                     operation_payload["recipe_revision_sha256"].as_json(),
-                    operation_progress[("measurement", "phase")].as_json(),
-                    operation_progress[("measurement", "completed_bytes")].as_json(),
-                    operation_progress[("measurement", "total_bytes")].as_json(),
-                    operation_progress["downloaded_bytes"].as_json(),
-                    operation_progress["expected_bytes"].as_json(),
+                    ModelCacheOperation.progress,
                 ).where(ModelCacheOperation.kind.in_(("download", "repair")))
             ).all()
             revisions = session.execute(
@@ -656,11 +655,7 @@ class LibraryProjection:
             artifact_set_sha256,
             payload_model_digest,
             payload_recipe_digest,
-            phase,
-            measured_completed,
-            measured_total,
-            downloaded_bytes,
-            expected_bytes,
+            stored_progress,
         ) in cache_operations:
             digest_values = {payload_model_digest, payload_recipe_digest}
             if artifact_set_sha256:
@@ -669,17 +664,22 @@ class LibraryProjection:
                     digest_values.update(
                         digest for digest in cache_set[1:3] if digest is not None
                     )
-            preparation = self._cache_progress(
-                operation_id,
-                state,
-                phase=phase,
-                completed=(
-                    measured_completed
-                    if measured_completed is not None
-                    else (downloaded_bytes if downloaded_bytes is not None else 0)
-                ),
-                total=measured_total if measured_total is not None else expected_bytes,
-            )
+            # Read complete JSON through the database JSON decoder. Numeric
+            # subpath extraction on SQLite converts wide integers to floats
+            # before Python can validate their canonical meaning.
+            try:
+                progress = ModelCacheOperationProgress.model_validate(stored_progress)
+            except ValidationError as error:
+                _note_unreadable("cache progress", operation_id, str(error))
+                preparation = None
+            else:
+                preparation = self._cache_progress(
+                    operation_id,
+                    state,
+                    phase=progress.measurement.phase,
+                    completed=progress.measurement.completed_bytes,
+                    total=progress.measurement.total_bytes,
+                )
             controller = (
                 "preparing"
                 if state in model_cache_states.LIVE
