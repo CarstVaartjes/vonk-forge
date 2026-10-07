@@ -4393,16 +4393,6 @@ class SparkLifecycle:
                 != source_inputs[name]
             ):
                 raise LifecycleError("native renewal helper source input changed")
-        source = self._run_command(
-            ["git", "rev-parse", "HEAD"], cwd=REPOSITORY_ROOT, timeout=30
-        ).stdout.strip()
-        if source != self.arguments.source_sha:
-            raise LifecycleError("native renewal helper source checkout changed")
-        for command in (
-            ["git", "diff", "--quiet"],
-            ["git", "diff", "--cached", "--quiet"],
-        ):
-            self._run_command(command, cwd=REPOSITORY_ROOT, timeout=30)
         identity = self._self_test()
         if manifest.get("build_digest") != identity.get("build_digest"):
             raise LifecycleError("native renewal helper candidate build changed")

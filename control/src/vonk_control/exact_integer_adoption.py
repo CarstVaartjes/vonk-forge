@@ -20,6 +20,7 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import DBAPIError
 
 from .exact_integer_storage import DecimalIntegerToken
 from .settings import DATABASE_WAIT_BUDGETS
@@ -456,6 +457,34 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
 
 
 def reconcile_exact_integer_schema(engine: Engine) -> None:
+    """Retry transient SQLite adoption failures after releasing the checkout.
+
+    Three transaction budgets and two short backoffs bound the whole request.
+    Each failed attempt rolls back and removes its progress callback before a
+    fresh checkout; integrity and contract refusals are never retried.
+    """
+    for attempt in range(3):
+        try:
+            _reconcile_exact_integer_schema_once(engine)
+            return
+        except DBAPIError as error:
+            code = getattr(error.orig, "sqlite_errorcode", None)
+            if (
+                not isinstance(error.orig, sqlite3.OperationalError)
+                or not isinstance(code, int)
+                or code & 0xFF
+                not in {
+                    sqlite3.SQLITE_INTERRUPT,
+                    sqlite3.SQLITE_BUSY,
+                    sqlite3.SQLITE_LOCKED,
+                }
+                or attempt == 2
+            ):
+                raise
+        time.sleep(0.1 * (attempt + 1))
+
+
+def _reconcile_exact_integer_schema_once(engine: Engine) -> None:
     """SQLite-only isolated startup entry; never nest in an active service tx.
 
     Foreign-key settings belong to this checked-out connection and are restored
@@ -501,6 +530,8 @@ def reconcile_exact_integer_schema(engine: Engine) -> None:
             adopt_exact_integer_columns(connection)
             connection.commit()
         except BaseException:
+            # An expired callback must not interrupt the rollback itself.
+            driver.set_progress_handler(None, 0)
             connection.rollback()
             raise
         finally:

@@ -358,7 +358,7 @@
     },
     {
       "path": "control/src/vonk_control/distribution.py",
-      "count": 8
+      "count": 3
     },
     {
       "path": "control/src/vonk_control/distribution_executor.py",
@@ -374,7 +374,7 @@
     },
     {
       "path": "control/src/vonk_control/execution_plan_service.py",
-      "count": 6
+      "count": 5
     },
     {
       "path": "control/src/vonk_control/fleet_profiles.py",

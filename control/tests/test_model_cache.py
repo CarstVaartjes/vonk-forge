@@ -4,7 +4,6 @@ import errno
 import hashlib
 import json
 import os
-from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -86,10 +85,6 @@ def _first_manifest_artifact(document: dict[str, object]) -> dict[str, object]:
     first = artifacts[0]
     assert isinstance(first, dict)
     return dict(first)
-
-
-def _distribution_object(item: Mapping[str, object]) -> Mapping[str, object]:
-    return require_mapping(item["distribution_object"], "distribution object")
 
 
 def _canonical_model(
@@ -1310,10 +1305,10 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     )
     assert {
         (
-            item["model_content_sha256"],
-            item["file_id"],
-            item["path"],
-            tuple(require_sequence(item["roles"], "artifact roles")),
+            item.model_content_sha256,
+            item.file_id,
+            item.path,
+            tuple(item.roles),
         )
         for item in receipts
     } == {
@@ -1321,9 +1316,9 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         (model_a, "tokenizer", "tokenizer.json", ("auxiliary",)),
     }
     assert all(
-        _distribution_object(item)["sha256"] == item["sha256"]
-        and _distribution_object(item)["bytes"] == item["bytes"]
-        and _distribution_object(item)["name"] == item["path"]
+        item.distribution_object.sha256 == item.sha256
+        and item.distribution_object.bytes == item.bytes
+        and item.distribution_object.name == item.path
         for item in receipts
     )
     assert (
@@ -1421,7 +1416,7 @@ def test_upstream_revision_downloads_only_new_files_and_reuses_the_rest(
     receipts = ModelCacheObjectSource.from_service(
         service
     ).verified_model_objects_for_set(second.artifact_set_sha256 or "")
-    assert {(item["model_content_sha256"], item["file_id"]) for item in receipts} == {
+    assert {(item.model_content_sha256, item.file_id) for item in receipts} == {
         (updated, "weights"),
         (updated, "config"),
         (updated, "tokenizer"),

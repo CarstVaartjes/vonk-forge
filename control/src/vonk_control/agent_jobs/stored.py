@@ -37,10 +37,16 @@ def column_is_document(row: object, column: str) -> bool:
 
 
 def column_message(row: object, column: str) -> bytes:
-    """Canonical bytes for exact receipt comparisons and digest verification.
+    """Validated stored bytes for exact receipt comparisons and digest verification.
+
+    Validation must not rewrite the accepted document: optional nulls and
+    timestamp spellings belong to its bound digest. Typed projections are for
+    semantic reads, not for reconstructing already accepted receipt bytes.
 
     A damaged column has no valid canonical bytes. The empty sentinel cannot
     match any accepted JSON document and is never stored or sent to an agent.
     """
     value = read_row_column(row, column)
-    return b"" if isinstance(value, Residue) else canonical_message(value)
+    return (
+        b"" if isinstance(value, Residue) else canonical_message(getattr(row, column))
+    )

@@ -1242,3 +1242,52 @@ def test_sqlite_weakened_owning_check_with_significant_literal_space_is_replaced
             ).one() == ("0", "0")
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("interruptions", [1, 3])
+def test_sqlite_interrupted_adoption_retries_without_poisoning_fresh_request(
+    legacy_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    interruptions: int,
+) -> None:
+    """Catches escaping an interrupt, endless retries or a poisoned new request."""
+    engine = legacy_engine
+    if engine.dialect.name != "sqlite":
+        pytest.skip("SQLite native progress interruption")
+    original = adoption_module.adopt_exact_integer_columns
+    calls = 0
+
+    def interrupt_once(connection: Connection) -> None:
+        nonlocal calls
+        calls += 1
+        if calls <= interruptions:
+            driver = connection.connection.driver_connection
+            assert isinstance(driver, sqlite3.Connection)
+            driver.set_progress_handler(lambda: 1, 1)
+            # A real native read fails, after BEGIN IMMEDIATE but before DDL.
+            connection.exec_driver_sql("SELECT name FROM sqlite_master").all()
+        original(connection)
+
+    monkeypatch.setattr(adoption_module, "adopt_exact_integer_columns", interrupt_once)
+    if interruptions == 3:
+        with pytest.raises(DBAPIError) as caught:
+            _adopt(engine)
+        assert isinstance(caught.value.orig, sqlite3.OperationalError)
+        assert caught.value.orig.sqlite_errorcode == sqlite3.SQLITE_INTERRUPT
+        assert calls == 3
+        # Exhaustion also releases ownership; a fresh request can finish.
+    _adopt(engine)
+    assert calls == interruptions + 1
+    with engine.connect() as connection:
+        assert all(
+            isinstance(column["type"], Text)
+            for table, names in OWNING_COLUMNS.items()
+            for column in inspect(connection).get_columns(table)
+            if column["name"] in names
+        )
+        assert connection.exec_driver_sql("SELECT 1").scalar_one() == 1
+    # A new request succeeds immediately; no lock or callback survives the end.
+    before = _schema(engine)
+    _adopt(engine)
+    assert _schema(engine) == before
+    assert calls == interruptions + 1

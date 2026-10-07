@@ -4244,3 +4244,44 @@ def _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, owner):
         fresh=fresh,
         assert_reason=reason,
     )
+
+
+def test_stored_receipt_bytes_preserve_bound_nulls_and_timestamp_spelling(service):
+    """Catches typed reserialization invalidating an accepted parent's digest."""
+    from vonk_control.agent_jobs.stored import column_message, column_value
+    from vonk_control.job_documents import RecipeStartParent
+
+    _jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    with sessions.begin() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None
+        stored.kind = "recipe.start"
+        stored.payload = {
+            "schema_version": 1,
+            "owner_kind": "run",
+            "owner_id": str(uuid.uuid4()),
+            "plan_digest": "b" * 64,
+            "start_deadline": "2026-08-03T01:00:00+00:00",
+            "phases": None,
+        }
+    with sessions() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None
+        accepted = canonical_message(stored.payload)
+        typed = column_value(stored, "payload")
+        assert isinstance(typed, RecipeStartParent)
+        assert canonical_message(typed) != accepted
+        assert column_message(stored, "payload") == accepted
+    from sqlalchemy import update
+    from vonk_control.lifecycle.evidence import Residue
+
+    with sessions.begin() as session:
+        session.connection().execute(
+            update(Job).where(Job.id == job.id).values(payload={"damaged": True})
+        )
+    with sessions() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None
+        assert isinstance(column_value(stored, "payload"), Residue)
+        assert column_message(stored, "payload") == b""
