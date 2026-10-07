@@ -98,13 +98,14 @@ def _postgres_owned_checks_current(
             check["name"]: check["sqltext"]
             for check in inspect(connection).get_check_constraints(table_name)
         }
-        validated = dict(
-            connection.exec_driver_sql(
+        validated = {
+            name: value
+            for name, value in connection.exec_driver_sql(
                 "SELECT conname,convalidated FROM pg_constraint "
                 "WHERE conrelid=to_regclass(%s) AND contype='c'",
                 (table_name,),
             )
-        )
+        }
         return all(
             validated.get(name) is True and actual.get(name) == expression
             for name, expression in expected.items()
