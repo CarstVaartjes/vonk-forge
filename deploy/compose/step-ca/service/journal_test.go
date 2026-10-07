@@ -11,6 +11,10 @@ import (
  "math/big"
  "net/url"
  "strings"
+ "os"
+ "os/exec"
+ "path/filepath"
+ "encoding/json"
  "sync/atomic"
  "testing"
  "time"
@@ -19,13 +23,17 @@ import (
  "github.com/smallstep/certificates/cas/softcas"
  "github.com/smallstep/certificates/db"
  "github.com/smallstep/nosql"
+ badger "github.com/dgraph-io/badger/v2"
 )
 
 type journalFixture struct { j *JournalDB; c *JournalCAS; csr *x509.CertificateRequest; binding Binding; now atomic.Int64; path string }
 
 func newJournalFixture(t *testing.T) *journalFixture {
+ return newJournalFixtureAt(t,t.TempDir())
+}
+func newJournalFixtureAt(t *testing.T,path string) *journalFixture {
  t.Helper()
- f:=&journalFixture{path:t.TempDir()}; f.now.Store(time.Now().UTC().Truncate(time.Second).Unix())
+ f:=&journalFixture{path:path}; f.now.Store(time.Now().UTC().Truncate(time.Second).Unix())
  clock:=func()time.Time{return time.Unix(f.now.Load(),0).UTC()}
  authdb,err:=db.New(&db.Config{Type:"badgerv2",DataSource:f.path}); if err!=nil {t.Fatal(err)}
  base,ok:=authdb.(*db.DB); if !ok {t.Fatal("configured Badger is not concrete DB")}
@@ -134,4 +142,47 @@ func TestJournalRestartResumesAbandonedAttemptWithoutWaitingForOldLease(t *testi
  cas:=&JournalCAS{Journal:restarted,Soft:f.c.Soft,Policy:f.c.Policy}
  response,err:=cas.CreateCertificateWithContext(withAttempt(context.Background(),*next),f.request());if err!=nil || response==nil{t.Fatalf("restart exact resume: %v",err)}
  if _,err:=restarted.ReadCommitted(*old);err==nil{t.Fatal("restart accepted old response")}
+}
+
+func TestPinnedBadgerCommitsSynchronously(t *testing.T) {
+ // nosql v0.8.0 constructs these exact defaults. This connected dependency
+ // guard must fail if a dependency update weakens the durable response fence.
+ if !badger.DefaultOptions(t.TempDir()).SyncWrites {t.Fatal("CA backend does not sync commits before returning")}
+}
+
+func TestJournalProcessDeathBeforeAndAfterCommit(t *testing.T) {
+ if phase:=os.Getenv("VONK_CA_PROCESS_DEATH_PHASE");phase!="" {
+  path:=os.Getenv("VONK_CA_PROCESS_DEATH_DB")
+  f:=newJournalFixtureAt(t,path)
+  binding,err:=json.Marshal(f.binding);if err!=nil{t.Fatal(err)}
+  if err:=os.WriteFile(filepath.Join(path,"accepted-binding.json"),binding,0600);err!=nil{t.Fatal(err)}
+  attempt,_,err:=f.j.Claim(f.binding);if err!=nil{t.Fatal(err)}
+  if phase=="before" {f.j.BeforeCommit=func()error{os.Exit(91);return nil}} else {f.j.AfterCommit=func(){os.Exit(92)}}
+  _,err=f.c.CreateCertificateWithContext(withAttempt(context.Background(),*attempt),f.request())
+  t.Fatalf("process death fault did not terminate signer: %v",err)
+ }
+ for _,phase:=range []string{"before","after"} {t.Run(phase,func(t *testing.T){
+  path:=t.TempDir()
+  child:=exec.Command(os.Args[0],"-test.run=^TestJournalProcessDeathBeforeAndAfterCommit$")
+  child.Env=append(os.Environ(),"VONK_CA_PROCESS_DEATH_PHASE="+phase,"VONK_CA_PROCESS_DEATH_DB="+path)
+  output,err:=child.CombinedOutput()
+  var exit *exec.ExitError
+  expected:=91;if phase=="after"{expected=92}
+  if !errors.As(err,&exit) || exit.ExitCode()!=expected{t.Fatalf("child did not crash at expected signing boundary: %v %s",err,output)}
+  raw,err:=os.ReadFile(filepath.Join(path,"accepted-binding.json"));if err!=nil{t.Fatal(err)}
+  var binding Binding;if err:=json.Unmarshal(raw,&binding);err!=nil{t.Fatal(err)}
+  reopened,err:=db.New(&db.Config{Type:"badgerv2",DataSource:path});if err!=nil{t.Fatal(err)}
+  defer reopened.Shutdown()
+  journal,err:=newJournalDB(reopened.(*db.DB),time.Now,10*time.Second);if err!=nil{t.Fatal(err)}
+  receipt,err:=journal.Observe(binding);if err!=nil || receipt==nil{t.Fatalf("crash lost accepted request: %v",err)}
+  attempt,adopted,err:=journal.Claim(binding);if err!=nil || attempt==nil{t.Fatalf("restart did not reconcile exact ownership: %v",err)}
+  if phase=="before" {
+   if len(adopted.Chain)!=0 || attempt.Epoch<=receipt.Epoch{t.Fatal("precommit crash manufactured issued receipt or reused old attempt")}
+   if _,err:=journal.Get(certsTable,[]byte(binding.Serial));!nosql.IsErrNotFound(err){t.Fatalf("precommit process crash left externally publishable leaf: %v",err)}
+  } else {
+   if attempt.Epoch!=receipt.Epoch || len(adopted.Chain)!=2{t.Fatal("postcommit crash replaced committed identity")}
+   chain,err:=journal.ReadCommitted(*attempt);if err!=nil{t.Fatal(err)}
+   if !bytes.Equal(chain[0].Raw,receipt.Chain[0]) || chain[0].SerialNumber.String()!=binding.Serial || chain[0].CheckSignatureFrom(chain[1])!=nil{t.Fatal("postcommit process crash changed signed DER")}
+  }
+ })}
 }
