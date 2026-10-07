@@ -345,7 +345,7 @@ def test_stale_or_unrelated_work_cannot_supply_replacement_overlap(
     [None, "workload_intent_ordinal", "phase", "request_id", "child_operation_id"],
 )
 def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
-    tmp_path, postgres_engine, changed_field
+    tmp_path, postgres_engine, changed_field: str | None
 ):
     from vonk_control.job_documents import RecipeStopParent
     from vonk_control.recipe_operations import RecipeStopAuthorityRefused
@@ -408,7 +408,7 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
     if changed_field is not None:
         with sessions.begin() as session:
             root = session.get(Job, owner.profile_operation_id)
-            assert root is not None
+            assert root is not None and root.result is not None
             damaged = dict(root.result)
             if changed_field == "request_id":
                 root.request_id = str(uuid4())
@@ -478,5 +478,6 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
         assert stored.payload["workload_intent_ordinal"] == ordinal
         assert stored.payload.get("phases")
         root = session.get(Job, owner.profile_operation_id)
-        assert root is not None and root.result["child_operation_id"] == stop_id
+        assert root is not None and root.result is not None
+        assert root.result["child_operation_id"] == stop_id
         assert root.result.get("phase_retry_generation") == retry_generation
