@@ -1755,21 +1755,15 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     snapshot = projection.read()
     observed = client.get("/api/fleet", headers=operator)
     assert observed.status_code == 200
+    observed_snapshot = FleetSnapshot.model_validate(observation_document(observed))
     if damage != "labels":
-        assert (
-            observation_document(observed)["nodes"][0]["installed"][0]["complete"]
-            is None
-        )
-        assert (
-            observation_document(observed)["nodes"][0]["loaded"][0]["healthy"] is None
-        )
+        assert observed_snapshot.nodes[0].installed[0].complete is None
+        assert observed_snapshot.nodes[0].loaded[0].healthy is None
     snapshot = projection.read()
     if damage == "labels":
-        assert observation_document(observed)["nodes"][0]["labels"] is None
-        assert (
-            "unknown"
-            in observation_document(observed)["nodes"][0]["projection_issues"][0]
-        )
+        assert observed_snapshot.nodes[0].labels is None
+        issues = observed_snapshot.nodes[0].projection_issues
+        assert issues is not None and "unknown" in issues[0]
         assert all(value.complete is True for value in snapshot.nodes[0].installed)
         with sessions.begin() as session:
             session.execute(
@@ -1778,10 +1772,11 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
                 .values(labels={"role": "inference"})
             )
         recovered = client.get("/api/fleet", headers=operator)
-        assert observation_document(recovered)["nodes"][0]["labels"] == {
-            "role": "inference"
-        }
-        assert not observation_document(recovered)["nodes"][0].get("projection_issues")
+        recovered_snapshot = FleetSnapshot.model_validate(
+            observation_document(recovered)
+        )
+        assert recovered_snapshot.nodes[0].labels == {"role": "inference"}
+        assert not recovered_snapshot.nodes[0].projection_issues
         return
     if damage in {"mapping", "mapping_rank", "rank", "state"}:
         assert (
@@ -1843,7 +1838,8 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
         )
     recovered = client.get("/api/fleet", headers=operator)
     assert recovered.status_code == 200
-    assert observation_document(recovered)["nodes"][0]["loaded"][0]["healthy"] is True
+    recovered_snapshot = FleetSnapshot.model_validate(observation_document(recovered))
+    assert recovered_snapshot.nodes[0].loaded[0].healthy is True
     restored = projection.read()
     assert restored.nodes[0].installed[0].complete is True
     assert restored.nodes[0].loaded[0].healthy is True
@@ -2560,13 +2556,18 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
     )
     response = client.get("/api/fleet", headers=operator)
     assert response.status_code == 200
-    nodes = {node["id"]: node for node in observation_document(response)["nodes"]}
+    observed_snapshot = FleetSnapshot.model_validate(observation_document(response))
+    nodes = {node.id: node for node in observed_snapshot.nodes}
     assert set(nodes) == {NODE_A, NODE_B}
-    assert nodes[NODE_B]["inventory"]["disk_free_bytes"] == 750
-    assert nodes[NODE_A][damaged] is None
+    healthy_inventory = nodes[NODE_B].inventory
+    assert healthy_inventory is not None and healthy_inventory.disk_free_bytes == 750
+    if damaged == "inventory":
+        assert nodes[NODE_A].inventory is None
+    else:
+        assert nodes[NODE_A].telemetry is None
     assert any(
-        "unreadable" in warning["detail"] and "unknown" in warning["detail"]
-        for warning in nodes[NODE_A]["warnings"]
+        "unreadable" in warning.detail and "unknown" in warning.detail
+        for warning in nodes[NODE_A].warnings
     )
     with sessions.begin() as session:
         if damaged == "inventory":
@@ -2583,12 +2584,10 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
             )
     recovered = client.get("/api/fleet", headers=operator)
     assert recovered.status_code == 200
-    restored = next(
-        node
-        for node in observation_document(recovered)["nodes"]
-        if node["id"] == NODE_A
-    )
-    assert restored[damaged] is not None
-    assert not any(
-        "unreadable" in warning["detail"] for warning in restored["warnings"]
-    )
+    recovered_snapshot = FleetSnapshot.model_validate(observation_document(recovered))
+    restored = next(node for node in recovered_snapshot.nodes if node.id == NODE_A)
+    if damaged == "inventory":
+        assert restored.inventory is not None
+    else:
+        assert restored.telemetry is not None
+    assert not any("unreadable" in warning.detail for warning in restored.warnings)
