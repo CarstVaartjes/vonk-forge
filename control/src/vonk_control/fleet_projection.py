@@ -541,8 +541,8 @@ class FleetNode(StrictModel):
     connection: NodeConnection
     inventory: InventoryState | None
     telemetry: TelemetryState | None
-    installed: list[InstallationPresence] = Field(max_length=512)
-    loaded: list[LoadedPresence] = Field(max_length=512)
+    installed: list[InstallationPresence]
+    loaded: list[LoadedPresence]
     reservations: CapacityReservations
     warnings: list[ProjectionReason] = Field(max_length=128)
 

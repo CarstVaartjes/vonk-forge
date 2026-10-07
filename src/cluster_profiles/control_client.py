@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import base64
 import binascii
 import hashlib
 import http.client
-import io
 import json
 import math
 import os
@@ -41,6 +39,11 @@ from .error_reporting import (
     safe_endpoint,
     safe_request_id,
     transport_context,
+)
+from .observation_transfer_reader import (
+    ObservationTransferInvalid,
+    ObservationTransferUnavailable,
+    receive_observation,
 )
 
 if TYPE_CHECKING:
@@ -155,7 +158,11 @@ class ControlResponseTooLarge(ControlClientError):
 
 
 class ControlObservationUnavailable(ControlClientError):
-    reason_code = "observation.transfer_unavailable"
+    def __init__(
+        self, reason_code: str, detail: str, *, context: ErrorContext | None = None
+    ) -> None:
+        self.reason_code = reason_code
+        super().__init__(f"{reason_code}: {detail}", context=context)
 
 
 class ControlTransportError(ControlClientError):
@@ -748,15 +755,6 @@ def _read_control_response(
     return status, content, response_headers
 
 
-def _unique_json_members(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate observation JSON member")
-        result[key] = value
-    return result
-
-
 def _observation_payload(path: str, method: str) -> str | None:
     operation = _operation(path, method)
     payload = operation.get("x-vonk-observation-payload")
@@ -1130,7 +1128,7 @@ class ControlClient:
                 response = self._opener(request, timeout=timeout)
             except urllib.error.HTTPError as error:
                 response = error
-            with response, tempfile.TemporaryFile(mode="w+b") as spool:
+            with response:
                 status = (
                     response.code
                     if isinstance(response, urllib.error.HTTPError)
@@ -1165,113 +1163,38 @@ class ControlClient:
                 if not isinstance(record_media, dict):
                     raise TypeError("observation transfer schema is unavailable")
                 record_schema = record_media.get("schema")
-                transfer_id: str | None = None
-                ordinal = 0
-                byte_count = 0
-                digest = hashlib.sha256()
-                complete = False
-                pending = bytearray()
-                while True:
-                    # A partial record can never retain more than its allocation.
-                    if len(pending) >= MAX_CONTROL_DOCUMENT_BYTES:
-                        raise ValueError("observation record exceeds reader allocation")
-                    incoming = response.read(
-                        min(65536, MAX_CONTROL_DOCUMENT_BYTES - len(pending))
-                    )
-                    if not incoming:
-                        break
-                    pending.extend(incoming)
-                    while b"\n" in pending:
-                        line, remainder = pending.split(b"\n", 1)
-                        pending = bytearray(remainder)
-                        if complete:
-                            raise ValueError("observation data follows final receipt")
-                        record = json.loads(
-                            line, object_pairs_hook=_unique_json_members
-                        )
-                        _validate_schema(
-                            record,
-                            record_schema,
-                            message="observation record violates canonical schema",
-                        )
-                        if not isinstance(record, dict):
-                            raise TypeError("observation record is not an object")
-                        kind = record.get("type")
-                        identifier = record.get("transfer_id")
-                        if transfer_id is None:
-                            expected_resource = (
-                                "fleet" if payload == "FleetSnapshot" else "platform"
-                            )
-                            if (
-                                kind != "start"
-                                or record.get("resource") != expected_resource
-                                or not isinstance(identifier, str)
-                            ):
-                                raise ValueError(
-                                    "observation start differs from requested resource"
-                                )
-                            transfer_id = identifier
-                            continue
-                        if identifier != transfer_id:
-                            raise ValueError(
-                                "observation identity changed during transfer"
-                            )
-                        if kind == "chunk":
-                            if record.get("ordinal") != ordinal:
-                                raise ValueError(
-                                    "observation fragments are not contiguous"
-                                )
-                            data = record.get("data")
-                            if not isinstance(data, str):
-                                raise ValueError(
-                                    "observation fragment data is unreadable"
-                                )
-                            raw = base64.b64decode(data, validate=True)
-                            spool.write(raw)
-                            digest.update(raw)
-                            byte_count += len(raw)
-                            ordinal += 1
-                        elif kind == "complete":
-                            if (
-                                record.get("chunks") != ordinal
-                                or ordinal == 0
-                                or record.get("bytes") != byte_count
-                                or record.get("sha256") != digest.hexdigest()
-                            ):
-                                raise ValueError(
-                                    "observation completeness receipt differs"
-                                )
-                            complete = True
-                        elif kind == "error":
-                            detail = record.get("detail")
-                            if not isinstance(detail, str):
-                                raise ValueError(
-                                    "observation error explanation is unreadable"
-                                )
-                            raise ControlObservationUnavailable(
-                                f"{ControlObservationUnavailable.reason_code}: {detail}",
-                                context=replace(
-                                    protocol_context(
-                                        operation=f"GET {path}", endpoint=path
-                                    ),
-                                    http_status=status,
-                                    request_id=request_id,
-                                ),
-                            )
-                        else:
-                            raise ValueError("unexpected observation transfer phase")
-                if pending or not complete:
-                    raise ValueError(
-                        "observation ended without a complete final receipt"
-                    )
-                spool.seek(0)
-                with io.TextIOWrapper(
-                    spool, encoding="utf-8", errors="strict"
-                ) as document:
-                    decoded = json.load(
-                        document, object_pairs_hook=_unique_json_members
-                    )
-                    return validate_control_document(payload, decoded)
+                return receive_observation(
+                    response,
+                    resource="fleet" if payload == "FleetSnapshot" else "platform",
+                    record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+                    validate_record=lambda record: _validate_schema(
+                        record,
+                        record_schema,
+                        message="observation record violates canonical schema",
+                    ),
+                    validate_payload=lambda document: validate_control_document(
+                        payload, document
+                    ),
+                )
+        except ObservationTransferUnavailable as error:
+            raise ControlObservationUnavailable(
+                error.reason_code,
+                error.detail,
+                context=replace(
+                    protocol_context(operation=f"GET {path}", endpoint=path),
+                    http_status=status,
+                    request_id=request_id,
+                ),
+            ) from None
+        except ObservationTransferInvalid as error:
+            raise ControlMalformedResponse(
+                f"Complete observation unavailable: {error}; retry observation",
+                context=replace(
+                    protocol_context(operation=f"GET {path}", endpoint=path),
+                    http_status=status,
+                    request_id=request_id,
+                ),
+            ) from None
         except (ControlHTTPError, ControlObservationUnavailable):
             raise
         except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
