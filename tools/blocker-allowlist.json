@@ -2000,14 +2000,6 @@
       ]
     },
     {
-      "family": "recipe_image_availability_api.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: raised in a contract or API module.",
-      "sites": [
-        ["control/src/vonk_control/recipe_image_availability_api.py", "RecipeImageAvailabilityError", "install_recipe_operator_routes.removal_document", "recipe_image.operation_invalid", 1]
-      ]
-    },
-    {
       "family": "recipe_packages.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
