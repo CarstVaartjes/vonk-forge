@@ -1975,7 +1975,12 @@ class RunSwitchFleetProfileAdapter:
             if child is None:
                 # Re-enter exactly the same queue index/request after lost SQL
                 # bookkeeping. No changed preview or new effect identity is used.
-                if cancelling:
+                if cancelling or (
+                    adopted_scope is not None and not set(nodes) <= set(adopted_scope)
+                ):
+                    # An issued child outside the continuing selection is
+                    # still unknown. Retain its one pending queue identity;
+                    # neither skipping it nor issuing it again proves absence.
                     pending_scopes.append(set(nodes))
                     continue
                 lost_children[pending.queue_index] = pending
