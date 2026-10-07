@@ -134,12 +134,6 @@ export class ApiClient implements ControlApi {
   constructor() {
     this.generated.use({
       onRequest: async ({request, params, schemaPath}) => {
-        if (import.meta.env.MODE === "test") console.info("VONK_AUTH_DISPATCH", {
-          step: "middleware-enter", method: request.method,
-          lexicalRequestIsGlobal: Request === globalThis.Request,
-          inputIsLexicalRequest: request instanceof Request,
-          inputIsGlobalRequest: request instanceof globalThis.Request,
-        });
         validateControlParameters(request.method, schemaPath, params);
         const url = new URL(request.url);
         url.pathname = schemaPath.replace(/\{([^}]+)\}/g, (_, key: string) => {
@@ -148,20 +142,28 @@ export class ApiClient implements ControlApi {
           if (typeof value !== "string" && typeof value !== "boolean") throw new Error("Unsupported API path parameter");
           return encodeURIComponent(String(value));
         });
-        const methodBeforeRebuild = request.method;
-        request = new Request(url, request);
-        if (import.meta.env.MODE === "test") console.info("VONK_AUTH_DISPATCH", {
-          step: "url-rebuild", methodBeforeRebuild, methodAfterRebuild: request.method,
-          skipsMutationCsrf: ["GET", "HEAD"].includes(request.method),
-        });
+        // Request is not a portable WebIDL dictionary: some browser/test
+        // runtimes discard its accessor-backed method when used as init.
+        // This owner constructs a new URL while preserving every request option.
+        const init = {
+          method: request.method, headers: request.headers, body: request.body,
+          credentials: request.credentials, signal: request.signal,
+          redirect: request.redirect, mode: request.mode, cache: request.cache,
+          referrer: request.referrer, referrerPolicy: request.referrerPolicy,
+          integrity: request.integrity, keepalive: request.keepalive,
+          // Node's native fetch requires this for a ReadableStream body;
+          // browsers ignore unknown dictionary members.
+          duplex: "half",
+        };
+        request = new Request(url, init);
         if (request.headers.get("content-type")?.startsWith("application/json") && request.body !== null) {
           const text = await request.clone().text();
           serializeControlBody(request.method, request.url, parseContractJson(text));
         }
-        if (["GET", "HEAD"].includes(request.method)) return;
-        const headers = new Headers(request.headers);
-        headers.set("X-CSRF-Token", await this.requiredCsrfToken());
-        return new Request(request, {headers});
+        if (!["GET", "HEAD"].includes(request.method)) {
+          request.headers.set("X-CSRF-Token", await this.requiredCsrfToken());
+        }
+        return request;
       },
       onResponse: async ({request, response}) => {
         let text: string;
@@ -198,7 +200,6 @@ export class ApiClient implements ControlApi {
   }
 
   private async requiredCsrfToken(): Promise<string> {
-    if (import.meta.env.MODE === "test") console.info("VONK_AUTH_DISPATCH", {step: "csrf-owner-enter"});
     const token = csrfToken();
     if (token) return token;
     // Expiry removes both cookies. Let the existing session owner distinguish
