@@ -61,7 +61,7 @@ func (f *authorityFixture) token(t *testing.T,binding Binding,change func(map[st
 func (f *authorityFixture) call(t *testing.T,binding Binding,token,mode string) *httptest.ResponseRecorder {
  t.Helper()
  raw,err:=json.Marshal(map[string]any{"csr":string(pem.EncodeToMemory(&pem.Block{Type:"CERTIFICATE REQUEST",Bytes:f.csr.Raw})),"ott":token,"request":binding,"mode":mode});if err!=nil{t.Fatal(err)}
- response:=httptest.NewRecorder();request:=httptest.NewRequest(http.MethodPost,"https://step-ca/1.0/sign",bytes.NewReader(raw));f.handler.ServeHTTP(response,request);return response
+ response:=httptest.NewRecorder();request:=httptest.NewRequest(http.MethodPost,"https://step-ca/1.0/vonk/sign",bytes.NewReader(raw));f.handler.ServeHTTP(response,request);return response
 }
 func issuedLeaf(t *testing.T,response *httptest.ResponseRecorder) *x509.Certificate {
  t.Helper()
@@ -156,7 +156,7 @@ func TestAuthorityHTTPStorageFaultAndLostHTTPRecoverWithoutNewIdentity(t *testin
  server:=httptest.NewServer(f.handler);defer server.Close()
  f.j.AfterCommit=server.CloseClientConnections
  raw,_:=json.Marshal(map[string]any{"csr":string(pem.EncodeToMemory(&pem.Block{Type:"CERTIFICATE REQUEST",Bytes:f.csr.Raw})),"ott":f.token(t,f.binding,nil),"request":f.binding,"mode":"issue"})
- response,err:=server.Client().Post(server.URL+"/1.0/sign","application/json",bytes.NewReader(raw))
+ response,err:=server.Client().Post(server.URL+"/1.0/vonk/sign","application/json",bytes.NewReader(raw))
  if err==nil{_ = response.Body.Close();t.Fatal("lost-response injection unexpectedly delivered HTTP reply")}
  receipt,err:=f.j.Observe(f.binding);if err!=nil || receipt==nil || len(receipt.Chain)==0{t.Fatalf("lost HTTP did not leave durable commit: %v",err)}
  f.c.BeforeSign=func(){t.Error("lost HTTP recovery called signer again")}
@@ -171,7 +171,7 @@ func TestAuthorityInternalTLSRenewsAndClientRoutesRemainFenced(t *testing.T) {
  renewer,err:=ca.NewTLSRenewer(initial,func()(*tls.Certificate,error){certificate,err:=f.auth.GetTLSCertificate();if err==nil{select{case renewed<-struct{}{}:default:}};return certificate,err},ca.WithRenewBefore(24*time.Hour-time.Second),ca.WithRenewJitter(time.Nanosecond));if err!=nil{t.Fatal(err)}
  renewer.Run();defer renewer.Stop()
  select{case <-renewed:case <-time.After(5*time.Second):t.Fatal("automatic internal CA TLS renewal failed")}
- for _,path:=range []string{"/1.0/renew","/1.0/rekey","/sign"}{response:=httptest.NewRecorder();f.handler.ServeHTTP(response,httptest.NewRequest(http.MethodPost,path,strings.NewReader(`{}`)));if response.Code!=404{t.Fatalf("native issuance route remains: %s",path)}}
+ for _,path:=range []string{"/1.0/renew","/1.0/rekey","/sign","/1.0/sign"}{response:=httptest.NewRecorder();f.handler.ServeHTTP(response,httptest.NewRequest(http.MethodPost,path,strings.NewReader(`{}`)));if response.Code!=404{t.Fatalf("native issuance route remains: %s",path)}}
  if response,err:=f.c.CreateCertificate(f.request());err==nil || response!=nil{t.Fatal("old CAS callback admitted client certificate")}
  forged:=f.request();forged.IsCAServerCert=true
  if response,err:=f.c.CreateCertificate(forged);err==nil || response!=nil{t.Fatal("client boolean invoked internal TLS callback")}

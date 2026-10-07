@@ -71,7 +71,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && r.URL.Path == "/1.0/revoke":
 		r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 		api.Revoke(w, r)
-	case r.Method == http.MethodPost && r.URL.Path == "/1.0/sign":
+	case r.Method == http.MethodPost && r.URL.Path == "/1.0/vonk/sign":
 		s.sign(w, r)
 	default:
 		http.NotFound(w, r)
