@@ -1,3 +1,4 @@
+import {formatWire} from "../api/contract-numeric";
 import {act, render, screen} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {ControlApi, TelemetryPoint, VisualFleetSnapshot} from "../api/types";
@@ -90,7 +91,7 @@ function Probe({control}: {control: ControlApi}) {
   const fleet = useFleetStream(control);
   return <>
     <span data-testid="connection">{fleet.connection}</span>
-    <span data-testid="cursor">{fleet.snapshot?.event_cursor ?? "none"}</span>
+    <span data-testid="cursor">{fleet.snapshot ? formatWire(fleet.snapshot.event_cursor) : "none"}</span>
     <span data-testid="gpu">{fleet.snapshot?.nodes[0]?.telemetry?.sample.gpu_utilization_percent ?? "none"}</span>
     <span data-testid="error">{fleet.error}</span>
     <button type="button" onClick={fleet.retry}>Retry</button>

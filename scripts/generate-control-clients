@@ -253,7 +253,7 @@ def main() -> None:
             [
                 "node",
                 str(ROOT / "tools/openapi-client/generate-runtime.mjs"),
-                str(client_openapi),
+                str(OPENAPI),
             ],
         )
         _normalize_generated_text(TYPESCRIPT_OUTPUT)

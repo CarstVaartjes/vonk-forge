@@ -1,5 +1,5 @@
 import * as generated from "./runtime.generated.js";
-import {materialize, parseContractJson, stringifyContractJson} from "./contract-numeric";
+import {parseContractJson, stringifyContractJson} from "./contract-numeric";
 
 export class ContractViolation extends Error {
   readonly path: string;
@@ -23,13 +23,13 @@ export function validateControlBody(method: string, path: string, status: number
   let value: unknown;
   try { value = parseContractJson(text); } catch { throw new ContractViolation(method, path, status); }
   if (!validator(value)) throw new ContractViolation(method, path, status);
-  return materialize(value);
+  return validator.normalize(value);
 }
 export function validateComponent(name: string, text: string): unknown {
   const validator = generated[`component${name}` as keyof typeof generated];
   const value = parseContractJson(text);
   if (typeof validator !== "function" || !validator(value)) throw new ContractViolation("EVENT", name, 0);
-  return materialize(value);
+  return validator.normalize(value);
 }
 export function serializeControlBody(method: string, path: string, value: unknown): string {
   const route = routeFor(method, path);
@@ -37,6 +37,16 @@ export function serializeControlBody(method: string, path: string, value: unknow
   const text = stringifyContractJson(value);
   if (!validator || !validator(parseContractJson(text))) throw new ContractViolation(method, path, 0);
   return text;
+}
+export function validateControlParameters(method: string, path: string, parameters: {path?: Record<string, unknown>; query?: Record<string, unknown>}): void {
+  const route = routeFor(method, path);
+  if (!route) throw new ContractViolation(method, path, 0);
+  for (const location of ["path", "query"] as const) {
+    // openapi-fetch's optional query arguments intentionally omit undefined.
+    const values = Object.fromEntries(Object.entries(parameters[location] ?? {}).filter(([, value]) => value !== undefined));
+    const validator = route.parameters[location];
+    if (validator ? !validator(parseContractJson(stringifyContractJson(values))) : Object.keys(values).length !== 0) throw new ContractViolation(method, path, 0);
+  }
 }
 /** Consume once; route owners, rather than the parser, determine byte budgets. */
 export async function readControlResponse(response: Response, method: string, path: string): Promise<unknown> {

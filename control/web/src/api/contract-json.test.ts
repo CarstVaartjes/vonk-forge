@@ -4,12 +4,12 @@ import {ContractResponse, validateComponent, validateControlBody} from "./contra
 import {compareNumeric, contractEqual, contractType, numericMultiple, parseContractJson, stringifyContractJson} from "./contract-numeric";
 
 describe("canonical numeric boundary", () => {
-  test.each(["9007199254740993", "18446744073709551615", "18446744073709551616"])("retains permitted integer %s", token => {
+  test.each(["9007199254740993", "18446744073709551615"])("retains permitted integer %s", token => {
     const text = `{"text":"","truncated":false,"dropped_bytes":${token},"dropped_lines":null}`;
     const value = validateComponent("FailureLogTail", text);
     expect(stringifyContractJson(value)).toBe(text);
   });
-  test.each(["1.0", "1e0", "-1", "true", '"1"'])("refuses invalid strict counter %s", token => {
+  test.each(["1.0", "1e0", "-1", "18446744073709551616", "true", '"1"'])("refuses invalid strict counter %s", token => {
     expect(() => validateComponent("FailureLogTail", `{"text":"","truncated":false,"dropped_bytes":${token},"dropped_lines":null}`)).toThrow();
   });
   test("numeric wrappers cannot satisfy object branches", () => {

@@ -1,3 +1,4 @@
+import type {WireNumber} from "./contract-numeric";
 import type {components, paths} from "./generated";
 
 export type AuthSession = components["schemas"]["AuthSession"];
@@ -63,11 +64,11 @@ export type LibraryViewRecipe = {
   model_selectors?: string[];
   installations?: unknown[];
   runs?: unknown[];
-  installation_returned_count?: number;
-  installation_total_count?: number;
+  installation_returned_count?: WireNumber;
+  installation_total_count?: WireNumber;
   installations_truncated?: boolean;
-  run_returned_count?: number;
-  run_total_count?: number;
+  run_returned_count?: WireNumber;
+  run_total_count?: WireNumber;
   runs_truncated?: boolean;
   reasons?: {code: string; severity: string; detail: string}[];
 };
@@ -110,7 +111,7 @@ export type LibraryViewRecipeDetail = {
   // Other recipes for the same model, excluding this one.
   alternatives?: RecipeAlternative[];
 };
-export type LibraryViewPlacementGroup = {eligible: boolean; node_ids: string[]; nodes: {node_id: string; memory_free_after_bytes: number}[]; topology_name: string; load_state: string; install_state: string};
+export type LibraryViewPlacementGroup = {eligible: boolean; node_ids: string[]; nodes: {node_id: string; memory_free_after_bytes: WireNumber}[]; topology_name: string; load_state: string; install_state: string};
 export type ArtifactJobInterface = components["schemas"]["ArtifactJobResponse"]["interface"];
 export type ArtifactJobFile = components["schemas"]["ArtifactOutputFile"];
 export type ArtifactJobInputFile = components["schemas"]["ArtifactFileDeclaration"];
@@ -169,15 +170,15 @@ export interface LibraryApi {
 export interface ControlApi extends LibraryApi {
   downloadCliToken(): Promise<CliTokenDownload>;
   profiles(signal?: AbortSignal): Promise<FleetProfileList>;
-  profile(number: number, signal?: AbortSignal): Promise<FleetProfileRead>;
-  autosaveProfile(number: number, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
-  previewProfile(number: number, signal?: AbortSignal): Promise<FleetProfilePreview>;
-  loadProfile(number: number, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
-  profileApplicationByRequest(number: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
-  profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
-  profileEndpoints(number: number, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
-  profileDefinition(number: number, signal?: AbortSignal): Promise<ProfileDefinition>;
-  cancelProfileApplication(applicationId: string, profileNumber: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profile(number: WireNumber, signal?: AbortSignal): Promise<FleetProfileRead>;
+  autosaveProfile(number: WireNumber, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
+  previewProfile(number: WireNumber, signal?: AbortSignal): Promise<FleetProfilePreview>;
+  loadProfile(number: WireNumber, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profileApplicationByRequest(number: WireNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profileProgress(number: WireNumber, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profileEndpoints(number: WireNumber, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
+  profileDefinition(number: WireNumber, signal?: AbortSignal): Promise<ProfileDefinition>;
+  cancelProfileApplication(applicationId: string, profileNumber: WireNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
   fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode>;

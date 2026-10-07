@@ -445,6 +445,8 @@ jobs:
             tools/openapi-client \
             src/cluster_profiles/generated_control \
             control/web/src/api/generated.d.ts \
+            control/web/src/api/runtime.generated.js \
+            control/web/src/api/runtime.generated.d.ts \
             src/cluster_profiles/schemas/control-openapi.json; then
             run_full=false
           fi
@@ -469,6 +471,8 @@ jobs:
           src/cluster_profiles/schemas/control-openapi.json
           src/cluster_profiles/generated_control
           control/web/src/api/generated.d.ts
+          control/web/src/api/runtime.generated.js
+          control/web/src/api/runtime.generated.d.ts
 
   compose-integration:
     name: Compose integration

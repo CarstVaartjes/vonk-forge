@@ -83,6 +83,14 @@ export function subtractWire(a: WireNumber, b: WireNumber): WireNumber {
   const right = numericToken(b)!;
   return addWire(a, integerResult(right.startsWith("-") ? right.slice(1) : `-${right}`));
 }
+/** Explicit integer arithmetic; result digits are bounded by input digits. */
+export function multiplyWire(a: WireNumber, b: WireNumber): WireNumber {
+  const left = numericToken(a)!, right = numericToken(b)!;
+  if (/[.eE]/.test(left + right)) throw new Error("Exact integer arithmetic requires integer tokens");
+  // Conversion is on-demand arithmetic, never eager network parsing. It uses
+  // only the provided integer digits and never expands an exponent token.
+  return integerResult((BigInt(left) * BigInt(right)).toString());
+}
 /** Presentation only. Exact source values remain available for copy/export. */
 export function displayRatio(a: WireNumber, b: WireNumber): number {
   const x = decimal(numericToken(a)!), y = decimal(numericToken(b)!);
@@ -104,9 +112,11 @@ export function contractType(value: unknown, types: string[], strictIntegerToken
     return typeof value === type;
   });
 }
-export function numericBound(value: unknown, bound: string, operator: string): boolean {
+export function numericBound(value: unknown, bound: string, operator: string, ieeeFloat = false): boolean {
   const token = numericToken(value); if (token === undefined) return true;
-  const comparison = compareNumeric(token, bound);
+  const comparison = ieeeFloat
+    ? (Number(token) === Number(bound) ? 0 : Number(token) < Number(bound) ? -1 : 1)
+    : compareNumeric(token, bound);
   return operator === "minimum" ? comparison >= 0 : operator === "maximum" ? comparison <= 0 : operator === "exclusiveMinimum" ? comparison > 0 : comparison < 0;
 }
 export function contractEqual(value: unknown, expected: unknown): boolean {
@@ -149,7 +159,54 @@ export function numericMultiple(value: unknown, divisor: string): boolean {
   for (const digit of x.digits.slice(0, x.digits.length - trailing)) remainder = (remainder * 10n + BigInt(digit)) % modulus;
   return remainder === 0n;
 }
-export function parseContractJson(text: string): unknown { return parse(text); }
+// Ordinary Controller/CLI JSON ingress uses last-key wins. Duplicate rejection
+// belongs to an explicitly stricter owning boundary, not this browser parser.
+export function parseContractJson(text: string): unknown { return parse(text, undefined, {onDuplicateKey: ({newValue}) => newValue}); }
+export interface NormalizationShape {
+  type?: string | string[];
+  ref?: string;
+  alternatives?: {validate: (value: unknown) => boolean; shape: NormalizationShape}[];
+  allOf?: NormalizationShape[];
+  properties?: Record<string, NormalizationShape>;
+  items?: NormalizationShape;
+  additionalProperties?: NormalizationShape;
+}
+/** Projection uses the successful compiled schema branch, never a second validator. */
+export function normalizeValidated(value: unknown, shape: NormalizationShape, definitions: Record<string, NormalizationShape>): unknown {
+  function expand(current: NormalizationShape, seen: Set<string>): NormalizationShape[] {
+    if (current.ref) {
+      if (seen.has(current.ref)) return [];
+      const referenced = definitions[current.ref];
+      if (!referenced) throw new Error("Missing canonical normalization reference");
+      return expand(referenced, new Set([...seen, current.ref]));
+    }
+    const alternative = current.alternatives?.find(item => item.validate(value));
+    return [current, ...(alternative ? expand(alternative.shape, seen) : []), ...(current.allOf ?? []).flatMap(item => expand(item, seen))];
+  }
+  const shapes = expand(shape, new Set());
+  if (value instanceof LosslessNumber) {
+    const types = shapes.flatMap(item => typeof item.type === "string" ? [item.type] : item.type ?? []);
+    if (types.includes("integer")) return materialize(value);
+    if (types.includes("number")) {
+      const number = Number(value.value);
+      if (!Number.isFinite(number)) throw new Error("Non-finite contract number");
+      return number;
+    }
+    return materialize(value);
+  }
+  if (Array.isArray(value)) {
+    const items = shapes.map(item => item.items).filter((item): item is NormalizationShape => item !== undefined);
+    return value.map(item => normalizeValidated(item, {allOf: items}, definitions));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+      const properties = shapes.map(candidate => candidate.properties?.[key]).filter((candidate): candidate is NormalizationShape => candidate !== undefined);
+      const additional = shapes.map(candidate => candidate.additionalProperties).filter((candidate): candidate is NormalizationShape => candidate !== undefined);
+      return [key, normalizeValidated(item, {allOf: properties.length ? properties : additional}, definitions)];
+    }));
+  }
+  return value;
+}
 export function materialize(value: unknown): unknown {
   if (value instanceof LosslessNumber) {
     const token = value.value, number = Number(token);
@@ -171,7 +228,12 @@ export function stringifyContractJson(value: unknown): string {
     if (typeof item === "bigint") return item.toString();
     if (typeof item === "number") {
       if (!Number.isFinite(item)) throw new Error("Non-finite request number");
-      return Object.is(item, -0) ? "-0.0" : String(item);
+      if (Object.is(item, -0)) return "-0.0";
+      const token = String(item);
+      // A caller's unsafe Number has already lost integer identity. Emit a
+      // float token so a strict integer contract refuses it; callers can pass
+      // an ExactInteger or bigint for the exact permitted integer instead.
+      return Number.isInteger(item) && !Number.isSafeInteger(item) && !/[.eE]/.test(token) ? `${token}.0` : token;
     }
     if (item instanceof LosslessNumber) { decimal(item.value); return item.value; }
     if (typeof item !== "object") throw new Error("Unsupported JSON request value");
