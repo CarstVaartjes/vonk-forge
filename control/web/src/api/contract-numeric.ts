@@ -1,8 +1,9 @@
 import {LosslessNumber, parse} from "lossless-json";
 
 /** The raw numeric token is retained until its canonical schema accepts it. */
-export type ExactInteger = LosslessNumber;
-export type WireNumber = number | ExactInteger;
+export type ExactNumber = LosslessNumber;
+export type ExactInteger = ExactNumber;
+export type WireNumber = number | ExactNumber;
 
 function unsignedCompare(a: string, b: string): number {
   a = a.replace(/^0+/, "") || "0"; b = b.replace(/^0+/, "") || "0";

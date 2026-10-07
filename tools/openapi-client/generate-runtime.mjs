@@ -148,6 +148,6 @@ const ast = await openapiTS(JSON.parse(raw), {transform(schema) {
   if (schema.type !== "integer" && schema.type !== "number") return;
   const lower = schema.minimum ?? schema.exclusiveMinimum, upper = schema.maximum ?? schema.exclusiveMaximum;
   if (typeof lower === "number" && typeof upper === "number" && Number.isSafeInteger(lower) && Number.isSafeInteger(upper)) return;
-  return node.createUnionTypeNode([node.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword), node.createTypeReferenceNode("ExactInteger")]);
+  return node.createUnionTypeNode([node.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword), node.createTypeReferenceNode("ExactNumber")]);
 }});
-fs.writeFileSync(path.join(out, "generated.d.ts"), provenance + 'import type {ExactInteger} from "./contract-numeric";\n' + astToString(ast));
+fs.writeFileSync(path.join(out, "generated.d.ts"), provenance + 'import type {ExactNumber} from "./contract-numeric";\n' + astToString(ast));
