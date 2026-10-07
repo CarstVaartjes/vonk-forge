@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
@@ -838,7 +839,32 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
                         f"SQL={lock_statements!r}; backend_wait={wait!r}"
                     )
                 assert response.status_code == 202, response.text
+                # Lost-response replay reconnects to the same parked intent
+                # while its exact superseded owner is still locked.
+                replay = pool.submit(
+                    api.post,
+                    f"/api/profile/{profile.number}/load",
+                    headers=headers,
+                    json=request_body,
+                ).result(timeout=1)
+                assert replay.status_code == 202, replay.text
+                assert replay.json()["id"] == response.json()["id"]
+                assert replay.json()["request_key"] == request_body["request_key"]
+                with sessions.begin() as admission:
+                    scope = tuple(admission.scalars(select(AgentNode.node_id)))
+                    # This independent SQL transaction can take every node
+                    # gate before the locker rolls back: the HTTP request
+                    # retained its receipt, not its admission transaction.
+                    acquire_admission_keys(
+                        admission,
+                        tuple(node_admission_key(node_id) for node_id in scope),
+                        holder="profile-contention-proof",
+                    )
                 with sessions() as session:
+                    assert (
+                        len(tuple(session.scalars(select(FleetProfileApplication))))
+                        == 1
+                    )
                     parked = session.scalar(select(FleetProfileApplication))
                     assert parked is not None
                     assert parked.state == "queued"
