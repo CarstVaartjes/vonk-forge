@@ -912,6 +912,12 @@ jobs:
         run: >-
           uv run --project control --frozen pytest -s -q -n 0
           control/tests/test_fresh_launch_catalog_postgres_acceptance.py::test_fresh_postgres_imports_typed_canonical_model_recipe_api
+          control/tests/test_catalog_service.py
+      - name: Verify installed Activity byte refusal and same-read recovery
+        if: matrix.shard.index == 1
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_operation_response_budget_installed_cli.py::test_installed_activity_byte_continuation_and_aggregate_fact_recovery
 
       - name: Set up Docker Buildx for the candidate CA
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
