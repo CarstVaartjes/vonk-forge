@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 984b9196a059d06b9faa4d19ed63f62631bdec19f0aeb99f44c9348eaf2731d2. Do not edit.
+// Generated from canonical OpenAPI SHA256 181c6374cf4c9b43ecfe7a3a8167d36b54d47203d51afcd24e68a20751799382. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -3499,6 +3499,8 @@ export interface components {
         /** FleetChangeEvent */
         FleetChangeEvent: {
             change: components["schemas"]["FleetChange"];
+            /** Event Cursor */
+            event_cursor: number | ExactNumber;
             /**
              * Projection Refresh Required
              * @default true
@@ -3513,6 +3515,18 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** FleetFrameIssue */
+        FleetFrameIssue: {
+            /** Budget Bytes */
+            budget_bytes: number;
+            /** Observed Bytes At Least */
+            observed_bytes_at_least: (number | ExactNumber) | null;
+            /**
+             * Reason Code
+             * @enum {string}
+             */
+            reason_code: "fleet.frame_budget_exceeded" | "fleet.frame_encoding_unavailable" | "fleet.stored_event_payload_unavailable";
+        } & (unknown & unknown);
         /** FleetLockHolder */
         FleetLockHolder: {
             /** Holder */
@@ -4173,6 +4187,7 @@ export interface components {
             original_operation_id?: string | null;
             /** Plan Digest */
             plan_digest: string;
+            progress?: components["schemas"]["RunSwitchProgress"] | null;
             /** Queue Index */
             queue_index: number | ExactNumber;
             /** Request Key */
@@ -4761,6 +4776,17 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** FleetRefreshEvent */
+        FleetRefreshEvent: {
+            /** Event Cursor */
+            event_cursor: number | ExactNumber;
+            issue?: components["schemas"]["FleetFrameIssue"] | null;
+            /**
+             * Reset Reason
+             * @enum {string}
+             */
+            reset_reason: "initial" | "cursor-ahead" | "retention-gap" | "missing-telemetry-sample" | "frame-unavailable";
+        };
         /** FleetRenameRequest */
         FleetRenameRequest: {
             /** Display Name */
@@ -4780,19 +4806,15 @@ export interface components {
             /** Nodes */
             nodes: components["schemas"]["FleetNode"][];
         };
-        /** FleetSnapshotEvent */
-        FleetSnapshotEvent: {
-            /** Reset Reason */
-            reset_reason: string;
-            snapshot: components["schemas"]["FleetSnapshot"];
-        };
         /**
          * FleetStreamEvent
          * @description OpenAPI union for the JSON payload carried by one SSE frame.
          */
-        FleetStreamEvent: components["schemas"]["FleetSnapshotEvent"] | components["schemas"]["FleetTelemetryEvent"] | components["schemas"]["FleetChangeEvent"];
+        FleetStreamEvent: components["schemas"]["FleetRefreshEvent"] | components["schemas"]["FleetTelemetryEvent"] | components["schemas"]["FleetChangeEvent"];
         /** FleetTelemetryEvent */
         FleetTelemetryEvent: {
+            /** Event Cursor */
+            event_cursor: number | ExactNumber;
             /** Node Id */
             node_id: string;
             sample: components["schemas"]["TelemetryPoint"];
@@ -6771,6 +6793,78 @@ export interface components {
          * @enum {string}
          */
         ObservationCause: "reported-unknown" | "lease-lapsed";
+        /** ObservationTransferChunk */
+        ObservationTransferChunk: {
+            /** Data */
+            data: string;
+            /** Ordinal */
+            ordinal: number | ExactNumber;
+            /** Transfer Id */
+            transfer_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "chunk";
+        };
+        /** ObservationTransferComplete */
+        ObservationTransferComplete: {
+            /** Bytes */
+            bytes: number | ExactNumber;
+            /** Chunks */
+            chunks: number | ExactNumber;
+            /** Sha256 */
+            sha256: string;
+            /** Transfer Id */
+            transfer_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "complete";
+        };
+        /** ObservationTransferError */
+        ObservationTransferError: {
+            /** Detail */
+            detail: string;
+            /**
+             * Reason Code
+             * @constant
+             */
+            reason_code: "observation.transfer_unavailable";
+            /** Transfer Id */
+            transfer_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "error";
+        };
+        /**
+         * ObservationTransferRecord
+         * @description One NDJSON record; EOF after a verified complete record is success.
+         */
+        ObservationTransferRecord: components["schemas"]["ObservationTransferStart"] | components["schemas"]["ObservationTransferChunk"] | components["schemas"]["ObservationTransferComplete"] | components["schemas"]["ObservationTransferError"];
+        /** ObservationTransferStart */
+        ObservationTransferStart: {
+            /**
+             * Encoding
+             * @constant
+             */
+            encoding: "base64-canonical-json-utf8-v1";
+            /**
+             * Resource
+             * @enum {string}
+             */
+            resource: "fleet" | "platform";
+            /** Transfer Id */
+            transfer_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "start";
+        };
         /**
          * ObservedAssignmentState
          * @description Where a fleet-profile assignment stands on the Sparks, as observed.
@@ -6832,6 +6926,8 @@ export interface components {
             /** Parent Id */
             parent_id?: string | null;
             progress?: components["schemas"]["OperationProgress"] | null;
+            /** Projection Issues */
+            projection_issues?: components["schemas"]["OperationProjectionIssue"][] | null;
             recovery?: components["schemas"]["OperationRecovery"] | null;
             /** State */
             state: string;
@@ -6976,6 +7072,27 @@ export interface components {
             total_bytes_known: boolean;
             /** Total Items */
             total_items?: (number | ExactNumber) | null;
+        };
+        /**
+         * OperationProjectionIssue
+         * @description One optional fact unavailable within this response's reader allocation.
+         */
+        OperationProjectionIssue: {
+            /** Budget Bytes */
+            budget_bytes: number | ExactNumber;
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "progress" | "cancellation";
+            /** Observed Bytes */
+            observed_bytes: number | ExactNumber;
+            /**
+             * Reason
+             * @default response-budget-exceeded
+             * @constant
+             */
+            reason: "response-budget-exceeded";
         };
         /** OperationRecovery */
         OperationRecovery: {
@@ -13283,7 +13400,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FleetSnapshot"];
+                    "application/x-vonk-observation+ndjson": components["schemas"]["ObservationTransferRecord"];
                 };
             };
             /** @description Unauthorized */
@@ -13595,7 +13712,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Durable Fleet event stream. The schema describes the JSON data in each snapshot, telemetry, or change SSE frame. */
+            /** @description Durable Fleet event stream. The schema describes the JSON data in each refresh notice, telemetry, or change SSE frame. A refresh notice requires a verified complete Fleet read. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -13610,7 +13727,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -13619,7 +13736,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
             /** @description Unprocessable Content */
@@ -13628,7 +13745,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": components["schemas"]["RequestValidationProblem"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -13637,7 +13754,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
         };
@@ -15224,7 +15341,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PlatformObservation"];
+                    "application/x-vonk-observation+ndjson": components["schemas"]["ObservationTransferRecord"];
                 };
             };
             /** @description Unauthorized */
