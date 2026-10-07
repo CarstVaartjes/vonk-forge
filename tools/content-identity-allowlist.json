@@ -493,10 +493,24 @@
     },
     {
       "path": "control/src/vonk_control/profile_stop_authority.py",
+      "function": "validate_jobrun_stop_source",
+      "kind": "provenance_comparison",
+      "expression": "request.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Exact issued JobRun source authority: the typed original request must name its installation's accepted recipe revision before that specific runtime target can be stopped; content-equivalent recipes do not authorize destructive effects on another accepted operation."
+    },
+    {
+      "path": "control/src/vonk_control/profile_stop_authority.py",
       "function": "validate_profile_stop_owner",
       "kind": "provenance_comparison",
-      "expression": "authorization.recipe_revision_id != run_switch_plan.recipe_revision_id",
+      "expression": "authorization.recipe_revision_id != accepted_revision_id",
       "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/profile_stop_authority.py",
+      "function": "validate_run_jobrun_stop_target",
+      "kind": "provenance_comparison",
+      "expression": "installation.recipe_revision_id != scope.recipe_revision_id",
+      "reason": "Ordinary accepted Stop authority: the immutable frozen target scope must name the current installation's exact accepted recipe revision before validating the owning parent, issued source and Stop grant; this binds one destructive operation, not reusable image content."
     },
     {
       "path": "control/src/vonk_control/recipe_build_cancellation.py",

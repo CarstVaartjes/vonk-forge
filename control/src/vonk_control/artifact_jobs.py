@@ -69,7 +69,7 @@ from .compiled_artifact_contract import (
 )
 from .execution_plan_service import compile_job_invocation
 from .library_contract import UuidId
-from .lifecycle import CancelRequested, Outcome, Reported
+from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter
 from .lifecycle.artifact_job import ArtifactJobAdapter
 from .lifecycle.evidence import (
@@ -1258,20 +1258,26 @@ class ArtifactJobService:
                     "recipe run is not accepting jobs",
                     reason=InvalidRequestReason.NOT_READY,
                 )
-            concurrent = session.scalar(
-                select(ArtifactJob.id)
-                .where(
+            adapter = ArtifactJobAdapter(session, clock=self._clock)
+            for prior in session.scalars(
+                select(ArtifactJob).where(
                     ArtifactJob.run_id == run.id,
                     ArtifactJob.id != artifact_job.id,
-                    ArtifactJob.state.in_(ajs.LIVE),
                 )
-                .limit(1)
-            )
-            if concurrent is not None:
-                raise ArtifactJobInvalid(
-                    "another artifact job already owns this run reservation",
-                    reason=InvalidRequestReason.CONFLICT,
+            ):
+                evidence = read_result_evidence(prior.result_evidence)
+                damaged_evidence = (
+                    prior.result_evidence is not None and evidence is None
                 )
+                if (
+                    prior.state in ajs.LIVE
+                    or adapter.adopt(prior).effect is Effect.UNKNOWN
+                    or (prior.operation_id is not None and damaged_evidence)
+                ):
+                    raise ArtifactJobInvalid(
+                        "another artifact job already owns this run reservation",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (
                 _active_recipe_revision(session, installation.recipe_revision_id)

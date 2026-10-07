@@ -67,6 +67,7 @@ class RecipeOperationWorker:
         run_switches: _RunSwitchCoordinator | None = None,
         build_cleanup: Callable[[], bool] | None = None,
         retirement_cleanup: Callable[[], bool] | None = None,
+        stop_admission_cleanup: Callable[[], bool] | None = None,
         residue_cleanup: Callable[[], bool] | None = None,
         order_reconcile: Callable[[], bool] | None = None,
     ) -> None:
@@ -78,6 +79,7 @@ class RecipeOperationWorker:
         self._run_switches = run_switches
         self._build_cleanup = build_cleanup
         self._retirement_cleanup = retirement_cleanup
+        self._stop_admission_cleanup = stop_admission_cleanup
         self._residue_cleanup = residue_cleanup
         self._order_reconcile = order_reconcile
 
@@ -87,6 +89,8 @@ class RecipeOperationWorker:
             # The Spark orders first: a lapsed attempt or a wait that needs no
             # person is decided before the owners above them read its state.
             progressed = self._order_reconcile()
+        if self._stop_admission_cleanup is not None:
+            progressed = self._stop_admission_cleanup() or progressed
         if self._build_cleanup is not None:
             progressed = self._build_cleanup() or progressed
         if self._retirement_cleanup is not None:

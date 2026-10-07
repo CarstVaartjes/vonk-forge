@@ -384,7 +384,7 @@ def scan_source(
                     r"(?:^|_)(cancel|stop|retire|supersede|uninstall|remove)(?:_|$)"
                 )
                 fresh = re.compile(
-                    r"(?:^|_)(start|load|apply|prepare|request|create|enqueue|admit)(?:_|$)"
+                    r"(?:^|_)(start|load|apply|prepare|request|create|enqueue|admit|activate|submit)(?:_|$)"
                 )
                 shadowed = {
                     n.id

@@ -32,16 +32,18 @@ from vonk_agent_protocol import (
     RecipeStartPayload,
     RecipeStopPayload,
     RecipeUninstallPayload,
+    RouteState,
 )
 from vonk_agent_protocol.contracts import RecipeBuildRequest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_forge_contracts import RecipeDefinition
 
 from .distribution_assignment import NodeDistributionAssignment
-from .integer_domains import MAX_DATABASE_INTEGER
+from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
 from .mapping_parameters import EngineArgumentValue
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure
+from .profile_stop_authority import JobRunStopScope, ProfileStopOwnerBinding
 from .recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
 from .recipe_build_cancellation import RecipeBuildIntent
 from .recipe_image_availability_contract import (
@@ -184,10 +186,31 @@ class ProfilePartialStop(_Document):
     missing_node_ids: list[NodeText] = Field(min_length=1, max_length=31)
 
 
+class ServiceRunStopReview(_Document):
+    """The exact service Stop accepted before its route withdrawal claim."""
+
+    stage: Literal["accepted", "withdrawal-claimed", "dispatched"]
+    route_state: RouteState
+    run_generation: int = Field(ge=1, le=MAX_DATABASE_BIGINT)
+    target_node_ids: list[NodeText] = Field(min_length=1, max_length=32)
+    missing_node_ids: list[NodeText] = Field(max_length=31)
+    profile_target_node_ids: list[NodeText] | None = Field(
+        default=None, min_length=1, max_length=32
+    )
+    profile_application_id: UuidText | None = None
+    profile_stop_owner: ProfileStopOwnerBinding | None = None
+    exact_payloads: dict[NodeText, RecipeStopPayload] | None = Field(
+        default=None, min_length=1, max_length=32
+    )
+    stop_order: list[NodeText] | None = Field(default=None, min_length=1, max_length=32)
+
+
 class RecipeStopParent(_RecipeParent):
+    service_stop_review: ServiceRunStopReview | None = None
     phases: list[list[StopPhaseOperation]] | None = None
     recovery: DistributedRecoveryMarker | None = None
     profile_partial_stop: ProfilePartialStop | None = None
+    job_run_stop_authorization: JobRunStopScope | None = None
 
 
 class RecipeUninstallParent(_RecipeParent):

@@ -292,6 +292,18 @@ def test_builtin_raise_inventory_is_report_only_and_excludes_custom_classes():
     )
 
 
+def test_real_activation_or_submission_is_fresh_admission_after_ending():
+    """Actual Controller admission APIs establish a new owner after Stop."""
+    for admission in ("activate_job_run", "submit"):
+        source = f"def test_recovery():\n    operations.stop(run)\n    service.{admission}(plan)"
+        assert not scan_source(source, path="test_recovery.py", mode="tests")
+    assert scan_source(
+        "def test_read_only():\n    operations.stop(run)\n    service.preview_run(run)",
+        path="test_recovery.py",
+        mode="tests",
+    )
+
+
 def test_resource_read_refusal_requires_canonical_owner_handler():
     """A resource exception cannot hide a generic damaged-row refusal."""
     source = (
