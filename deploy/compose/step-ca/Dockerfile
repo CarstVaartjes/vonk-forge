@@ -1,4 +1,4 @@
-FROM golang:1.25.8-bookworm@sha256:4557cf171e3cdf5053a298d5171b1a5f5734d920260c25f22c79e94760eb2084 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.8-bookworm@sha256:4557cf171e3cdf5053a298d5171b1a5f5734d920260c25f22c79e94760eb2084 AS builder
 
 ADD --checksum=sha256:744e4bc95fa41c6601872a897d1ea8ef6a71eff8de63076c9464b74ca030021d https://codeload.github.com/smallstep/certificates/tar.gz/6e8ec61405239cf3f37b2bbf260a587b7d2e4e31 /tmp/certificates.tar.gz
 WORKDIR /src/deploy/compose/step-ca
@@ -8,8 +8,13 @@ RUN mkdir upstream/certificates && tar -xzf /tmp/certificates.tar.gz --strip-com
 COPY deploy/compose/step-ca/service service
 WORKDIR /src/deploy/compose/step-ca/service
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
-RUN go mod download && go mod verify \
-    && go build -mod=readonly -trimpath -buildvcs=false -o /out/vonk-step-ca .
+# The same pinned compiler runs natively; only the static Go output targets
+# the requested runtime platform. Module verification remains shared and exact.
+RUN go mod download && go mod verify
+ARG TARGETOS
+ARG TARGETARCH
+RUN GOOS="${TARGETOS:?}" GOARCH="${TARGETARCH:?}" \
+    go build -mod=readonly -trimpath -buildvcs=false -o /out/vonk-step-ca .
 
 # Preserve the existing step health CLI, UID, home, trust mounts and Badger
 # volume. Only the CA executable changes; this is the existing CA service.
