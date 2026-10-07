@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     OperationMemberProgress,
     OperationProgress,
+    ProjectionCode,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeBuildCode,
@@ -3743,7 +3744,14 @@ class RecipeOperationService:
                     select(Job.id, Job.targets)
                     .where(
                         Job.kind == "recipe.stop",
-                        Job.state.in_(["queued", "running", "observing", "backoff"]),
+                        Job.state.in_(
+                            [
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.OBSERVING,
+                                LifecycleState.BACKOFF,
+                            ]
+                        ),
                     )
                     .order_by(Job.updated_at, Job.id)
                 )
@@ -3824,7 +3832,8 @@ class RecipeOperationService:
                             )
                             online_failed |= any(
                                 item.operation_id in children
-                                and children[item.operation_id].state != "succeeded"
+                                and children[item.operation_id].state
+                                != LifecycleState.SUCCEEDED
                                 and children[item.operation_id].state
                                 in _TERMINAL_JOB_STATES
                                 for item in online
@@ -3873,7 +3882,7 @@ class RecipeOperationService:
             )
         )
         pending_nodes = {
-            order.node_id for order in orders if order.state != "succeeded"
+            order.node_id for order in orders if order.state != LifecycleState.SUCCEEDED
         }
         for node in nodes:
             if node.node_id in pending_nodes and node.state == RunState.STOPPED:
@@ -3889,7 +3898,9 @@ class RecipeOperationService:
         run.stopped_at = now if complete else None
         run.updated_at = now
         run.route_error = (
-            None if complete else "node.offline: exact Stop pending reconnect"
+            None
+            if complete
+            else f"{ProjectionCode.NODE_OFFLINE}: exact Stop pending reconnect"
         )
         RecipeOperationAdapter().finish(
             job, now, failed=failed, reason=run.route_error, keep=False
@@ -3901,7 +3912,7 @@ class RecipeOperationService:
                 for child in session.scalars(
                     select(AgentOperation).where(
                         AgentOperation.parent_job_id == job.id,
-                        AgentOperation.state == "failed",
+                        AgentOperation.state == LifecycleState.FAILED,
                     )
                 )
                 if child.node_id not in deferred_stop_nodes(job)
@@ -8315,7 +8326,7 @@ class RecipeOperationService:
                 allow_pending
                 and target.node_id in deferred_stop_nodes(job)
                 and child is not None
-                and child.state != "succeeded"
+                and child.state != LifecycleState.SUCCEEDED
             ):
                 continue
             if child is None or child.current_attempt < 1:

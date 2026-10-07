@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     LifecycleState,
+    ProjectionCode,
     RunState,
     SecurityRefusalError,
     canonical_message,
@@ -49,7 +50,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 class OfflineStopIntent(StrictJSONModel):
     """Exact Stop orders retained for reconciliation after node contact returns."""
 
-    code: Literal["node.offline"] = "node.offline"
+    code: Literal[ProjectionCode.NODE_OFFLINE] = ProjectionCode.NODE_OFFLINE
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
 
 
