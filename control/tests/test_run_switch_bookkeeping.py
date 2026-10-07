@@ -10,7 +10,10 @@ import pytest
 from sqlalchemy import select, update
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import Job, RecipeRun
-from vonk_control.run_switch_contract import RunSwitchApplyRequest
+from vonk_control.run_switch_contract import (
+    RunSwitchApplyRequest,
+    RunSwitchOperationResult,
+)
 from vonk_control.run_switch_operations import (
     RunSwitchOperationConflict,
     _load_plan,
@@ -84,7 +87,9 @@ def test_unreadable_stored_documents_retire_as_unknown_values(tmp_path: Path) ->
 
 
 def test_an_operation_without_any_recorded_target_still_has_a_progress_view() -> None:
-    progress = _progress_view(None, {"node_ids": []}, "failed", "damaged row")
+    progress = _progress_view(
+        None, RunSwitchOperationResult(), "failed", "damaged row", node_ids=[]
+    )
 
     assert [member.state for member in progress.members] == ["unknown"]
 

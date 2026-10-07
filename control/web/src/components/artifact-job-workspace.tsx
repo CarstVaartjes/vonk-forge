@@ -10,6 +10,7 @@ import type {
   LibraryViewRecipeDetail,
   RecipeDefinition,
 } from "../api/types";
+import {addWire, compareWire, contractType, displayRatio, formatWire, isWireNumber, materialize, parseContractJson, stringifyContractJson, type WireNumber} from "../api/contract-numeric";
 import {LifecycleState} from "../api/vocabulary.generated";
 import {formatBytes} from "../lib/fleet";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
@@ -20,6 +21,24 @@ import "./artifact-job-workspace.css";
 
 const CONTROLLER_FILE_LIMIT = 512 * 1024 * 1024;
 const CONTROLLER_TOTAL_LIMIT = 1024 * 1024 * 1024;
+function wireMinimum<T extends WireNumber>(a: T, b: T): T { return compareWire(a, b) <= 0 ? a : b; }
+function wireMaximum<T extends WireNumber>(a: T, b: T): T { return compareWire(a, b) >= 0 ? a : b; }
+// Request transport fields have Controller-owned bounds within safe integers.
+// Conversion is allowed only after exact validation against that owner's bound.
+function boundedRequestInteger(value: WireNumber, maximum: number): number {
+  const native = Number(formatWire(value));
+  if (!contractType(value, ["integer"]) || compareWire(value, 1) < 0
+    || compareWire(value, maximum) > 0 || !Number.isSafeInteger(native)
+    || compareWire(value, native) !== 0) {
+    throw new Error("Request integer is outside the Controller transport boundary");
+  }
+  return native;
+}
+function integerInput(value: string): WireNumber | string {
+  if (!/^-?(?:0|[1-9][0-9]*)$/.test(value)) return value;
+  const parsed = materialize(parseContractJson(value));
+  return isWireNumber(parsed) && contractType(parsed, ["integer"]) ? parsed : value;
+}
 const TERMINAL_STATES = new Set<string>(["succeeded", "failed", "cancelled"]);
 
 /** The name a job is shown under: its lifecycle state, or its preparation stage before it is submitted. */
@@ -102,7 +121,7 @@ function recoveredInputIndexes(job: ArtifactJob, prepared: InputPayload[]): Set<
     const expected = index < 0 ? undefined : prepared[index]?.declaration;
     if (!expected || matched.has(index)
       || expected.media_type !== uploaded.media_type
-      || expected.size_bytes !== uploaded.size_bytes
+      || compareWire(expected.size_bytes, uploaded.size_bytes) !== 0
       || expected.sha256 !== uploaded.sha256) {
       throw new Error(`Durable job ${job.id} has an input that does not match the selected files; its exact draft cannot be reused.`);
     }
@@ -171,7 +190,7 @@ function parameterDefaults(parameters: RecipeParameter[]): Record<string, Scalar
 function parameterError(parameter: RecipeParameter, value: Scalar): string | undefined {
   if (value === null) return undefined;
   if (parameter.type === "integer") {
-    if (!Number.isInteger(value)) return "Enter a whole number.";
+    if (!contractType(value, ["integer"])) return "Enter a whole number.";
   }
   return undefined;
 }
@@ -181,7 +200,7 @@ function recipeParameters(document: JobRecipeDocument): RecipeParameter[] {
   return Object.entries(document.settings.knobs ?? {}).map(([name, setting]) => ({
     name,
     description: "Declared runtime setting.",
-    type: typeof setting.value === "boolean" ? "boolean" : typeof setting.value === "number" && Number.isInteger(setting.value) ? "integer" : "string",
+    type: typeof setting.value === "boolean" ? "boolean" : contractType(setting.value, ["integer"]) ? "integer" : "string",
     default: setting.value,
   }));
 }
@@ -214,7 +233,7 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
     {active && <div className="artifact-job-progress" role="status" aria-live="polite"><span className="artifact-job-progress-track"><span/></span><p>{job.state === "running" ? "The Spark is producing artifacts." : job.state === "queued" ? "Waiting for the assigned Spark." : "Preparing the immutable job request."}</p></div>}
     {job.status_reason && <p className="artifact-job-reason" role={job.state === "failed" ? "alert" : undefined}>{job.status_reason}</p>}
     {job.result_evidence && <dl className="artifact-job-evidence">
-      {job.result_evidence.elapsed_milliseconds != null && <><dt>Elapsed</dt><dd>{(job.result_evidence.elapsed_milliseconds / 1000).toLocaleString()} s</dd></>}
+      {job.result_evidence.elapsed_milliseconds != null && <><dt>Elapsed</dt><dd>{displayRatio(job.result_evidence.elapsed_milliseconds, 1000).toLocaleString()} s</dd></>}
       {job.result_evidence.peak_memory_bytes != null && <><dt>Peak memory</dt><dd>{formatBytes(job.result_evidence.peak_memory_bytes)}</dd></>}
     </dl>}
     {job.state === "succeeded" && job.output_files.length === 0 && <p className="artifact-job-reason">This job succeeded without downloadable outputs.</p>}
@@ -255,15 +274,15 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
       extensions: [],
       min_files: input.required ? 1 : 0,
       max_files: 32,
-      max_file_bytes: Math.min(input.max_bytes, CONTROLLER_FILE_LIMIT),
-      max_total_bytes: Math.min(input.max_bytes * 32, CONTROLLER_TOTAL_LIMIT),
+      max_file_bytes: wireMinimum(input.max_bytes, CONTROLLER_FILE_LIMIT),
+      max_total_bytes: wireMinimum(input.max_bytes * 32, CONTROLLER_TOTAL_LIMIT),
     }];
   }, [input]);
   const textSlot = inputSlots.find(slot => slot.media_types.includes("text/plain"));
   const [values, setValues] = useState<Record<string, Scalar>>(() => parameterDefaults(parameters));
   const [prompt, setPrompt] = useState("");
   const [filesBySlot, setFilesBySlot] = useState<Record<string, File[]>>({});
-  const [timeoutSeconds, setTimeoutSeconds] = useState(3600);
+  const [timeoutSeconds, setTimeoutSeconds] = useState<WireNumber | string>(3600);
   const [jobs, setJobs] = useState<ArtifactJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsError, setJobsError] = useState("");
@@ -353,8 +372,10 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   if (!jobInterface) return null;
   const adapter = jobInterface.adapter;
 
+  const controllerFileLimit = capabilities?.transport.max_input_file_bytes ?? CONTROLLER_FILE_LIMIT;
+  const controllerTotalLimit = capabilities?.transport.max_input_total_bytes ?? CONTROLLER_TOTAL_LIMIT;
   const allowsPromptFile = textSlot !== undefined;
-  const promptLimit = Math.min(textSlot?.max_file_bytes ?? CONTROLLER_FILE_LIMIT, CONTROLLER_FILE_LIMIT);
+  const promptLimit = wireMinimum(textSlot?.max_file_bytes ?? controllerFileLimit, controllerFileLimit);
   const selectedFiles = inputSlots.flatMap(slot => (filesBySlot[slot.id] ?? []).map(file => ({slot, file})));
   const parameterErrors = parameters.flatMap(parameter => {
     const error = parameterError(parameter, values[parameter.name] ?? parameter.default);
@@ -369,35 +390,34 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
     const promptCount = slot.id === textSlot?.id && prompt.trim() ? 1 : 0;
     const count = slotFiles.length + promptCount;
     const total = slotFiles.reduce((sum, file) => sum + file.size, 0) + (promptCount ? promptBytes : 0);
-    if (count < slot.min_files) inputErrors.push(`${slot.label}: add at least ${slot.min_files} file${slot.min_files === 1 ? "" : "s"}.`);
-    if (count > slot.max_files) inputErrors.push(`${slot.label}: use no more than ${slot.max_files} file${slot.max_files === 1 ? "" : "s"}.`);
-    if (slotFiles.some(file => file.size > Math.min(slot.max_file_bytes, CONTROLLER_FILE_LIMIT))) inputErrors.push(`${slot.label}: every file must be ${formatBytes(Math.min(slot.max_file_bytes, CONTROLLER_FILE_LIMIT))} or smaller.`);
+    if (compareWire(count, slot.min_files) < 0) inputErrors.push(`${slot.label}: add at least ${formatWire(slot.min_files)} file${compareWire(slot.min_files, 1) === 0 ? "" : "s"}.`);
+    if (compareWire(count, slot.max_files) > 0) inputErrors.push(`${slot.label}: use no more than ${formatWire(slot.max_files)} file${compareWire(slot.max_files, 1) === 0 ? "" : "s"}.`);
+    if (slotFiles.some(file => compareWire(file.size, wireMinimum(slot.max_file_bytes, controllerFileLimit)) > 0)) inputErrors.push(`${slot.label}: every file must be ${formatBytes(wireMinimum(slot.max_file_bytes, controllerFileLimit))} or smaller.`);
     if (slotFiles.some(file => !slot.media_types.includes(fileMediaType(slot, file)))) inputErrors.push(`${slot.label}: every file must use an allowed media type.`);
     if (slot.extensions.length > 0 && slotFiles.some(file => !slot.extensions.some(extension => file.name.toLowerCase().endsWith(extension.toLowerCase())))) inputErrors.push(`${slot.label}: every filename must end in ${slot.extensions.join(" or ")}.`);
-    if (total > Math.min(slot.max_total_bytes, CONTROLLER_TOTAL_LIMIT)) inputErrors.push(`${slot.label}: combined files must be ${formatBytes(Math.min(slot.max_total_bytes, CONTROLLER_TOTAL_LIMIT))} or smaller.`);
+    if (compareWire(total, wireMinimum(slot.max_total_bytes, controllerTotalLimit)) > 0) inputErrors.push(`${slot.label}: combined files must be ${formatBytes(wireMinimum(slot.max_total_bytes, controllerTotalLimit))} or smaller.`);
   }
-  if (inputCount > (capabilities?.transport.max_input_files ?? 32)) inputErrors.push(`Use no more than ${capabilities?.transport.max_input_files ?? 32} inputs across all slots.`);
-  if (promptBytes > promptLimit) inputErrors.push(`Prompt exceeds the ${formatBytes(promptLimit)} input limit.`);
-  const controllerTotalLimit = capabilities?.transport.max_input_total_bytes ?? CONTROLLER_TOTAL_LIMIT;
-  if (promptBytes + fileBytes > controllerTotalLimit) inputErrors.push(`Combined inputs must be ${formatBytes(controllerTotalLimit)} or smaller.`);
-  if (capabilities && promptBytes + fileBytes > capabilities.storage.remaining_bytes) inputErrors.push(`Artifact storage has only ${formatBytes(capabilities.storage.remaining_bytes)} remaining.`);
+  if (compareWire(inputCount, capabilities?.transport.max_input_files ?? 32) > 0) inputErrors.push(`Use no more than ${formatWire(capabilities?.transport.max_input_files ?? 32)} inputs across all slots.`);
+  if (compareWire(promptBytes, promptLimit) > 0) inputErrors.push(`Prompt exceeds the ${formatBytes(promptLimit)} input limit.`);
+  if (compareWire(promptBytes + fileBytes, controllerTotalLimit) > 0) inputErrors.push(`Combined inputs must be ${formatBytes(controllerTotalLimit)} or smaller.`);
+  if (capabilities && compareWire(promptBytes + fileBytes, capabilities.storage.remaining_bytes) > 0) inputErrors.push(`Artifact storage has only ${formatBytes(capabilities.storage.remaining_bytes)} remaining.`);
   const normalizedNames = selectedFiles.map(item => filename(item.file.name)).concat(textSlot && prompt.trim() ? ["prompt.txt"] : []);
   if (new Set(normalizedNames).size !== normalizedNames.length) inputErrors.push("Input filenames must be unique after removing unsupported characters.");
   if (normalizedNames.some(name => capabilities?.transport.reserved_input_names.includes(name))) inputErrors.push("One selected filename is reserved by the controller.");
   const maximumTimeout = capabilities?.transport.max_timeout_seconds ?? 3600;
-  if (timeoutSeconds < 1 || timeoutSeconds > maximumTimeout) inputErrors.push(`Timeout must be between 1 and ${maximumTimeout.toLocaleString()} seconds.`);
+  if (!isWireNumber(timeoutSeconds) || !contractType(timeoutSeconds, ["integer"]) || compareWire(timeoutSeconds, 1) < 0 || compareWire(timeoutSeconds, maximumTimeout) > 0) inputErrors.push(`Timeout must be between 1 and ${formatWire(maximumTimeout)} seconds.`);
   const output = jobInterface.output;
   const outputSlots = output?.slots ?? [];
-  const outputContractReady = Boolean(output) && outputSlots.length > 0 && typeof output.max_total_bytes === "number";
+  const outputContractReady = Boolean(output) && outputSlots.length > 0 && isWireNumber(output.max_total_bytes);
   if (!outputContractReady) inputErrors.push("This recipe revision has no complete artifact output contract.");
   const preflightErrors = [...parameterErrors.map(item => `${item.name}: ${item.error}`), ...inputErrors];
   const canSubmit = Boolean(activeRun && capabilities) && !phase && preflightErrors.length === 0
     && cancelRecovery?.source !== "upload";
   const exactOutputMedia = [...new Set(outputSlots.flatMap(slot => slot.media_types))];
   const outputLimits = {
-    max_files: Math.min(outputSlots.reduce((total, slot) => total + slot.max_files, 0) || 1, capabilities?.transport.max_output_files ?? 32),
-    max_file_bytes: Math.min(Math.max(...outputSlots.map(slot => slot.max_file_bytes), 1), capabilities?.transport.max_output_file_bytes ?? 1024 ** 3),
-    max_total_bytes: Math.min(output?.max_total_bytes ?? 1, capabilities?.transport.max_output_total_bytes ?? 2 * 1024 ** 3),
+    max_files: boundedRequestInteger(wireMinimum(wireMaximum(outputSlots.reduce<WireNumber>((total, slot) => addWire(total, slot.max_files), 0), 1), capabilities?.transport.max_output_files ?? 32), capabilities?.transport.max_output_files ?? 32),
+    max_file_bytes: wireMinimum(outputSlots.reduce((maximum, slot) => wireMaximum(maximum, slot.max_file_bytes), 1), capabilities?.transport.max_output_file_bytes ?? 1024 ** 3),
+    max_total_bytes: wireMinimum(output?.max_total_bytes ?? 1, capabilities?.transport.max_output_total_bytes ?? 2 * 1024 ** 3),
     allowed_media_types: exactOutputMedia.length > 0 ? exactOutputMedia : outputMedia[adapter],
   };
   const featuredTerminalId = jobs.find(job => isTerminal(job))?.id;
@@ -418,7 +438,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   }
 
   function createRequestId(runId: string, body: ArtifactJobCreateInput): string {
-    const fingerprint = JSON.stringify({runId, body});
+    const fingerprint = stringifyContractJson({runId, body});
     if (!createIntent.current || createIntent.current.fingerprint !== fingerprint) {
       createIntent.current = {fingerprint, requestId: crypto.randomUUID()};
     }
@@ -615,7 +635,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   }
 
   async function submit() {
-    if (!activeRun || !canSubmit) return;
+    if (!activeRun || !canSubmit || !isWireNumber(timeoutSeconds)) return;
     setSubmitError("");
     setRetryNotice("");
     const controller = new AbortController();
@@ -635,7 +655,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
         parameters: createParameters,
         inputs: prepared.map(item => item.declaration),
         output_limits: outputLimits,
-        timeout_seconds: timeoutSeconds,
+        timeout_seconds: boundedRequestInteger(timeoutSeconds, maximumTimeout),
       };
       const createKey = createRequestId(activeRun.run_id, body);
       setPhase("Creating durable job…");
@@ -765,14 +785,14 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
     <div className="artifact-job-layout">
       <form className="artifact-job-form" onSubmit={event => { event.preventDefault(); void submit(); }} noValidate>
         {jobInterfaces.length > 1 && <label htmlFor="artifact-job-interface"><span>Job interface</span><select id="artifact-job-interface" aria-label="Job interface" value={interfaceIndex} onChange={event => setInterfaceIndex(Number(event.target.value))}>{jobInterfaces.map((item, index) => <option value={index} key={`${item.adapter}:${index}`}>{humanizeIdentifier(item.adapter)} · {item.input?.slots?.length ?? 0} bounded slot{item.input?.slots?.length === 1 ? "" : "s"}</option>)}</select><small>Each declared interface keeps its own exact input and output boundary. Changing interface clears local, unsubmitted inputs.</small></label>}
-        {textSlot && <label htmlFor="artifact-job-prompt"><span>{textSlot.label}{textSlot.min_files > 0 ? "" : " (optional)"}</span><textarea id="artifact-job-prompt" rows={5} value={prompt} onChange={event => setPrompt(event.target.value)} aria-label={textSlot.label} aria-required={textSlot.min_files ? "true" : undefined} aria-invalid={inputErrors.some(error => error.startsWith(`${textSlot.label}:`)) || undefined} aria-describedby="artifact-job-prompt-help" placeholder="Describe the artifact to produce"/><small id="artifact-job-prompt-help">{textSlot.description} Saved as UTF-8 <code>prompt.txt</code> · {formatBytes(promptBytes)} of {formatBytes(promptLimit)}</small></label>}
+        {textSlot && <label htmlFor="artifact-job-prompt"><span>{textSlot.label}{compareWire(textSlot.min_files, 0) > 0 ? "" : " (optional)"}</span><textarea id="artifact-job-prompt" rows={5} value={prompt} onChange={event => setPrompt(event.target.value)} aria-label={textSlot.label} aria-required={compareWire(textSlot.min_files, 0) > 0 ? "true" : undefined} aria-invalid={inputErrors.some(error => error.startsWith(`${textSlot.label}:`)) || undefined} aria-describedby="artifact-job-prompt-help" placeholder="Describe the artifact to produce"/><small id="artifact-job-prompt-help">{textSlot.description} Saved as UTF-8 <code>prompt.txt</code> · {formatBytes(promptBytes)} of {formatBytes(promptLimit)}</small></label>}
         {!textSlot && <div className="artifact-job-contract-notice"><strong>No prompt control declared</strong><p>This recipe revision does not authorize a prompt file. Add its required source files below, or update the recipe contract before expecting text-guided output.</p></div>}
         {parameters.length > 0 && <fieldset className="artifact-job-parameters"><legend>Recipe settings</legend>{parameters.map(parameter => {
           const value = values[parameter.name] ?? parameter.default;
           const error = parameterErrors.find(item => item.name === parameter.name)?.error;
           const describedBy = `${parameter.name}-help${error ? ` ${parameter.name}-error` : ""}`;
           if (parameter.type === "boolean") return <label className="artifact-job-check" key={parameter.name}><input type="checkbox" checked={Boolean(value)} onChange={event => setValues(current => ({...current, [parameter.name]: event.target.checked}))}/><span><strong>{humanizeIdentifier(parameter.name)}</strong><small id={`${parameter.name}-help`}>{parameter.description}</small></span></label>;
-          return <label key={parameter.name} htmlFor={`artifact-job-${parameter.name}`}><span>{humanizeIdentifier(parameter.name)}</span><input id={`artifact-job-${parameter.name}`} type={parameter.type === "integer" ? "number" : "text"} value={String(value)} aria-label={humanizeIdentifier(parameter.name)} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={event => setValues(current => ({...current, [parameter.name]: parameter.type === "integer" ? Number(event.target.value) : event.target.value}))}/><small id={`${parameter.name}-help`}>{parameter.description}</small>{error && <small className="artifact-job-field-error" id={`${parameter.name}-error`}>{error}</small>}</label>;
+          return <label key={parameter.name} htmlFor={`artifact-job-${parameter.name}`}><span>{humanizeIdentifier(parameter.name)}</span><input id={`artifact-job-${parameter.name}`} type="text" inputMode={parameter.type === "integer" ? "numeric" : undefined} value={isWireNumber(value) ? formatWire(value) : String(value)} aria-label={humanizeIdentifier(parameter.name)} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={event => setValues(current => ({...current, [parameter.name]: parameter.type === "integer" ? integerInput(event.target.value) : event.target.value}))}/><small id={`${parameter.name}-help`}>{parameter.description}</small>{error && <small className="artifact-job-field-error" id={`${parameter.name}-error`}>{error}</small>}</label>;
         })}</fieldset>}
         {inputSlots.map(slot => {
           const fileMedia = slot.media_types.filter(mediaType => mediaType !== "text/plain");
@@ -781,13 +801,13 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
           const fieldErrors = inputErrors.filter(error => error.startsWith(`${slot.label}:`));
           const helpId = `${id}-help`;
           const errorId = `${id}-error`;
-          return <label htmlFor={id} key={slot.id}><span>{slot.label}{slot.min_files > 0 && slot.id !== textSlot?.id ? "" : " (optional)"}</span><input id={id} type="file" multiple={slot.max_files > 1} required={slot.min_files > 0 && slot.id !== textSlot?.id} accept={[...fileMedia, ...slot.extensions].join(",")} aria-label={slot.label} aria-invalid={fieldErrors.length > 0 || undefined} aria-describedby={`${helpId}${fieldErrors.length ? ` ${errorId}` : ""}`} onChange={event => setFilesBySlot(current => ({...current, [slot.id]: Array.from(event.target.files ?? [])}))}/><small id={helpId}>{slot.description} {fileMedia.join(" · ")} · {slot.min_files}–{slot.max_files} files · {formatBytes(Math.min(slot.max_file_bytes, CONTROLLER_FILE_LIMIT))} each · {formatBytes(Math.min(slot.max_total_bytes, CONTROLLER_TOTAL_LIMIT))} total</small>{fieldErrors.length > 0 && <small className="artifact-job-field-error" id={errorId}>{fieldErrors.join(" ")}</small>}</label>;
+          return <label htmlFor={id} key={slot.id}><span>{slot.label}{compareWire(slot.min_files, 0) > 0 && slot.id !== textSlot?.id ? "" : " (optional)"}</span><input id={id} type="file" multiple={compareWire(slot.max_files, 1) > 0} required={compareWire(slot.min_files, 0) > 0 && slot.id !== textSlot?.id} accept={[...fileMedia, ...slot.extensions].join(",")} aria-label={slot.label} aria-invalid={fieldErrors.length > 0 || undefined} aria-describedby={`${helpId}${fieldErrors.length ? ` ${errorId}` : ""}`} onChange={event => setFilesBySlot(current => ({...current, [slot.id]: Array.from(event.target.files ?? [])}))}/><small id={helpId}>{slot.description} {fileMedia.join(" · ")} · {formatWire(slot.min_files)}–{formatWire(slot.max_files)} files · {formatBytes(wireMinimum(slot.max_file_bytes, controllerFileLimit))} each · {formatBytes(wireMinimum(slot.max_total_bytes, controllerTotalLimit))} total</small>{fieldErrors.length > 0 && <small className="artifact-job-field-error" id={errorId}>{fieldErrors.join(" ")}</small>}</label>;
         })}
         {selectedFiles.length > 0 && <ul className="artifact-input-list" aria-label="Selected input files">{selectedFiles.map(({slot, file}) => <li key={`${slot.id}:${file.name}:${file.lastModified}`}><span>{file.name}</span><small>{slot.label} · {file.type || "Unknown media type"} · {formatBytes(file.size)}</small></li>)}</ul>}
-        <label htmlFor="artifact-job-timeout"><span>Maximum run time</span><input id="artifact-job-timeout" type="number" min={1} max={maximumTimeout} value={timeoutSeconds} aria-label="Maximum run time" onChange={event => setTimeoutSeconds(Number(event.target.value))}/><small>Seconds · the controller stops this job after at most {maximumTimeout.toLocaleString()} seconds.</small></label>
+        <label htmlFor="artifact-job-timeout"><span>Maximum run time</span><input id="artifact-job-timeout" type="number" min={1} max={formatWire(maximumTimeout)} value={typeof timeoutSeconds === "string" ? timeoutSeconds : formatWire(timeoutSeconds)} aria-label="Maximum run time" onChange={event => setTimeoutSeconds(integerInput(event.target.value))}/><small>Seconds · the controller stops this job after at most {formatWire(maximumTimeout)} seconds.</small></label>
         {capabilitiesError && <div className="artifact-job-error" role="alert"><strong>Storage preflight unavailable</strong><p>{capabilitiesError}</p><p>Submission stays disabled until the controller can report its current limits.</p><button type="button" className="button secondary" disabled={capabilitiesLoading} onClick={() => void loadCapabilities()}>{capabilitiesLoading ? "Retrying preflight…" : "Retry storage preflight"}</button></div>}
         <section className={`artifact-job-preflight${preflightErrors.length ? " has-errors" : ""}`} aria-label="Job preflight">
-          <div><strong>{preflightErrors.length ? "Resolve preflight checks" : "Ready to submit"}</strong><span>{inputCount} input{inputCount === 1 ? "" : "s"} · {formatBytes(promptBytes + fileBytes)} · up to {outputLimits.max_files} outputs</span></div>
+          <div><strong>{preflightErrors.length ? "Resolve preflight checks" : "Ready to submit"}</strong><span>{inputCount} input{inputCount === 1 ? "" : "s"} · {formatBytes(promptBytes + fileBytes)} · up to {formatWire(outputLimits.max_files)} outputs</span></div>
           {capabilities && <p className="artifact-storage-capacity">Controller storage: {formatBytes(capabilities.storage.remaining_bytes)} free of {formatBytes(capabilities.storage.max_stored_bytes)}</p>}
           {preflightErrors.length > 0 && <ul>{preflightErrors.map(error => <li key={error}>{error}</li>)}</ul>}
           <details><summary>Output boundary</summary><p>{formatBytes(outputLimits.max_total_bytes)} total · {formatBytes(outputLimits.max_file_bytes)} per file · {outputLimits.allowed_media_types.join(" · ")}</p></details>

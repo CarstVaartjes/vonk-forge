@@ -6,6 +6,7 @@ from fastapi import HTTPException, Query, Response
 
 from .bounded_json import BoundedJSONError
 from .failure_evidence import FailureEvidenceBundle, FailureEvidenceService
+from .integer_domains import MAX_DATABASE_INTEGER
 from .operation_api import bounded_error_responses
 
 
@@ -19,7 +20,9 @@ def install_failure_evidence_routes(
         operation_id="getOperationEvidence",
     )
     def evidence(
-        operation_id: str, attempt: int = Query(ge=0), _actor=actor_dependency
+        operation_id: str,
+        attempt: int = Query(ge=0, le=MAX_DATABASE_INTEGER),
+        _actor=actor_dependency,
     ):
         if service is None:
             raise HTTPException(503, "failure evidence service unavailable")

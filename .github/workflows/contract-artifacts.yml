@@ -1,0 +1,100 @@
+name: Canonical contract artifacts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/contract-artifacts.yml
+      - agent_protocol/**
+      - control/src/vonk_control/**
+      - rust/crates/vonk-wire-codegen/**
+      - scripts/export-agent-wire-schema
+      - scripts/export-installer-release-schema
+      - scripts/generate-agent-wire
+      - Cargo.lock
+      - Cargo.toml
+      - scripts/refresh-protocol-wheel-lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vonk-contract-artifacts-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Generate canonical wire artifacts from exact source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prepare pinned candidate packaging tool
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+      - name: Refresh candidate wheel pin from exact authored source
+        run: |
+          uv build --project agent_protocol --wheel --out-dir inventory/wheels
+          python3 scripts/refresh-protocol-wheel-lock
+      - name: Bootstrap canonical packaged resource from locked dependencies
+        env:
+          PYTHONPATH: control/src:agent_protocol/src:src
+        run: |
+          scripts/retry-dependency-fetch uv sync --project control --frozen --no-install-project --no-install-package vonk-cluster-profiles
+          control/.venv/bin/python scripts/generate-control-clients --cli-update-schema-only
+      - name: Prepare locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Install pinned Rust toolchain
+        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal --component rustfmt
+      - name: Restore read-only generator dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Generate canonical wire artifacts
+        env:
+          CARGO_BUILD_JOBS: "1"
+        run: |
+          scripts/retry-dependency-fetch cargo fetch --locked
+          uv run --project control --frozen python scripts/generate-agent-wire
+      - name: Record exact source and output digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, shutil, subprocess
+          paths = [
+              "rust/crates/vonk-agent-protocol/schema/wire.json",
+              "rust/crates/vonk-agent-protocol/src/generated.rs",
+              "schemas/install-release-manifest.schema.json",
+              "control/uv.lock",
+          ]
+          root = pathlib.Path("artifacts/canonical-contracts")
+          records = {}
+          for name in paths:
+              source = pathlib.Path(name)
+              target = root / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copyfile(source, target)
+              records[name] = hashlib.sha256(source.read_bytes()).hexdigest()
+          manifest = {
+              "source_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "sha256": records,
+          }
+          (root / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+          PY
+      - name: Upload canonical outputs and provenance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canonical-contracts-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/canonical-contracts
+          if-no-files-found: error
+          retention-days: 7

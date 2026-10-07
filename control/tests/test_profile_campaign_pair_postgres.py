@@ -97,6 +97,7 @@ class _PairedReceiptAdapter(_SwitchAdapter):
             )
             child_receipts.append(
                 FleetProfileSwitchChildState(
+                    queue_index=item_index,
                     operation_id=operation_id,
                     kind="run",
                     state="succeeded",
@@ -324,6 +325,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     assert isinstance(result, FleetProfileSwitchAdapterResult)
     assert result.assignment_ids == sorted(assignments)
     assert len(result.children) == 2
+    assert [child.queue_index for child in result.children] == [0, 1]
     observed_lanes: set[tuple[str, str]] = set()
     receipt_ids: set[str] = set()
     for child in result.children:
@@ -334,6 +336,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
         assert receipt.run_switch_operation_id == child.operation_id
         run_switch = receipt.run_switch
         assert run_switch.profile_application_id == application_id
+        assert child.queue_index == run_switch.item_index
         assignment_id = result.assignment_ids[run_switch.item_index]
         assignment = assignments[assignment_id]
         assert [member.node_id for member in run_switch.members] == [

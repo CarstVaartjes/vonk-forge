@@ -31,6 +31,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .auth import CursorError
 from .cluster_mappings import mapping_option_choices
+from .fleet_event_contract import NodeProfilePayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .machine_states import (
     CertificateStateField,
@@ -311,8 +312,8 @@ class InstallPartialEvidence(StrictModel):
     reason: InstallDegradedReason
     group_state: InstallationStateField
     rank_state: InstallationStateField
-    installed_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
-    required_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    installed_bytes: Annotated[int, Field(ge=0, le=_MAX_SIGNED_BIGINT)] | None = None
+    required_bytes: Annotated[int, Field(ge=0, le=_MAX_SIGNED_BIGINT)] | None = None
 
 
 class ProjectionReason(StrictModel):
@@ -349,7 +350,9 @@ class InventoryState(StrictModel):
     artifact_store_read_only: bool
     capabilities: list[Text64] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+    fabric_bandwidth_mbps: Annotated[int, Field(ge=1, le=_MAX_SIGNED_BIGINT)] | None = (
+        None
+    )
     nvidia_driver_version: Text256
     container_runtime_version: Text256
     network_interfaces: list[NetworkInterface] | None = Field(
@@ -410,8 +413,8 @@ class RecipePresence(StrictModel):
     affected_ranks: list[Rank] = Field(
         default_factory=list, max_length=_MAX_FLEET_NODES
     )
-    installed_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
-    required_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    installed_bytes: Annotated[int, Field(ge=0, le=_MAX_SIGNED_BIGINT)] | None = None
+    required_bytes: Annotated[int, Field(ge=0, le=_MAX_SIGNED_BIGINT)] | None = None
 
 
 class RunPresence(StrictModel):
@@ -667,10 +670,9 @@ class FleetProjection:
                         node_id=node_id,
                         entity_kind="node-profile",
                         entity_id=node_id,
-                        payload={
-                            "node_id": node_id,
-                            "display_name_changed": True,
-                        },
+                        payload=NodeProfilePayload(
+                            node_id=node_id, display_name_changed=True
+                        ),
                     ),
                 )
             return FleetNodeIdentity(

@@ -1,3 +1,4 @@
+import {addWire, compareWire, formatWire, type WireNumber} from "../api/contract-numeric";
 import type {MouseEvent} from "react";
 import {useState} from "react";
 import type {ControlApi, LibraryViewModel, LibraryViewSnapshot} from "../api/types";
@@ -90,7 +91,7 @@ function ModelRevisionsRow({api, revisions, onNavigate, onPrepared}: {api: Contr
   const model = revisions.find(item => modelKey(item.model) === selected)
     ?? revisions.find(item => item.recipes.length > 0) ?? revisions[0]!;
   const key = modelKey(model.model);
-  const bytes = model.model_document.files.reduce((sum, file) => sum + file.size_bytes, 0);
+  const bytes = model.model_document.files.reduce<WireNumber>((sum, file) => addWire(sum, file.size_bytes), 0);
   const capabilities = model.model_capabilities ?? [];
   const running = (model.local.running_on ?? []).length;
   const preparation = model.local.preparation;
@@ -122,7 +123,7 @@ function ModelRevisionsRow({api, revisions, onNavigate, onPrepared}: {api: Contr
     {recipes.length > 0 && <ul className="library-model-recipes" aria-label={`Recipes using ${modelTitle(model)}`}>
       {recipes.map(recipe => <li key={recipe.recipe_revision_id}>
         <a href={recipeLibraryPath(recipe.recipe_id)} onClick={event => onNavigate(event, recipeLibraryPath(recipe.recipe_id))}>{recipe.title}</a>
-        <span> · {recipe.topology_name} · {recipe.recipe_document.topology.node_count} {recipe.recipe_document.topology.node_count === 1 ? "Spark" : "Sparks"}</span>
+        <span> · {recipe.topology_name} · {formatWire(recipe.recipe_document.topology.node_count)} {compareWire(recipe.recipe_document.topology.node_count, 1) === 0 ? "Spark" : "Sparks"}</span>
       </li>)}
     </ul>}
   </article>;

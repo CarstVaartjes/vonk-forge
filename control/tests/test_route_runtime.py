@@ -45,13 +45,22 @@ def _publish(
     publisher._identity(authority_id, plan_digest, evidence_set_digest)
     with publisher._locked():
         current = publisher._read_marker(optional=True, verify_files=True)
+        generation = (current.generation if current is not None else 0) + 1
         marker = publisher._activate(
-            generation=(current.generation if current is not None else 0) + 1,
+            generation=generation,
             state=state,
             authority_id=authority_id,
             plan_digest=plan_digest,
             evidence_set_digest=evidence_set_digest,
-            routes=routes or _encoded({"schema_version": 2, "routes": {}}),
+            routes=routes
+            or _encoded(
+                {
+                    "generation": generation,
+                    "routes": {},
+                    "schema_version": 2,
+                    "state": state,
+                }
+            ),
             litellm=render_empty_config(),
         )
         publisher._require_supervisor_ack(marker)

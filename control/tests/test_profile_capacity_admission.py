@@ -11,10 +11,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
+    FleetProfileSwitchAdapterState,
     profile_switch_child_request_key,
 )
 from vonk_control.fleet_profiles import (
@@ -932,19 +933,21 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
         intended = restarted._intended_profile(recovered, session=session)
         assert not isinstance(intended, Residue)
         assert intended.reviewed_plan_digest == review["plan_digest"]
-        switch_state = recovered.progress["switch_adapter"]
-        assert isinstance(switch_state, dict)
-        position = switch_state["position"]
-        item = switch_state["queue"][position]
-        expected_child_request = profile_switch_child_request_key(
-            recovered.id, position, item["kind"], item["id"]
+        switch_state = FleetProfileSwitchAdapterState.model_validate_json(
+            canonical_message(recovered.progress["switch_adapter"])
         )
-        assert switch_state["active_operation_id"] is not None
-        child = session.scalar(
-            select(Job).where(Job.request_id == expected_child_request)
-        )
-        assert child is not None
-        assert child.id == switch_state["active_operation_id"]
+        assert switch_state.pending_children
+        for pending_child in switch_state.pending_children:
+            item = switch_state.queue[pending_child.queue_index]
+            assert pending_child.kind == item.kind
+            expected_child_request = profile_switch_child_request_key(
+                recovered.id, pending_child.queue_index, item.kind, item.id
+            )
+            child = session.scalar(
+                select(Job).where(Job.request_id == expected_child_request)
+            )
+            assert child is not None
+            assert child.id == pending_child.operation_id
 
 
 def test_queued_admission_survives_submitter_death_before_first_attempt(

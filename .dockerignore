@@ -33,6 +33,15 @@ schemas/global/*
 !tools/
 tools/*
 !tools/hatch_build.py
+!rust/
+rust/*
+!rust/crates/
+rust/crates/*
+!rust/crates/vonk-agent-protocol/
+rust/crates/vonk-agent-protocol/*
+!rust/crates/vonk-agent-protocol/schema/
+rust/crates/vonk-agent-protocol/schema/*
+!rust/crates/vonk-agent-protocol/schema/wire.json
 !deploy/
 deploy/*
 !deploy/compose/

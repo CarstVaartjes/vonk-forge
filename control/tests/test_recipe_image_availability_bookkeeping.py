@@ -11,13 +11,18 @@ from typing import cast
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.models import Base, Job, User
+from vonk_agent_protocol import OperationProgress
+from vonk_control.job_documents import AvailabilityJobPayload
+from vonk_control.model_cache_contract import ModelCacheCancellation
+from vonk_control.models import Base, Job, ModelCacheOperation, User
 from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     _removal_retry_is_due,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.stored_json import Residue, read_row_column
+from vonk_forge_contracts import RecipeDefinition
 
 from .test_recipe_image_availability import (
     _add_revision,
@@ -100,6 +105,19 @@ def test_damaged_cancellation_evidence_reads_as_none_and_a_fresh_cancel_heals_it
     )
     assert cancelled.state == "cancelled"
     assert cancelled.cancellation is not None
+    # Repairing unrelated damage must retain an adopted cancellation, including
+    # when the record also contains a retired field.
+    with sessions.begin() as session:
+        job = session.get(Job, operation.id)
+        assert job is not None
+        job.payload = dict(job.payload) | {
+            "retry_after_at": "damaged",
+            "cancellation": cancelled.cancellation.model_dump(mode="json")
+            | {"retired_field": True},
+        }
+    observed = service.get(operation.id)
+    assert observed.cancellation == cancelled.cancellation
+    assert observed.state == "cancelled" and service.run_pending() == 0
     engine.dispose()
 
 
@@ -128,20 +146,17 @@ def test_a_damaged_stored_recipe_is_rebuilt_from_its_revision_under_its_digest(
         job = session.get(Job, operation.id)
         assert job is not None
         intact = dict(job.payload)
-    assert service._stored_recipe(intact).identity.slug == (
-        _recipe("recipe-source-build.json").identity.slug
-    )
+    readable = service._stored_recipe(intact)
+    assert isinstance(readable, RecipeDefinition)
+    assert readable.identity.slug == (_recipe("recipe-source-build.json").identity.slug)
     damaged = {**intact, "recipe": {"not": "a recipe"}}
-    assert (
-        service._stored_recipe(damaged).identity
-        == _recipe("recipe-source-build.json").identity
-    )
+    recovered = service._stored_recipe(damaged)
+    assert isinstance(recovered, RecipeDefinition)
+    assert recovered.identity == _recipe("recipe-source-build.json").identity
     # The rebuild is evidence only under the digest the operation was accepted
     # with: a revision with other content is never a source for it.
     other = {**damaged, "recipe_content_sha256": "e" * 64}
-    with pytest.raises(RecipeImageAvailabilityError) as refused:
-        service._stored_recipe(other)
-    assert refused.value.code == "recipe_image.recipe_invalid"
+    assert isinstance(service._stored_recipe(other), Residue)
     engine.dispose()
 
 
@@ -175,3 +190,137 @@ def test_stored_damage_is_not_raised_as_an_invalid_operation_outside_the_removal
             ):
                 offenders.add(function.name)
     assert not offenders, offenders
+
+
+def test_builder_progress_survives_the_column_guard_and_completes(
+    tmp_path: Path,
+) -> None:
+    """A progress callback must not poison the payload with unused detail keys."""
+    engine, sessions, service, operation = _started(tmp_path)
+    original_builder = service._builder
+    assert original_builder is not None
+    observed = []
+
+    def build(*args, progress, **kwargs):
+        progress(
+            OperationProgress(
+                phase="build", completed_bytes=7, total_bytes=10, total_bytes_known=True
+            ).model_dump(mode="json")
+        )
+        with sessions() as session:
+            row = session.get(Job, operation.id)
+            assert row is not None
+            readable = read_row_column(row, "payload")
+            assert isinstance(readable, AvailabilityJobPayload)
+            observed.append(readable.progress.completed_bytes)
+        return original_builder(*args, **kwargs)
+
+    service._builder = build
+    assert service.run_pending() == 1
+    assert observed == [7]
+    assert service.get(operation.id).state == "succeeded"
+    engine.dispose()
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_damaged_optional_observations_and_legacy_fields_heal_in_the_worker(
+    tmp_path: Path,
+) -> None:
+    """Readable intent survives damaged observations without a replacement request."""
+    engine, sessions, service, operation = _started(tmp_path)
+    with sessions.begin() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        row.payload = dict(row.payload) | {
+            "recipe": {"damaged": True},
+            "retry_after_at": "tomorrow-ish",
+            "model_child": {"id": "unreadable"},
+            "image_result": {"image_bytes": "bad"},
+            "step": "retired detail",
+            "log_excerpt": "retired log",
+        }
+    # Reading does not rewrite the owner, and uses its exact catalog identity.
+    assert service.get(operation.id).residue is None
+    with sessions() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None and isinstance(read_row_column(row, "payload"), Residue)
+    assert service.run_pending() == 1
+    with sessions() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None and isinstance(
+            read_row_column(row, "payload"), AvailabilityJobPayload
+        )
+    assert service.get(operation.id).state == "succeeded"
+    engine.dispose()
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_unreadable_identity_is_residue_and_does_not_block_other_claims(
+    tmp_path: Path,
+) -> None:
+    """One unadoptable owner neither crashes reads nor consumes another job's slot."""
+    engine, sessions, service, damaged = _started(tmp_path)
+    ready = service.start("bookkeeping-revision", actor="operator", request_id="ready")
+    with sessions.begin() as session:
+        row = session.get(Job, damaged.id)
+        assert row is not None
+        row.payload = {
+            "schema_version": 2,
+            "recipe_revision_id": "bookkeeping-revision",
+        }
+    view = service.get(damaged.id)
+    assert isinstance(view.residue, Residue)
+    rows, total, _ = service.list_page(limit=10)
+    assert total == 2 and any(row.residue is not None for row in rows)
+    claims = service.claim_pending(limit=4)
+    assert [claim.operation_id for claim in claims] == [ready.id]
+    service.run_claim(claims[0])
+    assert service.get(ready.id).state == "succeeded"
+    engine.dispose()
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_lost_terminal_evidence_is_residue_and_a_new_request_still_runs(
+    tmp_path: Path,
+) -> None:
+    """A damaged result cannot masquerade as success or obstruct fresh intent."""
+    engine, sessions, service, operation = _started(tmp_path)
+    assert service.run_pending() == 1
+    assert service.get(operation.id).state == "succeeded"
+    with sessions.begin() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        row.result = {"lost": True}
+    unknown = service.get(operation.id)
+    assert isinstance(unknown.residue, Residue)
+    assert unknown.result is None and unknown.image_state == "succeeded"
+    accepted = service.start(
+        "bookkeeping-revision", actor="operator", request_id="after-lost-result"
+    )
+    assert service.run_pending() == 1
+    assert service.get(accepted.id).state == "succeeded"
+    engine.dispose()
+
+
+def test_model_child_cancel_intent_survives_unrelated_payload_damage() -> None:
+    """A damaged download envelope must not forget its accepted cancellation."""
+    from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
+
+    cancel = ModelCacheCancellation(
+        request_key="00000000-0000-4000-8000-000000000a02",
+        actor="operator",
+        reason="stop the child",
+        requested_at=datetime.now(UTC).isoformat(),
+    )
+    row = ModelCacheOperation(
+        id="00000000-0000-4000-8000-000000000a03",
+        kind="download",
+        payload={
+            "manifest": {"damaged": True},
+            "cancellation": cancel.model_dump(mode="json"),
+        },
+    )
+    assert isinstance(read_row_column(row, "payload"), Residue)
+    assert RecipeImageAvailabilityService._model_child_has_cancel_intent(row)
+    row.payload = {"cancellation": {"request_key": "damaged"}}
+    assert not RecipeImageAvailabilityService._model_child_has_cancel_intent(row)
