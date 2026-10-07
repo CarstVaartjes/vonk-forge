@@ -4198,7 +4198,12 @@ mod tests {
         }
         let database = root.path().join("state.sqlite");
         let mut observations = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
+            assert!(
+                Instant::now() < deadline,
+                "native observation fixture exceeded its elapsed budget"
+            );
             let mut state = StateStore::open(&database, NODE_ID).unwrap();
             let checkpoint = state.observation_checkpoint().unwrap();
             let page = runtime

@@ -1198,12 +1198,31 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
     }
 
-    pub fn recipe_run_inspection_plans(&self) -> Result<Vec<RecipeRunInspectionPlan>, OciError> {
+    /// Compatibility callers own a finite aggregate budget. Production scans
+    /// persist one bounded page at a time instead of awaiting a whole history.
+    pub fn recipe_run_inspection_plans(
+        &self,
+        deadline: Instant,
+    ) -> Result<Vec<RecipeRunInspectionPlan>, OciError> {
         let mut plans = Vec::new();
         let mut checkpoint = None;
         let mut failure = None;
         loop {
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "run inspection aggregate budget expired",
+                )
+                .into());
+            }
             let page = self.recipe_run_inspection_page(checkpoint.as_ref())?;
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "run inspection aggregate budget expired",
+                )
+                .into());
+            }
             plans.extend(page.plans);
             for fault in page.failures {
                 failure.get_or_insert(fault.error);

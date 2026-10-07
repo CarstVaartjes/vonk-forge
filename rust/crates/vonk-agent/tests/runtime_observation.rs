@@ -1,7 +1,11 @@
 #![forbid(unsafe_code)]
 
 use serde_json::{Value, json};
-use std::{fs, path::Path, time::Duration};
+use std::{
+    fs,
+    path::Path,
+    time::{Duration, Instant},
+};
 use tempfile::tempdir;
 use vonk_agent::{
     oci::{OciRuntime, RecipeRunStartIdentity},
@@ -108,7 +112,9 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
     fs::create_dir_all(&invalid_metadata).unwrap();
     fs::write(invalid_metadata.join("lifecycle.json"), b"not-json").unwrap();
     fs::create_dir_all(root.path().join("runs").join("not-a-run-id")).unwrap();
-    let inspections = runtime.recipe_run_inspection_plans().unwrap();
+    let inspections = runtime
+        .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+        .unwrap();
     assert_eq!(inspections.len(), 1);
     assert_eq!(inspections[0].run_id.to_string(), RUN);
     assert_eq!(&inspections[0].arguments[4..], launched.main.as_slice());
@@ -128,12 +134,24 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
     changed_placement.runtime.placement.endpoint_address = Some("192.168.1.213".parse().unwrap());
     for tampered in [changed_workload, changed_placement] {
         fs::write(&retained_path, serde_json::to_vec(&tampered).unwrap()).unwrap();
-        assert!(runtime.recipe_run_inspection_plans().is_err());
+        assert!(
+            runtime
+                .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+                .is_err()
+        );
     }
     fs::write(&retained_path, b"{}").unwrap();
-    assert!(runtime.recipe_run_inspection_plans().is_err());
+    assert!(
+        runtime
+            .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+            .is_err()
+    );
     fs::remove_file(&retained_path).unwrap();
-    assert!(runtime.recipe_run_inspection_plans().is_err());
+    assert!(
+        runtime
+            .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+            .is_err()
+    );
     std::os::unix::fs::symlink(
         root.path()
             .join("installations")
@@ -142,7 +160,11 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
         &retained_path,
     )
     .unwrap();
-    assert!(runtime.recipe_run_inspection_plans().is_err());
+    assert!(
+        runtime
+            .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+            .is_err()
+    );
 }
 
 #[test]
@@ -184,7 +206,9 @@ fn retained_inspection_and_agent_preparation_leave_private_tmp_cleanup_to_helper
             &identity,
         )
         .unwrap();
-    let inspections = runtime.recipe_run_inspection_plans().unwrap();
+    let inspections = runtime
+        .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+        .unwrap();
     assert_eq!(inspections.len(), 1);
     assert_eq!(inspections[0].endpoint_address, None);
     assert!(
@@ -502,7 +526,17 @@ fn retained_lifecycle_requires_all_canonical_placement_fields() {
             &identity(&plan),
         )
         .unwrap();
-    runtime.recipe_run_inspection_plans().unwrap();
+    let expired = runtime.recipe_run_inspection_plans(Instant::now());
+    assert!(matches!(
+        expired,
+        Err(vonk_agent::oci::OciError::Io(ref error))
+            if error.kind() == std::io::ErrorKind::TimedOut
+    ));
+    // Expiry is unknown coverage, never an empty/successful result; the same
+    // retained accepted Start is still readable under a fresh caller budget.
+    runtime
+        .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+        .unwrap();
     let path = root
         .path()
         .join("run-metadata")
@@ -523,7 +557,9 @@ fn retained_lifecycle_requires_all_canonical_placement_fields() {
             .remove(field);
         fs::write(&path, serde_json::to_vec(&incomplete).unwrap()).unwrap();
         assert!(
-            runtime.recipe_run_inspection_plans().is_err(),
+            runtime
+                .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+                .is_err(),
             "missing {field}"
         );
     }
@@ -580,7 +616,12 @@ fn sixty_five_native_starts_survive_durable_pagination_and_restart() {
     let database = root.path().join("agent-state.sqlite");
     let mut observed = BTreeSet::new();
     let mut pages = 0;
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
+        assert!(
+            Instant::now() < deadline,
+            "native scan fixture exceeded its elapsed budget"
+        );
         let mut state = StateStore::open(&database, "observation-test-node").unwrap();
         let checkpoint = state.observation_checkpoint().unwrap();
         let runtime = OciRuntime {
@@ -701,7 +742,12 @@ fn legacy_checkpoint_json_reopens_without_rewrite_and_resumes_native_scan() {
     let mut observed: BTreeSet<_> = first.plans.iter().map(|plan| plan.run_id).collect();
     let mut retained = Some(reopened);
     let mut pages = 0;
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
+        assert!(
+            Instant::now() < deadline,
+            "native scan fixture exceeded its elapsed budget"
+        );
         let page = runtime
             .recipe_run_inspection_page(retained.as_ref())
             .unwrap();
@@ -796,7 +842,12 @@ fn history_beyond_4096_keeps_cursor_progress_during_new_arrivals_and_restart() {
     let database = root.path().join("agent-state.sqlite");
     let mut found = false;
     let mut pages = 0;
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
+        assert!(
+            Instant::now() < deadline,
+            "native scan fixture exceeded its elapsed budget"
+        );
         let mut state = StateStore::open(&database, "observation-test-node").unwrap();
         let checkpoint = state.observation_checkpoint().unwrap();
         let runtime = OciRuntime {
@@ -843,7 +894,12 @@ fn complete_empty_history_uses_initial_cutoff_and_partial_scan_is_never_empty() 
     assert!(!first.empty_snapshot_safe);
     let original_cutoff = first.observed_at;
     let mut checkpoint = first.checkpoint;
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
+        assert!(
+            Instant::now() < deadline,
+            "native scan fixture exceeded its elapsed budget"
+        );
         let page = runtime
             .recipe_run_inspection_page(checkpoint.as_ref())
             .unwrap();
