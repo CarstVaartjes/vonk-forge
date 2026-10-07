@@ -29,6 +29,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from jsonschema import Draft202012Validator, ValidationError
 
 from .build_identity import current_build
+from .runtime_identity import verified_wheel_identity
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SOURCE = re.compile(r"[0-9a-f]{40}\Z")
@@ -261,6 +262,7 @@ def run_update(
     apply: bool,
     public_key: Path | None = None,
     download: Callable[[str, int], bytes] = _download,
+    controller_observation: Callable[[], dict[str, object]] | None = None,
 ) -> dict[str, object]:
     release, base = _signed_release(
         channel=channel,
@@ -294,15 +296,36 @@ def run_update(
         raise CliUpdateError("CLI wheel digest or size is invalid")
     try:
         with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
-            identity = json.loads(archive.read("cluster_profiles/build-identity.json"))
-        if identity != {
-            "schema_version": 1,
-            "source_sha": target_source,
-            "release_version": release["version"],
-        }:
-            raise CliUpdateError("CLI wheel identity does not match accepted release")
+            identity = verified_wheel_identity(
+                archive,
+                source_sha=cast(str, target_source),
+                version=cast(str, release["version"]),
+            )
     except (KeyError, ValueError, zipfile.BadZipFile) as error:
         raise CliUpdateError("CLI wheel identity is invalid") from error
+    from .control_client import ControlClient, ControlClientError
+
+    try:
+        deployed = (
+            controller_observation()
+            if controller_observation is not None
+            else ControlClient.from_environment().get("/api/platform")
+        )
+    except (ControlClientError, OSError):
+        result["compatibility"] = "controller-observation-unavailable"
+        return result
+    api = deployed.get("api")
+    source = api.get("source_sha") if isinstance(api, dict) else None
+    fingerprint = api.get("control_contract_sha256") if isinstance(api, dict) else None
+    result["controller"] = deployed
+    if (
+        not isinstance(source, str)
+        or _SOURCE.fullmatch(source) is None
+        or fingerprint != identity.control_contract_sha256
+    ):
+        result["compatibility"] = "controller-contract-unavailable-or-different"
+        return result
+    result["compatibility"] = "compatible"
     uv = shutil.which("uv")
     if uv is None:
         raise CliUpdateError("CLI update requires uv")

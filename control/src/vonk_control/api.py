@@ -526,6 +526,13 @@ def refresh_fleet_metrics(
     metrics.update_fleet(fleet_snapshot)
 
 
+from .platform_observation import (
+    PlatformObservation,
+    PlatformObserver,
+    api_only_observation,
+)
+
+
 def create_app(
     *,
     jobs: JobQueue,
@@ -556,6 +563,7 @@ def create_app(
     recipe_image_availability: Any | None = None,
     gateway_keys: GatewayKeyService | None = None,
     lifespan: Any | None = None,
+    platform_observer: PlatformObserver | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Vonk Forge Control",
@@ -916,6 +924,21 @@ def create_app(
         actor_dependency=authenticated_actor,
         operations=run_switch_operations,
     )
+
+    @app.get(
+        "/api/platform",
+        response_model=PlatformObservation,
+        operation_id="getPlatformObservation",
+        responses=bounded_error_responses(401, 503),
+    )
+    def platform_observation(
+        _actor: Actor = authenticated_actor,
+    ) -> PlatformObservation:
+        return (
+            api_only_observation()
+            if platform_observer is None
+            else platform_observer.read()
+        )
 
     @app.get("/api/healthz", response_model=HealthzResponse)
     def healthz() -> HealthzResponse:
@@ -1608,6 +1631,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             agent_upgrades.close()
 
     app = create_app(
+        platform_observer=PlatformObserver(sessions, clock=clock),
         jobs=job_service,
         tokens=token_codec,
         fleet_projection=visual_fleet,

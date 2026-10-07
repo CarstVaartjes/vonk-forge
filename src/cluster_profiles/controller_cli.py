@@ -432,6 +432,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     commands: argparse._SubParsersAction[ControllerParserT],
 ) -> None:
     """Register the Fleet, Model, Recipe, Profile and Key command namespaces."""
+    platform = commands.add_parser(
+        "platform", help="Actual Controller processes and installed contracts"
+    )
+    _add_output(platform)
     fleet = commands.add_parser(
         "fleet",
         help="Sparks, their health, and what they run",
@@ -4107,6 +4111,8 @@ def run_controller(
     request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
     command = getattr(args, "command", None) or "profile"
+    if command == "platform":
+        return client.request("GET", "/api/platform")
     if command == "run":
         return _run(args, client, request_id_factory)
     if command == "fleet":
