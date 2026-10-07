@@ -1,4 +1,6 @@
 import createClient from "openapi-fetch";
+import {ContractResponse, readControlResponse, serializeControlBody, validateControlBody} from "./contract-json";
+import {stringifyContractJson, parseContractJson} from "./contract-numeric";
 import {AuthenticationRequired} from "../auth";
 import type {paths} from "./generated";
 import type {
@@ -124,18 +126,33 @@ export class ApiClient implements ControlApi {
     baseUrl: location.origin,
     credentials: "same-origin",
     headers: {Accept: "application/json"},
+    bodySerializer: stringifyContractJson,
   });
 
   constructor() {
     this.generated.use({
       onRequest: async ({request}) => {
+        if (request.headers.get("content-type")?.startsWith("application/json") && request.body !== null) {
+          const text = await request.clone().text();
+          serializeControlBody(request.method, request.url, parseContractJson(text));
+        }
         if (["GET", "HEAD"].includes(request.method)) return;
         const headers = new Headers(request.headers);
         headers.set("X-CSRF-Token", await this.requiredCsrfToken());
         return new Request(request, {headers});
       },
-      onResponse: ({response}) => {
+      onResponse: async ({request, response}) => {
+        if (response.status === 204 || request.method === "HEAD") return response;
+        const text = await response.text();
+        let value: unknown;
+        try { value = validateControlBody(request.method, request.url, response.status, response.headers.get("content-type") ?? "", text); }
+        catch (cause) { this.requireAuthentication(response, cause); throw cause; }
         this.requireAuthentication(response);
+        if (!response.ok) {
+          const detail = typeof value === "object" && value !== null && "detail" in value ? formatApiDetail(value.detail) : "request failed";
+          throw new ApiError(response.status, `Control API returned ${response.status}: ${detail}`, requestIdOf(response));
+        }
+        return new ContractResponse(response, value, text);
       },
     });
   }
@@ -147,10 +164,12 @@ export class ApiClient implements ControlApi {
     };
   }
 
-  private requireAuthentication(response: Response): void {
+  private requireAuthentication(response: Response, cause?: unknown): void {
     if (response.status !== 401) return;
     this.authenticationRequired?.();
-    throw new AuthenticationRequired();
+    const error = new AuthenticationRequired();
+    if (cause !== undefined) error.cause = cause;
+    throw error;
   }
 
   private async requiredCsrfToken(): Promise<string> {
@@ -176,11 +195,17 @@ export class ApiClient implements ControlApi {
     // validates origin instead) and the call that issues the first token.
     const method = (init.method ?? "GET").toUpperCase();
     if (!["GET", "HEAD"].includes(method) && path !== "/api/auth/login") headers.set("X-CSRF-Token", await this.requiredCsrfToken());
+    if (init.body !== undefined && init.body !== null) {
+      if (typeof init.body !== "string") throw new Error("JSON API request requires a serialized document");
+      serializeControlBody(method, path, parseContractJson(init.body));
+    }
     const response = await fetch(path, {...init, method, headers, credentials: "same-origin"});
+    let decoded: unknown;
+    try { decoded = await readControlResponse(response, method, path); }
+    catch (cause) { this.requireAuthentication(response, cause); throw cause; }
     this.requireAuthentication(response);
     if (!response.ok) {
-      let problem: unknown;
-      try { problem = await response.json(); } catch { problem = null; }
+      const problem = decoded;
       if (typeof problem === "object" && problem !== null) {
         const body = problem as {code?: unknown; detail?: unknown};
         const code = typeof body.code === "string" ? body.code.slice(0, 128) : `HTTP ${response.status}`;
@@ -189,7 +214,7 @@ export class ApiClient implements ControlApi {
       }
       throw new ApiError(response.status, `Control API returned ${response.status}`, requestIdOf(response));
     }
-    return response.json() as Promise<T>;
+    return decoded as T;
   }
 
   session(): Promise<AuthSession> {
@@ -197,7 +222,7 @@ export class ApiClient implements ControlApi {
   }
 
   login(subject: "admin", password: string): Promise<AuthSession> {
-    return this.request("/api/auth/login", {method: "POST", body: JSON.stringify({subject, password})});
+    return this.request("/api/auth/login", {method: "POST", body: stringifyContractJson({subject, password})});
   }
 
   async logout(): Promise<void> {
@@ -517,7 +542,7 @@ export class ApiClient implements ControlApi {
   createArtifactJob(runId: string, input: ArtifactJobCreateInput, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, {
       method: "POST",
-      body: JSON.stringify(input),
+      body: stringifyContractJson(input),
       headers: {"X-Request-ID": requestId},
       signal,
     });
@@ -572,7 +597,7 @@ export class ApiClient implements ControlApi {
   cancelArtifactJob(jobId: string, reason: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
     return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: "POST",
-      body: JSON.stringify({reason}),
+      body: stringifyContractJson({reason}),
       headers: {"X-Request-ID": requestId},
       signal,
     });
