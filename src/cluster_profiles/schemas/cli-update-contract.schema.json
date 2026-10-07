@@ -1,0 +1,143 @@
+{
+  "$defs": {
+    "ApiRuntimeObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "control_contract_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Control Contract Sha256"
+        },
+        "source_sha": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Sha"
+        }
+      },
+      "required": [
+        "source_sha",
+        "control_contract_sha256"
+      ],
+      "title": "ApiRuntimeObservation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "api": {
+      "$ref": "#/$defs/ApiRuntimeObservation"
+    },
+    "compatibility_schema_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Compatibility Schema Sha256",
+      "type": "string"
+    },
+    "expected_worker_contract_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Expected Worker Contract Sha256"
+    },
+    "observed_at": {
+      "format": "date-time",
+      "title": "Observed At",
+      "type": "string"
+    },
+    "worker_compatibility": {
+      "enum": [
+        "compatible",
+        "unknown",
+        "incompatible"
+      ],
+      "title": "Worker Compatibility",
+      "type": "string"
+    },
+    "worker_contract_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Worker Contract Sha256"
+    },
+    "worker_count": {
+      "minimum": 0,
+      "title": "Worker Count",
+      "type": "integer"
+    },
+    "worker_issue": {
+      "anyOf": [
+        {
+          "enum": [
+            "worker-observation-unavailable",
+            "worker-provenance-unavailable",
+            "worker-source-mixed",
+            "worker-contract-mixed",
+            "api-worker-contract-unavailable",
+            "worker-contract-incompatible"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Worker Issue"
+    },
+    "worker_membership_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Worker Membership Sha256",
+      "type": "string"
+    },
+    "worker_source_sha": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Worker Source Sha"
+    }
+  },
+  "required": [
+    "observed_at",
+    "compatibility_schema_sha256",
+    "api",
+    "expected_worker_contract_sha256",
+    "worker_count",
+    "worker_membership_sha256",
+    "worker_source_sha",
+    "worker_contract_sha256",
+    "worker_compatibility",
+    "worker_issue"
+  ],
+  "title": "CliUpdateContract",
+  "type": "object"
+}
