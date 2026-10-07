@@ -68,6 +68,7 @@ from .models import (
 )
 from .request_fault import RequestFault
 from .revision_images import revision_images
+from .strict_json import serialize_json_value
 
 
 class LibraryProjectionError(RuntimeError):
@@ -127,7 +128,7 @@ def _bounded_library_page[T: BaseModel](
     require it.
     """
 
-    envelope = empty_response.model_dump(mode="json")
+    envelope = serialize_json_value(empty_response)
     empty_items = envelope.get(collection_field)
     if empty_items != [] or envelope.get("next_cursor") is not None:
         raise AssertionError("byte page sizing requires an empty response envelope")
@@ -142,7 +143,7 @@ def _bounded_library_page[T: BaseModel](
         return [], None
 
     item_sizes = [
-        len(_wire_json_bytes(item.model_dump(mode="json"))) for item in candidates
+        len(_wire_json_bytes(serialize_json_value(item))) for item in candidates
     ]
     prefix_sizes = [0]
     for item_size in item_sizes:
@@ -164,14 +165,14 @@ def _bounded_library_page[T: BaseModel](
             # This boundary cannot be issued to a caller. A later contiguous
             # boundary can still be representable, so keep scanning prefixes.
             continue
-        cursor_bytes = len(_wire_json_bytes(cursor)) if cursor is not None else 4
+        cursor_envelope = serialize_json_value(
+            empty_response.model_copy(update={"next_cursor": cursor})
+        )
         response_bytes = (
-            envelope_bytes
+            len(_wire_json_bytes(cursor_envelope))
             + prefix_sizes[count]
             + count
             - 1  # Commas between entries.
-            + cursor_bytes
-            - 4  # Replace the serialized null cursor.
         )
         if count == 1:
             first_item_response_bytes = response_bytes

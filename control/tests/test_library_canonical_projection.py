@@ -1174,6 +1174,14 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
         exact_wire_bytes = len(fitting.content)
         assert exact_wire_bytes <= MAX_CONTROL_DOCUMENT_BYTES
 
+        monkeypatch.setattr(
+            "vonk_control.library_projection.MAX_CONTROL_DOCUMENT_BYTES",
+            exact_wire_bytes,
+        )
+        exactly_fitting = client.get("/api/recipe/library", params={})
+        assert exactly_fitting.status_code == 200, exactly_fitting.text
+        assert exactly_fitting.content == fitting.content
+
         # This cap is one byte below the observed, fully serialized response.
         # An envelope-bracket undercount of two bytes would incorrectly accept
         # and return a response larger than this configured budget.

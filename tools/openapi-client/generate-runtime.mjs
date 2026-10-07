@@ -118,9 +118,14 @@ for (const [route, item] of Object.entries(document.paths)) {
       const name = `contract${index++}`; register(content.schema, name); requests[media] = name;
       normalization[name] = shape(content.schema);
     }
-    const responseMaxBytes = operation["x-vonk-response-max-bytes"];
-    if (responseMaxBytes !== undefined && (!Number.isSafeInteger(responseMaxBytes) || responseMaxBytes < 1)) {
-      throw new Error(`Invalid producer response byte budget: ${method} ${route}`);
+    const declaredResponseMaxBytes = operation["x-vonk-response-max-bytes"];
+    let responseMaxBytes;
+    if (declaredResponseMaxBytes !== undefined) {
+      const budgetToken = declaredResponseMaxBytes instanceof LosslessNumber ? declaredResponseMaxBytes.value : "";
+      if (!/^[1-9][0-9]*$/.test(budgetToken) || BigInt(budgetToken) > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error(`Invalid producer response byte budget: ${method} ${route}`);
+      }
+      responseMaxBytes = Number(budgetToken);
     }
     routes.push({route, method: method.toUpperCase(), responses, requests, parameters, responseMaxBytes});
   }
