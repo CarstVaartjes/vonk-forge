@@ -3305,7 +3305,7 @@ class SparkLifecycle:
                 label="synthetic canary profile cleanup",
                 node_id=node_id,
             )
-            _validate_canary_cleanup_application(
+            self._validate_cleanup_application(
                 cleanup_application,
                 installation_ids=[installation_id],
                 run_id=run_id,
@@ -3682,6 +3682,17 @@ class SparkLifecycle:
                 + self._redact_diagnostics(json.dumps(failure))
             )
         return typed.model_dump(mode="json")
+
+    def _validate_cleanup_application(
+        self,
+        application: dict[str, object],
+        *,
+        installation_ids: Sequence[str],
+        run_id: str,
+    ) -> None:
+        _validate_canary_cleanup_application(
+            application, installation_ids=installation_ids, run_id=run_id
+        )
 
     def _await_profile_application(
         self, operation: dict[str, object], *, label: str, node_id: str

@@ -22,6 +22,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import JsonValue, TypeAdapter
+
 from cluster_profiles.control_client import source_schema_validator
 from cluster_profiles.observation_transfer_reader import (
     ObservationStream,
@@ -215,6 +217,44 @@ class ControllerContract:
             raise ContractSkew(
                 f"{method} {template} sends what {self._label} does not accept: "
                 + "; ".join(problems[:3])
+            )
+
+    def check_json_response(
+        self, method: str, path: str, value: object, *, status: int = 200
+    ) -> None:
+        """Validate a receipt against the source of the Controller that sent it."""
+        route = path.partition("?")[0]
+        for pattern, template, operations in self._operations:
+            if pattern.fullmatch(route):
+                break
+        else:
+            raise ContractSkew(f"{self._label} has no operation {method} {route}")
+        operation = operations.get(method.lower())
+        if not isinstance(operation, dict):
+            raise ContractSkew(f"{self._label} has no operation {method} {template}")
+        response = (operation.get("responses") or {}).get(str(status)) or {}
+        content = response.get("content") or {}
+        if set(content) != {"application/json"}:
+            raise ContractSkew(f"{self._label} receipt media is not canonical JSON")
+        schema = content["application/json"].get("schema")
+        if not isinstance(schema, dict):
+            raise ContractSkew(f"{self._label} receipt schema is missing")
+        rooted = {"components": {"schemas": self._schemas}, "allOf": [schema]}
+        try:
+            instance = TypeAdapter(JsonValue).validate_json(
+                json.dumps(value, allow_nan=False), strict=True
+            )
+        except (TypeError, ValueError):
+            raise ContractSkew(f"{self._label} receipt is not JSON") from None
+        validator = source_schema_validator(rooted)
+        problem = next(validator.iter_errors(instance), None)
+        if problem is not None:
+            # Only schema locations and validator names, never input values or
+            # jsonschema's message (which can reproduce the whole receipt).
+            location = ".".join(str(part)[:64] for part in problem.absolute_path)[:384]
+            raise ContractSkew(
+                f"{self._label} receipt violates its source schema at "
+                f"{location or '<root>'} ({problem.validator})"
             )
 
     def _resolve(self, schema: Any) -> Any:
