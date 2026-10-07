@@ -9,7 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import (
+    FleetProfileInput,
+    FleetProfileSwitchAdapterState,
+    FleetProfileSwitchQueueItem,
+)
 from vonk_control.fleet_profiles import (
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
@@ -257,22 +261,21 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         adapter._write_state(
             session,
             row,
-            {
-                "child_id": newer.id,
-                "scope_node_ids": [_node_id(2)],
-                "assignment_ids": [assignment.id],
-                "assignments": [assignment.model_dump(mode="json")],
-                "queue": [{"kind": "run", "id": assignment.id}],
-                "actor": "admin",
-                "request_id": _uuid(18302),
-                "position": 0,
-                "state": "queued",
-            },
+            FleetProfileSwitchAdapterState(
+                child_id=newer.id,
+                scope_node_ids=[_node_id(2)],
+                assignment_ids=[assignment.id],
+                assignments=[assignment],
+                queue=[FleetProfileSwitchQueueItem(kind="run", id=assignment.id)],
+                actor="admin",
+                request_id=_uuid(18302),
+                state="queued",
+            ),
         )
     dispatched = []
 
     def dispatch(*args):
-        dispatched.append(args[1]["id"])
+        dispatched.append(args[1].id)
         return _running_child(_uuid(18303), _node_id(2))
 
     monkeypatch.setattr(adapter, "_start_child", dispatch)

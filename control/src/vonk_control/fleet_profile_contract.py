@@ -985,6 +985,17 @@ class FleetProfileSwitchAdapterState(StrictModel):
         indices.extend(self.skipped_indices)
         if len(indices) != len(set(indices)):
             raise ValueError("queue child identities must be unique")
+        operation_ids = [
+            child.operation_id for child in (*self.pending_children, *self.children)
+        ]
+        if len(operation_ids) != len(set(operation_ids)):
+            raise ValueError("one operation cannot own multiple queue effects")
+        if any(
+            child.result is not None
+            and child.result.run_switch_operation_id != child.operation_id
+            for child in self.children
+        ):
+            raise ValueError("closed queue receipt differs from its operation identity")
         if self.position > len(self.queue) or any(
             index < 0 or index >= len(self.queue) for index in indices
         ):

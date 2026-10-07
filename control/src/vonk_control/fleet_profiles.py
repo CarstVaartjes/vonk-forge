@@ -2200,6 +2200,8 @@ class RunSwitchFleetProfileAdapter:
                 or {node.node_id for node in item.nodes} <= set(adopted_scope)
             ],
         )
+        if adopted_scope is not None and state.status_reason is None:
+            state.status_reason = "Adopted assignments reconciled; other assignments were replaced by the selected profile"
         self._write_state(session, application, state)
         session.flush()
         return self._view_from_state(application, state)
@@ -5371,6 +5373,73 @@ class FleetProfileService:
         )
 
     @staticmethod
+    def _stop_binding_is_exact(
+        session: Session,
+        application: FleetProfileApplication,
+        stop: FleetProfileAdoptedStopEffect,
+    ) -> bool:
+        progress = _persisted_profile_progress(application)
+        document = progress.switch_adapter
+        if document is None or stop.queue_index >= len(document.queue):
+            return False
+        item = document.queue[stop.queue_index]
+        if (
+            item.kind != "stop"
+            or item.id != stop.effect.run_id
+            or item.profile_stop_scope != stop.effect.profile_stop_scope
+        ):
+            return False
+        request_key = profile_switch_child_request_key(
+            application.id, stop.queue_index, item.kind, item.id
+        )
+        if request_key != stop.request_key:
+            return False
+        record = next(
+            (
+                child
+                for child in (*document.pending_children, *document.children)
+                if child.queue_index == stop.queue_index
+                and child.kind == "stop"
+                and (
+                    child.operation_id == stop.operation_id
+                    or child.original_operation_id == stop.operation_id
+                )
+            ),
+            None,
+        )
+        if record is None:
+            return False
+        job = session.get(Job, record.operation_id)
+        if job is None or job.kind != "recipe.stop.v2" or job.request_id != request_key:
+            return False
+        try:
+            child_plan = read_stored_model(
+                RunSwitchPlan,
+                canonical_message(job.payload.get("plan")),
+                strict=True,
+                from_json=True,
+            )
+            child_result = read_stored_model(
+                RunSwitchOperationResult,
+                canonical_message(job.result),
+                strict=True,
+                from_json=True,
+            )
+        except (TypeError, ValueError):
+            return False
+        return (
+            child_plan.action == "stop"
+            and child_plan.run_id == stop.effect.run_id
+            and child_plan.installation_id == stop.effect.installation_id
+            and child_plan.profile_stop_scope == stop.effect.profile_stop_scope
+            and sorted(node.node_id for node in child_plan.spark_group.nodes)
+            == stop.effect.node_ids
+            and sorted(job.targets) == stop.effect.node_ids
+            and child_result.profile_application_id == application.id
+            and child_result.workload_intent_ordinal == progress.workload_intent_ordinal
+        )
+
+    @staticmethod
     def _adopted_application_scope(
         session: Session, application: FleetProfileApplication
     ) -> tuple[str, ...] | None:
@@ -5435,6 +5504,10 @@ class FleetProfileService:
             for node in item.nodes
         }
         for stop in link.stops:
+            if not FleetProfileService._stop_binding_is_exact(
+                session, application, stop
+            ):
+                return None
             if original_state is None or stop.queue_index >= len(original_state.queue):
                 return None
             item = original_state.queue[stop.queue_index]
@@ -5609,16 +5682,17 @@ class FleetProfileService:
                         and child.state != "succeeded"
                     ):
                         continue
-                    stops.append(
-                        FleetProfileAdoptedStopEffect(
-                            effect=effect,
-                            queue_index=child.queue_index,
-                            operation_id=child.operation_id,
-                            request_key=profile_switch_child_request_key(
-                                application.id, child.queue_index, item.kind, item.id
-                            ),
-                        )
+                    binding = FleetProfileAdoptedStopEffect(
+                        effect=effect,
+                        queue_index=child.queue_index,
+                        operation_id=child.original_operation_id or child.operation_id,
+                        request_key=profile_switch_child_request_key(
+                            application.id, child.queue_index, item.kind, item.id
+                        ),
                     )
+                    if not cls._stop_binding_is_exact(session, application, binding):
+                        continue
+                    stops.append(binding)
                     scope.update(members)
             if not scope or scope & owned_nodes:
                 continue
