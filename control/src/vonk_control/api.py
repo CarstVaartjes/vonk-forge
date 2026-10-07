@@ -529,6 +529,7 @@ def refresh_fleet_metrics(
 from .platform_observation import (
     PlatformObservation,
     PlatformObserver,
+    api_only_capture,
     api_only_observation,
 )
 
@@ -923,6 +924,16 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         operations=run_switch_operations,
+    )
+
+    from .cli_update_contract import install_cli_update_contract_routes
+
+    install_cli_update_contract_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        capture=api_only_capture
+        if platform_observer is None
+        else platform_observer.capture,
     )
 
     @app.get(

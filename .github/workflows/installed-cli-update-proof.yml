@@ -9,6 +9,10 @@ on:
       - 'src/cluster_profiles/cli_update.py'
       - 'src/cluster_profiles/build_identity.py'
       - 'src/cluster_profiles/runtime_identity.py'
+      - 'control/src/vonk_control/cli_update_contract.py'
+      - 'control/src/vonk_control/platform_observation.py'
+      - 'control/src/vonk_control/api.py'
+      - 'src/cluster_profiles/schemas/cli-update-contract.schema.json'
       - 'tools/hatch_build.py'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -67,6 +71,7 @@ jobs:
           proof = json.loads((root / 'signed-update-report.json').read_text())
           assert proof['tampered_wheel_retained_prior_tool_receipt']
           assert proof['real_uv_tool_receipt_changed']
+          assert proof['stable_updater_after_platform_ndjson']
           PY
       - name: Retain scoped signed updater evidence
         if: always()

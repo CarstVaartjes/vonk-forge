@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
@@ -10,7 +11,10 @@ from pydantic import Field, TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from cluster_profiles.runtime_identity import packaged_runtime_identity
+from cluster_profiles.runtime_identity import (
+    RuntimeBuildIdentity,
+    packaged_runtime_identity,
+)
 
 from .models import ControlProcessHeartbeat
 from .strict_json import StrictModel
@@ -42,6 +46,12 @@ class PlatformObservation(StrictModel):
     )
 
 
+@dataclass(frozen=True)
+class CapturedPlatformObservation:
+    identity: RuntimeBuildIdentity
+    observation: PlatformObservation
+
+
 class PlatformObserver:
     def __init__(
         self, sessions: sessionmaker[Session], *, clock: Callable[[], datetime]
@@ -50,6 +60,9 @@ class PlatformObserver:
         self._clock = clock
 
     def read(self) -> PlatformObservation:
+        return self.capture().observation
+
+    def capture(self) -> CapturedPlatformObservation:
         now = self._clock().astimezone(UTC)
         identity = packaged_runtime_identity()
         with self._sessions() as session:
@@ -79,7 +92,7 @@ class PlatformObserver:
             for row in rows
             if row.completed_at is not None
         ]
-        return PlatformObservation(
+        observation = PlatformObservation(
             observed_at=now,
             api=ApiRuntimeObservation(
                 source_sha=identity.source_sha,
@@ -97,11 +110,16 @@ class PlatformObserver:
                 else None
             ),
         )
+        return CapturedPlatformObservation(identity, observation)
 
 
 def api_only_observation() -> PlatformObservation:
+    return api_only_capture().observation
+
+
+def api_only_capture() -> CapturedPlatformObservation:
     identity = packaged_runtime_identity()
-    return PlatformObservation(
+    observation = PlatformObservation(
         observed_at=datetime.now(UTC),
         api=ApiRuntimeObservation(
             source_sha=identity.source_sha,
@@ -110,6 +128,7 @@ def api_only_observation() -> PlatformObservation:
         workers=None,
         worker_issue="worker-observation-unavailable",
     )
+    return CapturedPlatformObservation(identity, observation)
 
 
 def _readable_source(value: str | None) -> str | None:

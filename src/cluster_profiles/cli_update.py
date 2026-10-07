@@ -29,7 +29,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from jsonschema import Draft202012Validator, ValidationError
 
 from .build_identity import current_build
-from .runtime_identity import verified_wheel_identity
+from .runtime_identity import contract_fingerprint, verified_wheel_identity
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SOURCE = re.compile(r"[0-9a-f]{40}\Z")
@@ -262,7 +262,7 @@ def run_update(
     apply: bool,
     public_key: Path | None = None,
     download: Callable[[str, int], bytes] = _download,
-    controller_observation: Callable[[], dict[str, object]] | None = None,
+    compatibility_observation: Callable[[], dict[str, object]] | None = None,
 ) -> dict[str, object]:
     release, base = _signed_release(
         channel=channel,
@@ -296,6 +296,9 @@ def run_update(
         raise CliUpdateError("CLI wheel digest or size is invalid")
     try:
         with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
+            compatibility_schema = json.loads(
+                archive.read("cluster_profiles/schemas/cli-update-contract.schema.json")
+            )
             identity = verified_wheel_identity(
                 archive,
                 source_sha=cast(str, target_source),
@@ -312,14 +315,31 @@ def run_update(
 
     try:
         deployed = (
-            controller_observation()
-            if controller_observation is not None
-            else ControlClient.from_environment().get("/api/platform")
+            compatibility_observation()
+            if compatibility_observation is not None
+            else ControlClient.from_environment().get("/api/cli/contract")
         )
     except (ControlUnauthorized, ControlForbidden):
         raise
     except (ControlClientError, OSError):
         result["compatibility"] = "controller-observation-unavailable"
+        return result
+    try:
+        installed_schema = json.loads(
+            files("cluster_profiles")
+            .joinpath("schemas/cli-update-contract.schema.json")
+            .read_text()
+        )
+        schema_fingerprint = contract_fingerprint(installed_schema)
+        Draft202012Validator(installed_schema).validate(deployed)
+    except (OSError, ValueError, ValidationError):
+        result["compatibility"] = "controller-contract-unavailable-or-different"
+        return result
+    if (
+        contract_fingerprint(compatibility_schema) != schema_fingerprint
+        or deployed.get("compatibility_schema_sha256") != schema_fingerprint
+    ):
+        result["compatibility"] = "controller-contract-unavailable-or-different"
         return result
     api = deployed.get("api")
     source = api.get("source_sha") if isinstance(api, dict) else None
@@ -329,6 +349,16 @@ def run_update(
         not isinstance(source, str)
         or _SOURCE.fullmatch(source) is None
         or fingerprint != identity.control_contract_sha256
+        or deployed.get("worker_compatibility") != "compatible"
+        or deployed.get("worker_issue") is not None
+        or type(deployed.get("worker_count")) is not int
+        or cast(int, deployed["worker_count"]) < 1
+        or not isinstance(deployed.get("worker_source_sha"), str)
+        or _SOURCE.fullmatch(cast(str, deployed["worker_source_sha"])) is None
+        or identity.worker_contract_sha256 is None
+        or deployed.get("expected_worker_contract_sha256")
+        != identity.worker_contract_sha256
+        or deployed.get("worker_contract_sha256") != identity.worker_contract_sha256
     ):
         result["compatibility"] = "controller-contract-unavailable-or-different"
         return result

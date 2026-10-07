@@ -105,12 +105,8 @@ def typescript_vocabulary() -> str:
     )
     lines.append("} as const;")
     lines.append("")
-    lines.append(
-        "/** Retired wait spelling, adopted only when reading old rows. */"
-    )
-    lines.append(
-        'export const LEGACY_WAIT_STATE = "waiting-for-operator";'
-    )
+    lines.append("/** Retired wait spelling, adopted only when reading old rows. */")
+    lines.append('export const LEGACY_WAIT_STATE = "waiting-for-operator";')
     return "\n".join(lines) + "\n"
 
 
@@ -207,6 +203,12 @@ def main() -> None:
         help="regenerate only the tracked OpenAPI document without Node tooling",
     )
     arguments = parser.parse_args()
+    from vonk_control.cli_update_contract import cli_update_contract_schema
+
+    _write_openapi(
+        cli_update_contract_schema(),
+        path=ROOT / "src/cluster_profiles/schemas/cli-update-contract.schema.json",
+    )
 
     if arguments.schema_only:
         _write_openapi(_schema(include_browser_auth=True))
