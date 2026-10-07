@@ -21,6 +21,8 @@ struct HttpRequest {
     chain: PathBuf,
     private_key: PathBuf,
     result: AgentResult,
+    #[serde(default)]
+    progress: Option<vonk_agent_protocol::AgentProgress>,
 }
 use vonk_agent_protocol::generated::{
     BoundedErrorResponse, FailureDiagnostics, RequestValidationProblem,
@@ -43,13 +45,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             value.validate()?;
             canonical_json(&value)?
         }
+        Some("OperationProgress") => {
+            let value: vonk_agent_protocol::OperationProgress = parse_strict(&raw)?;
+            value.validate()?;
+            canonical_json(&value)?
+        }
+        Some("AgentProgress") => {
+            let value: vonk_agent_protocol::AgentProgress = parse_strict(&raw)?;
+            value.validate()?;
+            canonical_json(&value)?
+        }
+        Some("RecipeBuildEnvironmentArgument") => canonical_json(&parse_strict::<
+            vonk_agent_protocol::generated::RecipeBuildEnvironmentArgument,
+        >(&raw)?)?,
         Some("BoundedErrorResponse") => {
             canonical_json(&parse_strict::<BoundedErrorResponse>(&raw)?)?
         }
         Some("RequestValidationProblem") => {
             canonical_json(&parse_strict::<RequestValidationProblem>(&raw)?)?
         }
-        Some("http") => {
+        Some("http" | "heartbeat") => {
             let request: HttpRequest = serde_json::from_slice(&raw)?;
             let client = AgentHttpClient::from_identity_paths(
                 &request.config,
@@ -59,6 +74,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     private_key: request.private_key,
                 },
             )?;
+            if args.first().map(String::as_str) == Some("heartbeat") {
+                let progress = request.progress.ok_or("missing heartbeat progress")?;
+                let directive = client.heartbeat(&progress).await?;
+                println!("{}", String::from_utf8(canonical_json(&directive)?)?);
+                return Ok(());
+            }
             let error = client
                 .submit_result(&request.result)
                 .await

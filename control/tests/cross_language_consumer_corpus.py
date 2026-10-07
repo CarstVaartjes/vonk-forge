@@ -10,7 +10,8 @@ import json
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
-from vonk_agent_protocol import AgentResult, OperationProgress
+from vonk_agent_protocol import AgentProgress, AgentResult, OperationProgress
+from vonk_agent_protocol.build_import import RecipeBuildEnvironmentArgument
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control.operation_api import (
     BoundedErrorResponse,
@@ -25,6 +26,8 @@ OPERATION = "33333333-3333-4333-8333-333333333333"
 MODELS: dict[str, type[BaseModel]] = {
     "FailureDiagnostics": FailureDiagnostics,
     "AgentResult": AgentResult,
+    "AgentProgress": AgentProgress,
+    "RecipeBuildEnvironmentArgument": RecipeBuildEnvironmentArgument,
     "OperationProgress": OperationProgress,
     "BoundedErrorResponse": BoundedErrorResponse,
     "RequestValidationProblem": RequestValidationProblem,
@@ -222,14 +225,18 @@ def corpus() -> dict:
         "1e0",
         "true",
         "1e400",
+        "9" * 200,
         "9" * 5001,
     ):
         raw = '{"phase":"transfer","completed_bytes":' + token + "}"
         add(
-            "progress-completed-" + (token if len(token) < 30 else "5001-digits"),
+            "progress-completed-"
+            + (token if len(token) < 30 else str(len(token)) + "-digits"),
             "OperationProgress",
             raw,
-            consumers=["python"] if len(token) > 30 else ["python", "browser"],
+            consumers=["python"]
+            if len(token) > 4096
+            else ["python", "rust", "browser"],
         )
     for token in (
         "0",
@@ -247,7 +254,39 @@ def corpus() -> dict:
             "progress-rate-" + token,
             "OperationProgress",
             '{"phase":"transfer","bytes_per_second":' + token + "}",
-            consumers=["python", "browser"],
+            consumers=["python", "rust", "browser"],
+        )
+    for token in ("18446744073709551617", "9" * 200):
+        add(
+            "heartbeat-progress-" + (token if len(token) < 30 else "200-digits"),
+            "AgentProgress",
+            '{"fence":"'
+            + FENCE
+            + '","progress":{"phase":"transfer","completed_bytes":'
+            + token
+            + "}}",
+            consumers=["python", "rust"],
+        )
+    for token in (
+        "9223372036854775808",
+        "18446744073709551617",
+        "9" * 200,
+        "-" + "9" * 200,
+        "1.0",
+        "1e0",
+        "null",
+        "true",
+    ):
+        add(
+            "build-environment-"
+            + (
+                token
+                if len(token) < 30
+                else ("negative-" if token.startswith("-") else "") + "200-digits"
+            ),
+            "RecipeBuildEnvironmentArgument",
+            '{"name":"VONK_COUNT","value":' + token + "}",
+            consumers=["python", "rust"],
         )
     for status, component in (
         (503, "BoundedErrorResponse"),
@@ -317,9 +356,10 @@ def corpus() -> dict:
         "version": 1,
         "cases": cases,
         "nonoverlap": {
-            "OperationProgress": "No Rust Controller API response parser is claimed.",
+            "OperationProgress": "Rust agent protocol/heartbeat consumer covered; no Rust Controller API response parser is claimed.",
             "CompiledExecutionPlan": "Agent/helper wire only; no browser route exists.",
             "RecipeStopPayload": "Agent/helper wire only; no browser route exists.",
+            "RecipeBuildEnvironmentArgument": "Actual Rust generated request scalar decoder; real builder rendering covered by owning Rust tests, no browser route.",
         },
         "semantics": {
             "integer_tokens": "1.0/1e0 are mathematical JSON Schema integers but strict wire consumers reject them.",

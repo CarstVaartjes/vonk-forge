@@ -29,3 +29,12 @@ multipleOf, enum, const, allOf, anyOf and oneOf files. It uses the production sc
 compiler in mathematical integer/exact decimal mode. Production strict integer
 lexemes and finite float rules are covered separately. No local Rust build, web
 build, type suite, PostgreSQL or container is required for preparing these sources.
+
+The numeric followup adds unbounded OperationProgress counters to the actual Rust
+protocol parser and validates their AgentProgress heartbeat envelope through the
+real HTTPS AgentHttpClient. It also exercises the generated build-environment
+scalar decoder beyond i64/u64 and with 200-digit signed integers. The owning Rust
+RecipeBuilder tests cover rendering into arguments; this corpus does not claim to
+run Podman or invent a browser route. Python float fields retain their owner's
+finite IEEE754 normalization before bounds checks, while official schema tests
+retain mathematical decimal semantics.

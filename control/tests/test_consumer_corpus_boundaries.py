@@ -16,7 +16,7 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from pydantic import ValidationError
-from vonk_agent_protocol import AgentClaim, AgentResult
+from vonk_agent_protocol import AgentClaim, AgentDirective, AgentProgress, AgentResult
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control.operation_api import (
@@ -238,7 +238,16 @@ def test_real_state_writer_restart_replay_shares_leaf_with_job_response(
 
 
 @pytest.mark.parametrize(
-    ("status", "oversized"), [(422, False), (422, True), (503, False)]
+    ("status", "oversized", "case_id"),
+    [
+        (422, False, "error-422"),
+        (422, True, "error-422"),
+        (503, False, "error-503"),
+        (422, False, "error-422-loc-18446744073709551617"),
+        (422, False, "error-422-loc-200-digits"),
+        (200, False, "heartbeat-progress-18446744073709551617"),
+        (200, False, "heartbeat-progress-200-digits"),
+    ],
 )
 def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
     tmp_path: Path, status: int, oversized: bool, case_id: str
@@ -247,11 +256,24 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
     body = selected["text"].encode()
     if oversized:
         body = b" " * (64 * 1024) + body
+    if status == 200:
+        body = (
+            AgentDirective(
+                fence=FENCE,
+                deadline=datetime.now(UTC) + timedelta(minutes=1),
+                cancel_requested=False,
+            )
+            .model_dump_json()
+            .encode()
+        )
     certs = _certificate_files(tmp_path)
+    received: list[tuple[str, bytes]] = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
-            self.rfile.read(int(self.headers["Content-Length"]))
+            received.append(
+                (self.path, self.rfile.read(int(self.headers["Content-Length"])))
+            )
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -288,9 +310,19 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
         "private_key": str(certs["client_key"]),
         "result": json.loads(agent_envelope(json.dumps(diagnostic()))),
     }
+    if status == 200:
+        request["progress"] = json.loads(selected["text"])
     try:
-        result = rust("http", json.dumps(request))
+        result = rust("heartbeat" if status == 200 else "http", json.dumps(request))
         assert result.returncode == 0, result.stderr
+        if status == 200:
+            directive = AgentDirective.model_validate_json(result.stdout)
+            assert directive == AgentDirective.model_validate_json(body)
+            assert len(received) == 1 and received[0][0] == "/agent/heartbeat"
+            assert AgentProgress.model_validate_json(
+                received[0][1]
+            ) == AgentProgress.model_validate_json(selected["text"])
+            return
         observed = json.loads(result.stdout)
         assert observed["status"] == status
         if status == 422:
