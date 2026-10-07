@@ -381,7 +381,7 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
         stop_id = stop.id
         exact = tuple(
             session.scalars(
-                select(AgentOperation).where(AgentOperation.operation == "recipe.stop")
+                select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
             )
         )
         assert exact and {item.node_id for item in exact} == {nodes[0]}
@@ -423,7 +423,7 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
         assert {
             item.id
             for item in session.scalars(
-                select(AgentOperation).where(AgentOperation.operation == "recipe.stop")
+                select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
             )
         } == exact_ids
         assert (
