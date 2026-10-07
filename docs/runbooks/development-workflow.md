@@ -85,8 +85,10 @@ authentication or a locked signing agent is not permission to disable it.
 
 When merge is authorized, prefer auto-merge for an eligible PR. Keep required
 checks, reviews, and branch protection intact; never use an admin bypass to
-make it eligible. Check existing auto-merge requests first and arm only one PR
-at a time. Example for a reviewed eligible PR:
+make it eligible. Independently reviewed PRs with nonoverlapping changes may
+use auto-merge concurrently. Account for overlapping source and generated
+outputs through their integration owner before merging. Example for a reviewed
+eligible PR:
 
 ```bash
 gh pr merge PR_NUMBER --auto --squash
@@ -113,7 +115,7 @@ Confirm the checks refer to its new head and that auto-merge remains enabled
 when eligible. Do not force-push another agent's branch. If a review, permission,
 or failed check still blocks the merge, report that specific condition.
 
-## Serialize publication-producing merges
+## Merge independently; verify publication before deployment
 
 Every merge starts a release run, but it builds images only when their inputs
 changed since an ancestor release built them. The producer input paths live in
@@ -122,16 +124,17 @@ build inputs. Do not assume a commit has
 `dev-sha-<full-commit-sha>` merely because it reached `main`. Verify image tags
 in the registry; `git ls-remote` verifies Git refs, not registry images.
 
-For a build-producing merge, wait for an accepted generation whose relevant
-artifacts contain that change before arming the next PR. The publisher rejects
+Accepted publication is a deployment prerequisite, not a prerequisite for the
+next independent merge. Before deployment, verify an accepted generation whose
+relevant artifacts contain the intended changes. The publisher rejects
 superseded builds; several rapid merges can leave newer built images outside
 the accepted channel. A floating alias follows accepted publication. An image
 existing in the registry alone is not an accepted release or deployment proof.
 
 A documentation-only merge outside all producer inputs creates no image; its
 release reuses the ancestor images. Do not classify it as a failed or
-superseding build. If an earlier build-producing merge still awaits acceptance,
-resolve that publication gate before arming another PR. Follow the current
+superseding build. Independent PRs may merge while an earlier build awaits
+acceptance; keep its publication evidence open until verified. Follow the current
 [publication runbook](platform-release-publication.md) to reconcile an eligible
 producer/generation; never promote a guessed tag for a tip that did not build.
 
