@@ -44,6 +44,11 @@ describe("canonical numeric boundary", () => {
     expect(validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":"retry"}')).toEqual({detail: "retry"});
     expect(() => validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":"retry","private":true}')).toThrow();
   });
+  test("only a declared bodyless response accepts an empty document", () => {
+    expect(validateControlBody("POST", "/api/auth/logout", 204, "", "")).toBeUndefined();
+    expect(() => validateControlBody("GET", "/api/jobs/known", 204, "", "")).toThrow();
+    expect(() => validateControlBody("POST", "/api/auth/logout", 204, "application/json", "{}")).toThrow();
+  });
   test("generated transport response consumes once and retains metadata", async () => {
     const source = new Response('{"counter":9007199254740993}', {status: 200, headers: {"x-request-id": "example"}});
     const text = await source.text(), value = parseContractJson(text);

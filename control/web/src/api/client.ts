@@ -152,7 +152,6 @@ export class ApiClient implements ControlApi {
         return new Request(request, {headers});
       },
       onResponse: async ({request, response}) => {
-        if (response.status === 204 || request.method === "HEAD") return response;
         const text = await response.text();
         let value: unknown;
         try { value = validateControlBody(request.method, request.url, response.status, response.headers.get("content-type") ?? "", text); }
@@ -162,6 +161,7 @@ export class ApiClient implements ControlApi {
           const detail = typeof value === "object" && value !== null && "detail" in value ? formatApiDetail(value.detail) : "request failed";
           throw new ApiError(response.status, `Control API returned ${response.status}: ${detail}`, requestIdOf(response));
         }
+        if (response.status === 204 || request.method === "HEAD") return response;
         return new ContractResponse(response, value, text);
       },
     });

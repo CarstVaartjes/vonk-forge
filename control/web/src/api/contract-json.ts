@@ -18,6 +18,7 @@ function routeFor(method: string, path: string) {
 export function validateControlBody(method: string, path: string, status: number, media: string, text: string): unknown {
   const route = routeFor(method, path);
   const responses = route?.responses[String(status)] ?? route?.responses[`${Math.floor(status / 100)}XX`] ?? route?.responses.default;
+  if (responses && Object.keys(responses).length === 0 && text === "") return undefined;
   const validator = responses?.[media.split(";")[0].trim().toLowerCase()];
   if (!validator) throw new ContractViolation(method, path, status);
   let value: unknown;

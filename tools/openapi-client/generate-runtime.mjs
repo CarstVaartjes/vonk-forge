@@ -101,11 +101,14 @@ for (const [route, item] of Object.entries(document.paths)) {
       const schema = {type: "object", properties: Object.fromEntries(declared.map(parameter => [parameter.name, parameter.schema])), required: declared.filter(parameter => parameter.required).map(parameter => parameter.name), additionalProperties: false};
       register(schema, name); normalization[name] = shape(schema); parameters[location] = name;
     }
-    for (const [status, response] of Object.entries(operation.responses)) for (const [media, content] of Object.entries(response.content ?? {})) {
+    for (const [status, response] of Object.entries(operation.responses)) {
+      responses[status] = {};
+      for (const [media, content] of Object.entries(response.content ?? {})) {
       if (!content.schema) continue;
       const name = `validate${index++}`; register(content.schema, name);
       normalization[name] = shape(content.schema);
-      (responses[status] ??= {})[media] = name;
+      responses[status][media] = name;
+      }
     }
     for (const [media, content] of Object.entries(operation.requestBody?.content ?? {})) {
       if (!content.schema) continue;
