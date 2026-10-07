@@ -1,3 +1,4 @@
+import {compareWire, displayRatio, formatWire, isWireNumber, subtractWire, type WireNumber} from "../api/contract-numeric";
 import type {VisualFleetNode} from "../api/types";
 import {NodeOfflineReason, ProjectionCode} from "../api/vocabulary.generated";
 
@@ -90,13 +91,14 @@ export function formatMetric(value: number | null | undefined, format: (value: n
   return typeof value === "number" && Number.isFinite(value) ? format(value) : "Not reported";
 }
 
-export function formatBytes(value: number | null | undefined): string {
-  return formatMetric(value, bytes => {
-    if (bytes < 1024) return `${Math.round(bytes)} B`;
-    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
-    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
-    return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
-  });
+export function formatBytes(value: WireNumber | null | undefined): string {
+  if (!isWireNumber(value)) return "Not reported";
+  if (compareWire(value, 1024) < 0) return `${formatWire(value)} B`;
+  const unit = compareWire(value, 1024 ** 2) < 0 ? [1024, "KiB"] as const
+    : compareWire(value, 1024 ** 3) < 0 ? [1024 ** 2, "MiB"] as const
+    : [1024 ** 3, "GiB"] as const;
+  const displayed = displayRatio(value, unit[0]);
+  return Number.isFinite(displayed) ? `${displayed.toFixed(1)} ${unit[1]}` : `${formatWire(value)} B`;
 }
 
 const SPARK_ID = /^spk_[0-9a-f]{32}$/i;
@@ -142,15 +144,15 @@ export function nodeSecondaryName(node: VisualFleetNode): string | null {
 }
 
 /** Used share and total of the Spark's memory, from the live sample when there is one. */
-export function nodeMemory(node: VisualFleetNode): {usedPercent: number; totalBytes: number} | null {
+export function nodeMemory(node: VisualFleetNode): {usedPercent: number; totalBytes: WireNumber} | null {
   const sample = node.telemetry?.sample;
   const total = sample?.memory_total_bytes ?? node.inventory?.host_memory_total_bytes;
   const free = sample?.memory_available_bytes ?? node.inventory?.host_memory_free_bytes;
-  if (typeof total !== "number" || typeof free !== "number" || total <= 0) return null;
-  return {usedPercent: Math.round(100 * (total - free) / total), totalBytes: total};
+  if (!isWireNumber(total) || !isWireNumber(free) || compareWire(total, 0) <= 0) return null;
+  return {usedPercent: Math.round(100 * displayRatio(subtractWire(total, free), total)), totalBytes: total};
 }
 
-export function nodeDiskFreeBytes(node: VisualFleetNode): number | null {
+export function nodeDiskFreeBytes(node: VisualFleetNode): WireNumber | null {
   return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
 }
 

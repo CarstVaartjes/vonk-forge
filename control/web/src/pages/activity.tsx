@@ -1,3 +1,4 @@
+import {compareWire, displayRatio, formatWire, type WireNumber} from "../api/contract-numeric";
 import {availabilityProgress, LibraryAvailabilityProgress} from "../components/library-availability-progress";
 import {availabilityFailure, LibraryAvailabilityFeedback} from "../components/library-availability-feedback";
 import {LEGACY_WAIT_STATE, LifecycleState} from "../api/vocabulary.generated";
@@ -191,8 +192,8 @@ function CopyableValue({label, value}: {label: string; value?: string | null}) {
   </div>;
 }
 
-function DiagnosticDownload({id, attempt}: {id: string; attempt: number}) {
-  return <a className="button secondary" href={`/api/operations/${encodeURIComponent(id)}/evidence?attempt=${attempt}`} download>Download diagnostics</a>;
+function DiagnosticDownload({id, attempt}: {id: string; attempt: WireNumber}) {
+  return <a className="button secondary" href={`/api/operations/${encodeURIComponent(id)}/evidence?attempt=${encodeURIComponent(formatWire(attempt))}`} download>Download diagnostics</a>;
 }
 
 function TechnicalDetails({event}: {event: ActivityRecord}) {
@@ -277,7 +278,7 @@ function AgentUpgradeDiagnostics({detail, targetNames}: {detail: JobDetail; targ
     <header><div><span>Expected release</span><strong>{expected.version || "Not recorded"}</strong></div><StatusPill tone={diagnostics.targets.every(target => target.target_proven) ? "healthy" : "warning"}>{diagnostics.targets.every(target => target.target_proven) ? "Identity proven" : "Identity not proven"}</StatusPill></header>
     <dl className="activity-upgrade-expected"><CopyableValue label="Target binary digest" value={expected.binary_digest}/><CopyableValue label="Target build digest" value={expected.build_digest}/></dl>
     <ul>{diagnostics.targets.map(target => <li key={target.node_id}>
-      <div className="activity-upgrade-target"><strong>{friendlyTarget(target.node_id, targetNames)}</strong><span>{target.attempts} install {target.attempts === 1 ? "attempt" : "attempts"} · {target.target_proven ? "exact target reported" : "exact target not reported"}</span></div>
+      <div className="activity-upgrade-target"><strong>{friendlyTarget(target.node_id, targetNames)}</strong><span>{formatWire(target.attempts)} install {compareWire(target.attempts, 1) === 0 ? "attempt" : "attempts"} · {target.target_proven ? "exact target reported" : "exact target not reported"}</span></div>
       <dl><div><dt>Observed version</dt><dd>{target.observed_identity.version || "Not reported"}</dd></div><CopyableValue label="Observed binary digest" value={target.observed_identity.binary_digest}/><CopyableValue label="Observed build digest" value={target.observed_identity.build_digest}/>{target.retry_not_before && <div><dt>{target.retry_queued ? "Controller retry not before" : "Retry not before"}</dt><dd><time dateTime={target.retry_not_before}>{exactTime(target.retry_not_before) || target.retry_not_before}</time></dd></div>}</dl>
       {target.raw_reason && <details><summary>Raw helper evidence</summary><code>{target.raw_reason}</code></details>}
     </li>)}</ul>
@@ -369,7 +370,7 @@ function JobProgressDetails({
   const visibleOperations = detail?.operations ?? [];
   const completed = detail?.progress?.completed ?? 0;
   const total = detail?.progress?.total ?? 0;
-  const completion = total > 0 ? Math.min(100, Math.max(0, completed / total * 100)) : 0;
+  const completion = compareWire(total, 0) > 0 ? Math.min(100, Math.max(0, displayRatio(completed, total) * 100)) : 0;
   const agentRetryQueued = detail?.agent_upgrade_diagnostics?.targets.some(target => target.retry_queued) ?? false;
 
   return <details className="activity-job" onToggle={toggle}>
@@ -386,17 +387,17 @@ function JobProgressDetails({
         {detail.status_reason && <div className="activity-job-reason"><span>State reason</span><strong>{detail.status_reason}</strong></div>}
         {detail.projection_issue && <p className="activity-job-message" role="status">{detail.projection_issue}</p>}
         {detail.progress && <section className="activity-job-progress" aria-label="Operation progress">
-          <div><span>Completed</span><strong>{detail.progress.completed}</strong></div>
-          <div><span>Running</span><strong>{detail.progress.running}</strong></div>
-          <div><span>Failed</span><strong>{detail.progress.failed}</strong></div>
-          <div><span>Total</span><strong>{detail.progress.total}</strong></div>
-          <div className="activity-job-progress-track" role="img" aria-label={`${completed} of ${total} operation steps completed`}><span style={{width: `${completion}%`}}/></div>
+          <div><span>Completed</span><strong>{formatWire(detail.progress.completed)}</strong></div>
+          <div><span>Running</span><strong>{formatWire(detail.progress.running)}</strong></div>
+          <div><span>Failed</span><strong>{formatWire(detail.progress.failed)}</strong></div>
+          <div><span>Total</span><strong>{formatWire(detail.progress.total)}</strong></div>
+          <div className="activity-job-progress-track" role="img" aria-label={`${formatWire(completed)} of ${formatWire(total)} operation steps completed`}><span style={{width: `${completion}%`}}/></div>
         </section>}
-        {detail.kind !== "agent-upgrade" && <p className="activity-job-attempt">Current attempt <strong>{detail.current_attempt}</strong></p>}
+        {detail.kind !== "agent-upgrade" && <p className="activity-job-attempt">Current attempt <strong>{formatWire(detail.current_attempt)}</strong></p>}
         <AgentUpgradeDiagnostics detail={detail} targetNames={targetNames}/>
-        {visibleTargets.length > 0 && <section className="activity-job-targets" aria-label="Affected targets"><h3>Affected targets</h3><ul>{visibleTargets.map((target, index) => <li key={`${detail.targets[index]}:${index}`}>{target}</li>)}</ul>{detail.target_total > detail.targets.length && <p>Showing {detail.targets.length} of {detail.target_total} affected targets.</p>}</section>}
+        {visibleTargets.length > 0 && <section className="activity-job-targets" aria-label="Affected targets"><h3>Affected targets</h3><ul>{visibleTargets.map((target, index) => <li key={`${detail.targets[index]}:${index}`}>{target}</li>)}</ul>{compareWire(detail.target_total, detail.targets.length) > 0 && <p>Showing {detail.targets.length} of {formatWire(detail.target_total)} affected targets.</p>}</section>}
         {detail.progress && "operation" in detail.progress && detail.progress.operation != null && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress.operation)}/>}
-        {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{operation.kind === "artifact.distribution.v1" ? "Model distribution" : titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{activityStateLabel(operation.state)}</StatusPill>{operation.progress && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>} {operation.evidence_download && <DiagnosticDownload id={operation.id} attempt={operation.attempt}/>}</li>)}</ul>{detail.operation_total != null && detail.operation_total > visibleOperations.length && <p>Showing {visibleOperations.length} of {detail.operation_total} operation steps.</p>}</section>}
+        {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{operation.kind === "artifact.distribution.v1" ? "Model distribution" : titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{activityStateLabel(operation.state)}</StatusPill>{operation.progress && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>} {operation.evidence_download && <DiagnosticDownload id={operation.id} attempt={operation.attempt}/>}</li>)}</ul>{detail.operation_total != null && compareWire(detail.operation_total, visibleOperations.length) > 0 && <p>Showing {visibleOperations.length} of {formatWire(detail.operation_total)} operation steps.</p>}</section>}
         {isOperatorWait(detail.state) && (agentRetryQueued ? <section className="activity-job-resume"><div><strong>Retry queued behind safety delay</strong><p>{detail.agent_upgrade_diagnostics?.next_action}</p></div></section> : <section className="activity-job-resume"><div><strong>Operator action required</strong><p>{detail.agent_upgrade_diagnostics?.next_action || "This operation can be returned to the queue. Review the state reason and affected targets first."}</p></div><button type="button" className="button" disabled={resuming || loading} onClick={() => void resume()}>{resuming ? detail.kind === "agent-upgrade" ? "Queuing…" : "Resuming…" : detail.kind === "agent-upgrade" ? "Queue retry after inspection" : "Resume operation"}</button></section>)}
         {resumeNotice && <p className="activity-job-message is-success" role="status">{resumeNotice}</p>}
         {resumeError && <p className="activity-job-message is-error" role="alert">Operation was not resumed. {resumeError}</p>}
@@ -520,9 +521,9 @@ function CanonicalOperationDetails({api, detail, onUpdate}: {
     {availability
       ? <LibraryAvailabilityFeedback failure={availability}/>
       : detail.failure && <><strong>{failureSummary(detail.failure)}</strong>{"detail" in detail.failure && detail.failure.detail && <p style={{margin: 0}}>{detail.failure.detail}</p>}</>}
-    {detail.evidence_download && <DiagnosticDownload id={detail.id} attempt={detail.attempt}/>}
+    {detail.evidence_download && <DiagnosticDownload id={detail.id} attempt={formatWire(detail.attempt)}/>}
     {detail.progress && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress)}/>}
-    <p className="activity-job-attempt" style={{margin: 0}}>Attempt {detail.attempt}{detail.progress?.phase ? ` · ${titleCase(detail.progress.phase)}` : ""}{active ? " · Updates automatically" : ""}</p>
+    <p className="activity-job-attempt" style={{margin: 0}}>Attempt {formatWire(detail.attempt)}{detail.progress?.phase ? ` · ${titleCase(detail.progress.phase)}` : ""}{active ? " · Updates automatically" : ""}</p>
     {(detail.recovery?.uncertain || (detail.failure && "uncertain" in detail.failure && detail.failure.uncertain))
       ? <p style={{margin: 0}}>Outcome uncertain. {detail.recovery?.explanation ?? "Inspect the observed state before recovery."}</p>
       : detail.recovery?.explanation && <p style={{margin: 0}}>{detail.recovery.explanation}</p>}
@@ -572,7 +573,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
   const [paginationError, setPaginationError] = useState("");
   const canonicalIds = useRef(new Set<string>());
   const [canonicalCount, setCanonicalCount] = useState(0);
-  const [canonicalTotal, setCanonicalTotal] = useState(0);
+  const [canonicalTotal, setCanonicalTotal] = useState<WireNumber>(0);
   const [canonicalCursor, setCanonicalCursor] = useState<string | null>(null);
   const [canonicalAvailable, setCanonicalAvailable] = useState(true);
   const requestGeneration = useRef(0);
@@ -716,9 +717,9 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
 
     {events && <section className="library-pagination" aria-label="Activity history coverage">
       <p role="status">Showing {events.length} loaded {events.length === 1 ? "event" : "events"}.{canonicalCursor ? " Load older activity below." : ""}</p>
-      <details className="activity-technical"><summary>History coverage</summary><p>{canonicalAvailable ? `Loaded ${canonicalCount} of ${canonicalTotal} operations` : "Operations are unavailable"}. Summary counts and filters cover only these loaded records.</p></details>
+      <details className="activity-technical"><summary>History coverage</summary><p>{canonicalAvailable ? `Loaded ${canonicalCount} of ${formatWire(canonicalTotal)} operations` : "Operations are unavailable"}. Summary counts and filters cover only these loaded records.</p></details>
       {canonicalCursor && <button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => void loadMoreOperations()}>{loadingMore ? "Loading older operations…" : "Load older operations"}</button>}
-      {canonicalAvailable && !canonicalCursor && canonicalCount < canonicalTotal && <p role="status">The operations API reports additional records but did not provide a continuation cursor.</p>}
+      {canonicalAvailable && !canonicalCursor && compareWire(canonicalCount, canonicalTotal) < 0 && <p role="status">The operations API reports additional records but did not provide a continuation cursor.</p>}
       {paginationError && <p role="alert">{paginationError}</p>}
     </section>}
 

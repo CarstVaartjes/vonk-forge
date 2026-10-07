@@ -1,3 +1,4 @@
+import {parseContractJson, materialize} from "../api/contract-numeric";
 import {render, screen} from "@testing-library/react";
 import {expect, test} from "vitest";
 import {availabilityProgress, LibraryAvailabilityProgress} from "./library-availability-progress";
@@ -35,4 +36,19 @@ test("advisory stall and last observation are visible without presenting stale s
   expect(screen.getByText("Possibly stalled · work continues")).toBeInTheDocument();
   expect(screen.getByText(/Last progress/).querySelector("time")).toHaveAttribute("dateTime", "2026-09-08T12:00:00Z");
   expect(screen.queryByText(/B\/s/)).not.toBeInTheDocument();
+});
+
+test("displays exact item counts and a bounded accessible wide-byte ratio", () => {
+  const progress = availabilityProgress(materialize(parseContractJson('{"phase":"copying","completed_bytes":9223372036854775807,"total_bytes":18446744073709551615,"completed_items":9007199254740993,"total_items":9007199254740994}')));
+  render(<LibraryAvailabilityProgress progress={progress}/>);
+  expect(screen.getByText("9007199254740993 of 9007199254740994 items")).toBeInTheDocument();
+  const bar = screen.getByRole("progressbar");
+  expect(bar).toHaveAttribute("aria-valuemax", "100");
+  expect(Number(bar.getAttribute("aria-valuenow"))).toBeCloseTo(50);
+});
+
+test("missing measured bytes stay unknown instead of inventing zero progress", () => {
+  render(<LibraryAvailabilityProgress progress={availabilityProgress({phase: "copying"})}/>);
+  expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+  expect(screen.getByText("Not reported received")).toBeInTheDocument();
 });

@@ -1,3 +1,4 @@
+import {stringifyContractJson} from "../api/contract-numeric";
 import type {ControlApi} from "../api/types";
 import {safeErrorText} from "../lib/error-display";
 import {useToast} from "./toast";
@@ -11,7 +12,7 @@ export function ProfileExport({api, number}: {api: Pick<ControlApi, "profileDefi
       if (value.definition === null) {
         throw new Error(`${value.projection_issue?.detail} ${value.projection_issue?.next_action}`);
       }
-      const url = URL.createObjectURL(new Blob([JSON.stringify(value.definition, null, 2) + "\n"], {type: "application/json"}));
+      const url = URL.createObjectURL(new Blob([stringifyContractJson(value.definition) + "\n"], {type: "application/json"}));
       const link = document.createElement("a");
       link.href = url; link.download = `profile-${number}.json`; link.click();
       URL.revokeObjectURL(url);
