@@ -1123,6 +1123,15 @@ jobs:
             --platform "$VONK_ACCEPTANCE_PLATFORM" \
             --output "$RUNNER_TEMP/spark-acceptance/report-$VONK_ACCEPTANCE_PLATFORM.json"
 
+      - name: Retain bounded Start topology diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-spark-start-topology-${{ needs.candidate.outputs.generation }}-linux-arm64
+          retention-days: 7
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/spark-acceptance/failed-start-topology.json
+
       - name: Upload Spark behavioral gate report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

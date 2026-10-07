@@ -1655,3 +1655,96 @@ def test_retired_certificate_probe_cannot_pass_without_current_identity(
     run._certificate_probe = probe
     with pytest.raises(lifecycle.LifecycleError, match="current certificate"):
         run._old_certificate_rejected("123456789012345678", "987654321098765432")
+
+
+@pytest.mark.parametrize("foreign_host", [False, True])
+def test_lost_start_probe_binds_produced_placement_to_owned_interface(
+    tmp_path: Path,
+    foreign_host: bool,
+) -> None:
+    from vonk_agent_protocol import CompiledExecutionPlan, RecipeStartPayload
+    from vonk_control.recipe_start_payloads import (
+        RecipeStartPlacement,
+        build_recipe_start_payload,
+    )
+
+    lifecycle = _module()
+    address = "172.31.42.1"
+    identifier = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    node_id = "spk_" + "b" * 32
+    fixture = json.loads(
+        (
+            Path(__file__).parent.parent
+            / "control/tests/fixtures/compiled_workload_v2.json"
+        ).read_text(encoding="utf-8")
+    )
+    payload = RecipeStartPayload.model_validate(
+        build_recipe_start_payload(
+            run_id=identifier,
+            installation_id=identifier,
+            recipe_revision_id=identifier,
+            mapping_id=identifier,
+            run_generation=1,
+            plan_digest="c" * 64,
+            placement=RecipeStartPlacement(
+                node_id, 0, "entrypoint", 8000, 80_000_000, 0, "unified", None
+            ),
+            compiled_endpoint_address=address,
+            world_size=1,
+            compiled_execution_plan=CompiledExecutionPlan.model_validate(fixture),
+            master_address=None,
+            master_port=None,
+        )
+    )
+    placement = payload.compiled_execution_plan.runtime.placement
+    endpoint = f"http://{'172.31.43.1' if foreign_host else placement.endpoint_address}:{placement.port}"
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.temporary_root = tmp_path
+    run.arguments = SimpleNamespace(output=tmp_path / "report.json")
+    run.synthetic_fabric_octet = 42
+    run.synthetic_interfaces = ["vmgt42"]
+    run._lost_start_placement = None
+    run.synthetic_canary_fixture = SimpleNamespace(serving_check={}, slug="canary")
+    commands = []
+
+    def command(argv, **_kwargs):
+        commands.append(argv)
+        assert argv == ["/usr/sbin/ip", "-j", "-4", "address", "show", "dev", "vmgt42"]
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            json.dumps(
+                [
+                    {
+                        "ifname": "vmgt42",
+                        "addr_info": [{"family": "inet", "local": address}],
+                    }
+                ]
+            ),
+            "",
+        )
+
+    run._run_command = command
+    run._run_canonical_inference = lambda *_args: "verified-response"
+    run._observe_start_topology(
+        endpoint,
+        str(placement.endpoint_address),
+        str(placement.port),
+        identifier,
+        identifier,
+        node_id,
+        identifier,
+    )
+    if foreign_host:
+        with pytest.raises(
+            lifecycle.LifecycleError, match="outside the disposable Spark"
+        ):
+            run._direct_canary_inference(endpoint)
+    else:
+        assert run._direct_canary_inference(endpoint) == "verified-response"
+    evidence = json.loads((tmp_path / "failed-start-topology.json").read_text())
+    assert evidence["accepted_address"] == address
+    assert evidence["interface_addresses"] == [address]
+    assert evidence["receipt_address"] == ("172.31.43.1" if foreign_host else address)
+    assert len(commands) == 1

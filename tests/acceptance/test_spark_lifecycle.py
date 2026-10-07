@@ -1118,6 +1118,7 @@ class SparkLifecycle:
         self.firewall_environment: dict[str, str] = {}
         self.agent_installed = False
         self.lost_start_proof: LostStartProof | None = None
+        self._lost_start_placement: tuple[str, int] | None = None
         self.synthetic_fixture_sha256: str | None = None
         # The release whose Controller this lane runs. The upgrade-carry lane
         # starts on the previous release and moves to the candidate.
@@ -1628,12 +1629,21 @@ class SparkLifecycle:
         """Probe from the authorized NAS namespace before route publication."""
         assert self.bundle is not None
         bundle = self.bundle
-        parsed = urlsplit(endpoint)
+        try:
+            parsed = urlsplit(endpoint)
+            parsed_port = parsed.port
+        except ValueError as error:
+            raise LifecycleError(
+                "lost Start receipt endpoint URL is invalid"
+            ) from error
+        placement = self._lost_start_placement
         if (
             parsed.scheme != "http"
             or parsed.hostname != f"172.31.{self.synthetic_fabric_octet}.1"
-            or parsed.port is None
-            or not 1 <= parsed.port <= 65535
+            or placement is None
+            or (parsed.hostname, parsed_port) != placement
+            or parsed_port is None
+            or not 1 <= parsed_port <= 65535
             or parsed.username is not None
             or parsed.password is not None
             or parsed.path not in {"", "/"}
@@ -1641,7 +1651,8 @@ class SparkLifecycle:
             or parsed.fragment
         ):
             raise LifecycleError(
-                "lost Start receipt endpoint is outside the disposable Spark"
+                "lost Start receipt endpoint is outside the disposable Spark; "
+                "see failed-start-topology.json for bounded placement evidence"
             )
 
         def transport(
@@ -1688,6 +1699,75 @@ class SparkLifecycle:
             inference, fixture.serving_check, fixture.slug
         )
 
+    def _observe_start_topology(
+        self,
+        endpoint: str,
+        address: str,
+        port: str,
+        operation_id: str,
+        run_id: str,
+        node_id: str,
+        fence: str,
+    ) -> None:
+        """Retain only safe receipt/placement fields before disposable cleanup."""
+        assert self.temporary_root is not None
+        interface = self.synthetic_interfaces[0]
+        observed = self._run_command(
+            ["/usr/sbin/ip", "-j", "-4", "address", "show", "dev", interface],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        interfaces = json.loads(observed.stdout)
+        addresses = sorted(
+            {
+                str(ipaddress.IPv4Address(item["local"]))
+                for row in interfaces
+                if row.get("ifname") == interface
+                for item in row.get("addr_info", [])
+                if item.get("family") == "inet"
+            }
+        )
+        structural: dict[str, object] = {"invalid_url": True}
+        try:
+            parsed = urlsplit(endpoint)
+            structural = {
+                "scheme": parsed.scheme
+                if parsed.scheme in {"http", "https"}
+                else "other",
+                "has_credentials": parsed.username is not None
+                or parsed.password is not None,
+                "has_path": parsed.path not in {"", "/"},
+                "has_query": bool(parsed.query),
+                "has_fragment": bool(parsed.fragment),
+            }
+            receipt_address = str(ipaddress.ip_address(parsed.hostname or ""))
+            receipt_port = parsed.port
+        except ValueError:
+            receipt_address, receipt_port = None, None
+        evidence = {
+            "url_structure": structural,
+            "operation_id": operation_id,
+            "run_id": run_id,
+            "node_id": node_id,
+            "fence": fence,
+            "interface": interface,
+            "interface_addresses": addresses,
+            "accepted_address": address,
+            "accepted_port": port,
+            "receipt_address": receipt_address,
+            "receipt_port": receipt_port,
+        }
+        _atomic_write(
+            self.arguments.output.with_name("failed-start-topology.json"), evidence
+        )
+        expected = f"172.31.{self.synthetic_fabric_octet}.1"
+        if address != expected or address not in addresses or not port.isdigit():
+            raise LifecycleError(
+                "accepted Start placement does not match the disposable Spark interface; "
+                "see failed-start-topology.json"
+            )
+        self._lost_start_placement = (address, int(port))
+
     def _recover_lost_start_receipt(self, node_id: str) -> None:
         if getattr(self, "lost_start_proof", None) is not None:
             return
@@ -1711,15 +1791,26 @@ class SparkLifecycle:
         ):
             raise LifecycleError("lost Start receipt identity is invalid")
         rows = self._psql(
-            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state,COALESCE(o.payload->>'phase','single') "
+            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state,COALESCE(o.payload->>'phase','single'),"
+            "o.payload#>>'{compiled_execution_plan,runtime,placement,endpoint_address}',"
+            "o.payload#>>'{compiled_execution_plan,runtime,placement,port}' "
             "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
             f"WHERE a.fence='{fence}'"
         )
-        if len(rows) != 1 or len(rows[0]) != 8:
+        if len(rows) != 1 or len(rows[0]) != 10:
             raise LifecycleError("lost Start receipt has no accepted Controller claim")
-        operation_id, payload_digest, run_id, attempt, kind, owner, state, phase = rows[
-            0
-        ]
+        (
+            operation_id,
+            payload_digest,
+            run_id,
+            attempt,
+            kind,
+            owner,
+            state,
+            phase,
+            accepted_address,
+            accepted_port,
+        ) = rows[0]
         if (
             UUID.fullmatch(operation_id) is None
             or SHA256.fullmatch(payload_digest) is None
@@ -1733,6 +1824,15 @@ class SparkLifecycle:
             raise LifecycleError(
                 "lost Start receipt is not the live exact canary Start"
             )
+        self._observe_start_topology(
+            endpoint,
+            accepted_address,
+            accepted_port,
+            operation_id,
+            run_id,
+            node_id,
+            fence,
+        )
         before_container = self._container_for_replay(run_id)
         before_managed = self._managed_for_replay()
         before_response = self._direct_canary_inference(endpoint)
