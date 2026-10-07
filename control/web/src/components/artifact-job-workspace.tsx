@@ -21,8 +21,19 @@ import "./artifact-job-workspace.css";
 
 const CONTROLLER_FILE_LIMIT = 512 * 1024 * 1024;
 const CONTROLLER_TOTAL_LIMIT = 1024 * 1024 * 1024;
-function wireMinimum(a: WireNumber, b: WireNumber): WireNumber { return compareWire(a, b) <= 0 ? a : b; }
-function wireMaximum(a: WireNumber, b: WireNumber): WireNumber { return compareWire(a, b) >= 0 ? a : b; }
+function wireMinimum<T extends WireNumber>(a: T, b: T): T { return compareWire(a, b) <= 0 ? a : b; }
+function wireMaximum<T extends WireNumber>(a: T, b: T): T { return compareWire(a, b) >= 0 ? a : b; }
+// Request transport fields have Controller-owned bounds within safe integers.
+// Conversion is allowed only after exact validation against that owner's bound.
+function boundedRequestInteger(value: WireNumber, maximum: number): number {
+  const native = Number(formatWire(value));
+  if (!contractType(value, ["integer"]) || compareWire(value, 1) < 0
+    || compareWire(value, maximum) > 0 || !Number.isSafeInteger(native)
+    || compareWire(value, native) !== 0) {
+    throw new Error("Request integer is outside the Controller transport boundary");
+  }
+  return native;
+}
 function integerInput(value: string): WireNumber | string {
   if (!/^-?(?:0|[1-9][0-9]*)$/.test(value)) return value;
   const parsed = materialize(parseContractJson(value));
@@ -404,8 +415,8 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
     && cancelRecovery?.source !== "upload";
   const exactOutputMedia = [...new Set(outputSlots.flatMap(slot => slot.media_types))];
   const outputLimits = {
-    max_files: wireMinimum(wireMaximum(outputSlots.reduce<WireNumber>((total, slot) => addWire(total, slot.max_files), 0), 1), capabilities?.transport.max_output_files ?? 32),
-    max_file_bytes: wireMinimum(outputSlots.reduce<WireNumber>((maximum, slot) => wireMaximum(maximum, slot.max_file_bytes), 1), capabilities?.transport.max_output_file_bytes ?? 1024 ** 3),
+    max_files: boundedRequestInteger(wireMinimum(wireMaximum(outputSlots.reduce<WireNumber>((total, slot) => addWire(total, slot.max_files), 0), 1), capabilities?.transport.max_output_files ?? 32), capabilities?.transport.max_output_files ?? 32),
+    max_file_bytes: wireMinimum(outputSlots.reduce((maximum, slot) => wireMaximum(maximum, slot.max_file_bytes), 1), capabilities?.transport.max_output_file_bytes ?? 1024 ** 3),
     max_total_bytes: wireMinimum(output?.max_total_bytes ?? 1, capabilities?.transport.max_output_total_bytes ?? 2 * 1024 ** 3),
     allowed_media_types: exactOutputMedia.length > 0 ? exactOutputMedia : outputMedia[adapter],
   };
@@ -644,7 +655,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
         parameters: createParameters,
         inputs: prepared.map(item => item.declaration),
         output_limits: outputLimits,
-        timeout_seconds: timeoutSeconds,
+        timeout_seconds: boundedRequestInteger(timeoutSeconds, maximumTimeout),
       };
       const createKey = createRequestId(activeRun.run_id, body);
       setPhase("Creating durable job…");
