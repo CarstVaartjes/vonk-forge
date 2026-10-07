@@ -104,10 +104,23 @@ UUID = re.compile(
 )
 SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
 PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-arm64\Z")
-# Exercise the production-supported lower bound.  The agent renews at two thirds
-# of a certificate lifetime and its independent rotation lane polls on a bounded
-# interval, so 90 seconds leaves real scheduling margin in every ARM64 gate.
-CERTIFICATE_LIFETIME_SECONDS = 90
+# The published CA owns a fixed thirty-day certificate profile. The native
+# acceptance peer advances only the certificate-derived renewal scheduling
+# clock; real CA, Controller, TLS and identity validity clocks stay unchanged.
+CERTIFICATE_LIFETIME_SECONDS = 2_592_000
+RENEWAL_OBSERVATION_SECONDS = 150
+RENEWAL_HELPER_INPUTS = (
+    "Cargo.lock",
+    "Cargo.toml",
+    "rust-toolchain.toml",
+    "rust/crates/vonk-agent/Cargo.toml",
+    "rust/crates/vonk-agent/examples/acceptance_certificate_renewal.rs",
+    "rust/crates/vonk-agent/src/rotation.rs",
+    "rust/crates/vonk-agent/src/identity.rs",
+    "rust/crates/vonk-agent/src/client.rs",
+    "rust/crates/vonk-agent/src/config.rs",
+    "rust/crates/vonk-agent/src/runtime_identity.rs",
+)
 CONTROLLER_ADDRESS = "127.0.0.1"
 CANARY_CATALOG_IMPORT = Path(__file__).with_name("spark_canary_catalog_import.py")
 SPARK_CONFIG = Path("/etc/vonk-forge-agent/agent.toml")
@@ -736,15 +749,16 @@ def _configure_acceptance_renewal(
         or claims.get("disableSmallstepExtensions") is not True
     ):
         raise LifecycleError("Step CA provisioner claims are invalid")
-    # The Controller derives the agent certificate lifetime from this claim.
-    duration = f"{lifetime_seconds}s"
-    claims.update(
-        defaultTLSCertDuration=duration,
-        maxTLSCertDuration=duration,
-        minTLSCertDuration=duration,
-    )
-    ca_path.write_bytes(_canonical(ca))
-    os.chmod(ca_path, 0o600)
+    if any(
+        claims.get(name) != "720h"
+        for name in (
+            "defaultTLSCertDuration",
+            "maxTLSCertDuration",
+            "minTLSCertDuration",
+        )
+    ):
+        raise LifecycleError("Step CA fixed certificate lifetime is invalid")
+    # Preserve the signed installer's CA configuration and production policy.
 
     compose_path = bundle / "docker-compose.yaml"
     try:
@@ -4260,13 +4274,107 @@ class SparkLifecycle:
         finally:
             shutil.rmtree(probe)
 
+    def _exercise_native_renewal(self) -> None:
+        helper = Path(self._required_environment("VONK_ACCEPTANCE_RENEWAL_HELPER"))
+        manifest_path = Path(
+            self._required_environment("VONK_ACCEPTANCE_RENEWAL_HELPER_MANIFEST")
+        )
+        manifest = _read_document(manifest_path, "native renewal helper manifest")
+        source_inputs = manifest.get("source_inputs")
+        if not isinstance(source_inputs, dict):
+            raise LifecycleError("native renewal helper inputs are invalid")
+        if (
+            manifest.get("source_sha") != self.arguments.source_sha
+            or set(source_inputs) != set(RENEWAL_HELPER_INPUTS)
+            or helper.is_symlink()
+            or not helper.is_file()
+            or hashlib.sha256(helper.read_bytes()).hexdigest()
+            != manifest.get("binary_sha256")
+        ):
+            raise LifecycleError("native renewal helper provenance is invalid")
+        for name in RENEWAL_HELPER_INPUTS:
+            if (
+                hashlib.sha256((REPOSITORY_ROOT / name).read_bytes()).hexdigest()
+                != source_inputs[name]
+            ):
+                raise LifecycleError("native renewal helper source input changed")
+        source = self._run_command(
+            ["git", "rev-parse", "HEAD"], cwd=REPOSITORY_ROOT, timeout=30
+        ).stdout.strip()
+        if source != self.arguments.source_sha:
+            raise LifecycleError("native renewal helper source checkout changed")
+        for command in (
+            ["git", "diff", "--quiet"],
+            ["git", "diff", "--cached", "--quiet"],
+        ):
+            self._run_command(command, cwd=REPOSITORY_ROOT, timeout=30)
+        identity = self._self_test()
+        if manifest.get("build_digest") != identity.get("build_digest"):
+            raise LifecycleError("native renewal helper candidate build changed")
+        installed = Path("/usr/local/libexec/vonk-acceptance-certificate-renewal")
+        self._run_command(
+            ["sudo", "install", "-D", "-m", "0555", helper, installed],
+            cwd=REPOSITORY_ROOT,
+            timeout=30,
+        )
+        self._run_command(
+            ["sudo", "/usr/bin/systemctl", "stop", "vonk-forge-agent.service"],
+            cwd=Path("/"),
+            timeout=30,
+        )
+        try:
+            result = self._run_command(
+                [
+                    "sudo",
+                    "-u",
+                    "vonk-agent",
+                    installed,
+                    SPARK_CONFIG,
+                    AGENT_BINARY,
+                    str(identity["binary_digest"]),
+                    str(identity["build_digest"]),
+                ],
+                cwd=Path("/"),
+                timeout=60,
+                report_failure_output=True,
+            )
+        finally:
+            self._run_command(
+                ["sudo", "/usr/bin/systemctl", "start", "vonk-forge-agent.service"],
+                cwd=Path("/"),
+                timeout=30,
+            )
+        try:
+            native = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise LifecycleError(
+                "native renewal scheduling evidence is invalid"
+            ) from error
+        if (
+            not isinstance(native, dict)
+            or native.get("scheduling_clock") != "certificate-derived-controlled-clock"
+            or native.get("source_agent_binary_sha256") != identity["binary_digest"]
+            or native.get("source_agent_build_digest") != identity["build_digest"]
+            or native.get("source_lifetime_seconds") != CERTIFICATE_LIFETIME_SECONDS
+            or native.get("replacement_lifetime_seconds")
+            != CERTIFICATE_LIFETIME_SECONDS
+            or native.get("source_certificate_sha256")
+            == native.get("replacement_certificate_sha256")
+            or native.get("source_public_key_sha256")
+            == native.get("replacement_public_key_sha256")
+        ):
+            raise LifecycleError("native renewal did not prove fixed-profile rekey")
+        evidence = Path(self.arguments.output).parent / "renewal-scheduling-clock.json"
+        evidence.write_bytes(_canonical({"helper": manifest, "native": native}))
+
     def _observe_renewal(self, node_id: str, serial_before: str) -> dict[str, object]:
         if (
             NODE_ID.fullmatch(node_id) is None
             or SERIAL.fullmatch(serial_before) is None
         ):
             raise LifecycleError("renewal identity is invalid")
-        deadline = time.monotonic() + CERTIFICATE_LIFETIME_SECONDS + 60
+        deadline = time.monotonic() + RENEWAL_OBSERVATION_SECONDS
+        self._exercise_native_renewal()
         while time.monotonic() < deadline:
             rows = self._psql(
                 "SELECT n.contact_certificate_serial,c.state,"
