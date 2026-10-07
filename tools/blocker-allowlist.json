@@ -3711,7 +3711,7 @@
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-exceeds-its-adopted-assignment-scope", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-fleet-intent-changed", 2],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-has-no-saved-profile-owner", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-is-not-the-active-reviewed-child", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-is-not-the-active-reviewed-child", 2],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-lifecycle-binding-is-stale", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-parent-operation-kind-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-parent-payload-digest-changed", 1],
@@ -3816,12 +3816,12 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-profile-binding-is-inconsistent", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-owner-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-child-is-ambiguous", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-parent-binding-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-parent-binding-changed", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-phase-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-request-does-not-name-its-exact-phase", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-installation-disappeared", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-authority-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-authority-is-unreadable", 1]
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-authority-is-unreadable", 2]
       ]
     },
     {
