@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import OperationProgress, canonical_message
+from vonk_agent_protocol import LifecycleState, OperationProgress, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
