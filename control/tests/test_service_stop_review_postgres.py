@@ -574,8 +574,11 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
         assert session.get(Job, lost_start_id) is None
     assert len(publisher.aliases) == generations
     assert claims(sessions, run_id) == before_claims
-    # Real allocator admission still accounts for this uncertain service run.
-    assert not service.preview_run(installation_id, "before-exact-cleanup").allowed
+    # A separate run may fit genuine spare capacity. Its preview must still
+    # subtract this uncertain run's retained allocation, rather than assume absence.
+    before_admission = service.preview_run(installation_id, "before-exact-cleanup")
+    before_available = before_admission.nodes[0].available_memory_bytes
+    assert before_available is not None
     preview = service.preview_stop(run_id)
     assert preview.allowed
     request = str(uuid4())
@@ -652,6 +655,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
         assert run is not None and run.state == "stopped"
     fresh_plan = restarted.preview_run(installation_id, "after-lost-service-cleanup")
     assert fresh_plan.allowed
+    after_available = fresh_plan.nodes[0].available_memory_bytes
+    assert after_available is not None and after_available > before_available
     fresh = restarted.start(
         fresh_plan,
         plan_digest=fresh_plan.plan_digest,
