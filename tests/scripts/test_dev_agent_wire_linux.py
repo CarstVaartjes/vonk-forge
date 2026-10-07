@@ -16,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "dev_agent_wire_linux.py"
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def _module():

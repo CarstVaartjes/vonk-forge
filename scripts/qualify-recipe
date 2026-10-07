@@ -25,6 +25,9 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path, PurePosixPath
 from types import ModuleType
 
+sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
+from check_environment import ensure_catalog
+
 ROOT = Path(__file__).resolve().parents[1]
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _ARCHIVE_PAYLOAD_PREFIXES = ("image/", "oci/", "weights/")
@@ -168,11 +171,7 @@ def _read_package(path: Path, document: Mapping[str, object], contracts: ModuleT
 
 
 def _catalog_package(library_root: Path, recipe: object, document: Mapping[str, object], contracts: ModuleType) -> Path:
-    if not (library_root / "catalog-index.json").is_file():
-        raise QualificationError(
-            "recipe library index is not built; run "
-            f"scripts/build-recipe-library {library_root}"
-        )
+    ensure_catalog(ROOT, library_root)
     index = _load_json(library_root / "catalog-index.json")
     rows = index.get("recipes") if isinstance(index, Mapping) else None
     if not isinstance(rows, list):
