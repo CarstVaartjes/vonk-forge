@@ -25,7 +25,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
-from vonk_control.models import AgentCertificate, Job, ResourceReservation
+from vonk_control.models import AgentCertificate, Job, ResourceReservation, User
 from vonk_control.oci_image_store import StoredImage
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_operations import RecipeOperationService
@@ -99,6 +99,7 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
     )
     jobs.set_result_consumer(operations.consume_agent_result)
     with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
         session.add(
             AgentCertificate(
                 serial="manifest-recovery-builder",
