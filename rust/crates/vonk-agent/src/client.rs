@@ -2426,9 +2426,10 @@ mod tests {
 
     use super::{
         AgentHttpClient, AgentResult, ClientError, ControllerError, DISTRIBUTION_CONCURRENCY,
-        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, ObjectPlacement, StreamGovernor,
-        WriteBehind, clamp_inventory_request, controller_rejection_digest, is_rotation_conflict,
-        open_trusted_partial, partial_path, preallocate, range_end, valid_reported_hostname,
+        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, ObjectPlacement,
+        RecipeRunDisposition, StreamGovernor, WriteBehind, clamp_inventory_request,
+        controller_rejection_digest, is_rotation_conflict, open_trusted_partial, partial_path,
+        preallocate, range_end, valid_reported_hostname,
     };
     use crate::{
         oci::OciRuntime,

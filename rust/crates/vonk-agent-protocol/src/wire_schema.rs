@@ -237,7 +237,7 @@ pub(crate) fn validate_and_materialize(name: &str, value: &mut Value) -> Result<
 
 #[cfg(test)]
 mod raw_integer_shape_tests {
-    use crate::FailureLogTail;
+    use crate::generated::FailureLogTail;
 
     #[test]
     fn generated_tail_rejects_private_number_objects_at_raw_json_boundary() {
