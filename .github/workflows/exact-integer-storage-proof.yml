@@ -7,10 +7,13 @@ on:
       - .github/workflows/exact-integer-storage-proof.yml
       - control/tests/test_exact_integer_storage.py
       - control/tests/test_database_adoption_recovery_postgres.py
+      - control/tests/test_database_connection_wait_postgres.py
       - control/src/vonk_control/exact_integer_storage.py
       - control/src/vonk_control/exact_integer_adoption.py
       - control/src/vonk_control/models.py
       - control/src/vonk_control/db.py
+      - control/src/vonk_control/settings.py
+      - control/migrations/env.py
       - control/src/vonk_control/unused_storage_collection.py
       - control/src/vonk_control/model_cache.py
       - control/src/vonk_control/catalog_entities.py
@@ -51,6 +54,9 @@ jobs:
               '.github/workflows/exact-integer-storage-proof.yml',
               'control/tests/test_exact_integer_storage.py',
               'control/tests/test_database_adoption_recovery_postgres.py',
+              'control/tests/test_database_connection_wait_postgres.py',
+              'control/migrations/env.py', 'control/alembic.ini',
+              'control/migrations/versions/0000_fresh_schema.py',
               'control/src/vonk_control/exact_integer_storage.py',
               'control/src/vonk_control/exact_integer_adoption.py',
               'control/src/vonk_control/models.py', 'control/src/vonk_control/db.py',
@@ -117,9 +123,11 @@ jobs:
             control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_unreviewed_schema_is_fatal_without_backoff \
             control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_native_schema_permission_denial_is_fatal_without_backoff \
             control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_credentials \
+            control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_converter_runs_after_schema_advisory_owner_is_released \
+            control/tests/test_database_connection_wait_postgres.py::test_initialize_database_silent_handshake_timeout_releases_attempt_then_same_call_recovers \
             --tb=short --junitxml=exact-integer-storage-proof-output/startup.xml \
             2>&1 | tee exact-integer-storage-proof-output/startup.log
-      - name: Require six additional startup cases and unchanged source inputs
+      - name: Require eight additional startup cases and unchanged source inputs
         run: |
           uv run --project control --frozen python - <<'PY'
           import hashlib, json
@@ -127,7 +135,7 @@ jobs:
           from pathlib import Path
           output = Path('exact-integer-storage-proof-output')
           cases = ET.parse(output/'startup.xml').getroot().findall('.//testcase')
-          assert len(cases) == 6, f'expected 6 separate startup cases, got {len(cases)}'
+          assert len(cases) == 8, f'expected 8 separate startup cases, got {len(cases)}'
           assert all(case.find(tag) is None for case in cases for tag in ('skipped','failure','error'))
           expected = {
               'test_initialize_database_same_call_releases_old_attempt_before_owner_clears[relation]',
@@ -136,6 +144,8 @@ jobs:
               'test_initialize_database_unreviewed_schema_is_fatal_without_backoff',
               'test_initialize_database_native_schema_permission_denial_is_fatal_without_backoff',
               'test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_credentials',
+              'test_initialize_database_converter_runs_after_schema_advisory_owner_is_released',
+              'test_initialize_database_silent_handshake_timeout_releases_attempt_then_same_call_recovers',
           }
           assert {case.attrib['name'] for case in cases} == expected
           manifest = json.loads((output/'source.json').read_text())
@@ -145,10 +155,10 @@ jobs:
               'source_sha': manifest['source_sha'], 'engine': 'postgresql',
               'cases': [case.attrib for case in cases], 'failures': 0, 'skips': 0,
               'original_storage_case_inventory': 34,
-              'additional_startup_case_inventory': 6,
+              'additional_startup_case_inventory': 8,
               'input_restoration_verified': True},sort_keys=True,indent=2)+'\n')
           PY
-          git diff --exit-code -- control/src control/tests/test_exact_integer_storage.py control/tests/test_database_adoption_recovery_postgres.py
+          git diff --exit-code -- control/src control/tests/test_exact_integer_storage.py control/tests/test_database_adoption_recovery_postgres.py control/tests/test_database_connection_wait_postgres.py
       - name: Preserve exact-source proof and failures
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -45,16 +45,81 @@ class StartupDatabase:
     url: str
 
 
+def assert_native_server_budgets(connection: Connection) -> None:
+    # Read actual PostgreSQL settings at the owning migration SQL boundary.
+    # Casting each interval to milliseconds avoids display-unit assumptions.
+    values = connection.exec_driver_sql(
+        "SELECT "
+        "(extract(epoch FROM current_setting('lock_timeout')::interval)*1000)::bigint, "
+        "(extract(epoch FROM current_setting('statement_timeout')::interval)*1000)::bigint, "
+        "(extract(epoch FROM current_setting('transaction_timeout')::interval)*1000)::bigint, "
+        "(extract(epoch FROM current_setting('idle_in_transaction_session_timeout')::interval)*1000)::bigint"
+    ).one()
+    budgets = db.DATABASE_WAIT_BUDGETS
+    assert tuple(values) == (
+        budgets.lock_timeout_ms,
+        budgets.statement_timeout_ms,
+        budgets.transaction_timeout_ms,
+        budgets.idle_in_transaction_timeout_ms,
+    )
+
+
 @pytest.fixture
 def startup_database(legacy_engine: Engine) -> StartupDatabase:
     revision = _historical_draft(legacy_engine, _document(9, "startup-retained"))
     url = legacy_engine.url.render_as_string(hide_password=False)
     config = Config(str(CONFIG))
     config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
-    # A real historical database records the existing baseline. Use the owning
-    # Alembic command, so startup's upgrade still executes normally and does not
-    # bootstrap tables while the intentional relation lock is held.
-    command.stamp(config, "head")
+    ordinary_migration_pids: set[int] = set()
+    ordinary_engines: set[Engine] = set()
+    ordinary_disposed: set[Engine] = set()
+    connection_timeouts: list[int] = []
+    inspecting: set[Connection] = set()
+
+    def before_migration_sql(
+        connection: Connection,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        if "alembic_version" not in statement or connection in inspecting:
+            return
+        assert isinstance(connection.engine.pool, NullPool)
+        ordinary_engines.add(connection.engine)
+        inspecting.add(connection)
+        assert_native_server_budgets(connection)
+        pid = connection.exec_driver_sql("SELECT pg_backend_pid()").scalar_one()
+        assert isinstance(pid, int)
+        ordinary_migration_pids.add(pid)
+
+    def before_connect(
+        dialect: object, record: object, args: object, parameters: dict[str, object]
+    ) -> None:
+        timeout = parameters.get("connect_timeout")
+        assert type(timeout) is int
+        assert timeout == db.DATABASE_WAIT_BUDGETS.connect_timeout_seconds
+        connection_timeouts.append(timeout)
+
+    def disposed(engine: Engine) -> None:
+        if engine in ordinary_engines:
+            ordinary_disposed.add(engine)
+
+    event.listen(Engine, "before_cursor_execute", before_migration_sql)
+    event.listen(Engine, "do_connect", before_connect)
+    event.listen(Engine, "engine_disposed", disposed)
+    try:
+        # Real ordinary Alembic owns its separate NullPool and all native
+        # budgets. This setup exercises that path without a new case inventory.
+        command.stamp(config, "head")
+        assert len(ordinary_migration_pids) == 1
+        assert len(connection_timeouts) == 1
+        assert len(ordinary_engines) == 1 and ordinary_disposed == ordinary_engines
+    finally:
+        event.remove(Engine, "before_cursor_execute", before_migration_sql)
+        event.remove(Engine, "do_connect", before_connect)
+        event.remove(Engine, "engine_disposed", disposed)
     return StartupDatabase(legacy_engine, revision.id, url)
 
 
@@ -101,27 +166,30 @@ def watch_native_attempts() -> Iterator[Attempts]:
         executemany: bool,
     ) -> None:
         is_startup_owner = "pg_try_advisory_lock" in statement and "%(key)" in statement
-        is_migration_connection = isinstance(connection.engine.pool, NullPool) and any(
-            connection.engine.url == engine.url for engine in attempts.pids
-        )
-        if connection in captured_connections or (
-            connection.engine not in attempts.pids
-            and not is_startup_owner
-            and not is_migration_connection
+        is_migration_sql = "alembic_version" in statement
+        if (
+            connection in captured_connections
+            and connection.engine not in attempts.pids
         ):
             return
-        # Capture each native schema/advisory connection before its first SQL.
-        # Mark before our PID query, which itself passes through this event.
-        captured_connections.add(connection)
-        pid = connection.exec_driver_sql("SELECT pg_backend_pid()").scalar_one()
-        assert isinstance(pid, int)
-        if is_migration_connection:
-            # Owning Alembic env.py closes its independent NullPool connection.
-            # Verify its server ownership too; it is not an initialize engine
-            # and therefore does not emit the initialize engine-disposed event.
-            attempts.migration_pids.add(pid)
-        else:
+        if connection.engine not in attempts.pids and not is_startup_owner:
+            # Startup must not create an independent migration connection while
+            # the schema owner is held, including one with its own NullPool.
+            if is_migration_sql:
+                raise AssertionError("startup migration opened an unowned connection")
+            return
+        if connection not in captured_connections:
+            captured_connections.add(connection)
+            pid = connection.exec_driver_sql("SELECT pg_backend_pid()").scalar_one()
+            assert isinstance(pid, int)
             attempts.pids.setdefault(connection.engine, set()).add(pid)
+        if is_migration_sql:
+            assert_native_server_budgets(connection)
+            pid = connection.exec_driver_sql("SELECT pg_backend_pid()").scalar_one()
+            assert isinstance(pid, int)
+            # There is exactly one authenticated startup owner per attempt.
+            assert attempts.pids[connection.engine] == {pid}
+            attempts.migration_pids.add(pid)
 
     def disposed(engine: Engine) -> None:
         if engine in attempts.pids:
@@ -405,3 +473,52 @@ def test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_cre
             ).scalar_one()
             == 0
         )
+
+
+def test_initialize_database_converter_runs_after_schema_advisory_owner_is_released(
+    startup_database: StartupDatabase,
+) -> None:
+    """Catches retaining the global schema owner during native row conversion."""
+    database = startup_database
+    observed: list[str] = []
+
+    def before_converter_query(
+        connection: Connection,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        if (
+            "fleet_profile_applications" not in statement
+            or "FOR UPDATE SKIP LOCKED" not in statement
+        ):
+            return
+        # This is the actual converter's owning bounded claim, not a mocked
+        # converter callback. Its JSON switch_adapter selector may be bound.
+        observed.append(statement)
+        with database.engine.connect() as probe:
+            acquired = probe.exec_driver_sql(
+                "SELECT pg_try_advisory_lock(%s)", (db._STARTUP_ADVISORY_LOCK,)
+            ).scalar_one()
+            try:
+                assert acquired is True
+            finally:
+                if acquired is True:
+                    assert (
+                        probe.exec_driver_sql(
+                            "SELECT pg_advisory_unlock(%s)",
+                            (db._STARTUP_ADVISORY_LOCK,),
+                        ).scalar_one()
+                        is True
+                    )
+                    probe.commit()
+
+    event.listen(Engine, "before_cursor_execute", before_converter_query)
+    try:
+        db.initialize_database(database.url, config_path=CONFIG)
+        assert len(observed) == 1
+    finally:
+        event.remove(Engine, "before_cursor_execute", before_converter_query)
+    assert_retained_and_current(database)

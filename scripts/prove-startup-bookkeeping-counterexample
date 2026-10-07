@@ -34,7 +34,10 @@ def main() -> None:
         )
     mutated = text.replace(
         marker,
-        "                            except SQLAlchemyError:\n                                raise\n",
+        "                            except SQLAlchemyError as error:\n"
+        "                                raise RuntimeError(\n"
+        '                                    "Controller startup schema reconciliation failed"\n'
+        "                                ) from error\n",
         1,
     )
     report = output / "before-wrong-startup.xml"
@@ -94,7 +97,7 @@ def main() -> None:
         json.dumps(
             {
                 "source_sha": os.environ.get("VONK_PROOF_SOURCE_SHA"),
-                "mutation": "test-only rethrow of the exact startup bookkeeping SQL catch",
+                "mutation": "test-only fail-closed abort in the exact startup bookkeeping SQL catch",
                 "authored_db_sha256": hashlib.sha256(original).hexdigest(),
                 "mutated_db_sha256": hashlib.sha256(mutated.encode()).hexdigest(),
                 "restored_db_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
