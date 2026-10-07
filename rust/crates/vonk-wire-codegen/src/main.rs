@@ -86,16 +86,9 @@ fn prepare(value: &mut Value) {
                         .and_then(Value::as_f64)
                         .is_some_and(|v| v >= 0.0)
                     || object.get("const").and_then(Value::as_u64).is_some();
-                let unbounded = ![
-                    "minimum",
-                    "maximum",
-                    "exclusiveMinimum",
-                    "exclusiveMaximum",
-                    "const",
-                    "enum",
-                ]
-                .iter()
-                .any(|key| object.contains_key(*key));
+                let unbounded = !["maximum", "exclusiveMaximum", "const", "enum"]
+                    .iter()
+                    .any(|key| object.contains_key(*key));
                 let format = if unbounded {
                     "vonk-integer"
                 } else if object.get("format").and_then(Value::as_str) == Some("int64") {
@@ -658,7 +651,11 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     settings.with_conversion(
         serde_json::from_value(json!({"type":"integer","format":"vonk-integer"}))?,
         "crate::integer::Integer",
-        [typify::TypeSpaceImpl::Display].into_iter(),
+        [
+            typify::TypeSpaceImpl::Display,
+            typify::TypeSpaceImpl::Default,
+        ]
+        .into_iter(),
     );
     settings.with_conversion(
         serde_json::from_value(json!({"type":"string", "format":"date-time"}))?,
@@ -835,6 +832,9 @@ mod tests {
         let mut free = json!({"type":"integer"});
         prepare(&mut free);
         assert_eq!(free, json!({"type":"integer","format":"vonk-integer"}));
+        let mut lower_only = json!({"type":"integer","minimum":0});
+        prepare(&mut lower_only);
+        assert_eq!(lower_only, free);
         let mut counter = json!({"type":"integer","minimum":0,"maximum":u64::MAX});
         prepare(&mut counter);
         assert_eq!(counter, json!({"type":"integer","format":"uint64"}));

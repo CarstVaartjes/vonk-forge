@@ -7,8 +7,8 @@ pub use crate::generated::{
     CompiledEnvironmentEntry, CompiledExecutionPlan, CompiledIdentity as CompiledWorkloadIdentity,
     CompiledJob, CompiledJobInput, CompiledJobInputSlot, CompiledLifecycle,
     CompiledModelIdentity as ModelArtifactIdentity, CompiledPlacement as CompiledRuntimePlacement,
-    CompiledRuntime, CompiledRuntimeImage, CompiledSecurity,
-    CompiledSecurityMount as MountSpec, CompiledTopology,
+    CompiledRuntime, CompiledRuntimeImage, CompiledSecurity, CompiledSecurityMount as MountSpec,
+    CompiledTopology,
 };
 
 #[derive(Debug, Error)]
@@ -174,7 +174,9 @@ impl CompiledExecutionPlan {
                 || self.endpoint.is_none()
                 || !self.security.gpu)
         {
-            return Err(WorkloadError::Invalid("native fabric placement is incomplete"));
+            return Err(WorkloadError::Invalid(
+                "native fabric placement is incomplete",
+            ));
         }
         self.security.validate(&self.runtime.placement)?;
         self.topology.validate()?;
@@ -502,6 +504,8 @@ fn valid_mount_policy(mount: &MountSpec) -> bool {
 impl CompiledRuntimePlacement {
     /// Validate placement after Controller assignment has resolved execution addresses.
     pub fn validate_bound(&self) -> Result<(), WorkloadError> {
+        crate::validate_generated("CompiledPlacement", self)
+            .map_err(|_| WorkloadError::Invalid("placement"))?;
         if self.rank >= self.world_size
             || self.world_size == 0
             || !valid_role(&self.role)
@@ -648,12 +652,9 @@ fn validate_distribution_object(
         .map_err(|_| WorkloadError::Invalid("compiled distribution object"))
 }
 
-
 #[cfg(test)]
 mod argv_bound_tests {
-    use super::{
-        MAX_ARGV_BYTES, MAX_ARGV_ITEM_BYTES, MAX_ARGV_ITEMS, valid_opaque_argv,
-    };
+    use super::{MAX_ARGV_BYTES, MAX_ARGV_ITEM_BYTES, MAX_ARGV_ITEMS, valid_opaque_argv};
 
     #[test]
     fn a_long_command_is_admitted_and_an_absurd_one_is_refused() {

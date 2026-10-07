@@ -131,7 +131,7 @@ pub async fn pair(
             chain_pem: issued.chain_pem.into_bytes(),
             serial: issued.serial,
             fingerprint: issued.fingerprint,
-            generation: issued.generation,
+            generation: u64::from(issued.generation),
         },
     )?;
     Ok(())

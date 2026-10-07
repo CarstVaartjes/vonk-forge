@@ -703,8 +703,8 @@ impl AgentHttpClient {
         {
             measured.phase = snapshot.phase.to_string();
             if let Some((bytes, total)) = snapshot.counters {
-                measured.completed_bytes = bytes;
-                measured.total_bytes = Some(total);
+                measured.completed_bytes = bytes.into();
+                measured.total_bytes = Some(total.into());
                 measured.total_bytes_known = true;
             }
         }
@@ -1709,7 +1709,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let request = ActivateRequest {
-            generation,
+            generation: generation.try_into().map_err(|_| ClientError::Protocol)?,
             node_id: self.node_id.clone(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
@@ -4079,11 +4079,11 @@ mod tests {
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
             progress: Some(OperationProgress {
                 phase: "executing".to_owned(),
-                completed_bytes: 21,
-                total_bytes: Some(42),
+                completed_bytes: 21_u64.into(),
+                total_bytes: Some(42_u64.into()),
                 total_bytes_known: true,
-                completed_items: Some(1),
-                total_items: Some(2),
+                completed_items: Some(1_u64.into()),
+                total_items: Some(2_u64.into()),
                 object_sha256: None,
                 kind: None,
                 activity: None,

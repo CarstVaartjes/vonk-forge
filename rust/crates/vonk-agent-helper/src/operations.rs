@@ -5545,7 +5545,7 @@ mod tests {
         let compiled = compiled_plan_for_runtime_authority();
         RecipeStopPayload {
             cancel_pending_start,
-            rank: compiled.runtime.placement.rank,
+            rank: compiled.runtime.placement.rank.clone(),
             role: compiled.runtime.placement.role.clone(),
             recipe_content_sha256: compiled.identity.recipe_revision_sha256.clone(),
             stop_timeout_seconds: compiled.lifecycle.stop_timeout_seconds,
@@ -5725,7 +5725,7 @@ mod tests {
         // Every identity and the cleanup timeout remain covered by the signed
         // Stop hash even though cleanup does not require launch history.
         let mutations: [fn(&mut RecipeStopPayload); 4] = [
-            |plan: &mut RecipeStopPayload| plan.rank += 1,
+            |plan: &mut RecipeStopPayload| plan.rank = 1_u64.into(),
             |plan: &mut RecipeStopPayload| plan.role = "other".to_owned(),
             |plan: &mut RecipeStopPayload| plan.recipe_content_sha256 = "d".repeat(64),
             |plan: &mut RecipeStopPayload| plan.stop_timeout_seconds += 1,
