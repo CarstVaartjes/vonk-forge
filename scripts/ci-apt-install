@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Package acquisition for disposable Ubuntu CI runners (including root containers).
+# Three attempts: default mirror first, then Ubuntu's HTTPS mirrors. At most
+# 3 * (90s configure + 90s update + 180s install + 3 * 5s kill grace) + 6s backoff.
+set -euo pipefail
+
+if (( $# == 0 )); then
+  echo 'usage: scripts/ci-apt-install <packages...>' >&2
+  exit 2
+fi
+for package in "$@"; do
+  if [[ "$package" == -* ]]; then
+    echo "ci-apt-install: expected a package name, got $package" >&2
+    exit 2
+  fi
+done
+
+privilege=()
+if (( EUID != 0 )); then
+  privilege=(sudo -n)
+fi
+apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=15
+  -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=15)
+
+fallback_mirrors() {
+  local architecture mirror source updated
+  architecture=$("${privilege[@]}" timeout --kill-after=5s 30s dpkg --print-architecture)
+  mirror=https://archive.ubuntu.com/ubuntu
+  if [[ "$architecture" == arm64 ]]; then
+    mirror=https://ports.ubuntu.com/ubuntu-ports
+  fi
+  # Override only for hermetic fixtures. Production uses apt's standard sources.
+  local sources_dir=${CI_APT_SOURCES_DIR:-/etc/apt}
+  local uri='https?://([[:alnum:].-]+\.)?archive\.ubuntu\.com/ubuntu/?|https?://ports\.ubuntu\.com/ubuntu-ports/?'
+  # Legacy deb lines and deb822 URIs share URLs. Preserve suites, components,
+  # Signed-By, security endpoints and unrelated vendor/third-party repositories.
+  for source in "$sources_dir/sources.list" "$sources_dir"/sources.list.d/*.list "$sources_dir"/sources.list.d/*.sources; do
+    [[ -f "$source" ]] || continue
+    updated=$(timeout --kill-after=5s 30s sed -E "s@($uri)([[:space:]]|$)@$mirror\\3@g" "$source")
+    if [[ "$updated" != "$(< "$source")" ]]; then
+      printf '%s\n' "$updated" | "${privilege[@]}" timeout --kill-after=5s 30s tee "$source" >/dev/null
+      echo "ci-apt-install: switched Ubuntu mirror in $source to $mirror" >&2
+    fi
+  done
+}
+
+for attempt in 1 2 3; do
+  echo "ci-apt-install: attempt $attempt/3 for $*" >&2
+  # Reconcile an interrupted install before fetching/installing again. apt/dpkg
+  # keep their normal locks; a timed-out attempt is killed before the next starts.
+  if "${privilege[@]}" timeout --kill-after=5s 90s env DEBIAN_FRONTEND=noninteractive dpkg --configure -a \
+    && "${privilege[@]}" timeout --kill-after=5s 90s apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update \
+    && "${privilege[@]}" timeout --kill-after=5s 180s env DEBIAN_FRONTEND=noninteractive \
+      apt-get "${apt_options[@]}" install --yes --no-install-recommends "$@"; then
+    exit 0
+  else
+    status=$?
+    echo "ci-apt-install: attempt $attempt failed (exit $status)" >&2
+  fi
+  if (( attempt < 3 )); then
+    if (( attempt == 1 )); then
+      fallback_mirrors
+    fi
+    delay=$((attempt * 2))
+    echo "ci-apt-install: retrying in ${delay}s" >&2
+    sleep "$delay"
+  fi
+done
+
+echo "::error::ci-apt-install: package acquisition failed after 3 bounded attempts (default and HTTPS Ubuntu mirrors): $*" >&2
+exit 1

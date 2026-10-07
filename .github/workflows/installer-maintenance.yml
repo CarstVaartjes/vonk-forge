@@ -54,8 +54,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes rclone
+          scripts/ci-apt-install rclone
 
       - name: Detect published channel
         id: availability

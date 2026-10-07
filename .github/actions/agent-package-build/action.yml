@@ -153,7 +153,6 @@ runs:
       run: |
         set -euo pipefail
         test "$(uname -m)" = aarch64
-        sudo apt-get update
         rustup set profile minimal
         rustup toolchain install 1.98.1 --component clippy,rustfmt
         rustup default 1.98.1
@@ -469,8 +468,7 @@ runs:
         set -euo pipefail
         test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
         trap 'echo "lifecycle check failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
-        sudo apt-get update
-        sudo apt-get install --no-install-recommends -y \
+        scripts/ci-apt-install \
           crun fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
         shellcheck \
           packaging/bin/vonk-forge-docker-firewall \

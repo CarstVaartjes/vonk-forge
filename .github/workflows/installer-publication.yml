@@ -572,8 +572,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes rclone
+          scripts/ci-apt-install rclone
 
       - name: Revalidate source authority before R2 credentials
         shell: bash
@@ -1394,8 +1393,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes rclone skopeo
+          scripts/ci-apt-install rclone skopeo
 
       - name: Log in to GHCR for accepted channel promotion
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0

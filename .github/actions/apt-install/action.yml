@@ -1,5 +1,5 @@
 name: Install Ubuntu packages
-description: apt-get update and install with bounded network retries and timeouts
+description: Install packages with bounded retries and Ubuntu mirror recovery
 inputs:
   packages:
     description: Space-separated package names
@@ -13,8 +13,5 @@ runs:
         PACKAGES: ${{ inputs.packages }}
       run: |
         set -euo pipefail
-        printf '%s\n' 'Acquire::Retries "5";' 'Acquire::http::Timeout "30";' \
-          'Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/80-vonk-retries >/dev/null
         read -r -a packages <<< "$PACKAGES"
-        timeout 300 sudo apt-get update
-        timeout 600 sudo apt-get install --yes --no-install-recommends "${packages[@]}"
+        scripts/ci-apt-install "${packages[@]}"
