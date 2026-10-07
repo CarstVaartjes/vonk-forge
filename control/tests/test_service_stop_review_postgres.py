@@ -301,10 +301,11 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     from vonk_control.models import FleetProfileApplication
 
     from .agent_fences import fenced_operation
+    from .profile_stop_readmission_support import start_on_released_gang
     from .test_fleet_profiles import _uuid
     from .test_profile_adapter_parallel_postgres import _stored
     from .test_profile_stop_effect_adoption_postgres import _pending_stop
-    from .test_recipe_operations import _issue_exact_stop_grant, complete_started_recipe
+    from .test_recipe_operations import _issue_exact_stop_grant
     from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
     route_owner = []
@@ -514,17 +515,18 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     assert not any(
         state == "active" for _id, _node, state, _bytes in claims(sessions, run_id)
     )
-    # The acknowledged Stop releases real runtime capacity for a fresh request.
-    fresh_plan = restarted.preview_run(installation_id, "after-adopted-stop")
-    assert fresh_plan.allowed
-    fresh_run = restarted.start(
-        fresh_plan,
-        plan_digest=fresh_plan.plan_digest,
-        actor="admin",
+    # A current report and fenced native Start prove the released physical gang.
+    fresh_run_id = start_on_released_gang(
+        sessions,
+        restarted,
+        run_id,
+        nodes,
+        clock=lambda: clock[0],
         request_id=str(uuid4()),
     )
-    complete_started_recipe(sessions, restarted, fresh_run.id)
-    assert restarted.get(fresh_run.id).state == "succeeded"
+    with sessions() as session:
+        fresh_run = session.get(RecipeRun, fresh_run_id)
+        assert fresh_run is not None and fresh_run.installation_id == installation_id
 
 
 def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
@@ -546,7 +548,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     from vonk_control.route_runtime import AtomicRouteBundlePublisher
 
     from .agent_fences import fenced_operation
-    from .test_recipe_operations import _issue_exact_stop_grant, complete_started_recipe
+    from .profile_stop_readmission_support import start_on_released_gang
+    from .test_recipe_operations import _issue_exact_stop_grant
 
     sessions, service, _jobs, _old_routes, _stand_in, run_id, nodes = (
         published_service_run
@@ -677,12 +680,12 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     assert fresh_plan.allowed
     after_available = fresh_plan.nodes[0].available_memory_bytes
     assert after_available is not None and after_available > before_available
-    fresh = restarted.start(
-        fresh_plan,
-        plan_digest=fresh_plan.plan_digest,
-        actor="admin",
+    fresh_run_id = start_on_released_gang(
+        sessions,
+        restarted,
+        run_id,
+        nodes,
+        clock=lambda: clock,
         request_id=str(uuid4()),
     )
-    assert fresh.owner_id != run_id
-    complete_started_recipe(sessions, restarted, fresh.id)
-    assert restarted.get(fresh.id).state == "succeeded"
+    assert fresh_run_id != run_id

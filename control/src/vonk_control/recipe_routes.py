@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import GatewayRouteState, RoutePublicationState, RunState
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.enrollment import NodeId
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_forge_contracts import read_recipe
 
@@ -1218,7 +1219,7 @@ class RecipeRouteService:
                 select(Job.id)
                 .where(
                     Job.kind == "recipe.stop",
-                    Job.state == "running",
+                    Job.state == LifecycleState.RUNNING.value,
                     Job.payload["owner_id"].as_string() == run.id,
                     Job.payload["service_stop_review"]["stage"]
                     .as_string()
