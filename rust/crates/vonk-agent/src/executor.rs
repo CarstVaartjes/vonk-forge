@@ -19,7 +19,10 @@ use crate::{
         RecipeRunDisposition,
     },
     health::{wait_ready, wait_ready_until},
-    host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome, HostRuntimePlan},
+    host_runtime::{
+        BACKGROUND_RUN_INSPECTION_CONCURRENCY, HostRuntimeBoundary, HostRuntimeOutcome,
+        HostRuntimePlan,
+    },
     oci::{
         MAX_RECIPE_RUN_OBSERVATIONS_PER_BATCH, OciError, OciRuntime,
         RecipeRunObservationCheckpoint, RecipeRunStartIdentity,
@@ -433,7 +436,10 @@ impl<R> RecipeExecutor<'_, R> {
                     request_root: &request_root,
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
                 };
-                match boundary.inspect_recipe_run(vec![run_id.to_owned()]).await {
+                match boundary
+                    .inspect_recipe_run_for_observation(vec![run_id.to_owned()])
+                    .await
+                {
                     Ok(false) => Ok(ExactRecipeRunObservation {
                         run_id: uuid::Uuid::parse_str(run_id)
                             .map_err(|_| RecipeObservationError::SkippedRun)?,
@@ -507,7 +513,7 @@ impl<R> RecipeExecutor<'_, R> {
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
                 };
                 let process_running = boundary
-                    .inspect_recipe_run(plan.arguments)
+                    .inspect_recipe_run_for_observation(plan.arguments)
                     .await
                     .inspect_err(|error| {
                         eprintln!(
@@ -545,7 +551,7 @@ impl<R> RecipeExecutor<'_, R> {
                     endpoint_ready,
                 })
             })
-            .buffer_unordered(8)
+            .buffer_unordered(BACKGROUND_RUN_INSPECTION_CONCURRENCY)
             .take_until(tokio::time::sleep(Duration::from_secs(10)))
             .collect::<Vec<_>>()
             .await;

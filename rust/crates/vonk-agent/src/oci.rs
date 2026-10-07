@@ -117,7 +117,8 @@ pub struct OciRuntime<'a, R> {
 pub const MAX_RECIPE_RUN_OBSERVATIONS_PER_BATCH: usize = 64;
 // One wave of the executor's eight simultaneous physical inspections. A
 // sick first wave cannot permanently hide later runs inside a larger page.
-const MAX_RUN_INSPECTIONS_PER_PAGE: usize = 8;
+const MAX_RUN_INSPECTIONS_PER_PAGE: usize =
+    crate::host_runtime::BACKGROUND_RUN_INSPECTION_CONCURRENCY;
 // Bound traversal work by a 64 KiB worst-case directory-name wave (Unix
 // NAME_MAX plus a terminator per entry), in addition to elapsed scan time.
 const RUN_DIRECTORY_NAME_WAVE_BYTES: usize = 64 * 1024;
