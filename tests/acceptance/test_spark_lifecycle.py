@@ -1454,7 +1454,7 @@ class SparkLifecycle:
     def _controller_site_values(self) -> dict[str, str]:
         """Synthetic Spark networks, set in .env where an operator would."""
         return {
-            "VONK_MANAGEMENT_CIDRS": "172.16.0.0/12",
+            "VONK_MANAGEMENT_CIDRS": f"172.31.{self.synthetic_fabric_octet}.0/30",
             "VONK_DIRECT_FABRIC_CIDRS": f"198.19.{self.synthetic_fabric_octet}.0/24",
         }
 

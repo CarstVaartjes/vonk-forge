@@ -151,6 +151,18 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         + "networks:\n  ingress: {}\n  cluster-egress: {}\n"
     )
 
+    import yaml
+
+    compose_path = bundle / "docker-compose.yaml"
+    compose_document = yaml.safe_load(compose_path.read_text())
+    published = yaml.safe_load(
+        (ENTRY_POINT.parents[2] / "deploy/compose/compose.yaml").read_text()
+    )
+    compose_document["services"]["caddy"]["entrypoint"] = published["services"][
+        "caddy"
+    ]["entrypoint"]
+    compose_path.write_text(yaml.safe_dump(compose_document))
+
     lifecycle._configure_acceptance_renewal(
         bundle,
         lifetime_seconds=lifecycle.CERTIFICATE_LIFETIME_SECONDS,
@@ -175,6 +187,80 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     caddyfile = (bundle / "acceptance-Caddyfile").read_text()
     assert "header_up X-Vonk-Agent-Source 172.31.42.1" in caddyfile
     assert "X-Vonk-Agent-Source {http.request.remote.host}" not in caddyfile
+
+    # Execute the actual shell wrapper and native secret-validating entrypoint.
+    # Only the staged mount paths and terminal Caddy executable are fixture
+    # resources; no container, network, or readiness result is mocked.
+    compose_document = yaml.safe_load(compose_path.read_text())
+    service = compose_document["services"]["caddy"]
+    secrets = tmp_path / "run/secrets"
+    secrets.mkdir(parents=True)
+    for name in (
+        "controller-server-certificate",
+        "controller-server-key",
+        "agent-client-ca",
+    ):
+        (secrets / name).write_text("fixture public certificate material")
+    (secrets / "agent-proxy-auth").write_text("a" * 32)
+    native_source = (
+        ENTRY_POINT.parents[2] / "deploy/compose/caddy/entrypoint.sh"
+    ).read_text()
+    native = tmp_path / "runtime/caddy/entrypoint.sh"
+    native.parent.mkdir(parents=True)
+    native.write_text(native_source.replace("/run/secrets/", str(secrets) + "/"))
+    executable = tmp_path / "bin/caddy"
+    executable.parent.mkdir()
+    captured = tmp_path / "caddy-arguments.json"
+    executable.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" > "$CAPTURE_ARGUMENTS"\n')
+    executable.chmod(0o755)
+    wrapper = [
+        argument.replace("$$", "$").replace(
+            "/run/vonk-runtime-assets/caddy/entrypoint.sh", str(native)
+        )
+        for argument in service["entrypoint"]
+    ]
+    # The former published wrapper discarded command arguments. Its native
+    # entrypoint therefore selected the packaged configuration, not the
+    # fixture's source-bound configuration. Exercise that exact countercase.
+    old_wrapper = wrapper[:3]
+    old_wrapper[2] = old_wrapper[2].removesuffix(' "$@"')
+    environment = {
+        "PATH": str(executable.parent) + os.pathsep + os.defpath,
+        "VONK_CONTROL_HOSTNAME": "spark.acceptance.invalid",
+        "CAPTURE_ARGUMENTS": str(captured),
+    }
+    subprocess.run(
+        [*old_wrapper, *service["command"]], check=True, timeout=2, env=environment
+    )
+    old_selected = captured.read_text().splitlines()
+    assert old_selected != service["command"][1:]
+    assert (
+        old_selected[old_selected.index("--config") + 1]
+        == "/run/vonk-runtime-assets/caddy/Caddyfile"
+    )
+    subprocess.run(
+        [*wrapper, *service["command"]],
+        check=True,
+        timeout=2,
+        env={
+            "PATH": str(executable.parent) + os.pathsep + os.defpath,
+            "VONK_CONTROL_HOSTNAME": "spark.acceptance.invalid",
+            "CAPTURE_ARGUMENTS": str(captured),
+        },
+    )
+    assert captured.read_text().splitlines() == service["command"][1:]
+    selected = captured.read_text().splitlines()
+    assert selected[selected.index("--config") + 1] == "/etc/caddy/Caddyfile"
+    from vonk_control.presence import ManagementAddressPolicy, PresenceError
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.synthetic_fabric_octet = 42
+    policy = ManagementAddressPolicy.parse(
+        run._controller_site_values()["VONK_MANAGEMENT_CIDRS"]
+    )
+    assert policy.validate("172.31.42.1") == "172.31.42.1"
+    with pytest.raises(PresenceError, match="outside configured"):
+        policy.validate("172.26.0.1")
 
 
 def test_synthetic_device_fixture_supports_the_arm64_spark_runner() -> None:
@@ -530,7 +616,7 @@ def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
 
     values = run._controller_site_values()
 
-    assert values["VONK_MANAGEMENT_CIDRS"] == "172.16.0.0/12"
+    assert values["VONK_MANAGEMENT_CIDRS"] == "172.31.42.0/30"
     assert values["VONK_DIRECT_FABRIC_CIDRS"] == "198.19.42.0/24"
 
 
