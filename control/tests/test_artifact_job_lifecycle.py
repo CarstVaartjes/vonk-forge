@@ -343,8 +343,10 @@ def test_the_job_follows_its_order_without_a_second_state(tmp_path) -> None:
         assert order is not None and order.state == "cancelled"
 
 
-def test_a_legacy_failed_lease_expiry_no_longer_blocks_the_runs_stop(tmp_path) -> None:
-    """Before the core, a lapsed job ended ``failed`` and blocked Stop forever."""
+def test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt(
+    tmp_path,
+) -> None:
+    """A stored typed expiry cause is not an observation that the target stopped."""
 
     (
         sessions,
@@ -381,7 +383,7 @@ def test_a_legacy_failed_lease_expiry_no_longer_blocks_the_runs_stop(tmp_path) -
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000399",
     )
-    assert stopped.state == "succeeded"
+    assert stopped.state == "running"
     assert service.get(submitted.id).state == "failed"
 
 

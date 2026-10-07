@@ -43,7 +43,7 @@ from .test_artifact_job_lifecycle import CANCEL_KEY, _drive, _issued_job
 from .test_artifact_jobs import cancellation_result, submitted_artifact_job
 
 
-@pytest.mark.parametrize("damaged_evidence", [False, True])
+@pytest.mark.parametrize("damaged_evidence", [False, True, "omitted"])
 def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     tmp_path,
     damaged_evidence,
@@ -74,17 +74,22 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     assert ended.result_evidence.active_scope_may_remain is True
 
     if damaged_evidence:
+        document = ended.result_evidence.model_dump(mode="json", exclude_none=True)
+        if damaged_evidence == "omitted":
+            # The remaining canonical failure cause still reports an unconfirmed
+            # physical stop. Omission cannot turn that into observed absence.
+            document.pop("active_scope_may_remain")
+        else:
+            document = {"elapsed_milliseconds": "damaged"}
         with sessions.begin() as session:
-            # Corrupt the persisted observation below the strict writer guard;
-            # a normal producer must never be permitted to write this value.
+            # Damage only the persisted observation. The malformed branch goes
+            # below the strict writer guard; omission remains schema-valid.
             session.execute(
                 text(
                     "UPDATE artifact_jobs SET result_evidence = :document WHERE id = :id"
                 ),
                 {
-                    "document": canonical_message(
-                        {"elapsed_milliseconds": "damaged"}
-                    ).decode(),
+                    "document": canonical_message(document).decode(),
                     "id": job.id,
                 },
             )
@@ -233,9 +238,11 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     assert resolved.result_evidence is not None
     assert resolved.result_evidence.active_scope_may_remain is False
     assert resolved.result_evidence.residue_resolved_by == "exact-stop"
-    if damaged_evidence:
+    if damaged_evidence is True:
         assert resolved.result_evidence.elapsed_milliseconds is None
         assert resolved.result_evidence.peak_memory_bytes is None
+    elif damaged_evidence == "omitted":
+        assert resolved.result_evidence.elapsed_milliseconds == 10
     with sessions() as session:
         assert not tuple(
             session.scalars(

@@ -283,14 +283,15 @@ class ArtifactJobAdapter:
     ) -> Effect:
         if state is State.SUCCEEDED:
             return Effect.ESTABLISHED
+        evidence = read_result_evidence(job.result_evidence)
+        if evidence is not None and evidence.scope_unproven:
+            return Effect.UNKNOWN
         if attempts == 0:
             return Effect.NONE
-        evidence = read_result_evidence(job.result_evidence)
-        residue = evidence is not None and evidence.active_scope_may_remain is True
         if state is State.CANCELLED:
-            return Effect.UNKNOWN if residue else Effect.STOPPED
+            return Effect.STOPPED
         if state is State.FAILED:
-            return Effect.UNKNOWN if residue else Effect.NONE
+            return Effect.NONE
         if state is State.RUNNING and (row.lease_deadline is not None):
             return Effect.ISSUED
         return Effect.UNKNOWN
@@ -613,7 +614,7 @@ class ArtifactJobAdapter:
             # rebuilds the physical-effect fact; unreadable metrics are retired,
             # never reconstructed as measurements.
             evidence = ArtifactJobResultEvidence()
-        elif evidence.active_scope_may_remain is not True:
+        elif not evidence.scope_unproven:
             return False
         job.state = ajs.CANCELLED
         job.status_reason = reason[:_MAX_REASON]

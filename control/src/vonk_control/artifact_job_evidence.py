@@ -36,6 +36,16 @@ class ArtifactJobResultEvidence(StrictJSONModel):
     late_results_accepted: bool | None = None
     residue_resolved_by: Literal["exact-stop"] | None = None
 
+    @property
+    def scope_unproven(self) -> bool:
+        """An omitted flag cannot erase an unresolved typed physical cause."""
+        if self.residue_resolved_by == "exact-stop":
+            return False
+        # The sole false-scope writer records its validated exact receipt marker
+        # alongside the flag. A contradictory false flag alone cannot erase a
+        # still-unresolved typed uncertainty cause.
+        return self.failure_kind is not None or self.active_scope_may_remain is True
+
     def merged(self, given: ArtifactJobResultEvidence) -> ArtifactJobResultEvidence:
         """These facts with every field ``given`` set, the new value winning."""
 
