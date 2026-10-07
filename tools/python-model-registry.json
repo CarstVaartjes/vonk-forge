@@ -261,6 +261,11 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/observation_transfer.py",
+      "kind": "controller-contract",
+      "reason": "Canonical immutable observation transport records; original Fleet and platform models retain domain ownership."
+    },
+    {
       "module": "control/src/vonk_control/operation_api.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
