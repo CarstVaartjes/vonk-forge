@@ -6526,7 +6526,9 @@ class FleetProfileService:
         retry_of_application_id: str | None = None,
         automatic_cache_recovery: bool = False,
         pending_application_id: str | None = None,
+        platform_maintenance: bool = False,
     ) -> FleetProfileApplicationView:
+        """Admit new submissions as their actor; maintain accepted intent as the platform."""
         now = _aware(self._clock())
         reviewed_plan_digest = preview.plan_digest
         application_id = pending_application_id or str(uuid.uuid4())
@@ -6549,9 +6551,9 @@ class FleetProfileService:
         with self._admission_session(
             actor,
             node_ids=preview.scope.node_ids,
-            platform_maintenance=(
-                pending_application_id is not None or automatic_cache_recovery
-            ),
+            # A durable pending receipt also exists during a NEW submission.
+            # Only the maintenance callers may bypass current actor authority.
+            platform_maintenance=platform_maintenance,
         ) as session:
             profile = session.get(
                 FleetProfile, preview.profile_id, with_for_update={"nowait": True}
@@ -7982,6 +7984,7 @@ class FleetProfileService:
             operation_kind=operation_kind,
             retry_of_application_id=application_id,
             automatic_cache_recovery=automatic_cache_recovery,
+            platform_maintenance=automatic_cache_recovery,
         )
 
     def operation_provider(self) -> OperationProviderProtocol:
@@ -8738,6 +8741,7 @@ class FleetProfileService:
                 actor=selected.actor,
                 operation_kind="fleet-profile.apply",
                 pending_application_id=pending.id,
+                platform_maintenance=True,
             )
         except (FleetProfileAdmissionBusy, FleetProfileAdmissionEffectBusy) as error:
             if pending is None:
@@ -9811,6 +9815,7 @@ class FleetProfileService:
                 actor=actor,
                 operation_kind="fleet-profile.apply",
                 pending_application_id=application_id,
+                platform_maintenance=True,
             )
         except (
             FleetProfileAdmissionBusy,
