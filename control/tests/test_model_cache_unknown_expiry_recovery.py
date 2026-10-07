@@ -186,15 +186,19 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
         with sessions() as session:
             ended = session.get(ModelCacheOperation, confirmed.id)
             assert ended is not None
-            assert restarted._lifecycle.lifecycle(ended, now[0]).effect is Effect.NONE
+            assert (
+                restarted._lifecycle.lifecycle(ended, now[0]).effect is Effect.STOPPED
+            )
         with _api(restarted) as api:
             response = api.get(f"/api/model/operations/{confirmed.id}")
             assert response.status_code == 200
             confirmed_response = response.json()
-            assert confirmed_response["cancellation"]["observation"]["effect"] == "none"
+            assert (
+                confirmed_response["cancellation"]["observation"]["effect"] == "stopped"
+            )
             render_payload(confirmed_response, "model", action="progress")
             rendered = capsys.readouterr().out
-            assert "no writer effect was observed" in rendered
+            assert "confirmed stopped" in rendered
             assert "unconfirmed" not in rendered
         exported = os.environ.get("VONK_CACHE_CANCEL_RESPONSE_OUTPUT")
         if exported:

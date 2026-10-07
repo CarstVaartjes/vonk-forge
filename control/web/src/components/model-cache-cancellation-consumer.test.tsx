@@ -22,7 +22,7 @@ test.skipIf(!responsesPath)("actual model cancellation responses preserve unknow
     await user.click(screen.getByRole("button", {name: "Confirm cancel download"}));
     expect(await screen.findByText(observed.cancellation!.observation!.detail)).toBeVisible();
     expect(screen.queryByText("Cancelled the download.")).toBeNull();
-    expect(observed.cancellation!.observation!.effect).toBe(name === "unknown" ? "unknown" : "none");
+    expect(observed.cancellation!.observation!.effect).toBe(name === "unknown" ? "unknown" : "stopped");
     cleanup();
     vi.unstubAllGlobals();
   }
