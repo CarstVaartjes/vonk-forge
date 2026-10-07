@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --project control --frozen python
+#!/usr/bin/env -S uv run --project control --no-sync --offline python
 """Fail when a Python type error appears outside the reviewed exception list.
 
 The repository does not type-check cleanly yet, but every surviving error is a
@@ -33,7 +33,7 @@ BASELINE = ROOT / "tools/pyright-baseline.json"
 TYPECHECK_TIMEOUT_SECONDS = 600
 
 
-def _diagnostics() -> list[dict[str, object]]:
+def _diagnostics(files: list[str] | None = None) -> list[dict[str, object]]:
     # pyright is locked in the control dev group and resolves imports from
     # this same interpreter; its version check is the only network access it
     # would otherwise attempt.
@@ -46,6 +46,7 @@ def _diagnostics() -> list[dict[str, object]]:
                 "--outputjson",
                 "--pythonpath",
                 sys.executable,
+                *[str((ROOT / file).resolve()) for file in files or []],
             ],
             cwd=ROOT,
             env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
@@ -66,6 +67,9 @@ def _diagnostics() -> list[dict[str, object]]:
         print(completed.stderr[-4000:], file=sys.stderr)
         raise SystemExit("pyright did not return a JSON report")
     diagnostics = []
+    if completed.returncode not in (0, 1):
+        print(completed.stderr[-4000:], file=sys.stderr)
+        raise SystemExit(f"pyright failed with exit status {completed.returncode}")
     for diagnostic in payload.get("generalDiagnostics", []):
         if diagnostic.get("severity") != "error":
             continue
@@ -174,15 +178,27 @@ def _write(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update", action="store_true", help="rewrite the baseline")
+    parser.add_argument(
+        "files", nargs="*", help="check only these files (default: full repository)"
+    )
     args = parser.parse_args()
+    if args.update and args.files:
+        parser.error("--update requires a full repository check")
 
-    diagnostics = _diagnostics()
+    diagnostics = _diagnostics(args.files)
+    selected = {
+        (ROOT / file).resolve().relative_to(ROOT).as_posix() for file in args.files
+    }
+    if selected:
+        diagnostics = [item for item in diagnostics if item["file"] in selected]
     counts = _counts(diagnostics)
     if args.update:
         _write(counts, _load(BASELINE))
         return 0
 
     exceptions = _load(BASELINE)
+    if selected:
+        exceptions = [entry for entry in exceptions if entry.get("file") in selected]
     problems = evaluate(counts, exceptions)
     for problem in problems:
         print(problem, file=sys.stderr)

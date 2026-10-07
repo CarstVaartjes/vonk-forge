@@ -11,7 +11,7 @@ live repository ruleset, not the dated protection report under `inventory/`):
 
 | Check | Purpose |
 | --- | --- |
-| `Ruff` | Lint changed Python files (or the whole tree for a release tag). |
+| `Ruff` | Lint and formatting on changed Python files; full Python type check (whole-tree lint/format for a release tag). |
 | `Generated control clients` | Rebuild OpenAPI clients and reject generated drift. |
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
@@ -283,10 +283,12 @@ export UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache
 
 # Python lint; ruff is the repository's formatting authority too.
 uv run --project control --frozen ruff check .
+uv run --project control --frozen ruff format --check .
 
 # Python types. Pyright is locked in the control dev group and resolves imports
 # from that same environment.
 scripts/build-control-wheel
+uv sync --project control --frozen
 scripts/check-python-types
 
 # Web behavior and types; the build runs tsc --noEmit before bundling.
@@ -314,8 +316,11 @@ same rule cannot hide and a fixed error must be removed; an entry that no
 longer occurs fails as stale; and an entry without a reason fails, so
 `--update` is not a way to accept an error without saying why. Run `--update`
 to write the current errors, then write the reason for anything it adds.
-`pyright` runs over `control/src`, `src`, `tests` and `control/tests` in basic
-mode; generated clients and virtualenvs are excluded.
+With no file arguments, `pyright` runs over `control/src`, `src`, `tests` and
+`control/tests` in basic mode; generated clients and virtualenvs are excluded.
+The commit hook passes changed Python paths and checks only their diagnostics
+and reviewed exceptions. CI retains the full check, including errors in
+unchanged consumers. Partial checks cannot update the repository baseline.
 
 The coordination boundaries are checked by
 `control/tests/coordination_boundaries.py`, which the control suite runs over
@@ -531,7 +536,7 @@ Run `scripts/verify-supply-chain --json` to validate authored lockfiles, the
 third-party contract wheel digest, and image pins. CI builds the protocol
 wheel, generates SPDX documents and a digest manifest, and uploads them as
 verified release evidence. These generated files are not committed or staged
-by the pre-commit hook. See the
+by the pre-commit hook, which runs only lint, format, and types. See the
 [development workflow](runbooks/development-workflow.md#generated-artifacts-and-release-evidence).
 
 ## What earns a test

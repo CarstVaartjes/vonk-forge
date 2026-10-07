@@ -11,7 +11,10 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -185,3 +188,122 @@ def test_failed_gate_preserves_the_actual_diagnostic_location_and_cause(
     detail = capsys.readouterr().err
     assert "control/src/example.py:30:1: reportAttributeAccessIssue" in detail
     assert "CanonicalEvidence is not exported" in detail
+
+
+def test_partial_check_does_not_require_exceptions_in_unchecked_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = _module()
+    target = tmp_path / "baseline.json"
+    target.write_text(json.dumps({"schema_version": 1, "exceptions": [_exception()]}))
+    monkeypatch.setattr(module, "BASELINE", target)
+    selected = "tests/scripts/test_check_python_types.py"
+    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), selected])
+    observed: list[list[str]] = []
+
+    def diagnostics(files: list[str]) -> list[dict[str, object]]:
+        observed.append(files)
+        return []
+
+    monkeypatch.setattr(module, "_diagnostics", diagnostics)
+    assert module.main() == 0
+    assert observed == [[selected]]
+
+
+def test_partial_check_still_rejects_new_errors_and_stale_selected_exceptions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _module()
+    target = tmp_path / "baseline.json"
+    target.write_text(json.dumps({"schema_version": 1, "exceptions": [_exception()]}))
+    monkeypatch.setattr(module, "BASELINE", target)
+    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "control/tests/example.py"])
+    monkeypatch.setattr(
+        module,
+        "_diagnostics",
+        lambda files: [
+            {
+                "file": "control/tests/example.py",
+                "rule": "reportReturnType",
+                "message": "str is not assignable to int",
+                "line": 1,
+                "column": 1,
+            }
+        ],
+    )
+    assert module.main() == 1
+    detail = capsys.readouterr().err
+    assert "stale exception" in detail
+    assert "unlisted type error" in detail
+    assert "str is not assignable to int" in detail
+
+
+def test_partial_check_cannot_rewrite_the_full_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    monkeypatch.setattr(
+        module.sys, "argv", [str(SCRIPT), "--update", "tests/example.py"]
+    )
+    with pytest.raises(SystemExit) as failure:
+        module.main()
+    assert failure.value.code == 2
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("value = missing_name\n", "F821"),
+        ("value=1\n", "would be reformatted"),
+        ('value: int = "wrong"\n', "reportAssignmentType"),
+        ("value: int = 1\n", "no unlisted errors"),
+    ],
+)
+def test_real_hook_checks_whitespace_paths_without_building_or_syncing(
+    tmp_path: Path, source: str, expected: str
+) -> None:
+    """Catch skipped typing, broken filename splitting and hidden setup effects."""
+    (tmp_path / "control").mkdir()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "control/pyproject.toml").write_text(
+        '[project]\nname = "hook-probe"\nversion = "0.0.0"\nrequires-python = ">=3.14"\n'
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pyright]\ntypeCheckingMode = "basic"\n'
+    )
+    (tmp_path / "tools/pyright-baseline.json").write_text(
+        '{"schema_version": 1, "exceptions": []}\n'
+    )
+    shutil.copy2(SCRIPT, tmp_path / "scripts/check-python-types")
+    probe = tmp_path / 'probe with space and "quote".py'
+    probe.write_text(source)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
+    subprocess.run(
+        ["git", "add", "--", probe.name], cwd=tmp_path, check=True, timeout=30
+    )
+
+    def authored_paths() -> set[Path]:
+        return {
+            path.relative_to(tmp_path)
+            for path in tmp_path.rglob("*")
+            if ".ruff_cache" not in path.parts
+        }
+
+    before = authored_paths()
+    completed = subprocess.run(
+        ["bash", str(ROOT / ".githooks/pre-commit")],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "UV_PROJECT_ENVIRONMENT": str(Path(sys.executable).parent.parent),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert expected in completed.stdout + completed.stderr
+    assert completed.returncode == (0 if source == "value: int = 1\n" else 1)
+    assert authored_paths() == before
+    assert probe.read_text() == source
