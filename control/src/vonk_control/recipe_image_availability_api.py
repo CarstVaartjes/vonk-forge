@@ -224,6 +224,7 @@ RecipeOperationResponse = (
 RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS = {
     ("get", "/api/recipe/operations/{operation_id}"): "getRecipeOperation",
     ("get", "/api/recipe/requests/{request_key}"): "getRecipeRequest",
+    ("post", "/api/recipe/operations/{operation_id}/retry"): "retryRecipeOperation",
     ("post", "/api/recipe/operations/{operation_id}/cancel"): "cancelRecipeOperation",
     ("post", "/api/recipe/{selector}/download"): "downloadRecipe",
     ("post", "/api/recipe/{selector}/remove"): "removeRecipe",
@@ -487,6 +488,28 @@ def install_recipe_operator_routes(
             if isinstance(operation, RecipeImageAvailabilityView):
                 return _view_document(operation)
             return removal_document(operation)
+        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+            raise _recipe_error(error) from None
+
+    @app.post(
+        "/api/recipe/operations/{operation_id}/retry",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=RecipeImageAvailabilityResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="retryRecipeOperation",
+    )
+    def retry_operation(
+        body: RecipeDownloadRequest,
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Any = actor_dependency,
+    ) -> RecipeImageAvailabilityResponse:
+        _mutating(actor, "/api/recipe/operations/{operation_id}/retry")
+        try:
+            return _view_document(
+                _service(service).retry(
+                    operation_id, actor=actor.subject, request_id=body.request_key
+                )
+            )
         except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
             raise _recipe_error(error) from None
 

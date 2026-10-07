@@ -246,3 +246,17 @@ made now. Normal
 `vonkctl profile load` progress displays the effective initial-start budget,
 deadline, and current load/JIT phase when the Run/Switch child reaches startup.
 Rank-loss recovery and final route publication keep their separate deadlines.
+
+A failed recipe preparation can be retried with its original frozen recipe
+revision, content, and targets:
+
+```sh
+vonkctl recipe retry <operation-id> --yes --detach --request-key <new-uuid>
+vonkctl recipe progress --request-key <new-uuid> --follow
+```
+
+Use one new request key for the new attempt and reuse it when reconnecting after
+a lost response. The Controller returns the same accepted attempt for that key;
+it does not resolve the current recipe selector. Retry remains subject to current
+authorization and normal worker admission. A changed catalog recipe does not
+change the frozen intent of this attempt.
