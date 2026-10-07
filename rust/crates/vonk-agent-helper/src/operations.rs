@@ -6883,6 +6883,9 @@ mod tests {
             .iter()
             .position(|arg| arg == "VONK_RANK=0")
             .unwrap();
+        let mut negative_zero = arguments.clone();
+        negative_zero[rank] = "VONK_RANK=-0".to_owned();
+        assert!(validate_docker_run(&negative_zero, &roots, None).is_ok());
         nonzero_owner[rank] = "VONK_RANK=1".to_owned();
         assert!(validate_docker_run(&nonzero_owner, &roots, None).is_ok());
         let mut wide_rank = arguments.clone();
