@@ -51,7 +51,7 @@ from scripts.spark_lifecycle_contract import (
     recompute_publication_graphs,
     validate_lifecycle,
 )
-from tests.acceptance.controller_contract import ContractSkew
+from tests.acceptance.controller_contract import ContractSkew, ControllerContract
 from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
@@ -967,6 +967,7 @@ class LocalBrowserController:
         hostname: str,
         port: int,
         request_guard: Callable[[str, str, bytes | None], None] | None = None,
+        observation_contract: Callable[[], ControllerContract] | None = None,
     ) -> None:
         if (
             not hostname
@@ -980,6 +981,54 @@ class LocalBrowserController:
         self.port = port
         # Sees every request the administrator session sends before it leaves.
         self.request_guard = request_guard
+        self.observation_contract = observation_contract
+
+    def observation_request(
+        self, path: str, headers: dict[str, str], timeout: float
+    ) -> tuple[int, dict[str, object]]:
+        # Capture one source contract before I/O; carry changes this getter only
+        # when the verified release's Controller generation changes.
+        contract = (
+            self.observation_contract()
+            if self.observation_contract is not None
+            else ControllerContract(
+                json.loads(
+                    (
+                        Path(__file__).resolve().parents[2] / "control/openapi.json"
+                    ).read_text()
+                ),
+                label="this acceptance source's Controller",
+            )
+        )
+        selected = contract.observation(path)
+        request_headers = {**headers, "Accept": selected.media_type}
+        if self.request_guard is not None:
+            self.request_guard("GET", path, None)
+        if timeout <= 0 or any(
+            name.lower() in {"connection", "content-length", "host"}
+            or any(character in name for character in "\0\r\n:")
+            or any(character in value for character in "\0\r\n")
+            for name, value in request_headers.items()
+        ):
+            raise LifecycleError("local browser observation request is invalid")
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=timeout)
+        try:
+            connection.request(
+                "GET", path, headers={"Host": self.hostname, **request_headers}
+            )
+            response = connection.getresponse()
+            document = selected.decode(
+                response,
+                status=response.status,
+                media_type=response.getheader("Content-Type", ""),
+            )
+            return response.status, document
+        except (OSError, http.client.HTTPException, ValueError, ContractSkew) as error:
+            raise LifecycleError(
+                "complete source-bound observation is unavailable; retry observation"
+            ) from error
+        finally:
+            connection.close()
 
     def raw_request(
         self,
@@ -1094,6 +1143,7 @@ class LocalBrowserController:
             timeout=timeout,
             headers=fixed_headers,
             transport=transport,
+            observation_transport=self.observation_request,
         )
 
     def bearer(self, token: str, *, timeout: float) -> Client:
@@ -1114,6 +1164,7 @@ class LocalBrowserController:
             token,
             timeout=timeout,
             transport=transport,
+            observation_transport=self.observation_request,
         )
 
 
@@ -1550,11 +1601,23 @@ class SparkLifecycle:
             hostname=self.control_hostname,
             port=self._local_browser_port(),
             request_guard=self._controller_request_guard(),
+            observation_contract=self._controller_observation_contract,
         )
         self.browser = boundary
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
         del password
+
+    def _controller_observation_contract(self) -> ControllerContract:
+        """Fresh lanes run the Controller built from this acceptance source."""
+        return ControllerContract(
+            json.loads(
+                (
+                    Path(__file__).resolve().parents[2] / "control/openapi.json"
+                ).read_text()
+            ),
+            label="this acceptance source's Controller",
+        )
 
     def _controller_request_guard(
         self,
