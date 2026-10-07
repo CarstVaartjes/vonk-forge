@@ -1,0 +1,61 @@
+name: Installed profile effect recipes consumer proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/profile-effect-consumer-proof.yml
+      - control/tests/test_profile_effect_consumer_contract_postgres.py
+      - control/tests/test_profile_stop_effect_adoption_postgres.py
+      - control/src/vonk_control/fleet_profiles.py
+      - control/src/vonk_control/fleet_profile_contract.py
+      - src/cluster_profiles/**
+      - control/openapi.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: profile-effect-consumer-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  connected-consumer:
+    name: Real SQL Stop through installed CLI and recipes cleanup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact platform producer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Check out immutable recipes consumer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: a3343cac7ec1747c0ed1a4950d96bc13fc1d6a60
+          path: .proof-recipes
+          persist-credentials: false
+      - name: Verify immutable consumer source
+        run: test "$(git -C .proof-recipes rev-parse HEAD)" = a3343cac7ec1747c0ed1a4950d96bc13fc1d6a60
+      - name: Prepare locked Python and CLI dependencies
+        uses: ./.github/actions/python-env
+      - name: Pull pinned disposable PostgreSQL
+        run: scripts/pull-test-images postgres
+      - name: Exercise connected producer and consumer
+        env:
+          VONK_RECIPE_EFFECT_CONSUMER_SOURCE: ${{ github.workspace }}/.proof-recipes
+          VONK_EFFECT_PROOF_OUTPUT: ${{ runner.temp }}/profile-effect-consumer-proof
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_profile_effect_consumer_contract_postgres.py
+      - name: Upload exact-source handoff and wheel provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: profile-effect-consumer-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/profile-effect-consumer-proof
+          if-no-files-found: warn
+          retention-days: 7

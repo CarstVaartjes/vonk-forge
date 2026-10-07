@@ -3,6 +3,7 @@
 pub mod compiled_execution_plan;
 pub mod compiled_oci;
 pub mod generated;
+pub mod integer;
 pub mod runtime_preflight;
 mod wire_datetime;
 mod wire_schema;
@@ -1859,7 +1860,7 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
         && value.installation_id.get_version() == Some(uuid::Version::Random)
         && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
         && value.mapping_id.get_version() == Some(uuid::Version::Random)
-        && (1..=i32::MAX as u32).contains(&value.run_generation)
+        && (1..=i64::MAX as u64).contains(&value.run_generation)
         && lower_hex(&value.plan_digest, 64)
         && plan.job.is_some()
         && plan.runtime.placement.world_size == 1
@@ -1892,7 +1893,7 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
 fn validate_recipe_stop(value: &RecipeStopRequest) -> bool {
     value.run_id.get_version() == Some(uuid::Version::Random)
         && value.target_runtime_id.get_version() == Some(uuid::Version::Random)
-        && (1..=i32::MAX as u32).contains(&value.run_generation)
+        && (1..=i64::MAX as u64).contains(&value.run_generation)
         && value.installation_id.get_version() == Some(uuid::Version::Random)
         && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
         && value.mapping_id.get_version() == Some(uuid::Version::Random)
@@ -1932,7 +1933,7 @@ fn validate_recipe_start(value: &RecipeStartRequest) -> bool {
             && placement.master_address.is_none()
             && placement.master_port.is_none()
     };
-    (1..=i32::MAX as u32).contains(&value.run_generation)
+    (1..=i64::MAX as u64).contains(&value.run_generation)
         && value.run_id.get_version() == Some(uuid::Version::Random)
         && value.installation_id.get_version() == Some(uuid::Version::Random)
         && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
@@ -2200,7 +2201,7 @@ fn valid_role(value: &str) -> bool {
 fn valid_scalar(value: &generated::RecipeBuildEnvironmentArgumentValue) -> bool {
     match value {
         generated::RecipeBuildEnvironmentArgumentValue::Boolean(_)
-        | generated::RecipeBuildEnvironmentArgumentValue::Int64(_) => true,
+        | generated::RecipeBuildEnvironmentArgumentValue::VonkInteger(_) => true,
         generated::RecipeBuildEnvironmentArgumentValue::String(value) => {
             value.len() <= 1024 && !value.contains('\0')
         }

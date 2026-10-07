@@ -1,9 +1,10 @@
+import {compareWire, type WireNumber} from "../api/contract-numeric";
 import {useMemo, useState} from "react";
 
 export type Sort<K extends string> = {key: K; descending: boolean};
 
 /** Click-to-sort state for a table; values that are null always sort last. */
-export function useSort<T, K extends string>(rows: T[], initial: Sort<K>, values: Record<K, (row: T) => string | number | null>) {
+export function useSort<T, K extends string>(rows: T[], initial: Sort<K>, values: Record<K, (row: T) => string | WireNumber | null>) {
   const [sort, setSort] = useState<Sort<K>>(initial);
   const sorted = useMemo(() => {
     const value = values[sort.key];
@@ -11,7 +12,9 @@ export function useSort<T, K extends string>(rows: T[], initial: Sort<K>, values
       const left = value(a);
       const right = value(b);
       if (left === null || right === null) return left === right ? 0 : left === null ? 1 : -1;
-      const order = typeof left === "string" && typeof right === "string" ? left.localeCompare(right) : Number(left) - Number(right);
+      const order = typeof left === "string"
+        ? typeof right === "string" ? left.localeCompare(right) : -1
+        : typeof right === "string" ? 1 : compareWire(left, right);
       return sort.descending ? -order : order;
     });
     // `values` is a stable literal per table; rows and sort are the inputs.

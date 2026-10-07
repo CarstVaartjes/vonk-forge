@@ -20,6 +20,25 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from cluster_profiles import cli, cli_update
+from cluster_profiles.runtime_identity import contract_fingerprint
+
+
+def _control_schema():
+    return json.loads(
+        (
+            Path(__file__).resolve().parents[2]
+            / "src/cluster_profiles/schemas/control-openapi.json"
+        ).read_text()
+    )
+
+
+def _controller_observation() -> dict[str, object]:
+    return {
+        "api": {
+            "source_sha": "a" * 40,
+            "control_contract_sha256": contract_fingerprint(_control_schema()),
+        }
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -83,11 +102,17 @@ def _signed_publication(
             "cluster_profiles/build-identity.json",
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
+                    "control_contract_sha256": contract_fingerprint(_control_schema()),
+                    "worker_contract_sha256": "d" * 64,
                     "source_sha": source_sha,
                     "release_version": "1.2.3",
                 }
             ),
+        )
+        archive.writestr(
+            "cluster_profiles/schemas/control-openapi.json",
+            json.dumps(_control_schema()),
         )
     wheel = wheel if wheel is not None else wheel_buffer.getvalue()
     generation = "a" * 64
@@ -244,6 +269,7 @@ def test_update_installs_only_changed_signed_wheel(
         origin="https://install.vonkforge.ai",
         apply=True,
         download=download,
+        controller_observation=_controller_observation,
     )
     assert applied["updated"] is True and len(seen) == 1
     assert applied["previous"] == checked["current"]
@@ -261,6 +287,7 @@ def test_update_installs_only_changed_signed_wheel(
         origin="https://install.vonkforge.ai",
         apply=True,
         download=download,
+        controller_observation=_controller_observation,
     )
     assert unchanged["updated"] is False and len(seen) == 1
 
@@ -517,3 +544,35 @@ def _install_cli_wheel(uv: str, venv: Path, wheel: Path) -> Path:
         f"{dependencies[0]}\n", encoding="utf-8"
     )
     return python
+
+
+@pytest.mark.parametrize(
+    "api",
+    [
+        {"source_sha": None, "control_contract_sha256": None},
+        {"source_sha": "a" * 40, "control_contract_sha256": "0" * 64},
+    ],
+)
+def test_signed_client_update_retains_install_until_deployed_contract_matches(
+    tmp_path, monkeypatch, api
+) -> None:
+    key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
+    current = {"version": "0.1.1", "source_sha": "c" * 40}
+    monkeypatch.setattr(cli_update, "current_build", lambda: current)
+    monkeypatch.setattr(
+        cli_update.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("incompatible signed client installed"),
+    )
+    result = cli_update.run_update(
+        channel="stable",
+        public_key=key,
+        origin="https://install.vonkforge.ai",
+        apply=True,
+        download=lambda url, _maximum: objects[url],
+        controller_observation=lambda: {"api": api},
+    )
+    assert result["updated"] is False
+    assert result["current"] == current
+    assert result["accepted_source_sha"] == "b" * 40
+    assert result["compatibility"] == "controller-contract-unavailable-or-different"

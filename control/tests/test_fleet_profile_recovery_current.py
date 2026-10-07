@@ -1131,7 +1131,7 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
         document = copy.deepcopy(old.document)
         metadata = document["metadata"]
         assert isinstance(metadata, dict)
-        metadata["summary"] = "A newer synced revision"
+        metadata["description"] = "A newer synced revision"
         newer = CatalogDocumentRevision(
             document_id=old.document_id,
             kind=old.kind,

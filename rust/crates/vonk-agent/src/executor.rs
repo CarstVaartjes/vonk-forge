@@ -912,7 +912,7 @@ fn exact_stop_plan_from_claim(
     }
     Some(RecipeStopRequest {
         cancel_pending_start,
-        rank: compiled_execution_plan.runtime.placement.rank,
+        rank: compiled_execution_plan.runtime.placement.rank.clone(),
         role: compiled_execution_plan.runtime.placement.role.clone(),
         recipe_content_sha256: compiled_execution_plan
             .identity
@@ -1112,12 +1112,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     let progress = AgentProgress {
                         fence: progress_claim.fence,
                         progress: Some(OperationProgress {
-                            completed_items: Some(completed_items),
-                            total_items: Some(item.total_items),
+                            completed_items: Some(completed_items.into()),
+                            total_items: Some(item.total_items.into()),
                             object_sha256: Some(item.object_sha256),
                             kind: Some(item.kind),
-                            completed_bytes,
-                            total_bytes: item.total_bytes,
+                            completed_bytes: completed_bytes.into(),
+                            total_bytes: item.total_bytes.map(Into::into),
                             total_bytes_known: item.total_bytes.is_some(),
                             ..phase_progress(item.phase)
                         }),
@@ -1331,8 +1331,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 let progress = AgentProgress {
                                     fence: progress_claim.fence,
                                     progress: Some(OperationProgress {
-                                        completed_bytes,
-                                        total_bytes: Some(total_bytes),
+                                        completed_bytes: completed_bytes.into(),
+                                        total_bytes: Some(total_bytes.into()),
                                         total_bytes_known: true,
                                         ..phase_progress(ProgressPhase::Uploading)
                                     }),
@@ -1986,7 +1986,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let placement = spec.runtime.placement.clone();
                 let run_id = request.run_id.to_string();
                 let inspection_identity = Some(RecipeRunStartIdentity {
-                    run_generation: u64::from(request.run_generation),
+                    run_generation: request.run_generation,
                 });
                 let collective_readiness =
                     matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
@@ -3593,7 +3593,7 @@ fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
 fn phase_progress(phase: ProgressPhase) -> OperationProgress {
     OperationProgress {
         phase: phase.to_string(),
-        completed_bytes: 0,
+        completed_bytes: 0_u64.into(),
         total_bytes: None,
         total_bytes_known: false,
         completed_items: None,

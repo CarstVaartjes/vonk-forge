@@ -10,8 +10,12 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import canonical_message
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import (
+    FleetProfileInput,
+    FleetProfileSwitchAdapterState,
+)
 from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     build_production_fleet_profile_service,
@@ -371,10 +375,13 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
             .order_by(FleetProfileApplication.created_at.desc())
         )
         assert retry is not None
-        switch_state = require_mapping(
-            retry.progress["switch_adapter"], "profile switch state"
+        switch_state = FleetProfileSwitchAdapterState.model_validate_json(
+            canonical_message(retry.progress["switch_adapter"])
         )
-        retry_child = session.get(Job, switch_state["active_operation_id"])
+        assert len(switch_state.pending_children) == 1
+        pending_child = switch_state.pending_children[0]
+        assert pending_child.kind == switch_state.queue[pending_child.queue_index].kind
+        retry_child = session.get(Job, pending_child.operation_id)
         assert retry_child is not None
         child_plan = require_mapping(retry_child.payload["plan"], "child plan")
         child_build = require_mapping(child_plan["build"], "child build")
