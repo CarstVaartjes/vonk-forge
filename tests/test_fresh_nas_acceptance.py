@@ -1137,3 +1137,69 @@ def test_candidate_overlay_checks_exact_roles_and_pinned_upstream(mutation):
             acceptance.assert_candidate_image_graph(services, expected)
     else:
         acceptance.assert_candidate_image_graph(services, expected)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_error", "expected_reads"),
+    [
+        ("recovers", None, 2),
+        ("never-completes", "fresh completed loop", 20),
+        ("api-mismatch", "differs from its installed package source", 1),
+        ("worker-mismatch", "differ from their own installed package", 2),
+        ("unknown-provenance", "fresh completed loop", 1),
+    ],
+)
+def test_controller_provenance_waits_only_for_missing_completed_worker_loop(
+    tmp_path: Path, monkeypatch, outcome, expected_error, expected_reads
+) -> None:
+    acceptance = _acceptance_module()
+    source = "a" * 40
+    package = {
+        "source_sha": source,
+        "control_contract_sha256": "b" * 64,
+        "worker_contract_sha256": "c" * 64,
+    }
+    monkeypatch.setenv("VONK_ACCEPTANCE_SOURCE_SHA", source)
+    monkeypatch.setattr(acceptance, "reference_compose", lambda: ["compose"])
+    elapsed = [0.0]
+    monkeypatch.setattr(acceptance.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(
+        acceptance.time,
+        "sleep",
+        lambda duration: elapsed.__setitem__(0, elapsed[0] + duration),
+    )
+    reads = []
+
+    def run(command, **kwargs):
+        if "control-api" in command:
+            reads.append(kwargs["timeout"])
+            missing = len(reads) == 1 or outcome == "never-completes"
+            api = dict(package)
+            if outcome == "api-mismatch":
+                api["source_sha"] = "d" * 40
+            workers = None if missing else [dict(package)]
+            issue = "worker-observation-unavailable" if missing else None
+            if outcome == "unknown-provenance":
+                workers = [dict(package, source_sha=None)]
+                issue = "worker-provenance-unavailable"
+            if outcome == "worker-mismatch" and workers:
+                workers[0]["source_sha"] = "e" * 40
+            document = {
+                "package": package,
+                "observation": {"api": api, "workers": workers, "worker_issue": issue},
+            }
+        else:
+            document = package
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(document), stderr=""
+        )
+
+    monkeypatch.setattr(acceptance, "run", run)
+    if expected_error:
+        with pytest.raises(AcceptanceError, match=expected_error):
+            acceptance.verify_deployed_controller_identity(tmp_path)
+    else:
+        acceptance.verify_deployed_controller_identity(tmp_path)
+    assert len(reads) == expected_reads
+    assert reads == [20 - index for index in range(expected_reads)]
+    assert elapsed[0] <= 20
