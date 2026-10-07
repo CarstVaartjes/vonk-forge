@@ -6,6 +6,7 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Callable, Collection, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -86,6 +87,71 @@ class NoRemoval:
         raise AssertionError("pressure observation attempted an uninstall")
 
 
+@contextmanager
+def _historical_mapper(engine: Engine) -> Iterator[None]:
+    """Use old BIGINT mappings only for sequential historical producer fixtures.
+
+    Sessions/cache services close before exit; no concurrent mapped users are
+    allowed. Restore four types and both caches before current adoption/reads.
+    """
+    saved = {
+        (table, name): Base.metadata.tables[table].c[name].type
+        for table, names in OWNING_COLUMNS.items()
+        for name in names
+    }
+    with engine.connect() as connection:
+        assert all(
+            isinstance(column["type"], BigInteger)
+            for table, names in OWNING_COLUMNS.items()
+            for column in inspect(connection).get_columns(table)
+            if column["name"] in names
+        )
+        settings = (
+            tuple(
+                connection.exec_driver_sql(f"PRAGMA {key}").scalar_one()
+                for key in ("foreign_keys", "legacy_alter_table", "busy_timeout")
+            )
+            if engine.dialect.name == "sqlite"
+            else ()
+        )
+
+    def clear_caches() -> None:
+        engine.clear_compiled_cache()
+        # Native ORM flushes use Mapper._compiled_cache rather than the engine
+        # cache (pinned persistence.py); restore that cache boundary too.
+        CatalogDocumentRevision.__mapper__._compiled_cache.clear()
+        ModelCacheSet.__mapper__._compiled_cache.clear()
+
+    try:
+        for table, name in saved:
+            Base.metadata.tables[table].c[name].type = BigInteger()
+        clear_caches()
+        yield
+    finally:
+        for (table, name), original in saved.items():
+            Base.metadata.tables[table].c[name].type = original
+        clear_caches()
+        engine.dispose()
+        if engine.dialect.name == "sqlite":
+            with engine.connect() as connection:
+                for key, value in zip(
+                    ("foreign_keys", "legacy_alter_table", "busy_timeout"),
+                    settings,
+                    strict=True,
+                ):
+                    connection.exec_driver_sql(f"PRAGMA {key}={int(value)}")
+                connection.commit()
+
+
+def _historical_draft(
+    engine: Engine, document: dict[str, object]
+) -> CatalogDocumentRevision:
+    with _historical_mapper(engine):
+        return CatalogEntityService(
+            sessionmaker(engine, expire_on_commit=False), clock=lambda: NOW
+        ).create_draft(document, actor="operator")
+
+
 def _document(size: int, slug: str) -> dict[str, object]:
     document = _model()
     identity = document["identity"]
@@ -96,6 +162,8 @@ def _document(size: int, slug: str) -> dict[str, object]:
     first = files[0]
     assert isinstance(first, dict)
     first["size_bytes"] = size
+    if size == 0:
+        first["sha256"] = hashlib.sha256(b"").hexdigest()
     first.pop("parts", None)
     document["files"] = [first]
     ModelDefinition.model_validate_json(json.dumps(document))
@@ -241,10 +309,10 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
     engine = legacy_engine
     sessions = sessionmaker(engine, expire_on_commit=False)
     owner = CatalogEntityService(sessions, clock=lambda: NOW)
-    existing = owner.create_draft(_document(9, "legacy-nine"), actor="operator")
+    existing = _historical_draft(engine, _document(9, "legacy-nine"))
     # The baseline attempt runs through the real producer, inside an isolated
     # outer transaction. Restore even if SQLite accepted a lossy REAL value.
-    with engine.connect() as connection:
+    with _historical_mapper(engine), engine.connect() as connection:
         transaction = connection.begin()
         try:
             if engine.dialect.name == "sqlite":
@@ -255,7 +323,7 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
                 join_transaction_mode="create_savepoint",
             )
             baseline = CatalogEntityService(baseline_sessions, clock=lambda: NOW)
-            with pytest.raises((DBAPIError, ValueError)):
+            with pytest.raises((DBAPIError, StatementError, OverflowError)):
                 row = baseline.create_draft(
                     _document(2**63, "baseline-large"), actor="operator"
                 )
@@ -296,7 +364,11 @@ def _seed_cache(engine: Engine, root: Path, expected: int = 10) -> str:
         sessions, root, fixture_sources=True, reserve_bytes=0, clock=lambda: NOW
     )
     try:
-        artifact = _artifact(root.parent, b"proof", artifact_id=f"proof{expected}")
+        artifact = _artifact(
+            root.parent,
+            b"" if expected == 0 else b"proof",
+            artifact_id=f"proof{expected}",
+        )
         artifact["download_bytes"] = expected
         manifest = cache.resolve_artifact_set(artifacts=[artifact])
         # The same native preparation entry used by start_download; no copied
@@ -390,10 +462,11 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
     """Catches table replacement losing foreign keys, CHECKs or unknown DDL."""
     engine = legacy_engine
     sessions = sessionmaker(engine, expire_on_commit=False)
-    revision = CatalogEntityService(sessions, clock=lambda: NOW).create_draft(
-        _document(9, "preserved-nine"), actor="operator"
-    )
-    digest = _seed_cache(engine, tmp_path / "cache", 9)
+    with _historical_mapper(engine):
+        revision = CatalogEntityService(sessions, clock=lambda: NOW).create_draft(
+            _document(9, "preserved-nine"), actor="operator"
+        )
+        digest = _seed_cache(engine, tmp_path / "cache", 9)
     with engine.begin() as connection:
         connection.exec_driver_sql(
             "CREATE TABLE proof_child (identity VARCHAR(64) PRIMARY KEY, revision_id VARCHAR(64) NOT NULL REFERENCES catalog_document_revisions(id), CONSTRAINT ck_proof_child_name CHECK (length(identity)>0), CHECK (length(revision_id)>0))"
@@ -420,7 +493,10 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
             table: (
                 inspect(connection).get_pk_constraint(table),
                 inspect(connection).get_foreign_keys(table),
-                inspect(connection).get_unique_constraints(table),
+                sorted(
+                    inspect(connection).get_unique_constraints(table),
+                    key=lambda value: json.dumps(value, sort_keys=True),
+                ),
             )
             for table in Base.metadata.tables
         }
@@ -432,7 +508,10 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
             table: (
                 inspect(connection).get_pk_constraint(table),
                 inspect(connection).get_foreign_keys(table),
-                inspect(connection).get_unique_constraints(table),
+                sorted(
+                    inspect(connection).get_unique_constraints(table),
+                    key=lambda value: json.dumps(value, sort_keys=True),
+                ),
             )
             for table in Base.metadata.tables
         }
@@ -504,10 +583,7 @@ def test_unreviewed_numeric_extension_defers_without_schema_or_data_mutation(
 ) -> None:
     """Catches dropping or changing unreviewed numeric extension semantics."""
     engine = legacy_engine
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    revision = CatalogEntityService(sessions, clock=lambda: NOW).create_draft(
-        _document(9, "deferred-nine"), actor="operator"
-    )
+    revision = _historical_draft(engine, _document(9, "deferred-nine"))
     with engine.begin() as connection:
         if extension == "numeric-check":
             if engine.dialect.name == "postgresql":
@@ -706,6 +782,8 @@ def test_native_catalog_and_cache_preserve_complete_integer_domain_across_restar
             first = files[0]
             assert isinstance(first, dict)
             first["size_bytes"] = expected
+            if expected == 0:
+                first["sha256"] = hashlib.sha256(b"").hexdigest()
             first.pop("parts", None)
             document["files"] = [first]
             native = ModelDefinition.model_validate_json(json.dumps(document))
@@ -715,28 +793,38 @@ def test_native_catalog_and_cache_preserve_complete_integer_domain_across_restar
 
             artifact = _artifact(
                 tmp_path,
-                f"source-{index}".encode(),
+                b"" if expected == 0 else f"source-{index}".encode(),
                 artifact_id=f"weights{index}",
                 model_content_sha256=draft.content_digest or "",
             )
             artifact["download_bytes"] = expected
-            preview = cache.download_preview(artifacts=[artifact])
+            assert draft.content_digest is not None
+            preview = cache.download_preview(
+                artifacts=[artifact], model_content_sha256=draft.content_digest
+            )
             request_key = str(uuid.uuid4())
             receipt = cache.start_download(
                 actor="operator",
                 request_key=request_key,
                 plan_digest=str(preview["plan_digest"]),
                 artifacts=[artifact],
+                model_content_sha256=draft.content_digest,
             )
             progress = ModelCacheOperationProgress.model_validate_json(
                 json.dumps(receipt.progress)
             )
             assert progress.measurement.total_bytes == expected
-            manifest = cache.resolve_artifact_set(artifacts=[artifact])
+            manifest = cache.resolve_artifact_set(
+                artifacts=[artifact], model_content_sha256=draft.content_digest
+            )
+            assert manifest.model_content_sha256 == draft.content_digest
+            assert receipt.model_content_sha256 == draft.content_digest
+            assert receipt.artifact_set_sha256 == manifest.digest
             entry = CacheEntryResponse.model_validate_json(
                 json.dumps(cache.get_entry(manifest.digest))
             )
             assert entry.expected_bytes == expected
+            assert entry.model_content_sha256 == draft.content_digest
             assert entry.verified_bytes == 0  # Preparation does not invent bytes.
             evidence = cache.preparation_evidence(manifest.digest)
             assert evidence["artifact_set_bytes"] == expected
@@ -812,9 +900,7 @@ def test_invalid_legacy_row_refuses_before_mutation_then_exact_repair_retries(
     """Catches malformed casts or partial adoption of another owning table."""
     engine = legacy_engine
     sessions = sessionmaker(engine, expire_on_commit=False)
-    revision = CatalogEntityService(sessions, clock=lambda: NOW).create_draft(
-        _document(9, "invalid-then-repaired"), actor="operator"
-    )
+    revision = _historical_draft(engine, _document(9, "invalid-then-repaired"))
     with engine.begin() as connection:
         if engine.dialect.name == "postgresql":
             connection.exec_driver_sql(
@@ -961,10 +1047,11 @@ def test_adoption_execution_deadline_rolls_back_partial_ddl_then_same_identity_r
     """Catches partial adoption escaping a real execution timeout, or poisoned retry."""
     engine = legacy_engine
     sessions = sessionmaker(engine, expire_on_commit=False)
-    revision = CatalogEntityService(sessions, clock=lambda: NOW).create_draft(
-        _document(9, "deadline-retained"), actor="operator"
-    )
-    digest = _seed_cache(engine, tmp_path / "deadline-cache", 9)
+    with _historical_mapper(engine):
+        revision = CatalogEntityService(sessions, clock=lambda: NOW).create_draft(
+            _document(9, "deadline-retained"), actor="operator"
+        )
+        digest = _seed_cache(engine, tmp_path / "deadline-cache", 9)
     monkeypatch.setattr(
         adoption_module,
         "DATABASE_WAIT_BUDGETS",
