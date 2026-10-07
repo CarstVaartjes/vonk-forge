@@ -495,7 +495,7 @@ class EnrollmentService:
         except Exception as error:
             if (
                 isinstance(error, StepCAError)
-                and error.reason_code == "certificate.response_unrepresentable"
+                and error.reason_code == CertificateCode.RESPONSE_UNREPRESENTABLE
             ):
                 raise CertificateResponseCapacityRefused(
                     "certificate response exceeds the supported wire budget"
@@ -839,7 +839,7 @@ class EnrollmentService:
         except Exception as error:
             if (
                 isinstance(error, StepCAError)
-                and error.reason_code == "certificate.response_unrepresentable"
+                and error.reason_code == CertificateCode.RESPONSE_UNREPRESENTABLE
             ):
                 raise CertificateResponseCapacityRefused(
                     "certificate response exceeds the supported wire budget"
