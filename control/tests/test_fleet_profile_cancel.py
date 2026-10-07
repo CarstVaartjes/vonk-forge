@@ -463,11 +463,16 @@ def _start_profile_stop_child(sessions, run_switch, service, application):
         service.tick()
         run_switch.tick()
         active = service.application(application.id).progress.switch_adapter
-        if active is not None and active.active_operation_id is not None:
+        if active is not None and active.pending_children:
             with sessions() as session:
                 stop_job = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-            if stop_job is not None:
-                return active.active_operation_id, stop_job.id
+            pending_stop = next(
+                (child for child in active.pending_children if child.kind == "stop"),
+                None,
+            )
+            if stop_job is not None and pending_stop is not None:
+                assert active.queue[pending_stop.queue_index].kind == "stop"
+                return pending_stop.operation_id, stop_job.id
     raise AssertionError("profile did not issue its exact target stop child")
 
 
@@ -1164,8 +1169,8 @@ def test_activity_preserves_issued_effect_while_profile_cancellation_waits(
     )
     assert service.tick() is True
     active = service.application(application.id).progress.switch_adapter
-    assert active is not None and active.active_operation_id is not None
-    child_id = active.active_operation_id
+    assert active is not None and active.pending_children
+    child_id = active.pending_children[0].operation_id
     adapter.request_cancellation = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
     adapter.advance = lambda _application_id, **_kwargs: FleetProfileChildOperation(
         id=child_id, state=LifecycleState.RUNNING
@@ -1229,8 +1234,8 @@ def test_cancel_during_child_start_keeps_late_start_receipt_from_resuming_profil
         try:
             assert started.wait(timeout=10), "profile worker did not start its child"
             active = service.application(application.id).progress.switch_adapter
-            assert active is not None and active.active_operation_id is not None
-            active_operation_id = active.active_operation_id
+            assert active is not None and active.pending_children
+            active_operation_id = active.pending_children[0].operation_id
 
             requested = service.cancel(
                 application.id,
@@ -1293,8 +1298,8 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
     )
     assert service.tick() is True
     active = service.application(application.id).progress.switch_adapter
-    assert active is not None and active.active_operation_id is not None
-    child_id = active.active_operation_id
+    assert active is not None and active.pending_children
+    child_id = active.pending_children[0].operation_id
 
     # Keep the issued child unresolved so the cancellation remains pending;
     # the separate real-boundary test covers Run/Switch's cancellation owner.
@@ -1453,8 +1458,8 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     assert [row.current_operation_id for row in rows] == [None, None, latest_id]
 
     latest_child = service.application(latest_id).progress.switch_adapter
-    assert latest_child is not None and latest_child.active_operation_id is not None
-    active_child_id = latest_child.active_operation_id
+    assert latest_child is not None and latest_child.pending_children
+    active_child_id = latest_child.pending_children[0].operation_id
     observations: list[str] = []
     adapter.request_cancellation = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
     original_advance = adapter.advance

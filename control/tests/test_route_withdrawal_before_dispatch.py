@@ -83,9 +83,9 @@ def _routes(sessions, root: Path, gate: _Gate) -> RecipeRouteService:
 
 
 def _aliases(root: Path) -> set[str]:
-    routes = verify_active_route_bundle(root).routes["routes"]
-    assert isinstance(routes, dict)
-    return set(routes)
+    bundle = verify_active_route_bundle(root).routes
+    assert bundle is not None
+    return set(bundle.routes)
 
 
 def _world(tmp_path: Path, *, nodes: int = 1, distributed: bool = False, engine=None):

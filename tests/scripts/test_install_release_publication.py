@@ -17,6 +17,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 pytestmark = pytest.mark.needs_dpkg_deb
 
+from cluster_profiles.runtime_identity import contract_fingerprint
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/install-release-publication"
 DIGEST = "a" * 64
@@ -205,11 +207,31 @@ def _inputs(
             "cluster_profiles/build-identity.json",
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
+                    "control_contract_sha256": contract_fingerprint(
+                        json.loads(
+                            (
+                                ROOT
+                                / "src/cluster_profiles/schemas/control-openapi.json"
+                            ).read_text()
+                        )
+                    ),
+                    "worker_contract_sha256": contract_fingerprint(
+                        json.loads(
+                            (
+                                ROOT
+                                / "rust/crates/vonk-agent-protocol/schema/wire.json"
+                            ).read_text()
+                        )
+                    ),
                     "source_sha": SOURCE_SHA,
                     "release_version": version,
                 }
             ),
+        )
+        archive.writestr(
+            "cluster_profiles/schemas/control-openapi.json",
+            (ROOT / "src/cluster_profiles/schemas/control-openapi.json").read_bytes(),
         )
     return {
         "nas": nas,

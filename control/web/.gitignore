@@ -3,3 +3,7 @@ dist/
 test-results/
 playwright-report/
 *.tsbuildinfo
+# Hosted official-schema compiler fixtures are ephemeral.
+src/api/official-suite-*.generated.js
+src/api/official-suite-*.generated.d.ts
+src/api/official-schema.generated.test.ts

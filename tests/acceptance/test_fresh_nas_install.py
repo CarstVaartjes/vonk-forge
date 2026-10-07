@@ -675,6 +675,100 @@ def compose_services(bundle: Path) -> set[str]:
     return {line for line in output.stdout.splitlines() if line}
 
 
+def verify_deployed_controller_identity(bundle: Path) -> None:
+    source = required_environment("VONK_ACCEPTANCE_SOURCE_SHA")
+    if re.fullmatch(r"[0-9a-f]{40}", source) is None:
+        raise AcceptanceError("candidate Controller source is invalid")
+    script = """
+import json, time, urllib.request
+from dataclasses import asdict
+from cluster_profiles.runtime_identity import packaged_runtime_identity
+from vonk_control.auth import Actor, TokenCodec
+from vonk_control.settings import Settings
+identity = packaged_runtime_identity()
+token = TokenCodec(Settings.from_env_and_secrets().token_signing_key).issue(Actor("acceptance-runtime", "viewer"), ttl_seconds=30, now=int(time.time()))
+request = urllib.request.Request("http://127.0.0.1:8000/api/platform", headers={"Authorization": "Bearer " + token})
+with urllib.request.urlopen(request, timeout=10) as response:
+    assert response.status == 200
+    observation = json.loads(response.read(2000000))
+print(json.dumps({"package": asdict(identity), "observation": observation}))
+"""
+    result = run(
+        [*reference_compose(), "exec", "-T", "control-api", "python", "-c", script],
+        cwd=bundle,
+        timeout=20,
+    )
+    document = json.loads(result.stdout)
+    package = document["package"]
+    observation = document["observation"]
+    worker_script = """
+import json
+from dataclasses import asdict
+from cluster_profiles.runtime_identity import packaged_runtime_identity
+print(json.dumps(asdict(packaged_runtime_identity())))
+"""
+    worker_result = run(
+        [
+            *reference_compose(),
+            "exec",
+            "-T",
+            "control-worker",
+            "python",
+            "-c",
+            worker_script,
+        ],
+        cwd=bundle,
+        timeout=20,
+    )
+    worker_package = json.loads(worker_result.stdout)
+    for role, identity in (("API", package), ("worker", worker_package)):
+        if (
+            not isinstance(identity["source_sha"], str)
+            or re.fullmatch(r"[0-9a-f]{40}", identity["source_sha"]) is None
+        ):
+            raise AcceptanceError(f"running {role} package has unknown source")
+        for field in ("control_contract_sha256", "worker_contract_sha256"):
+            if (
+                not isinstance(identity[field], str)
+                or re.fullmatch(r"[0-9a-f]{64}", identity[field]) is None
+            ):
+                raise AcceptanceError(f"running {role} package has unknown {field}")
+    if observation["api"]["source_sha"] != package["source_sha"]:
+        raise AcceptanceError(
+            "running API observation differs from its installed package source"
+        )
+    if (
+        observation["api"]["control_contract_sha256"]
+        != package["control_contract_sha256"]
+    ):
+        raise AcceptanceError("running API contract differs from its installed package")
+    workers = observation["workers"]
+    if not workers or observation["worker_issue"] is not None:
+        raise AcceptanceError(
+            "worker provenance is not available from a fresh completed loop"
+        )
+    if any(
+        worker["source_sha"] != worker_package["source_sha"]
+        or worker["worker_contract_sha256"] != worker_package["worker_contract_sha256"]
+        for worker in workers
+    ):
+        raise AcceptanceError(
+            "fresh worker observations differ from their own installed package"
+        )
+    # Signed image closure is verified by the installer. Reused immutable images
+    # retain their producer source, which can differ from the publication envelope.
+    print(
+        json.dumps(
+            {
+                "accepted_source_sha": source,
+                "api_package": package,
+                "worker_package": worker_package,
+                "platform": observation,
+            }
+        )
+    )
+
+
 def verify_controller_tls(bundle: Path, nas_ip: str, enrollment_hostname: str) -> None:
     root = bundle / "secrets/step-ca/root-certificate"
     response = run(
@@ -1622,6 +1716,7 @@ def exercise_compose(
             assert_tailscale_services_absent(status.stdout)
         assert_compose_services_healthy(status.stdout, expected)
         verify_controller_tls(bundle, nas_ip, enrollment_hostname)
+        verify_deployed_controller_identity(bundle)
         verify_postgres_databases(bundle)
 
     try:

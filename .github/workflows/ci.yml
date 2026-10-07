@@ -445,6 +445,8 @@ jobs:
             tools/openapi-client \
             src/cluster_profiles/generated_control \
             control/web/src/api/generated.d.ts \
+            control/web/src/api/runtime.generated.js \
+            control/web/src/api/runtime.generated.d.ts \
             src/cluster_profiles/schemas/control-openapi.json; then
             run_full=false
           fi
@@ -469,6 +471,8 @@ jobs:
           src/cluster_profiles/schemas/control-openapi.json
           src/cluster_profiles/generated_control
           control/web/src/api/generated.d.ts
+          control/web/src/api/runtime.generated.js
+          control/web/src/api/runtime.generated.d.ts
 
   compose-integration:
     name: Compose integration
@@ -532,7 +536,9 @@ jobs:
           target: api
           load: true
           tags: ${{ env.IMAGE_PREFIX }}-api:${{ env.IMAGE_TAG }}
-          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+          build-args: |
+            DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=ci-test-vonk-forge-api
       - name: Build the Controller worker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -542,7 +548,9 @@ jobs:
           target: worker
           load: true
           tags: ${{ env.IMAGE_PREFIX }}-worker:${{ env.IMAGE_TAG }}
-          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+          build-args: |
+            DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=ci-test-vonk-forge-worker
       - name: Build the LiteLLM image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -612,6 +620,7 @@ jobs:
           VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
           VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
           VONK_ACCEPTANCE_COMPOSE_OVERLAY: ${{ runner.temp }}/nas-local/overlay.yml
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ github.sha }}
           VONK_ACCEPTANCE_LOCAL_SETUP: ${{ github.workspace }}/target/release/vonk-nas-setup
           VONK_ACCEPTANCE_LOCAL_PAYLOAD: ${{ runner.temp }}/nas-local/payload.json
           # Not a real key: it only has to be accepted by the installer.
@@ -879,7 +888,9 @@ jobs:
           target: api
           load: true
           tags: ${{ env.VONK_TEST_CONTROLLER_IMAGE }}
-          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+          build-args: |
+            DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=ci-test-vonk-forge-api
           # Only main writes the shared cache; pull requests read it.
           cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=ci-test-vonk-forge-api' || '' }}
@@ -891,7 +902,9 @@ jobs:
           target: worker
           load: true
           tags: ${{ env.VONK_TEST_WORKER_IMAGE }}
-          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+          build-args: |
+            DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=ci-test-vonk-forge-worker
           # Only main writes the shared cache; pull requests read it.
           cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=ci-test-vonk-forge-worker' || '' }}

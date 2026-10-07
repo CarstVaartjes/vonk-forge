@@ -26,7 +26,9 @@ use vonk_agent_protocol::{
         CompiledOciError, CompiledOciPaths, ExecInvocationLimits, measure_exec_invocation,
         start_arguments_for_paths,
     },
-    hex_sha256, parse_strict,
+    hex_sha256,
+    integer::Integer,
+    parse_strict,
 };
 use wait_timeout::ChildExt;
 
@@ -549,7 +551,7 @@ struct RuntimeRequestGrantBinding<'a> {
     reconciliation_identity: Option<&'a RecipeReconciliationIdentity>,
     start_plan_sha256: Option<&'a str>,
     stop_plan_sha256: Option<&'a str>,
-    run_generation: Option<u32>,
+    run_generation: Option<u64>,
     runtime_run_id: Option<&'a uuid::Uuid>,
     runtime_target_id: Option<&'a uuid::Uuid>,
     runtime_installation_id: Option<&'a uuid::Uuid>,
@@ -583,7 +585,7 @@ const RUNTIME_GENERATION_FENCE_SCHEMA_VERSION: u8 = 2;
 struct RuntimeEffectIdentity {
     runtime_id: uuid::Uuid,
     installation_id: uuid::Uuid,
-    run_generation: u32,
+    run_generation: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -1387,7 +1389,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .runtime_target_id
                     .ok_or(OperationError::InvalidOperation)?;
                 if generation == 0
-                    || generation > i32::MAX as u32
+                    || generation > i64::MAX as u64
                     || request.run_generation != Some(generation)
                     || grant.run_generation != Some(generation)
                     || grant.runtime_run_id != Some(&logical_run_id)
@@ -1799,7 +1801,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || fence.installation_id != installation_id
             || fence.runtime_id != runtime_id
             || fence.highest_generation == 0
-            || fence.highest_generation > i32::MAX as u32
+            || fence.highest_generation > i64::MAX as u64
             || canonical_json(&fence).map_err(|_| OperationError::InvalidArtifact)? != bytes
         {
             return Err(OperationError::InvalidArtifact);
@@ -1819,7 +1821,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let bytes = canonical_json(fence).map_err(|_| OperationError::InvalidOperation)?;
         if fence.schema_version != RUNTIME_GENERATION_FENCE_SCHEMA_VERSION
             || fence.highest_generation == 0
-            || fence.highest_generation > i32::MAX as u32
+            || fence.highest_generation > i64::MAX as u64
             || bytes.len() as u64 > MAX_RUNTIME_GENERATION_FENCE_BYTES
         {
             return Err(OperationError::InvalidOperation);
@@ -1851,7 +1853,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         identity: &RuntimeEffectIdentity,
         use_kind: RuntimeGenerationFenceUse,
     ) -> Result<(), OperationError> {
-        if identity.run_generation == 0 || identity.run_generation > i32::MAX as u32 {
+        if identity.run_generation == 0 || identity.run_generation > i64::MAX as u64 {
             return Err(OperationError::InvalidOperation);
         }
         let current =
@@ -3013,7 +3015,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     ) -> Result<(), OperationError> {
         if !lower_hex(plan_digest, 64)
             || identity.run_generation == 0
-            || identity.run_generation > i32::MAX as u32
+            || identity.run_generation > i64::MAX as u64
         {
             return Err(OperationError::InvalidOperation);
         }
@@ -3667,10 +3669,19 @@ fn validate_docker_run_with_archive(
                     crate::runtime_fabric::ENVIRONMENT_NAMES.contains(&name)
                 });
                 if let Some(value) = value.strip_prefix("VONK_WORLD_SIZE=") {
-                    let parsed = value
-                        .parse::<u32>()
+                    // This argv member must be a decimal token, not a Serde
+                    // private arbitrary-precision number object.
+                    if !value
+                        .strip_prefix('-')
+                        .unwrap_or(value)
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit())
+                    {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                    let parsed: Integer = parse_strict(value.as_bytes())
                         .map_err(|_| OperationError::InvalidOperation)?;
-                    if parsed == 0 || world_size.replace(parsed).is_some() {
+                    if parsed <= 0 || world_size.replace(parsed).is_some() {
                         return Err(OperationError::InvalidOperation);
                     }
                 }
@@ -3708,11 +3719,19 @@ fn validate_docker_run_with_archive(
                     }
                 }
                 if let Some(value) = value.strip_prefix("VONK_RANK=") {
-                    let parsed = value
-                        .parse::<u32>()
-                        .ok()
-                        .ok_or(OperationError::InvalidOperation)?;
-                    if rank.replace(parsed).is_some() {
+                    // This argv member must be a decimal token, not a Serde
+                    // private arbitrary-precision number object.
+                    if !value
+                        .strip_prefix('-')
+                        .unwrap_or(value)
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit())
+                    {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                    let parsed: Integer = parse_strict(value.as_bytes())
+                        .map_err(|_| OperationError::InvalidOperation)?;
+                    if parsed < 0 || rank.replace(parsed).is_some() {
                         return Err(OperationError::InvalidOperation);
                     }
                 }
@@ -4069,7 +4088,7 @@ fn validate_runtime_start_plan(plan: &RecipeStartPayload) -> Result<(), Operatio
         _ => false,
     };
     if plan.run_generation == 0
-        || plan.run_generation > i32::MAX as u32
+        || plan.run_generation > i64::MAX as u64
         || placement.rank >= placement.world_size
         || !lower_hex(&plan.plan_digest, 64)
         || !valid_oci_digest(plan.image_digest())
@@ -4111,7 +4130,7 @@ fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<(), Operation
         .as_ref()
         .ok_or(OperationError::InvalidOperation)?;
     if plan.run_generation == 0
-        || plan.run_generation > i32::MAX as u32
+        || plan.run_generation > i64::MAX as u64
         || !lower_hex(&plan.plan_digest, 64)
         || !valid_oci_digest(&compiled.runtime_image.image_digest)
         || !(1..=3600).contains(&job.timeout_seconds)
@@ -4132,7 +4151,7 @@ fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<(), Operation
 fn validate_runtime_stop_plan(plan: &RecipeStopPayload) -> Result<(), OperationError> {
     let encoded_claim = canonical_json(plan).map_err(|_| OperationError::InvalidOperation)?;
     if plan.run_generation == 0
-        || plan.run_generation > i32::MAX as u32
+        || plan.run_generation > i64::MAX as u64
         || !lower_hex(&plan.plan_digest, 64)
         || !lower_hex(&plan.recipe_content_sha256, 64)
         || !(1..=600).contains(&plan.stop_timeout_seconds)
@@ -5023,7 +5042,7 @@ mod tests {
         logical_run_id: uuid::Uuid,
         target_id: uuid::Uuid,
         installation_id: uuid::Uuid,
-        run_generation: u32,
+        run_generation: u64,
         plan_digest: String,
         calls: Arc<Mutex<Vec<Vec<String>>>>,
     }
@@ -5503,7 +5522,7 @@ mod tests {
         assert!(!fence.was_cancelled(identity).unwrap());
     }
 
-    fn runtime_effect_identity(run_generation: u32) -> RuntimeEffectIdentity {
+    fn runtime_effect_identity(run_generation: u64) -> RuntimeEffectIdentity {
         RuntimeEffectIdentity {
             runtime_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
             installation_id: uuid::Uuid::parse_str("50000000-0000-4000-8000-000000000005").unwrap(),
@@ -5522,7 +5541,7 @@ mod tests {
         compiled
     }
 
-    fn recipe_start_plan_for_authority(run_generation: u32) -> RecipeStartPayload {
+    fn recipe_start_plan_for_authority(run_generation: u64) -> RecipeStartPayload {
         let compiled = compiled_plan_for_runtime_authority();
         RecipeStartPayload {
             compiled_execution_plan: compiled,
@@ -5539,13 +5558,13 @@ mod tests {
     }
 
     fn recipe_stop_plan_for_authority(
-        run_generation: u32,
+        run_generation: u64,
         cancel_pending_start: bool,
     ) -> RecipeStopPayload {
         let compiled = compiled_plan_for_runtime_authority();
         RecipeStopPayload {
             cancel_pending_start,
-            rank: compiled.runtime.placement.rank,
+            rank: compiled.runtime.placement.rank.clone(),
             role: compiled.runtime.placement.role.clone(),
             recipe_content_sha256: compiled.identity.recipe_revision_sha256.clone(),
             stop_timeout_seconds: compiled.lifecycle.stop_timeout_seconds,
@@ -5563,7 +5582,7 @@ mod tests {
     struct RuntimeRequestTestParts {
         action: HostRuntimeAction,
         arguments: Vec<String>,
-        run_generation: u32,
+        run_generation: u64,
         start_plan: Option<RecipeStartPayload>,
         stop_plan: Option<RecipeStopPayload>,
     }
@@ -5595,7 +5614,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let start_plan = recipe_start_plan_for_authority(1);
+        let start_plan = recipe_start_plan_for_authority(i64::MAX as u64);
         let arguments = executor
             .projected_runtime_arguments(
                 &start_plan.compiled_execution_plan,
@@ -5636,11 +5655,11 @@ mod tests {
                 identity: RuntimeEffectIdentity {
                     runtime_id,
                     installation_id,
-                    run_generation: 1,
+                    run_generation,
                 },
                 logical_run_id,
                 plan_digest,
-            } if runtime_id == start_plan.run_id
+            } if run_generation == i64::MAX as u64 && runtime_id == start_plan.run_id
                 && installation_id == start_plan.installation_id
                 && logical_run_id == start_plan.run_id
                 && plan_digest == start_plan.plan_digest
@@ -5725,7 +5744,7 @@ mod tests {
         // Every identity and the cleanup timeout remain covered by the signed
         // Stop hash even though cleanup does not require launch history.
         let mutations: [fn(&mut RecipeStopPayload); 4] = [
-            |plan: &mut RecipeStopPayload| plan.rank += 1,
+            |plan: &mut RecipeStopPayload| plan.rank = 1_u64.into(),
             |plan: &mut RecipeStopPayload| plan.role = "other".to_owned(),
             |plan: &mut RecipeStopPayload| plan.recipe_content_sha256 = "d".repeat(64),
             |plan: &mut RecipeStopPayload| plan.stop_timeout_seconds += 1,
@@ -5813,6 +5832,51 @@ mod tests {
             .unwrap();
         assert_eq!(stored.highest_generation, 2);
         assert!(!stored.cancelled);
+    }
+
+    #[test]
+    fn full_controller_generation_fence_survives_restart_without_truncation() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        let helper =
+            OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
+        let identity = runtime_effect_identity(i64::MAX as u64);
+        helper
+            .update_runtime_generation_fence(
+                &identity,
+                RuntimeGenerationFenceUse::Stop {
+                    cancel_pending_start: true,
+                },
+            )
+            .unwrap();
+        let restarted =
+            OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+        let stored = restarted
+            .read_runtime_generation_fence(identity.installation_id, identity.runtime_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.highest_generation, i64::MAX as u64);
+        assert!(stored.cancelled);
+        assert!(matches!(
+            restarted.update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start),
+            Err(OperationError::InvalidOperation)
+        ));
+        let stale = RuntimeEffectIdentity {
+            run_generation: u64::from(u32::MAX) + 1,
+            ..identity
+        };
+        assert!(matches!(
+            restarted.update_runtime_generation_fence(&stale, RuntimeGenerationFenceUse::Start),
+            Err(OperationError::InvalidOperation)
+        ));
+        let invalid = RuntimeEffectIdentity {
+            run_generation: i64::MAX as u64 + 1,
+            ..identity
+        };
+        assert!(matches!(
+            restarted.update_runtime_generation_fence(&invalid, RuntimeGenerationFenceUse::Start),
+            Err(OperationError::InvalidOperation)
+        ));
     }
 
     #[test]
@@ -6791,13 +6855,56 @@ mod tests {
             .map(str::to_owned),
         );
         assert!(validate_docker_run(&arguments, &roots, None).is_ok());
+        let world_size_index = arguments
+            .iter()
+            .position(|arg| arg == "VONK_WORLD_SIZE=2")
+            .unwrap();
+        // These are decimal environment arguments, not machine-sized indexes.
+        // Preserve the exact canonical topology domain before native launch.
+        for world_size in ["18446744073709551616".to_owned(), "9".repeat(200)] {
+            let mut wide = arguments.clone();
+            wide[world_size_index] = format!("VONK_WORLD_SIZE={world_size}");
+            assert!(validate_docker_run(&wide, &roots, None).is_ok());
+        }
+        for invalid in [
+            "-1",
+            "0",
+            "1.0",
+            "1e0",
+            "true",
+            r#"{"$serde_json::private::Number":"2"}"#,
+        ] {
+            let mut invalid_shape = arguments.clone();
+            invalid_shape[world_size_index] = format!("VONK_WORLD_SIZE={invalid}");
+            assert!(validate_docker_run(&invalid_shape, &roots, None).is_err());
+        }
         let mut nonzero_owner = arguments.clone();
         let rank = nonzero_owner
             .iter()
             .position(|arg| arg == "VONK_RANK=0")
             .unwrap();
+        let mut negative_zero = arguments.clone();
+        negative_zero[rank] = "VONK_RANK=-0".to_owned();
+        assert!(validate_docker_run(&negative_zero, &roots, None).is_ok());
         nonzero_owner[rank] = "VONK_RANK=1".to_owned();
         assert!(validate_docker_run(&nonzero_owner, &roots, None).is_ok());
+        let mut wide_rank = arguments.clone();
+        wide_rank[world_size_index] = format!("VONK_WORLD_SIZE={}", "9".repeat(200));
+        wide_rank[rank] = format!("VONK_RANK={}", "8".repeat(200));
+        assert!(validate_docker_run(&wide_rank, &roots, None).is_ok());
+        wide_rank[rank] = format!("VONK_RANK={}", "9".repeat(200));
+        assert!(validate_docker_run(&wide_rank, &roots, None).is_err());
+        for invalid in [
+            "-1",
+            "1.0",
+            "1e0",
+            "true",
+            r#"{"$serde_json::private::Number":"1"}"#,
+        ] {
+            let mut invalid_shape = arguments.clone();
+            invalid_shape[rank] = format!("VONK_RANK={invalid}");
+            assert!(validate_docker_run(&invalid_shape, &roots, None).is_err());
+        }
         let mut worker = arguments.clone();
         let local = worker
             .iter()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from unittest.mock import Mock
 
@@ -8,12 +9,14 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import ValidationError
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, OperationProgress
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
+from vonk_control.job_documents import AvailabilityJobResult, AvailabilityModelChild
+from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     SOURCE_POLICY_REFUSED_CODE,
@@ -30,6 +33,9 @@ from vonk_control.recipe_image_availability_api import (
     _view_document,
     install_recipe_operator_routes,
 )
+from vonk_control.recipe_image_availability_view_contract import (
+    RecipeCacheRemovalStatus,
+)
 from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
 
 
@@ -41,7 +47,11 @@ def test_model_child_requires_typed_model_references(
 ) -> None:
     with pytest.raises(ValidationError):
         _child(
-            {"id": "model-child", "state": "queued", "progress": {"phase": "download"}}
+            {
+                "id": "00000000-0000-4000-8000-000000000601",
+                "state": "queued",
+                "progress": {"phase": "download"},
+            }
             | mutation,
             kind="model-cache",
         )
@@ -81,7 +91,9 @@ def test_optional_missing_image_progress_does_not_create_a_fake_child() -> None:
         recipe_content_sha256="a" * 64,
         model_digest=None,
         build_input_sha256=None,
-        progress={"phase": "prepare", "total_bytes_known": False},
+        progress=OperationProgress.model_validate_json(
+            json.dumps({"phase": "prepare", "total_bytes_known": False})
+        ),
         image_progress=None,
         result=None,
         failure=None,
@@ -105,48 +117,65 @@ def test_completed_result_projection_is_strict_and_exposes_both_children() -> No
         recipe_content_sha256="a" * 64,
         model_digest=None,
         build_input_sha256=None,
-        progress={
-            "phase": "available",
-            "completed_bytes": 20,
-            "total_bytes": 20,
-            "total_bytes_known": True,
-        },
-        image_progress={
-            "phase": "available",
-            "completed_bytes": 20,
-            "total_bytes": 20,
-            "total_bytes_known": True,
-        },
-        result={
-            "schema_version": 2,
-            "recipe_content_sha256": "a" * 64,
-            "image_digest": "sha256:image",
-            "oci_archive_sha256": "b" * 64,
-            "image_bytes": 20,
-            "model_child": {
-                "id": "model-child",
-                "artifact_set_sha256": "c" * 64,
-                "model_content_digests": ["d" * 64],
-            },
-        },
+        progress=OperationProgress.model_validate_json(
+            json.dumps(
+                {
+                    "phase": "available",
+                    "completed_bytes": 20,
+                    "total_bytes": 20,
+                    "total_bytes_known": True,
+                }
+            )
+        ),
+        image_progress=OperationProgress.model_validate_json(
+            json.dumps(
+                {
+                    "phase": "available",
+                    "completed_bytes": 20,
+                    "total_bytes": 20,
+                    "total_bytes_known": True,
+                }
+            )
+        ),
+        result=AvailabilityJobResult.model_validate_json(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "recipe_content_sha256": "a" * 64,
+                    "image_digest": "sha256:image",
+                    "oci_archive_sha256": "b" * 64,
+                    "image_bytes": 20,
+                    "model_child": {
+                        "id": "00000000-0000-4000-8000-000000000601",
+                        "state": "succeeded",
+                        "artifact_set_sha256": "c" * 64,
+                        "model_content_digests": ["d" * 64],
+                    },
+                }
+            )
+        ),
         failure=None,
         supported_actions=(),
         created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",
-        model_child={
-            "id": "model-child",
-            "state": "succeeded",
-            "model_content_digests": ["d" * 64],
-            "progress": {
-                "phase": "download",
-                "completed_bytes": 0,
-                "total_bytes_known": False,
-            },
-        },
+        model_child=AvailabilityModelChild.model_validate_json(
+            json.dumps(
+                {
+                    "id": "00000000-0000-4000-8000-000000000601",
+                    "state": "succeeded",
+                    "model_content_digests": ["d" * 64],
+                    "progress": {
+                        "phase": "download",
+                        "completed_bytes": 0,
+                        "total_bytes_known": False,
+                    },
+                }
+            )
+        ),
     )
     response = _view_document(view)
     assert response.result is not None
-    assert response.result.model_child_id == "model-child"
+    assert response.result.model_child_id == "00000000-0000-4000-8000-000000000601"
     assert response.result.model_content_digests == ["d" * 64]
     assert response.children[0].model_content_digests == ["d" * 64]
     assert {child.kind for child in response.children} == {
@@ -209,7 +238,9 @@ def test_recipe_operation_observation_is_readable_by_any_authenticated_actor() -
         recipe_content_sha256="a" * 64,
         model_digest=None,
         build_input_sha256=None,
-        progress={"phase": "prepare", "total_bytes_known": False},
+        progress=OperationProgress.model_validate_json(
+            json.dumps({"phase": "prepare", "total_bytes_known": False})
+        ),
         image_progress=None,
         result=None,
         failure=None,
@@ -228,6 +259,58 @@ def test_recipe_operation_observation_is_readable_by_any_authenticated_actor() -
     response = TestClient(app).get(f"/api/recipe/operations/{view.id}")
     assert response.status_code == 200, response.text
     assert response.json()["id"] == view.id
+
+    # Unreadable identity stays unknown through HTTP rather than failing the
+    # public response model or inventing the required identity fields.
+    service.get_operator_operation.return_value = view.model_copy(
+        update={
+            "request": None,
+            "recipe_revision_id": None,
+            "recipe_content_sha256": None,
+            "residue": Residue(
+                kind="jobs.payload",
+                subject=view.id,
+                reason=BookkeepingReason.ROW_INCOMPLETE,
+            ),
+        }
+    )
+    unknown = TestClient(app).get(f"/api/recipe/operations/{view.id}")
+    assert unknown.status_code == 200, unknown.text
+    observation = unknown.json()
+    assert observation["id"] == view.id
+    assert observation["state"] == "queued"
+    assert observation["progress"] == response.json()["progress"]
+    assert observation["request"] is None
+    assert observation["recipe_revision_id"] is None
+    assert observation["recipe_content_sha256"] is None
+    assert observation["residue"]["reason"] == "row-incomplete"
+    from cluster_profiles.generated_control.models.recipe_image_availability_response import (
+        RecipeImageAvailabilityResponse as GeneratedAvailabilityResponse,
+    )
+
+    generated = GeneratedAvailabilityResponse.from_dict(observation)
+    assert generated.request is None
+    assert generated.recipe_content_sha256 is None
+    assert generated.residue is not None
+    for terminal_state in ("succeeded", "failed"):
+        service.get_operator_operation.return_value = (
+            service.get_operator_operation.return_value.model_copy(
+                update={"state": terminal_state, "measurement": None}
+            )
+        )
+        terminal = TestClient(app).get(f"/api/recipe/operations/{view.id}")
+        assert terminal.status_code == 200, terminal.text
+        assert terminal.json()["state"] == terminal_state
+        assert terminal.json()["progress"] is None
+        assert terminal.json()["result"] is None
+        assert terminal.json()["failure"] is None
+    service.get_operator_operation.return_value = view
+    repaired = TestClient(app).get(f"/api/recipe/operations/{view.id}")
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json() == response.json()
+    generated_repaired = GeneratedAvailabilityResponse.from_dict(repaired.json())
+    assert generated_repaired.request is not None
+    assert generated_repaired.residue is None
 
 
 _REQUEST_KEY = "00000000-0000-4000-8000-000000000001"
@@ -375,30 +458,33 @@ def test_remove_names_a_terminal_availability_refusal() -> None:
 
 def test_remove_response_projects_the_stored_model_choice_not_the_request() -> None:
     service = Mock()
-    service.remove_selector.return_value = {
-        "schema_version": 2,
-        "action": "remove",
-        "selector": "example",
-        "request_key": _REQUEST_KEY,
-        "operation_id": "00000000-0000-4000-8000-000000000002",
-        "recipe_revision_id": "revision-example",
-        "with_model": False,
-        "state": "succeeded",
-        "progress": {
-            "phase": "completed",
-            "completed_bytes": 0,
-            "total_bytes": 0,
-            "total_bytes_known": True,
-            "completed_items": 0,
-            "total_items": 0,
-        },
-        "reclaimed_bytes": 0,
-        "preserved": ["model-download"],
-        "next_actions": [],
-        "cancelled_operations": [],
-        "cancelled_builds": [],
-        "model_removals": [],
-    }
+    service.remove_selector.return_value = RecipeCacheRemovalStatus.model_validate(
+        {
+            "schema_version": 2,
+            "review_digest": "a" * 64,
+            "action": "remove",
+            "selector": "example",
+            "request_key": _REQUEST_KEY,
+            "operation_id": "00000000-0000-4000-8000-000000000002",
+            "recipe_revision_id": "revision-example",
+            "with_model": False,
+            "state": "succeeded",
+            "progress": {
+                "phase": "completed",
+                "completed_bytes": 0,
+                "total_bytes": 0,
+                "total_bytes_known": True,
+                "completed_items": 0,
+                "total_items": 0,
+            },
+            "reclaimed_bytes": 0,
+            "preserved": ["model-download"],
+            "next_actions": [],
+            "cancelled_operations": [],
+            "cancelled_builds": [],
+            "model_removals": [],
+        }
+    )
 
     response = _operator_client(service).post(
         "/api/recipe/example/remove",
@@ -421,38 +507,41 @@ def test_remove_response_projects_the_stored_model_choice_not_the_request() -> N
 
 def test_remove_response_preserves_partial_progress_and_failure() -> None:
     service = Mock()
-    service.remove_selector.return_value = {
-        "schema_version": 2,
-        "action": "remove",
-        "selector": "example",
-        "request_key": _REQUEST_KEY,
-        "operation_id": "00000000-0000-4000-8000-000000000002",
-        "recipe_revision_id": "revision-example",
-        "with_model": False,
-        "state": "partial",
-        "progress": {
-            "phase": "reclaiming",
-            "completed_bytes": 13,
-            "total_bytes_known": False,
-            "completed_items": 1,
-            "total_items": 2,
-            "activity": "waiting",
-        },
-        "reclaimed_bytes": 13,
-        "preserved": ["model-download"],
-        "next_actions": ["retry"],
-        "cancelled_operations": [],
-        "cancelled_builds": [],
-        "model_removals": [],
-        "failure": {
-            "code": "runtime_image.removal_storage_failed",
-            "detail": "managed image storage is temporarily unavailable",
-            "retryable": True,
-            "recovery_actions": ["retry"],
-            "retry_time": "2026-01-01T00:00:05+00:00",
-            "retry_after_seconds": 5,
-        },
-    }
+    service.remove_selector.return_value = RecipeCacheRemovalStatus.model_validate(
+        {
+            "schema_version": 2,
+            "review_digest": "a" * 64,
+            "action": "remove",
+            "selector": "example",
+            "request_key": _REQUEST_KEY,
+            "operation_id": "00000000-0000-4000-8000-000000000002",
+            "recipe_revision_id": "revision-example",
+            "with_model": False,
+            "state": "backoff",
+            "progress": {
+                "phase": "reclaiming",
+                "completed_bytes": 13,
+                "total_bytes_known": False,
+                "completed_items": 1,
+                "total_items": 2,
+                "activity": "waiting",
+            },
+            "reclaimed_bytes": 13,
+            "preserved": ["model-download"],
+            "next_actions": ["retry"],
+            "cancelled_operations": [],
+            "cancelled_builds": [],
+            "model_removals": [],
+            "failure": {
+                "code": "runtime_image.removal_storage_failed",
+                "detail": "managed image storage is temporarily unavailable",
+                "retryable": True,
+                "recovery_actions": ["retry"],
+                "retry_time": "2026-01-01T00:00:05+00:00",
+                "retry_after_seconds": 5,
+            },
+        }
+    )
 
     response = _operator_client(service).post(
         "/api/recipe/example/remove",
@@ -570,7 +659,9 @@ def test_recipe_cancel_requires_mutation_role_and_returns_durable_request() -> N
         recipe_content_sha256="a" * 64,
         model_digest=None,
         build_input_sha256=None,
-        progress={"phase": "prepare", "total_bytes_known": False},
+        progress=OperationProgress.model_validate_json(
+            json.dumps({"phase": "prepare", "total_bytes_known": False})
+        ),
         image_progress=None,
         result=None,
         failure=None,

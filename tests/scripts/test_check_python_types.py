@@ -183,5 +183,5 @@ def test_failed_gate_preserves_the_actual_diagnostic_location_and_cause(
     )
     assert module.main() == 1
     detail = capsys.readouterr().err
-    assert "control/src/example.py:30: reportAttributeAccessIssue" in detail
+    assert "control/src/example.py:30:1: reportAttributeAccessIssue" in detail
     assert "CanonicalEvidence is not exported" in detail
