@@ -15,6 +15,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import (
+    DBAPIError,
     InterfaceError,
     OperationalError,
     SQLAlchemyError,
@@ -35,6 +36,31 @@ _ALEMBIC_CONFIG = (
 _DATABASE_STARTUP_TIMEOUT_SECONDS = 120.0
 _DATABASE_RETRYABLE_ERRORS = (InterfaceError, OperationalError, TimeoutError)
 _LOGGER = logging.getLogger(__name__)
+
+
+class _DatabaseStartupContention(RuntimeError):
+    """The current schema owner remains busy; retry after releasing ownership."""
+
+
+def _database_sqlstate(error: BaseException) -> str | None:
+    if not isinstance(error, DBAPIError):
+        return None
+    code = getattr(error.orig, "sqlstate", None)
+    return code if isinstance(code, str) else None
+
+
+def _startup_retryable(error: BaseException) -> bool:
+    if isinstance(error, (_DatabaseStartupContention, TimeoutError)):
+        return True
+    if not isinstance(error, (InterfaceError, OperationalError)):
+        return False
+    code = _database_sqlstate(error)
+    # Failed connection establishment may lack SQLSTATE even after a server
+    # authentication refusal. Its cause remains unknown: retry is bounded and
+    # never changes credentials or grants access.
+    # Retry only a connection fault or PostgreSQL's cannot-connect-now startup
+    # response. Permissions, schema damage and integrity refusals remain fatal.
+    return code is None or code.startswith("08") or code == "57P03"
 
 
 def build_engine(database_url: str, *, component: str = "control") -> Engine:
@@ -110,13 +136,14 @@ def run_with_database_startup_retry[T](
     monotonic: Callable[[], float] = time.monotonic,
     label: str = "database",
 ) -> T:
-    """Retry transient database connection failures for a bounded interval.
+    """Connection failures and startup-owner contention share one deadline.
 
     Container DNS and PostgreSQL can become available in either order after a
     host or Docker restart.  Keep startup deterministic by retrying only
-    connection-class failures, logging a redacted diagnostic, and always
-    re-raising once the fixed deadline expires.  Schema and permission errors
-    remain fatal immediately.
+    typed connection faults, unknown connection establishment and exact startup
+    contention. Diagnostics remain redacted and the fixed deadline never resets.
+    Known schema and permission refusals remain fatal immediately; an untyped
+    handshake failure remains unknown until the bounded attempt expires.
     """
     if timeout_seconds < 0 or timeout_seconds > 900:
         raise ValueError("database startup timeout is outside the safe bound")
@@ -126,15 +153,38 @@ def run_with_database_startup_retry[T](
     while True:
         try:
             return operation()
-        except _DATABASE_RETRYABLE_ERRORS as error:
+        except (*_DATABASE_RETRYABLE_ERRORS, _DatabaseStartupContention) as error:
+            if not _startup_retryable(error):
+                raise
             remaining = deadline - monotonic()
             if remaining <= 0:
+                if (
+                    isinstance(error, (InterfaceError, OperationalError))
+                    and _database_sqlstate(error) is None
+                ):
+                    print(
+                        f"{label} startup deadline expired; connection establishment "
+                        "cause unknown (driver SQLSTATE unavailable); credentials unchanged",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 raise
             wait = min(delay, remaining)
             attempts += 1
+            if isinstance(error, _DatabaseStartupContention):
+                reason = str(error)
+            elif isinstance(error, (InterfaceError, OperationalError)):
+                code = _database_sqlstate(error)
+                reason = (
+                    f"{type(error).__name__}; SQLSTATE {code}"
+                    if code is not None
+                    else "connection establishment cause unknown; driver SQLSTATE unavailable"
+                )
+            else:
+                reason = type(error).__name__
             print(
                 f"{label} unavailable during startup (attempt {attempts}; "
-                f"{type(error).__name__}); retrying in {wait:.1f}s",
+                f"{reason}); retrying in {wait:.1f}s",
                 file=sys.stderr,
                 flush=True,
             )
@@ -977,11 +1027,15 @@ def initialize_database(
                     "control database initialization requires PostgreSQL"
                 )
             with engine.connect() as lock_connection:
-                lock_connection.execute(
-                    text("SELECT pg_advisory_lock(:key)"),
+                acquired = lock_connection.execute(
+                    text("SELECT pg_try_advisory_lock(:key)"),
                     {"key": _STARTUP_ADVISORY_LOCK},
-                )
+                ).scalar_one()
                 lock_connection.commit()
+                if acquired is not True:
+                    raise _DatabaseStartupContention(
+                        "Controller schema owner is busy; startup will retry"
+                    )
                 try:
                     upgrade_schema(database_url, config_path=config_path)
                     try:
@@ -999,6 +1053,10 @@ def initialize_database(
                                     "current schema remains available"
                                 )
                     except SQLAlchemyError as error:
+                        if _database_sqlstate(error) == "55P03":
+                            raise _DatabaseStartupContention(
+                                "Controller schema relation is busy; startup will retry"
+                            ) from None
                         raise RuntimeError(
                             "Controller startup schema reconciliation failed and the "
                             "transaction was rolled back. This error class is not "
@@ -1028,6 +1086,12 @@ def initialize_database(
                         {"key": _STARTUP_ADVISORY_LOCK},
                     )
                     lock_connection.commit()
+        except SQLAlchemyError as error:
+            if _database_sqlstate(error) == "55P03":
+                raise _DatabaseStartupContention(
+                    "Controller schema relation is busy; startup will retry"
+                ) from None
+            raise
         finally:
             engine.dispose()
 

@@ -40,12 +40,18 @@ from vonk_control.exact_integer_adoption import (
     reconcile_exact_integer_schema,
 )
 from vonk_control.exact_integer_storage import DecimalIntegerOrderKey
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
 from vonk_control.model_cache_contract import (
     CacheEntryResponse,
+    ModelCacheDownloadPayload,
     ModelCacheOperationProgress,
 )
-from vonk_control.models import Base, CatalogDocumentRevision, ModelCacheSet
+from vonk_control.models import (
+    Base,
+    CatalogDocumentRevision,
+    ModelCacheOperation,
+    ModelCacheSet,
+)
 from vonk_control.recipe_action_plans import UninstallPlan
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_forge_contracts import ModelDefinition
@@ -818,7 +824,21 @@ def test_native_catalog_and_cache_preserve_complete_integer_domain_across_restar
                 artifacts=[artifact], model_content_sha256=draft.content_digest
             )
             assert manifest.model_content_sha256 == draft.content_digest
-            assert receipt.model_content_sha256 == draft.content_digest
+            with sessions() as session:
+                stored_operation = session.get(ModelCacheOperation, receipt.id)
+                assert stored_operation is not None
+                assert stored_operation.id == receipt.id
+                assert stored_operation.request_key == request_key
+                stored_payload = ModelCacheDownloadPayload.model_validate_json(
+                    json.dumps(stored_operation.payload)
+                )
+                assert (
+                    stored_payload.manifest.model_content_sha256 == draft.content_digest
+                )
+                assert (
+                    ArtifactSetManifest.from_contract(stored_payload.manifest).digest
+                    == receipt.artifact_set_sha256
+                )
             assert receipt.artifact_set_sha256 == manifest.digest
             entry = CacheEntryResponse.model_validate_json(
                 json.dumps(cache.get_entry(manifest.digest))

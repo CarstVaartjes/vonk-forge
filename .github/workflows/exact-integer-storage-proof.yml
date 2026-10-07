@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/exact-integer-storage-proof.yml
       - control/tests/test_exact_integer_storage.py
+      - control/tests/test_database_adoption_recovery_postgres.py
       - control/src/vonk_control/exact_integer_storage.py
       - control/src/vonk_control/exact_integer_adoption.py
       - control/src/vonk_control/models.py
@@ -49,6 +50,7 @@ jobs:
           paths = [
               '.github/workflows/exact-integer-storage-proof.yml',
               'control/tests/test_exact_integer_storage.py',
+              'control/tests/test_database_adoption_recovery_postgres.py',
               'control/src/vonk_control/exact_integer_storage.py',
               'control/src/vonk_control/exact_integer_adoption.py',
               'control/src/vonk_control/models.py', 'control/src/vonk_control/db.py',
@@ -105,6 +107,48 @@ jobs:
               'input_restoration_verified': True},sort_keys=True,indent=2)+'\n')
           PY
           git diff --exit-code -- control/src control/tests/test_exact_integer_storage.py
+      - name: Execute native one-call startup recovery and fatal refusal boundaries
+        run: |
+          set -o pipefail
+          uv run --project control --frozen pytest -q -n 0 \
+            'control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_same_call_releases_old_attempt_before_owner_clears[relation]' \
+            'control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_same_call_releases_old_attempt_before_owner_clears[advisory]' \
+            control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_busy_owner_exhausts_one_fixed_deadline_without_mutation \
+            control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_unreviewed_schema_is_fatal_without_backoff \
+            control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_native_schema_permission_denial_is_fatal_without_backoff \
+            control/tests/test_database_adoption_recovery_postgres.py::test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_credentials \
+            --tb=short --junitxml=exact-integer-storage-proof-output/startup.xml \
+            2>&1 | tee exact-integer-storage-proof-output/startup.log
+      - name: Require six additional startup cases and unchanged source inputs
+        run: |
+          uv run --project control --frozen python - <<'PY'
+          import hashlib, json
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          output = Path('exact-integer-storage-proof-output')
+          cases = ET.parse(output/'startup.xml').getroot().findall('.//testcase')
+          assert len(cases) == 6, f'expected 6 separate startup cases, got {len(cases)}'
+          assert all(case.find(tag) is None for case in cases for tag in ('skipped','failure','error'))
+          expected = {
+              'test_initialize_database_same_call_releases_old_attempt_before_owner_clears[relation]',
+              'test_initialize_database_same_call_releases_old_attempt_before_owner_clears[advisory]',
+              'test_initialize_database_busy_owner_exhausts_one_fixed_deadline_without_mutation',
+              'test_initialize_database_unreviewed_schema_is_fatal_without_backoff',
+              'test_initialize_database_native_schema_permission_denial_is_fatal_without_backoff',
+              'test_initialize_database_bad_handshake_is_bounded_unknown_with_unchanged_credentials',
+          }
+          assert {case.attrib['name'] for case in cases} == expected
+          manifest = json.loads((output/'source.json').read_text())
+          for path, expected_hash in manifest['inputs'].items():
+              assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == expected_hash['sha256'], path
+          (output/'startup-execution.json').write_text(json.dumps({
+              'source_sha': manifest['source_sha'], 'engine': 'postgresql',
+              'cases': [case.attrib for case in cases], 'failures': 0, 'skips': 0,
+              'original_storage_case_inventory': 34,
+              'additional_startup_case_inventory': 6,
+              'input_restoration_verified': True},sort_keys=True,indent=2)+'\n')
+          PY
+          git diff --exit-code -- control/src control/tests/test_exact_integer_storage.py control/tests/test_database_adoption_recovery_postgres.py
       - name: Preserve exact-source proof and failures
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
