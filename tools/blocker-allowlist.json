@@ -349,9 +349,10 @@
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService.stop",
       "catches": [
+        "UnknownOutcomeError",
         "_RouteNotWithdrawn"
       ],
-      "reason": "The stop re-withdraws the run's route and tries to dispatch again a bounded number of times when a competing publication listed the run again; the stop's request key makes a repeat idempotent."
+      "reason": "The stop re-withdraws the run's route and tries to dispatch again a bounded number of times when a competing publication listed the run again; the stop's request key makes a repeat idempotent. Native logical Stop separately retries canonical unknown outcomes through admission_attempts without sleeping or changing the request key/preview; actual SQL-read fault\u2192rollback\u2192repair\u2192exact Stop receipt\u2192fresh claim is covered by test_artifact_residue_stop."
     },
     {
       "path": "control/src/vonk_control/run_switch_operations.py",
@@ -1757,15 +1758,11 @@
       "category": "security-edge",
       "reason": "Exact destructive-effect consent and target fences: reject changed profile intent, generation, reviewed plan, child identity or ambiguous source authority before issuing Stop. Historical launch history is handled separately by durable run ownership; these checks remain fail closed.",
       "sites": [
-        ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopAuthorization.identities_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-child-set-is-inconsistent", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-parent-identity-is-inconsistent", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "issued-profile-stop-child-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "issued-profile-stop-parent-is-unavailable", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "profile-jobrun-stop-differs-from-its-source", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "profile-stop-target-is-not-authorized", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "source-jobrun-identity-is-inconsistent", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "source-jobrun-request-is-invalid", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "a-newer-profile-intent-owns-this-stop", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "accepted-profile-does-not-own-this-exact-stop", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-identity-is-stale", 1],
@@ -3561,6 +3558,50 @@
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._heal_source_bundle", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._verified_bundle.read", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "rederive_source_bundle_from_closure", "permission-denied", 1]
+      ]
+    },
+    {
+      "category": "security-edge",
+      "reason": "Exact immutable source, accepted target scope, reviewed effect digest, parent/child hashes, current ordinal and installation membership are authorization/integrity fences; profile selection and controller-cancellation fences remain unchanged.",
+      "family": "exact-ordinary-jobrun-stop-security-edge",
+      "sites": [
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "ProfileStopAuthorityError", "derive_runtime_plan_binding", "profile-stop-target-is-ambiguous", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "ProfileStopAuthorityError", "derive_runtime_plan_binding", "run-jobrun-stop-scope-is-missing", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "ProfileStopAuthorityError", "derive_runtime_plan_binding", "run-jobrun-stop-target-is-ambiguous", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_jobrun_stop_source", "jobrun-stop-differs-from-its-source", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_jobrun_stop_source", "source-jobrun-identity-is-inconsistent", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_jobrun_stop_source", "source-jobrun-request-is-invalid", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "source-jobrun-cancellation-owner-changed", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_run_jobrun_stop_target", "accepted-run-jobrun-stop-manifest-changed", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_run_jobrun_stop_target", "accepted-run-jobrun-stop-owner-changed", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_run_jobrun_stop_target", "accepted-run-jobrun-stop-was-superseded", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_run_jobrun_stop_target", "issued-run-jobrun-stop-child-changed", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_run_jobrun_stop_target", "run-jobrun-stop-phase-target-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "accepted-logical-stop-identity-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "reviewed-stop-plan-digest-does-not-match-current-effects", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._run_jobrun_stop_in_session", "accepted-exact-jobrun-stop-targets-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._run_jobrun_stop_in_session", "new-jobrun-effect-escaped-the-accepted-stop-scope", 1]
+      ]
+    },
+    {
+      "category": "input-validation",
+      "reason": "Exact immutable source, accepted target scope, reviewed effect digest, parent/child hashes, current ordinal and installation membership are authorization/integrity fences; profile selection and controller-cancellation fences remain unchanged.",
+      "family": "exact-ordinary-jobrun-stop-input-validation",
+      "sites": [
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "profile-jobrun-stop-authority-is-invalid", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "run-jobrun-stop-authority-is-invalid", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "JobRunStopScope.identities_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1]
+      ]
+    },
+    {
+      "category": "already-retried",
+      "reason": "Native Stop uses the canonical bounded admission transaction retry for unknown source observation; every retry preserves the original request key and preview digest, rolls back before re-observing, and retains claims on final refusal.",
+      "family": "exact-ordinary-jobrun-stop-already-retried",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._run_jobrun_stop_in_session", "accepted-jobrun-stop-source-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._run_jobrun_stop_in_session", "exact-jobrun-installation-authority-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._run_jobrun_stop_in_session", "unknown-jobrun-exact-target-is-not-reachable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._run_jobrun_stop_in_session", "unknown-jobrun-has-no-exact-source-authority", 1]
       ]
     }
   ]

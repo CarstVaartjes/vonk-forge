@@ -580,12 +580,6 @@
     },
     {
       "path": "control/tests/test_build_consumer_ownership.py",
-      "function": "test_new_availability_consumer_committing_before_cancellation_keeps_shared_build",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_build_consumer_ownership.py",
       "function": "test_profile_protects_its_build_before_the_execution_child_exists",
       "kind": "ending-without-fresh-request",
       "count": 1

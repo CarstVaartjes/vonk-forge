@@ -34,6 +34,7 @@ from .distribution_assignment import NodeDistributionAssignment
 from .mapping_parameters import EngineArgumentValue
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure
+from .profile_stop_authority import JobRunStopScope
 from .recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
 from .recipe_build_cancellation import RecipeBuildIntent
 from .recipe_image_availability_api import (
@@ -169,6 +170,7 @@ class RecipeStopParent(_RecipeParent):
     phases: list[list[StopPhaseOperation]] | None = None
     recovery: DistributedRecoveryMarker | None = None
     profile_partial_stop: ProfilePartialStop | None = None
+    job_run_stop_authorization: JobRunStopScope | None = None
 
 
 class RecipeUninstallParent(_RecipeParent):

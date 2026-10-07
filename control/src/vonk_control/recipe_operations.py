@@ -71,6 +71,7 @@ from .agent_jobs import (
     release_owned_reservations_in_session,
     superseded_cancellation_deadline,
 )
+from .artifact_job_evidence import ArtifactJobResultEvidence
 from .categorized_errors import (
     InvalidValue,
     MissingRecord,
@@ -138,12 +139,15 @@ from .models import (
 )
 from .prebuilt_images import policy_prebuilt_reference, prebuilt_reference
 from .profile_stop_authority import (
+    JobRunStopScope,
     ProfileJobRunStopAuthorization,
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
     ProfileStopAuthorityError,
+    validate_jobrun_stop_source,
     validate_profile_jobrun_stop_target,
     validate_profile_stop_owner,
+    validate_run_jobrun_stop_target,
 )
 from .recipe_action_plans import (
     StopNodeImpact,
@@ -3023,15 +3027,29 @@ class RecipeOperationService:
             )
         ):
             return existing
-        logical = self._stop_logical_job_run(
-            run_id,
-            plan_digest=plan_digest,
-            actor=actor,
-            request_id=request_id,
-            workload_intent_ordinal=workload_intent_ordinal,
-            profile_target_node_ids=profile_target_node_ids,
-            profile_application_id=profile_application_id,
+        refused: UnknownOutcomeError | None = None
+        logical: RecipeOperationView | RecipeArtifactJobCancellationPending | None = (
+            None
         )
+        for _attempt in admission_attempts():
+            try:
+                logical = self._stop_logical_job_run(
+                    run_id,
+                    plan_digest=plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    profile_target_node_ids=profile_target_node_ids,
+                    profile_application_id=profile_application_id,
+                )
+                refused = None
+                break
+            except UnknownOutcomeError as error:
+                refused = error
+                if admission_wait_exhausted(error):
+                    break
+        if refused is not None:
+            raise refused
         if isinstance(logical, RecipeArtifactJobCancellationPending):
             raise logical
         if logical is not None:
@@ -5439,9 +5457,9 @@ class RecipeOperationService:
             )
             if (
                 job.payload.get("execution_mode") == "profile-jobrun-stop"
-                and not job_failed
-            ):
-                completion = self._complete_profile_jobrun_stop_in_session(
+                or job.payload.get("job_run_stop_authorization") is not None
+            ) and not job_failed:
+                completion = self._complete_jobrun_stop_in_session(
                     session, job, children, now=now
                 )
                 if isinstance(completion, Residue):
@@ -6816,6 +6834,11 @@ class RecipeOperationService:
             )
             if not admitted.allowed:
                 raise RecipeRequestInvalid("stop plan is stale or blocked")
+            if pending_job is None and plan_digest != admitted.plan_digest:
+                raise RecipeRequestInvalid(
+                    "reviewed Stop plan digest does not match current effects",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             plan_digest = admitted.plan_digest
             installation = session.get(RecipeInstallation, run.installation_id)
             if installation is None:
@@ -6888,6 +6911,23 @@ class RecipeOperationService:
                     )
                 if profile_job is not None:
                     return self._view(profile_job, session=session)
+            else:
+                exact_job = self._run_jobrun_stop_in_session(
+                    session,
+                    run=run,
+                    nodes=nodes,
+                    target_node_ids=targets,
+                    stop_plan_digest=plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    now=now,
+                    pending_job=pending_job,
+                )
+                if isinstance(exact_job, RecipeArtifactJobCancellationPending):
+                    return exact_job
+                if exact_job is not None:
+                    return self._view(exact_job, session=session)
             payload = {
                 "schema_version": 1,
                 "owner_kind": "run",
@@ -6971,7 +7011,207 @@ class RecipeOperationService:
                 and job.kind == "recipe.stop"
                 and job.state == "running"
                 and job.payload.get("execution_mode") == "one-shot-jobs"
+                and job.payload.get("phases") is None
             )
+
+    def _run_jobrun_stop_in_session(
+        self,
+        session: Session,
+        *,
+        run: RecipeRun,
+        nodes: Sequence[RunNode],
+        target_node_ids: Sequence[str],
+        stop_plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int,
+        now: datetime,
+        pending_job: Job | None,
+    ) -> Job | RecipeArtifactJobCancellationPending | None:
+        """Freeze exact issued targets before admitting ordinary run cleanup."""
+        rows: list[tuple[ProfileJobRunStopTarget, RecipeStopPayload]] = []
+        adapter = ArtifactJobAdapter(session)
+        frozen: JobRunStopScope | None = None
+        if pending_job is not None:
+            from .job_documents import RecipeStopParent
+
+            frozen = RecipeStopParent.model_validate_json(
+                canonical_message(pending_job.payload), strict=True
+            ).job_run_stop_authorization
+        frozen_ids = (
+            {target.artifact_job_id for target in frozen.targets}
+            if frozen is not None
+            else None
+        )
+        needs_stop = False
+        for artifact in session.scalars(
+            select(ArtifactJob)
+            .where(ArtifactJob.run_id == run.id)
+            .order_by(ArtifactJob.created_at, ArtifactJob.id)
+            .with_for_update(of=ArtifactJob)
+        ):
+            effect = adapter.adopt(artifact).effect
+            if artifact.result_evidence is not None:
+                try:
+                    evidence = read_stored_model(
+                        ArtifactJobResultEvidence,
+                        canonical_message(artifact.result_evidence),
+                        from_json=True,
+                    )
+                except (TypeError, ValueError) as error:
+                    retire_as_unknown(
+                        "recipe.jobrun-stop",
+                        artifact.id,
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        f"JobRun effect evidence is unreadable: {error}",
+                    )
+                    effect = Effect.UNKNOWN
+                else:
+                    if evidence.active_scope_may_remain is True:
+                        effect = Effect.UNKNOWN
+            if frozen_ids is not None:
+                if artifact.id not in frozen_ids:
+                    if effect in {Effect.ISSUED, Effect.UNKNOWN}:
+                        raise RecipeStopAuthorityRefused(
+                            "new JobRun effect escaped the accepted Stop scope"
+                        )
+                    continue
+            elif effect not in {Effect.ISSUED, Effect.UNKNOWN}:
+                continue
+            needs_stop |= effect in {Effect.ISSUED, Effect.UNKNOWN}
+            if artifact.operation_id is None:
+                raise RecipeRetryLater("unknown JobRun has no exact source authority")
+            children = tuple(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(AgentOperation.parent_job_id == artifact.operation_id)
+                    .with_for_update(of=AgentOperation)
+                )
+            )
+            if len(children) != 1 or children[0].node_id not in target_node_ids:
+                raise RecipeRetryLater("unknown JobRun exact target is not reachable")
+            source = children[0]
+            request = read_stored_model(
+                RecipeJobRunRequest, canonical_message(source.payload), from_json=True
+            )
+            payload = stop_payload_from_job_run(request, cancel_pending_start=True)
+            target = ProfileJobRunStopTarget(
+                artifact_job_id=artifact.id,
+                source_job_id=artifact.operation_id,
+                source_operation_id=source.id,
+                node_id=source.node_id,
+                stop_payload_sha256=hashlib.sha256(
+                    canonical_message(payload)
+                ).hexdigest(),
+            )
+            validate_jobrun_stop_source(
+                session,
+                target,
+                payload,
+                run,
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+            rows.append((target, payload))
+        if frozen_ids is not None and frozen_ids != {
+            target.artifact_job_id for target, _payload in rows
+        }:
+            raise RecipeRetryLater("accepted JobRun Stop source disappeared")
+        if not rows:
+            return None
+        installation = session.get(RecipeInstallation, run.installation_id)
+        if installation is None:
+            raise RecipeRetryLater("exact JobRun installation authority is unavailable")
+        scope = JobRunStopScope(
+            schema_version=1,
+            run_id=run.id,
+            installation_id=run.installation_id,
+            recipe_revision_id=installation.recipe_revision_id,
+            mapping_id=run.mapping_id,
+            mapping_generation=run.mapping_generation,
+            run_generation=run.run_generation,
+            plan_digest=run.plan_digest,
+            workload_intent_ordinal=workload_intent_ordinal,
+            run_node_ids=[node.node_id for node in nodes],
+            reachable_node_ids=sorted(target_node_ids),
+            missing_node_ids=sorted(
+                node.node_id for node in nodes if node.node_id not in target_node_ids
+            ),
+            targets=[target for target, _payload in rows],
+            stop_plan_digest=stop_plan_digest,
+        )
+        if frozen is not None and frozen != scope:
+            raise RecipeStopAuthorityRefused(
+                "accepted exact JobRun Stop targets changed"
+            )
+        if not needs_stop:
+            # Each original source has now positively reported a stopped/ended
+            # effect. The frozen scope remains exact; no unseen target is added.
+            return None
+        pending = self._one_shot_stop_prerequisite(
+            session, run.id, now, target_node_ids=target_node_ids
+        )
+        if pending is not None:
+            if pending_job is None:
+                payload = {
+                    "schema_version": 1,
+                    "owner_kind": "run",
+                    "owner_id": run.id,
+                    "plan_digest": stop_plan_digest,
+                    "execution_mode": "one-shot-jobs",
+                    "workload_intent_ordinal": workload_intent_ordinal,
+                    "job_run_stop_authorization": json.loads(canonical_message(scope)),
+                }
+                session.add(
+                    new_recipe_job(
+                        id=str(uuid.uuid4()),
+                        request_id=request_id,
+                        kind="recipe.stop",
+                        state=LifecycleState.RUNNING.value,
+                        actor=actor,
+                        authority_revision=rows[0][1].recipe_content_sha256,
+                        targets=sorted(target_node_ids),
+                        payload_digest=hashlib.sha256(
+                            canonical_message(payload)
+                        ).hexdigest(),
+                        payload=payload,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                session.flush()
+            return pending
+        # One-shot recipes are single-node. Sequential phases bind each distinct
+        # target without creating concurrent cleanup claims on that node.
+        phases = tuple(
+            ((target.node_id, json.loads(canonical_message(payload))),)
+            for target, payload in rows
+        )
+        run.state = RunState.STOPPING
+        run.updated_at = now
+        parent = self._queue_in_session(
+            session,
+            kind="recipe.stop",
+            owner_kind="run",
+            owner_id=run.id,
+            plan_digest=stop_plan_digest,
+            actor=actor,
+            request_id=request_id,
+            node_payloads=phases[0],
+            phases=phases,
+            authority_digest=rows[0][1].recipe_content_sha256,
+            now=now,
+            workload_intent_ordinal=workload_intent_ordinal,
+            job_context={
+                "execution_mode": "one-shot-jobs",
+                "job_run_stop_authorization": json.loads(canonical_message(scope)),
+            },
+            adopt_stop_parent=pending_job,
+        )
+        for target, payload in rows:
+            validate_run_jobrun_stop_target(
+                session, scope, target, payload, stop_parent=parent
+            )
+        return parent
 
     def _profile_jobrun_stop_is_pending(self, request_id: str) -> bool:
         with self._sessions() as session:
@@ -7083,7 +7323,7 @@ class RecipeOperationService:
             )
         return authorization, targets[0]
 
-    def _complete_profile_jobrun_stop_in_session(
+    def _complete_jobrun_stop_in_session(
         self,
         session: Session,
         job: Job,
@@ -7111,19 +7351,40 @@ class RecipeOperationService:
                 BookkeepingReason.EVIDENCE_MISMATCH,
                 "profile JobRun Stop payload digest changed",
             )
-        parent = _profile_jobrun_parent(job)
-        if isinstance(parent, Residue):
-            return parent
-        authorization = parent.profile_stop_authorization
-        try:
-            validate_profile_stop_owner(
-                session, authorization, now=now, require_current=False
-            )
-        except ProfileStopAuthorityError as error:
-            return unproven(
-                BookkeepingReason.EVIDENCE_MISMATCH,
-                f"profile JobRun Stop owner is no longer provable: {error}",
-            )
+        is_profile = job.payload.get("execution_mode") == "profile-jobrun-stop"
+        if is_profile:
+            parent = _profile_jobrun_parent(job)
+            if isinstance(parent, Residue):
+                return parent
+            authorization: JobRunStopScope = parent.profile_stop_authorization
+            try:
+                validate_profile_stop_owner(
+                    session,
+                    parent.profile_stop_authorization,
+                    now=now,
+                    require_current=False,
+                )
+            except ProfileStopAuthorityError as error:
+                return unproven(
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    f"profile JobRun Stop owner is no longer provable: {error}",
+                )
+        else:
+            from .job_documents import RecipeStopParent
+
+            try:
+                direct = RecipeStopParent.model_validate_json(
+                    canonical_message(job.payload), strict=True
+                )
+                direct_scope = direct.job_run_stop_authorization
+                if direct_scope is None:
+                    raise ValueError("exact JobRun Stop scope is missing")
+                authorization = direct_scope
+            except (TypeError, ValueError) as error:
+                return unproven(
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    f"run JobRun Stop accepted scope is unreadable: {error}",
+                )
         child_by_identity = {
             (
                 child.node_id,
@@ -7148,11 +7409,33 @@ class RecipeOperationService:
                     BookkeepingReason.EVIDENCE_UNAVAILABLE,
                     "profile JobRun Stop lacks an exact issued receipt",
                 )
-            validated = self._validate_profile_jobrun_stop_child(
-                session, job, child, now=now, require_current=False
-            )
-            if isinstance(validated, Residue):
-                return validated
+            if is_profile:
+                validated = self._validate_profile_jobrun_stop_child(
+                    session, job, child, now=now, require_current=False
+                )
+                if isinstance(validated, Residue):
+                    return validated
+            else:
+                try:
+                    payload = read_stored_model(
+                        RecipeStopPayload,
+                        canonical_message(child.payload),
+                        from_json=True,
+                    )
+                    validate_run_jobrun_stop_target(
+                        session,
+                        authorization,
+                        target,
+                        payload,
+                        stop_parent=job,
+                        operation=child,
+                        require_current=False,
+                    )
+                except (TypeError, ValueError) as error:
+                    return unproven(
+                        BookkeepingReason.EVIDENCE_MISMATCH,
+                        f"run JobRun Stop receipt authority changed: {error}",
+                    )
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
                     AgentOperationAttempt.operation_id == child.id,
@@ -8328,6 +8611,7 @@ class RecipeOperationService:
         job_context: Mapping[str, object] | None = None,
         workload_intent_ordinal: int | None = None,
         unattended_guard: Callable[[Session], None] | None = None,
+        adopt_stop_parent: Job | None = None,
     ) -> Job:
         if not node_payloads:
             raise RecipeRequestInvalid("operation group has no target nodes")
@@ -8392,7 +8676,26 @@ class RecipeOperationService:
             owner_id=owner_id,
         )
         if existing is not None:
-            return existing
+            if adopt_stop_parent is None:
+                return existing
+            if (
+                kind != "recipe.stop"
+                or existing.id != adopt_stop_parent.id
+                or existing.state != LifecycleState.RUNNING.value
+                or existing.payload.get("execution_mode") != "one-shot-jobs"
+                or existing.payload.get("phases") is not None
+                or existing.targets != targets
+                or existing.payload.get("workload_intent_ordinal")
+                != workload_intent_ordinal
+                or session.scalar(
+                    select(AgentOperation.id).where(
+                        AgentOperation.parent_job_id == existing.id
+                    )
+                )
+                is not None
+            ):
+                raise RecipeRequestInvalid("accepted logical Stop identity changed")
+            job_id = existing.id
         if kind in _WORKLOAD_INTENT_KINDS:
             # Only a standalone request admits a new intent. A child carries
             # its parent's exact ordinal and may not capture newer authority.
@@ -8462,7 +8765,14 @@ class RecipeOperationService:
             created_at=now,
             updated_at=now,
         )
-        session.add(job)
+        if existing is not None:
+            existing.payload = job.payload
+            existing.payload_digest = job.payload_digest
+            existing.authority_revision = job.authority_revision
+            existing.updated_at = now
+            job = existing
+        else:
+            session.add(job)
         try:
             session.flush()
             for operation_id, node_id, payload in phase_groups[0]:
