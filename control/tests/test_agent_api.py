@@ -2689,7 +2689,9 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         "a" * 64,
         STOP_PAYLOAD,
     )
-    claim = client.post("/agent/claim", headers=agent_headers(NODE_A, "101")).json()
+    claimed = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert claimed.status_code == 200
+    claim = claimed.json()
     result = {key: claim[key] for key in ("fence",)} | {
         "state": "failed",
         "result": {"status": "failed", "error_code": "stop_failed"},
@@ -2709,7 +2711,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         result["result"]["diagnostics"] = diagnostics
 
     response = client.post(
-        "/agent/result", headers=agent_headers(NODE_A, "101"), json=result
+        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
     )
 
     assert response.status_code == 204
@@ -2764,14 +2766,16 @@ def test_failed_result_error_code_obeys_the_shared_contract_rule(
         "a" * 64,
         STOP_PAYLOAD,
     )
-    claim = client.post("/agent/claim", headers=agent_headers(NODE_A, "101")).json()
+    claimed = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert claimed.status_code == 200
+    claim = claimed.json()
     result = {key: claim[key] for key in ("fence",)} | {
         "state": "failed",
         "result": failure,
     }
 
     response = client.post(
-        "/agent/result", headers=agent_headers(NODE_A, "101"), json=result
+        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
     )
 
     assert response.status_code == expected_status
