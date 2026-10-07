@@ -823,6 +823,8 @@ def install_operator_projection_routes(
     def selected(selector: str) -> FleetNode:
         try:
             return _node(snapshot(), selector)
+        except ObservationCaptureUnavailable:
+            raise
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
@@ -1132,6 +1134,8 @@ def install_operator_projection_routes(
                 targets=list(getattr(job, "targets", node_ids)),
             )
             return result
+        except ObservationCaptureUnavailable:
+            raise
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
