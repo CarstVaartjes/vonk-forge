@@ -7,7 +7,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import standalone from "ajv/dist/standalone/index.js";
 import codegen from "ajv/dist/compile/codegen/code.js";
-import {parse, stringify, LosslessNumber} from "lossless-json";
+import {stringify, LosslessNumber} from "lossless-json";
 import openapiTS, {astToString} from "openapi-typescript";
 import ts from "typescript";
 const {_Code, _} = codegen;
@@ -17,7 +17,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 // production Control contracts additionally require strict integer lexemes.
 const schemaOnly = process.argv[2] === "--schema";
 const input = process.argv[schemaOnly ? 3 : 2] ?? path.join(root, "control/openapi.json");
-const raw = fs.readFileSync(input, "utf8"), parsed = parse(raw);
+const raw = fs.readFileSync(input, "utf8");
+const parsed = JSON.parse(raw, (_key, value, context) => {
+  if (typeof value !== "number") return value;
+  if (typeof context?.source !== "string") throw new Error("The pinned generator requires JSON.parse numeric source tokens");
+  return new LosslessNumber(context.source);
+});
 const document = schemaOnly ? {components: {schemas: {Suite: parsed}}, paths: {}} : parsed;
 const out = path.join(root, "control/web/src/api");
 const token = value => value instanceof LosslessNumber ? value.value : String(value);
@@ -26,7 +31,7 @@ function transform(value) {
   if (Array.isArray(value)) return value.map(transform);
   if (value instanceof LosslessNumber) return Number(value.value);
   if (value === null || typeof value !== "object") return value;
-  const result = {};
+  const result = Object.create(null);
   for (const [key, item] of Object.entries(value)) {
     if (["properties", "$defs", "definitions", "patternProperties", "dependentSchemas"].includes(key)) result[key] = Object.fromEntries(Object.entries(item).map(([name, schema]) => [name, transform(schema)]));
     else if (key === "type") result.vonkType = Array.isArray(item) ? item : [item];
@@ -40,7 +45,7 @@ function transform(value) {
   // JSON Schema object keywords ignore numbers. Ajv sees the lossless token
   // class as an object, so apply these keywords only to actual JSON objects.
   const objectKeywords = ["properties", "patternProperties", "additionalProperties", "propertyNames", "required", "minProperties", "maxProperties", "dependentRequired", "dependentSchemas", "dependencies", "unevaluatedProperties"];
-  const objectRules = {};
+  const objectRules = Object.create(null);
   for (const key of objectKeywords) if (Object.hasOwn(result, key)) { objectRules[key] = result[key]; delete result[key]; }
   if (Object.keys(objectRules).length) (result.allOf ??= []).push({if: {vonkType: ["object"]}, then: objectRules});
   return result;
@@ -60,8 +65,8 @@ ajv.addKeyword({keyword: "vonkBounds", code(context) {
   for (const [operator, bound, ieeeFloat] of context.schema) context.fail(_`!${func}(${context.data}, ${bound}, ${operator}, ${ieeeFloat})`);
 }});
 const schemas = Object.fromEntries(Object.entries(document.components?.schemas ?? {}).map(([name, schema]) => [name, transform(schema)]));
-const exports = {}, routes = [];
-const normalization = {};
+const exports = Object.create(null), routes = [];
+const normalization = Object.create(null);
 const componentId = "urn:vonk:control:components";
 ajv.addSchema({components: {schemas}}, componentId);
 function bindReferences(value) {
@@ -77,7 +82,7 @@ let index = 0;
 function shape(schema) {
   if (typeof schema !== "object" || schema === null) return {};
   if (schema.$ref) return {ref: schema.$ref.replace(/^#\/components\/schemas\//, "")};
-  const result = {};
+  const result = Object.create(null);
   if (schema.type) result.type = schema.type;
   if (schema.anyOf || schema.oneOf) result.alternatives = (schema.anyOf ?? schema.oneOf).map(option => {
     const name = `normalize${index++}`; register(option, name);
@@ -96,7 +101,7 @@ function shape(schema) {
 for (const [route, item] of Object.entries(document.paths)) {
   for (const [method, operation] of Object.entries(item)) {
     if (!operation || typeof operation !== "object" || !operation.responses) continue;
-    const responses = {}, requests = {}, parameters = {};
+    const responses = Object.create(null), requests = Object.create(null), parameters = Object.create(null);
     for (const location of ["path", "query"]) {
       const declared = [...(item.parameters ?? []), ...(operation.parameters ?? [])].filter(parameter => parameter.in === location && parameter.schema);
       if (!declared.length) continue;
@@ -105,7 +110,7 @@ for (const [route, item] of Object.entries(document.paths)) {
       register(schema, name); normalization[name] = shape(schema); parameters[location] = name;
     }
     for (const [status, response] of Object.entries(operation.responses)) {
-      responses[status] = {};
+      responses[status] = Object.create(null);
       for (const [media, content] of Object.entries(response.content ?? {})) {
       if (!content.schema) continue;
       const name = `contract${index++}`; register(content.schema, name);
@@ -130,7 +135,7 @@ for (const [route, item] of Object.entries(document.paths)) {
     routes.push({route, method: method.toUpperCase(), responses, requests, parameters, responseMaxBytes});
   }
 }
-const shapes = {};
+const shapes = Object.create(null);
 if (schemaOnly) register(parsed, "componentSuite");
 else for (const [name, schema] of Object.entries(document.components?.schemas ?? {})) {
   register({$ref: `#/components/schemas/${name}`}, `component${name}`);
@@ -149,7 +154,12 @@ fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + 'type Va
 // Route tables refer to the actual exported functions, never string names.
 const routeCode = JSON.stringify(routes).replace(/"(contract[0-9]+)"/g, "$1");
 const destination = path.join(out, "runtime.generated.js");
-const descriptor = value => JSON.stringify(value).replace(/"validate":"(normalize[0-9]+)"/g, '"validate":$1');
+const descriptor = (value, key = "") => {
+  if (key === "validate" && typeof value === "string" && /^normalize[0-9]+$/.test(value)) return value;
+  if (Array.isArray(value)) return `[${value.map(item => descriptor(item)).join(",")}]`;
+  if (value !== null && typeof value === "object") return `Object.fromEntries([${Object.entries(value).map(([name, item]) => `[${JSON.stringify(name)},${descriptor(item, name)}]`).join(",")}])`;
+  return JSON.stringify(value);
+};
 const normalizers = `\nconst shapes = ${descriptor(shapes)};\n` + Object.entries(normalization).map(([name, node]) => `Object.assign(${name}, {normalize: value => normalizeValidated(value, ${descriptor(node)}, shapes)});`).join("\n");
 fs.writeFileSync(destination, provenance + imports + code + normalizers + `\nexport const contractRoutes = ${routeCode};\n`);
 const node = ts.factory;

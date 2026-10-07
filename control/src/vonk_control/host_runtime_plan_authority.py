@@ -39,6 +39,11 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .profile_stop_authority import (
+    ProfileJobRunStopJob,
+    ProfileStopAuthorityError,
+    validate_profile_jobrun_stop_target,
+)
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
@@ -174,14 +179,40 @@ def derive_runtime_plan_binding(
         )
 
     stop = _parse_stop(operation.payload)
-    _service_stop_authority(
-        session,
-        parent=parent,
-        operation=operation,
-        node_id=node_id,
-        stop=stop,
-        now=now,
-    )
+    if parent.payload.get("execution_mode") == "profile-jobrun-stop":
+        try:
+            accepted = ProfileJobRunStopJob.model_validate_parent(parent.payload)
+            targets = [
+                target
+                for target in accepted.profile_stop_authorization.targets
+                if target.node_id == node_id
+                and target.stop_payload_sha256 == _payload_sha256(stop)
+            ]
+            if len(targets) != 1:
+                raise ProfileStopAuthorityError("profile Stop target is ambiguous")
+            validate_profile_jobrun_stop_target(
+                session,
+                accepted.profile_stop_authorization,
+                targets[0],
+                stop,
+                operation=operation,
+                stop_parent=parent,
+                now=now,
+            )
+        except (TypeError, ValueError) as error:
+            raise RuntimePlanAuthorityRefused(
+                "profile JobRun Stop authority is invalid",
+                reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+            ) from error
+    else:
+        _service_stop_authority(
+            session,
+            parent=parent,
+            operation=operation,
+            node_id=node_id,
+            stop=stop,
+            now=now,
+        )
     return RuntimePlanBinding(
         stop_plan_sha256=_payload_sha256(stop),
         run_generation=stop.run_generation,

@@ -23,8 +23,8 @@ class FailureLogTail(WireModel):
     truncated: bool
     # The collectors count physical buffers with usize/Py_ssize_t, rather
     # than accepting an arbitrary mathematical counter. Unknown remains null.
-    dropped_bytes: int | None = Field(ge=0, le=MAX_DROPPED_COUNT)
-    dropped_lines: int | None = Field(ge=0, le=MAX_DROPPED_COUNT)
+    dropped_bytes: Annotated[int, Field(ge=0, le=MAX_DROPPED_COUNT)] | None
+    dropped_lines: Annotated[int, Field(ge=0, le=MAX_DROPPED_COUNT)] | None
 
 
 class FailureProperty(WireModel):

@@ -1,8 +1,8 @@
-import {readFileSync} from "node:fs";
-import {afterEach, expect, test, vi} from "vitest";
+import {readFileSync, writeFileSync} from "node:fs";
+import {afterAll, afterEach, expect, test, vi} from "vitest";
 import {ApiClient, ApiError} from "./client";
 import {ContractViolation, validateComponent} from "./contract-json";
-import {contractEqual, parseContractJson, stringifyContractJson} from "./contract-numeric";
+import {contractEqual, stringifyContractJson} from "./contract-numeric";
 
 interface ConsumerCase {
   id: string;
@@ -20,7 +20,12 @@ const corpus: {version: number; cases: ConsumerCase[]} = file
   ? JSON.parse(readFileSync(file, "utf8"))
   : {version: 1, cases: []};
 const cases = corpus.cases.filter(item => item.consumers.includes("browser"));
+const exportedCases: {id: string; text: string}[] = [];
 afterEach(() => vi.unstubAllGlobals());
+afterAll(() => {
+  const output = process.env.VONK_CONSUMER_OUTPUT;
+  if (output) writeFileSync(output, JSON.stringify({version: 1, exports: exportedCases}) + "\n");
+});
 
 test.runIf(Boolean(file))("hosted corpus contains real consumer cases", () => {
   expect(corpus.version).toBe(1);
@@ -33,9 +38,11 @@ test.each(cases)("canonical browser component: $id", item => {
     return;
   }
   const value = validateComponent(item.component, item.text);
-  expect(contractEqual(value, parseContractJson(item.normalized_text ?? item.text))).toBe(true);
-  // The retained DTO can still be exported as JSON numeric values, not strings.
-  expect(contractEqual(parseContractJson(stringifyContractJson(value)), parseContractJson(item.normalized_text ?? item.text))).toBe(true);
+  const text = stringifyContractJson(value);
+  expect(contractEqual(value, validateComponent(item.component, text))).toBe(true);
+  // The owning Python model checks defaults, timestamps, exact scalar kinds and
+  // IEEE zero signs on both documents in the connected hosted verifier.
+  exportedCases.push({id: item.id, text});
 });
 test.each(cases.filter(item => item.http && item.browserGeneratedMethod === "job"))("actual raw and generated HTTP consumers: $id", async item => {
   const http = item.http!;
@@ -46,6 +53,6 @@ test.each(cases.filter(item => item.http && item.browserGeneratedMethod === "job
   for (const read of [raw, generated]) {
     if (!item.accepted) await expect(read()).rejects.toBeInstanceOf(ContractViolation);
     else if (http.status >= 400) await expect(read()).rejects.toBeInstanceOf(ApiError);
-    else expect(contractEqual(await read(), parseContractJson(item.normalized_text ?? item.text))).toBe(true);
+    else expect(contractEqual(await read(), validateComponent(item.component, http.text))).toBe(true);
   }
 });

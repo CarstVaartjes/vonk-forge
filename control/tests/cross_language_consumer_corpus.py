@@ -27,6 +27,7 @@ from vonk_control.operation_api import (
     JobDetailResponse,
     RequestValidationProblem,
 )
+from vonk_forge_contracts.recipe import RecipeRuntimeEnvironment, RecipeSetting
 
 NODE = "spk_" + "1" * 32
 FENCE = "11111111-1111-4111-8111-111111111111"
@@ -37,6 +38,8 @@ MODELS: dict[str, type[BaseModel]] = {
     "FleetProfileInput": FleetProfileInput,
     "FleetProfileDefinitionView": FleetProfileDefinitionView,
     "RecipeStartPayload": RecipeStartPayload,
+    "RecipeSetting": RecipeSetting,
+    "RecipeRuntimeEnvironment": RecipeRuntimeEnvironment,
     "AgentResult": AgentResult,
     "AgentProgress": AgentProgress,
     "RecipeBuildEnvironmentArgument": RecipeBuildEnvironmentArgument,
@@ -140,7 +143,12 @@ def corpus() -> dict:
                 "text": text,
                 "accepted": accepted,
                 "normalized_text": normalized,
-                "consumers": consumers or ["python", "rust", "browser"],
+                "consumers": consumers
+                or (
+                    ["python", "rust"]
+                    if component == "AgentResult"
+                    else ["python", "rust", "browser"]
+                ),
             }
         )
 
@@ -185,6 +193,30 @@ def corpus() -> dict:
         json.dumps({**start_document, "run_generation": 2**32 + 1}),
         consumers=["python", "rust"],
     )
+
+    for component, fields in (
+        ("RecipeSetting", {"change_effect": "restart"}),
+        ("RecipeRuntimeEnvironment", {"name": "VONK_SCALAR"}),
+    ):
+        for token in ("1000.0", "-0", "-0.0", "1.00000000000000001", "-1e-400"):
+            add(
+                f"float-kind-{component}-{token}",
+                component,
+                json.dumps({**fields, "value": "__NUMBER__"}).replace(
+                    '"__NUMBER__"', token
+                ),
+                consumers=["python", "browser"],
+            )
+    for component, document in (
+        ("FailureDiagnostics", diagnostic()),
+        ("OperationProgress", {"phase": "transfer"}),
+    ):
+        spoof = {"$serde_json::private::Number": "2"}
+        if component == "FailureDiagnostics":
+            document["stdout"]["dropped_bytes"] = spoof
+        else:
+            document["completed_bytes"] = spoof
+        add(f"private-number-object-{component}", component, json.dumps(document))
 
     base = diagnostic()
     add("diagnostics-producer", "FailureDiagnostics", json.dumps(base))
@@ -413,6 +445,8 @@ def corpus() -> dict:
             "OperationProgress": "Rust agent protocol/heartbeat consumer covered; no Rust Controller API response parser is claimed.",
             "FleetProfileInput": "Canonical input component validation only; no browser HTTP write or Rust API parser is claimed.",
             "FleetProfileDefinitionView": "Canonical projection component validation only; no invented route or Rust parser is claimed.",
+            "RecipeSetting": "Canonical scalar component; browser export returns to the actual Python recipe reader, no Rust or HTTP route is claimed.",
+            "RecipeRuntimeEnvironment": "Canonical scalar component; browser export returns to the actual Python runtime-environment reader, no Rust or HTTP route is claimed.",
             "RecipeStartPayload": "Actual generated Rust Agent payload decoder; no browser route exists.",
             "CompiledExecutionPlan": "Agent/helper wire only; no browser route exists.",
             "RecipeStopPayload": "Agent/helper wire only; no browser route exists.",

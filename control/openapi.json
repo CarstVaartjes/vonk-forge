@@ -172,8 +172,8 @@
           "helper_exit_code": {
             "anyOf": [
               {
-                "maximum": 255.0,
-                "minimum": 0.0,
+                "maximum": 255,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -231,8 +231,8 @@
           "retry_after_seconds": {
             "anyOf": [
               {
-                "maximum": 4294967295.0,
-                "minimum": 0.0,
+                "maximum": 4294967295,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -308,8 +308,8 @@
         "additionalProperties": false,
         "properties": {
           "installed_bytes": {
-            "maximum": 17592186044416.0,
-            "minimum": 0.0,
+            "maximum": 17592186044416,
+            "minimum": 0,
             "title": "Installed Bytes",
             "type": "integer"
           }
@@ -380,8 +380,8 @@
         "additionalProperties": false,
         "properties": {
           "attempt": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Attempt",
             "type": "integer"
           },
@@ -942,7 +942,7 @@
         "additionalProperties": false,
         "properties": {
           "attempts": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Attempts",
             "type": "integer"
           },
@@ -1089,8 +1089,8 @@
             "type": "string"
           },
           "size_bytes": {
-            "maximum": 536870912.0,
-            "minimum": 0.0,
+            "maximum": 536870912,
+            "minimum": 0,
             "title": "Size Bytes",
             "type": "integer"
           },
@@ -1114,8 +1114,8 @@
         "additionalProperties": false,
         "properties": {
           "max_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 0.0,
+            "maximum": 1073741824,
+            "minimum": 0,
             "title": "Max Bytes",
             "type": "integer"
           },
@@ -1213,8 +1213,8 @@
             "type": "object"
           },
           "timeout_seconds": {
-            "maximum": 3600.0,
-            "minimum": 1.0,
+            "maximum": 3600,
+            "minimum": 1,
             "title": "Timeout Seconds",
             "type": "integer"
           }
@@ -1298,7 +1298,7 @@
             "type": "string"
           },
           "input_total_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Input Total Bytes",
             "type": "integer"
           },
@@ -1432,8 +1432,8 @@
             "type": "array"
           },
           "timeout_seconds": {
-            "maximum": 3600.0,
-            "minimum": 1.0,
+            "maximum": 3600,
+            "minimum": 1,
             "title": "Timeout Seconds",
             "type": "integer"
           },
@@ -1517,7 +1517,7 @@
           "elapsed_milliseconds": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -1555,7 +1555,7 @@
           "peak_memory_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -1595,27 +1595,27 @@
         "additionalProperties": false,
         "properties": {
           "in_flight_uploads": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "In Flight Uploads",
             "type": "integer"
           },
           "max_stored_bytes": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Max Stored Bytes",
             "type": "integer"
           },
           "remaining_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Remaining Bytes",
             "type": "integer"
           },
           "reserved_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reserved Bytes",
             "type": "integer"
           },
           "used_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Used Bytes",
             "type": "integer"
           }
@@ -1634,44 +1634,44 @@
         "additionalProperties": false,
         "properties": {
           "max_input_file_bytes": {
-            "maximum": 536870912.0,
-            "minimum": 1.0,
+            "maximum": 536870912,
+            "minimum": 1,
             "title": "Max Input File Bytes",
             "type": "integer"
           },
           "max_input_files": {
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "maximum": 32,
+            "minimum": 1,
             "title": "Max Input Files",
             "type": "integer"
           },
           "max_input_total_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 1.0,
+            "maximum": 1073741824,
+            "minimum": 1,
             "title": "Max Input Total Bytes",
             "type": "integer"
           },
           "max_output_file_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 1.0,
+            "maximum": 1073741824,
+            "minimum": 1,
             "title": "Max Output File Bytes",
             "type": "integer"
           },
           "max_output_files": {
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "maximum": 32,
+            "minimum": 1,
             "title": "Max Output Files",
             "type": "integer"
           },
           "max_output_total_bytes": {
-            "maximum": 2147483648.0,
-            "minimum": 1.0,
+            "maximum": 2147483648,
+            "minimum": 1,
             "title": "Max Output Total Bytes",
             "type": "integer"
           },
           "max_timeout_seconds": {
-            "maximum": 3600.0,
-            "minimum": 1.0,
+            "maximum": 3600,
+            "minimum": 1,
             "title": "Max Timeout Seconds",
             "type": "integer"
           },
@@ -1722,8 +1722,8 @@
         "additionalProperties": false,
         "properties": {
           "max_total_bytes": {
-            "maximum": 2147483648.0,
-            "minimum": 1.0,
+            "maximum": 2147483648,
+            "minimum": 1,
             "title": "Max Total Bytes",
             "type": "integer"
           },
@@ -1769,8 +1769,8 @@
             "type": "string"
           },
           "size_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 0.0,
+            "maximum": 1073741824,
+            "minimum": 0,
             "title": "Size Bytes",
             "type": "integer"
           }
@@ -1798,20 +1798,20 @@
             "type": "array"
           },
           "max_file_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 1.0,
+            "maximum": 1073741824,
+            "minimum": 1,
             "title": "Max File Bytes",
             "type": "integer"
           },
           "max_files": {
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "maximum": 32,
+            "minimum": 1,
             "title": "Max Files",
             "type": "integer"
           },
           "max_total_bytes": {
-            "maximum": 2147483648.0,
-            "minimum": 1.0,
+            "maximum": 2147483648,
+            "minimum": 1,
             "title": "Max Total Bytes",
             "type": "integer"
           }
@@ -1864,20 +1864,20 @@
             "type": "string"
           },
           "max_file_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 1.0,
+            "maximum": 1073741824,
+            "minimum": 1,
             "title": "Max File Bytes",
             "type": "integer"
           },
           "max_files": {
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "maximum": 32,
+            "minimum": 1,
             "title": "Max Files",
             "type": "integer"
           },
           "max_total_bytes": {
-            "maximum": 2147483648.0,
-            "minimum": 1.0,
+            "maximum": 2147483648,
+            "minimum": 1,
             "title": "Max Total Bytes",
             "type": "integer"
           },
@@ -1892,8 +1892,8 @@
             "type": "array"
           },
           "min_files": {
-            "maximum": 32.0,
-            "minimum": 0.0,
+            "maximum": 32,
+            "minimum": 0,
             "title": "Min Files",
             "type": "integer"
           }
@@ -1928,7 +1928,7 @@
           "artifact_set_bytes": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -1951,14 +1951,14 @@
           },
           "copied_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Copied Bytes",
             "type": "integer"
           },
           "missing_nas_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -1970,7 +1970,7 @@
           "missing_spark_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -1983,7 +1983,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "minimum": 0.0,
+                  "minimum": 0,
                   "type": "integer"
                 },
                 "type": "object"
@@ -2005,7 +2005,7 @@
           },
           "reclaimable_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reclaimable Bytes",
             "type": "integer"
           },
@@ -2020,14 +2020,14 @@
           },
           "reclaimed_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reclaimed Bytes",
             "type": "integer"
           },
           "required_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -2046,7 +2046,7 @@
           },
           "reused_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reused Bytes",
             "type": "integer"
           },
@@ -2085,7 +2085,7 @@
           "copied_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -2109,7 +2109,7 @@
           "downloaded_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -2796,7 +2796,7 @@
           "free_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -2828,7 +2828,7 @@
           "required_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -2840,7 +2840,7 @@
           "retry_after_seconds": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -2869,7 +2869,7 @@
           "shortfall_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -3197,10 +3197,12 @@
             "type": "boolean"
           },
           "maximum": {
+            "default": null,
             "title": "Maximum",
             "type": "null"
           },
           "minimum": {
+            "default": null,
             "title": "Minimum",
             "type": "null"
           },
@@ -3781,7 +3783,7 @@
           "available_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -3801,7 +3803,7 @@
           "expected_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -4047,7 +4049,7 @@
           "additional_disk_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -4059,7 +4061,7 @@
           "image_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -4071,7 +4073,7 @@
           "model_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -4083,7 +4085,7 @@
           "per_spark_memory_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -4116,32 +4118,32 @@
         "additionalProperties": false,
         "properties": {
           "disk_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Disk Bytes",
             "type": "integer"
           },
           "gpu_memory_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Gpu Memory Bytes",
             "type": "integer"
           },
           "host_memory_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Host Memory Bytes",
             "type": "integer"
           },
           "port_count": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Port Count",
             "type": "integer"
           },
           "unified_memory_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Unified Memory Bytes",
             "type": "integer"
           }
@@ -4525,8 +4527,8 @@
             "type": "string"
           },
           "max_timeout_seconds": {
-            "maximum": 3600.0,
-            "minimum": 1.0,
+            "maximum": 3600,
+            "minimum": 1,
             "title": "Max Timeout Seconds",
             "type": "integer"
           },
@@ -5234,7 +5236,7 @@
           "expected_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -5246,7 +5248,7 @@
           "missing_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -5304,7 +5306,7 @@
           },
           "verified_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Verified Bytes",
             "type": "integer"
           },
@@ -5526,8 +5528,8 @@
         "description": "One model file referenced by an assignment.",
         "properties": {
           "bytes": {
-            "maximum": 17592186044416.0,
-            "minimum": 0.0,
+            "maximum": 17592186044416,
+            "minimum": 0,
             "title": "Bytes",
             "type": "integer"
           },
@@ -5617,26 +5619,26 @@
             "type": "string"
           },
           "data": {
-            "maximum": 31.0,
-            "minimum": 1.0,
+            "maximum": 31,
+            "minimum": 1,
             "title": "Data",
             "type": "integer"
           },
           "pipeline": {
-            "maximum": 31.0,
-            "minimum": 1.0,
+            "maximum": 31,
+            "minimum": 1,
             "title": "Pipeline",
             "type": "integer"
           },
           "tensor": {
-            "maximum": 31.0,
-            "minimum": 1.0,
+            "maximum": 31,
+            "minimum": 1,
             "title": "Tensor",
             "type": "integer"
           },
           "world_size": {
-            "maximum": 31.0,
-            "minimum": 1.0,
+            "maximum": 31,
+            "minimum": 1,
             "title": "World Size",
             "type": "integer"
           }
@@ -5673,7 +5675,7 @@
           "concurrency": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -5685,7 +5687,7 @@
           "context_tokens": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -5732,7 +5734,7 @@
           "max_batch_tokens": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -5784,8 +5786,8 @@
             "type": "string"
           },
           "generation": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 1.0,
+            "maximum": 9223372036854775807,
+            "minimum": 1,
             "title": "Generation",
             "type": "integer"
           },
@@ -6029,10 +6031,12 @@
             "$ref": "#/components/schemas/ParameterScalar"
           },
           "maximum": {
+            "default": null,
             "title": "Maximum",
             "type": "null"
           },
           "minimum": {
+            "default": null,
             "title": "Minimum",
             "type": "null"
           },
@@ -6145,8 +6149,8 @@
           "http_status": {
             "anyOf": [
               {
-                "maximum": 599.0,
-                "minimum": 100.0,
+                "maximum": 599,
+                "minimum": 100,
                 "type": "integer"
               },
               {
@@ -6203,8 +6207,8 @@
         "additionalProperties": false,
         "properties": {
           "attempt": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Attempt",
             "type": "integer"
           },
@@ -6231,8 +6235,8 @@
           "rank": {
             "anyOf": [
               {
-                "maximum": 2147483647.0,
-                "minimum": 0.0,
+                "maximum": 2147483647,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -6459,8 +6463,8 @@
           "dropped_bytes": {
             "anyOf": [
               {
-                "maximum": 1.8446744073709552e+19,
-                "minimum": 0.0,
+                "maximum": 18446744073709551615,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -6472,8 +6476,8 @@
           "dropped_lines": {
             "anyOf": [
               {
-                "maximum": 1.8446744073709552e+19,
-                "minimum": 0.0,
+                "maximum": 18446744073709551615,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -6798,19 +6802,19 @@
         "properties": {
           "cached": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Cached",
             "type": "integer"
           },
           "missing": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Missing",
             "type": "integer"
           },
           "unknown": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Unknown",
             "type": "integer"
           }
@@ -7052,8 +7056,8 @@
             "type": "boolean"
           },
           "lines": {
-            "maximum": 1000.0,
-            "minimum": 1.0,
+            "maximum": 1000,
+            "minimum": 1,
             "title": "Lines",
             "type": "integer"
           },
@@ -7496,8 +7500,8 @@
             "type": "array"
           },
           "workload_intent_ordinal": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Workload Intent Ordinal",
             "type": "integer"
           }
@@ -7524,7 +7528,7 @@
             "type": "string"
           },
           "queue_index": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Queue Index",
             "type": "integer"
           },
@@ -7547,8 +7551,8 @@
         "additionalProperties": false,
         "properties": {
           "profile_number": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Profile Number",
             "type": "integer"
           },
@@ -7650,8 +7654,8 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
-                "maximum": 2147483647.0,
-                "minimum": 1.0,
+                "maximum": 2147483647,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -7848,7 +7852,7 @@
         "properties": {
           "admission_attempt": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Admission Attempt",
             "type": "integer"
           },
@@ -7871,7 +7875,7 @@
           },
           "attempt": {
             "default": 1,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Attempt",
             "type": "integer"
           },
@@ -7917,8 +7921,8 @@
           },
           "completed_steps": {
             "default": 0,
-            "maximum": 1024.0,
-            "minimum": 0.0,
+            "maximum": 1024,
+            "minimum": 0,
             "title": "Completed Steps",
             "type": "integer"
           },
@@ -8040,16 +8044,16 @@
           },
           "total_steps": {
             "default": 0,
-            "maximum": 1024.0,
-            "minimum": 0.0,
+            "maximum": 1024,
+            "minimum": 0,
             "title": "Total Steps",
             "type": "integer"
           },
           "workload_intent_ordinal": {
             "anyOf": [
               {
-                "maximum": 2147483647.0,
-                "minimum": 1.0,
+                "maximum": 2147483647,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -8100,8 +8104,8 @@
             "type": "boolean"
           },
           "completed_steps": {
-            "maximum": 1024.0,
-            "minimum": 0.0,
+            "maximum": 1024,
+            "minimum": 0,
             "title": "Completed Steps",
             "type": "integer"
           }
@@ -8118,7 +8122,7 @@
         "properties": {
           "attempt": {
             "default": 1,
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Attempt",
             "type": "integer"
           },
@@ -8158,8 +8162,8 @@
             "title": "Current Operation Id"
           },
           "current_step": {
-            "maximum": 1024.0,
-            "minimum": 0.0,
+            "maximum": 1024,
+            "minimum": 0,
             "title": "Current Step",
             "type": "integer"
           },
@@ -8283,8 +8287,8 @@
             "title": "Superseded By"
           },
           "total_steps": {
-            "maximum": 1024.0,
-            "minimum": 0.0,
+            "maximum": 1024,
+            "minimum": 0,
             "title": "Total Steps",
             "type": "integer"
           },
@@ -8461,7 +8465,7 @@
           "queue_index": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -8676,8 +8680,8 @@
         "description": "Canonical read projection of one logical profile assignment.",
         "properties": {
           "assigned_sparks": {
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "maximum": 32,
+            "minimum": 1,
             "title": "Assigned Sparks",
             "type": "integer"
           },
@@ -8747,8 +8751,8 @@
           "required_sparks": {
             "anyOf": [
               {
-                "maximum": 32.0,
-                "minimum": 1.0,
+                "maximum": 32,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -8797,7 +8801,7 @@
           "bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -8860,7 +8864,7 @@
           "startup_budget_seconds": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -8872,7 +8876,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -9034,8 +9038,8 @@
             "title": "Id"
           },
           "number": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Number",
             "type": "integer"
           },
@@ -9050,8 +9054,8 @@
             ]
           },
           "revision": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Revision",
             "type": "integer"
           }
@@ -9126,7 +9130,7 @@
             "type": "string"
           },
           "queue_index": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Queue Index",
             "type": "integer"
           },
@@ -9173,7 +9177,7 @@
             "type": "string"
           },
           "workload_intent_ordinal": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Workload Intent Ordinal",
             "type": "integer"
           }
@@ -9363,8 +9367,8 @@
             "title": "Assignments"
           },
           "number": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Number",
             "type": "integer"
           },
@@ -9423,8 +9427,8 @@
           },
           "expected_revision": {
             "default": 0,
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Expected Revision",
             "type": "integer"
           },
@@ -9627,8 +9631,8 @@
             "type": "string"
           },
           "rank": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
@@ -9686,8 +9690,8 @@
         "additionalProperties": false,
         "properties": {
           "index": {
-            "maximum": 1023.0,
-            "minimum": 0.0,
+            "maximum": 1023,
+            "minimum": 0,
             "title": "Index",
             "type": "integer"
           },
@@ -9727,56 +9731,56 @@
         "additionalProperties": false,
         "properties": {
           "already_correct": {
-            "maximum": 64.0,
-            "minimum": 0.0,
+            "maximum": 64,
+            "minimum": 0,
             "title": "Already Correct",
             "type": "integer"
           },
           "blockers": {
-            "maximum": 2048.0,
-            "minimum": 0.0,
+            "maximum": 2048,
+            "minimum": 0,
             "title": "Blockers",
             "type": "integer"
           },
           "builds": {
-            "maximum": 64.0,
-            "minimum": 0.0,
+            "maximum": 64,
+            "minimum": 0,
             "title": "Builds",
             "type": "integer"
           },
           "distributions": {
-            "maximum": 64.0,
-            "minimum": 0.0,
+            "maximum": 64,
+            "minimum": 0,
             "title": "Distributions",
             "type": "integer"
           },
           "installs": {
-            "maximum": 64.0,
-            "minimum": 0.0,
+            "maximum": 64,
+            "minimum": 0,
             "title": "Installs",
             "type": "integer"
           },
           "placements": {
-            "maximum": 64.0,
-            "minimum": 0.0,
+            "maximum": 64,
+            "minimum": 0,
             "title": "Placements",
             "type": "integer"
           },
           "starts": {
-            "maximum": 64.0,
-            "minimum": 0.0,
+            "maximum": 64,
+            "minimum": 0,
             "title": "Starts",
             "type": "integer"
           },
           "stops": {
-            "maximum": 512.0,
-            "minimum": 0.0,
+            "maximum": 512,
+            "minimum": 0,
             "title": "Stops",
             "type": "integer"
           },
           "uninstalls": {
-            "maximum": 512.0,
-            "minimum": 0.0,
+            "maximum": 512,
+            "minimum": 0,
             "title": "Uninstalls",
             "type": "integer"
           }
@@ -9981,8 +9985,8 @@
           "profile_revision": {
             "anyOf": [
               {
-                "maximum": 2147483647.0,
-                "minimum": 1.0,
+                "maximum": 2147483647,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -10100,7 +10104,7 @@
           "disk_required_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -10112,7 +10116,7 @@
           "memory_floor_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -10155,7 +10159,7 @@
           "memory_required_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -10171,8 +10175,8 @@
           },
           "ports_required": {
             "items": {
-              "maximum": 65535.0,
-              "minimum": 1.0,
+              "maximum": 65535,
+              "minimum": 1,
               "type": "integer"
             },
             "title": "Ports Required",
@@ -10478,8 +10482,8 @@
           },
           "position": {
             "default": 0,
-            "maximum": 128.0,
-            "minimum": 0.0,
+            "maximum": 128,
+            "minimum": 0,
             "title": "Position",
             "type": "integer"
           },
@@ -10556,8 +10560,8 @@
           },
           "stop_reissue_attempt": {
             "default": 0,
-            "maximum": 32.0,
-            "minimum": 0.0,
+            "maximum": 32,
+            "minimum": 0,
             "title": "Stop Reissue Attempt",
             "type": "integer"
           }
@@ -10626,7 +10630,7 @@
             "title": "Original Operation Id"
           },
           "queue_index": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Queue Index",
             "type": "integer"
           },
@@ -10691,7 +10695,7 @@
             "title": "Original Operation Id"
           },
           "queue_index": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Queue Index",
             "type": "integer"
           }
@@ -10830,8 +10834,8 @@
           "loaded_revision": {
             "anyOf": [
               {
-                "maximum": 2147483647.0,
-                "minimum": 1.0,
+                "maximum": 2147483647,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -10855,8 +10859,8 @@
             "type": "array"
           },
           "number": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Number",
             "type": "integer"
           },
@@ -10866,8 +10870,8 @@
             "type": "string"
           },
           "revision": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Revision",
             "type": "integer"
           },
@@ -10950,8 +10954,8 @@
             "type": "string"
           },
           "event_cursor": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Event Cursor",
             "type": "integer"
           },
@@ -11102,6 +11106,7 @@
                 "type": "null"
               }
             ],
+            "default": null,
             "title": "Maximum"
           },
           "minimum": {
@@ -11116,6 +11121,7 @@
                 "type": "null"
               }
             ],
+            "default": null,
             "title": "Minimum"
           },
           "name": {
@@ -11155,7 +11161,7 @@
           "age_seconds": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -11179,8 +11185,8 @@
           "maximum_age_seconds": {
             "anyOf": [
               {
-                "maximum": 86400.0,
-                "minimum": 1.0,
+                "maximum": 86400,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -11229,22 +11235,22 @@
         "properties": {
           "inventory_fresh_seconds": {
             "default": 300,
-            "maximum": 3600.0,
-            "minimum": 1.0,
+            "maximum": 3600,
+            "minimum": 1,
             "title": "Inventory Fresh Seconds",
             "type": "integer"
           },
           "telemetry_delayed_seconds": {
             "default": 20,
-            "maximum": 300.0,
-            "minimum": 1.0,
+            "maximum": 300,
+            "minimum": 1,
             "title": "Telemetry Delayed Seconds",
             "type": "integer"
           },
           "telemetry_live_seconds": {
             "default": 6,
-            "maximum": 60.0,
-            "minimum": 1.0,
+            "maximum": 60,
+            "minimum": 1,
             "title": "Telemetry Live Seconds",
             "type": "integer"
           }
@@ -11460,7 +11466,7 @@
         "description": "One GitHub release asset selected for an existing model file.",
         "properties": {
           "asset_id": {
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Asset Id",
             "type": "integer"
           },
@@ -11497,7 +11503,7 @@
             "type": "string"
           },
           "release_id": {
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Release Id",
             "type": "integer"
           },
@@ -11669,8 +11675,8 @@
         "properties": {
           "affected_ranks": {
             "items": {
-              "maximum": 499.0,
-              "minimum": 0.0,
+              "maximum": 499,
+              "minimum": 0,
               "type": "integer"
             },
             "maxItems": 500,
@@ -11678,8 +11684,8 @@
             "type": "array"
           },
           "expected_rank_count": {
-            "maximum": 500.0,
-            "minimum": 1.0,
+            "maximum": 500,
+            "minimum": 1,
             "title": "Expected Rank Count",
             "type": "integer"
           },
@@ -11695,8 +11701,8 @@
           "installed_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 0.0,
+                "maximum": 9223372036854775807,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -11707,8 +11713,8 @@
           },
           "present_ranks": {
             "items": {
-              "maximum": 499.0,
-              "minimum": 0.0,
+              "maximum": 499,
+              "minimum": 0,
               "type": "integer"
             },
             "maxItems": 500,
@@ -11716,8 +11722,8 @@
             "type": "array"
           },
           "rank": {
-            "maximum": 499.0,
-            "minimum": 0.0,
+            "maximum": 499,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
@@ -11742,8 +11748,8 @@
           "required_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 0.0,
+                "maximum": 9223372036854775807,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -11860,7 +11866,7 @@
             "type": "string"
           },
           "installed_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Installed Bytes",
             "type": "integer"
           },
@@ -11871,13 +11877,13 @@
             "type": "string"
           },
           "rank": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
           "required_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Required Bytes",
             "type": "integer"
           },
@@ -11982,6 +11988,7 @@
                 "type": "null"
               }
             ],
+            "default": null,
             "title": "Maximum"
           },
           "minimum": {
@@ -11993,6 +12000,7 @@
                 "type": "null"
               }
             ],
+            "default": null,
             "title": "Minimum"
           },
           "name": {
@@ -12085,7 +12093,7 @@
         "properties": {
           "age_seconds": {
             "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Age Seconds",
             "type": "number"
           },
@@ -12110,14 +12118,14 @@
             "type": "string"
           },
           "disk_free_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Disk Free Bytes",
             "type": "integer"
           },
           "disk_total_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Disk Total Bytes",
             "type": "integer"
           },
@@ -12136,8 +12144,8 @@
           "fabric_bandwidth_mbps": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 1.0,
+                "maximum": 9223372036854775807,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -12155,32 +12163,32 @@
             "type": "string"
           },
           "gpu_count": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Gpu Count",
             "type": "integer"
           },
           "gpu_memory_free_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Gpu Memory Free Bytes",
             "type": "integer"
           },
           "gpu_memory_total_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Gpu Memory Total Bytes",
             "type": "integer"
           },
           "host_memory_free_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Host Memory Free Bytes",
             "type": "integer"
           },
           "host_memory_total_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "maximum": 9223372036854775807,
+            "minimum": 0,
             "title": "Host Memory Total Bytes",
             "type": "integer"
           },
@@ -12357,8 +12365,8 @@
             "type": "string"
           },
           "current_attempt": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Current Attempt",
             "type": "integer"
           },
@@ -12389,7 +12397,7 @@
           "operation_total": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -12476,7 +12484,7 @@
             "title": "Target Next Cursor"
           },
           "target_total": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Target Total",
             "type": "integer"
           },
@@ -12510,8 +12518,8 @@
         "additionalProperties": false,
         "properties": {
           "attempt": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Attempt",
             "type": "integer"
           },
@@ -12632,7 +12640,7 @@
             "type": "string"
           },
           "target_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Target Count",
             "type": "integer"
           }
@@ -12651,12 +12659,12 @@
         "additionalProperties": false,
         "properties": {
           "completed": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Completed",
             "type": "integer"
           },
           "failed": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Failed",
             "type": "integer"
           },
@@ -12671,12 +12679,12 @@
             ]
           },
           "running": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Running",
             "type": "integer"
           },
           "total": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Total",
             "type": "integer"
           }
@@ -13053,7 +13061,7 @@
         "properties": {
           "completed_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Completed Bytes",
             "type": "integer"
           },
@@ -13098,7 +13106,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -13426,7 +13434,7 @@
             "type": "array"
           },
           "node_count": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Node Count",
             "type": "integer"
           },
@@ -13506,7 +13514,7 @@
           "disk_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -13518,7 +13526,7 @@
           "image_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -13530,7 +13538,7 @@
           "memory_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -13542,7 +13550,7 @@
           "runtime_memory_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -13620,7 +13628,7 @@
             "maxProperties": 33,
             "patternProperties": {
               "^spk_[0-9a-f]{32}$": {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               }
             },
@@ -13686,8 +13694,8 @@
             "title": "Pending Node Id"
           },
           "phase_index": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Phase Index",
             "type": "integer"
           },
@@ -13979,12 +13987,12 @@
             "type": "string"
           },
           "stale_installation_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Stale Installation Count",
             "type": "integer"
           },
           "stale_run_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Stale Run Count",
             "type": "integer"
           }
@@ -14104,7 +14112,7 @@
             "title": "Expected Commit"
           },
           "imported_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Imported Count",
             "type": "integer"
           },
@@ -14149,7 +14157,7 @@
             "type": "array"
           },
           "processed_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Processed Count",
             "type": "integer"
           },
@@ -14165,7 +14173,7 @@
             "type": "string"
           },
           "skipped_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Skipped Count",
             "type": "integer"
           },
@@ -14185,7 +14193,7 @@
             "type": "string"
           },
           "total_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Total Count",
             "type": "integer"
           },
@@ -14198,17 +14206,17 @@
             "type": "string"
           },
           "unchanged_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Unchanged Count",
             "type": "integer"
           },
           "updated_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Updated Count",
             "type": "integer"
           },
           "withdrawn_count": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Withdrawn Count",
             "type": "integer"
           },
@@ -14375,8 +14383,8 @@
           "mapping_generation": {
             "anyOf": [
               {
-                "maximum": 2147483647.0,
-                "minimum": 1.0,
+                "maximum": 2147483647,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -14516,13 +14524,13 @@
         "description": "Exact model set, independent of transfer progress and verification time.",
         "properties": {
           "artifact_count": {
-            "maximum": 1024.0,
-            "minimum": 1.0,
+            "maximum": 1024,
+            "minimum": 1,
             "title": "Artifact Count",
             "type": "integer"
           },
           "artifact_set_bytes": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Artifact Set Bytes",
             "type": "integer"
           },
@@ -14572,13 +14580,13 @@
         "description": "Complete exact model set, including auxiliary and dependency files.",
         "properties": {
           "artifact_count": {
-            "maximum": 1024.0,
-            "minimum": 1.0,
+            "maximum": 1024,
+            "minimum": 1,
             "title": "Artifact Count",
             "type": "integer"
           },
           "artifact_set_bytes": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Artifact Set Bytes",
             "type": "integer"
           },
@@ -15245,7 +15253,7 @@
           "eta_seconds": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -15374,7 +15382,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -15384,7 +15392,7 @@
             "title": "Total Bytes"
           },
           "transferred_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Transferred Bytes",
             "type": "integer"
           }
@@ -15679,7 +15687,7 @@
             "type": "array"
           },
           "reclaimed_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reclaimed Bytes",
             "type": "integer"
           },
@@ -16316,7 +16324,7 @@
             "type": "string"
           },
           "size_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Size Bytes",
             "type": "integer"
           }
@@ -16347,7 +16355,7 @@
             "type": "string"
           },
           "size_bytes": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Size Bytes",
             "type": "integer"
           }
@@ -16853,8 +16861,8 @@
           "link_speed_mbps": {
             "anyOf": [
               {
-                "maximum": 1000000.0,
-                "minimum": 1.0,
+                "maximum": 1000000,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -16898,7 +16906,7 @@
             "anyOf": [
               {
                 "maximum": 9.223372036854776e+18,
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -16965,8 +16973,8 @@
             "type": "string"
           },
           "generation": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Generation",
             "type": "integer"
           },
@@ -17242,7 +17250,7 @@
             "type": "string"
           },
           "sequence": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Sequence",
             "type": "integer"
           }
@@ -17258,8 +17266,8 @@
         "additionalProperties": false,
         "properties": {
           "attempt": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Attempt",
             "type": "integer"
           },
@@ -17378,21 +17386,6 @@
                 "type": "null"
               }
             ]
-          },
-          "projection_issues": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/OperationProjectionIssue"
-                },
-                "maxItems": 2,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Projection Issues"
           },
           "recovery": {
             "anyOf": [
@@ -17540,8 +17533,8 @@
           "bytes_per_second": {
             "anyOf": [
               {
-                "maximum": 1000000000000000.0,
-                "minimum": 0.0,
+                "maximum": 1000000000000000,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -17552,14 +17545,14 @@
           },
           "completed_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Completed Bytes",
             "type": "integer"
           },
           "completed_items": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -17571,7 +17564,7 @@
           "elapsed_seconds": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -17583,8 +17576,8 @@
           "eta_seconds": {
             "anyOf": [
               {
-                "maximum": 1000000000.0,
-                "minimum": 0.0,
+                "maximum": 1000000000,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -17657,8 +17650,8 @@
           "smoothed_bytes_per_second": {
             "anyOf": [
               {
-                "maximum": 1000000000000000.0,
-                "minimum": 0.0,
+                "maximum": 1000000000000000,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -17677,7 +17670,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -17689,7 +17682,7 @@
           "total_items": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -17765,8 +17758,8 @@
           "bytes_per_second": {
             "anyOf": [
               {
-                "maximum": 1000000000000000.0,
-                "minimum": 0.0,
+                "maximum": 1000000000000000,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -17787,14 +17780,14 @@
           },
           "completed_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Completed Bytes",
             "type": "integer"
           },
           "completed_items": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -17806,7 +17799,7 @@
           "elapsed_seconds": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -17818,8 +17811,8 @@
           "eta_seconds": {
             "anyOf": [
               {
-                "maximum": 1000000000.0,
-                "minimum": 0.0,
+                "maximum": 1000000000,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -17894,8 +17887,8 @@
           "smoothed_bytes_per_second": {
             "anyOf": [
               {
-                "maximum": 1000000000000000.0,
-                "minimum": 0.0,
+                "maximum": 1000000000000000,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -17907,7 +17900,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -17924,7 +17917,7 @@
           "total_items": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -17938,43 +17931,6 @@
           "phase"
         ],
         "title": "OperationProgress",
-        "type": "object"
-      },
-      "OperationProjectionIssue": {
-        "additionalProperties": false,
-        "description": "One optional fact unavailable within this response's reader allocation.",
-        "properties": {
-          "budget_bytes": {
-            "minimum": 1.0,
-            "title": "Budget Bytes",
-            "type": "integer"
-          },
-          "field": {
-            "enum": [
-              "progress",
-              "cancellation"
-            ],
-            "title": "Field",
-            "type": "string"
-          },
-          "observed_bytes": {
-            "minimum": 1.0,
-            "title": "Observed Bytes",
-            "type": "integer"
-          },
-          "reason": {
-            "const": "response-budget-exceeded",
-            "default": "response-budget-exceeded",
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "field",
-          "observed_bytes",
-          "budget_bytes"
-        ],
-        "title": "OperationProjectionIssue",
         "type": "object"
       },
       "OperationRecovery": {
@@ -18064,7 +18020,7 @@
           "total": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -18409,20 +18365,20 @@
             "type": "array"
           },
           "max_file_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 1.0,
+            "maximum": 1073741824,
+            "minimum": 1,
             "title": "Max File Bytes",
             "type": "integer"
           },
           "max_files": {
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "maximum": 32,
+            "minimum": 1,
             "title": "Max Files",
             "type": "integer"
           },
           "max_total_bytes": {
-            "maximum": 2147483648.0,
-            "minimum": 1.0,
+            "maximum": 2147483648,
+            "minimum": 1,
             "title": "Max Total Bytes",
             "type": "integer"
           }
@@ -18474,8 +18430,8 @@
           },
           "created_at": {
             "format": "int64",
-            "maximum": 9.223372036854776e+18,
-            "minimum": 1.0,
+            "maximum": 9223372036854775807,
+            "minimum": 1,
             "title": "Created At",
             "type": "integer"
           },
@@ -18514,8 +18470,8 @@
           },
           "updated_at": {
             "format": "int64",
-            "maximum": 9.223372036854776e+18,
-            "minimum": 1.0,
+            "maximum": 9223372036854775807,
+            "minimum": 1,
             "title": "Updated At",
             "type": "integer"
           }
@@ -19526,7 +19482,7 @@
             "type": "string"
           },
           "node_count": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Node Count",
             "type": "integer"
           },
@@ -19927,8 +19883,8 @@
         "additionalProperties": false,
         "properties": {
           "image_bytes": {
-            "exclusiveMinimum": 0.0,
-            "maximum": 17592186044416.0,
+            "exclusiveMinimum": 0,
+            "maximum": 17592186044416,
             "title": "Image Bytes",
             "type": "integer"
           },
@@ -21105,7 +21061,7 @@
             "type": "array"
           },
           "node_count": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Node Count",
             "type": "integer"
           },
@@ -21154,22 +21110,22 @@
         "additionalProperties": false,
         "properties": {
           "artifact_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Artifact Bytes",
             "type": "integer"
           },
           "image_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Image Bytes",
             "type": "integer"
           },
           "safety_margin_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Safety Margin Bytes",
             "type": "integer"
           },
           "working_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Working Bytes",
             "type": "integer"
           }
@@ -21426,7 +21382,7 @@
         "additionalProperties": false,
         "properties": {
           "download_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Download Bytes",
             "type": "integer"
           },
@@ -21633,8 +21589,8 @@
             "type": "array"
           },
           "attempt": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Attempt",
             "type": "integer"
           },
@@ -21859,7 +21815,7 @@
             "title": "Build Input Sha256"
           },
           "image_bytes": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Image Bytes",
             "type": "integer"
           },
@@ -22023,20 +21979,20 @@
             "type": "string"
           },
           "max_file_bytes": {
-            "maximum": 536870912.0,
-            "minimum": 1.0,
+            "maximum": 536870912,
+            "minimum": 1,
             "title": "Max File Bytes",
             "type": "integer"
           },
           "max_files": {
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "maximum": 32,
+            "minimum": 1,
             "title": "Max Files",
             "type": "integer"
           },
           "max_total_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 1.0,
+            "maximum": 1073741824,
+            "minimum": 1,
             "title": "Max Total Bytes",
             "type": "integer"
           },
@@ -22050,8 +22006,8 @@
             "type": "array"
           },
           "min_files": {
-            "maximum": 32.0,
-            "minimum": 0.0,
+            "maximum": 32,
+            "minimum": 0,
             "title": "Min Files",
             "type": "integer"
           }
@@ -22237,8 +22193,8 @@
             "type": "string"
           },
           "mapping_generation": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Mapping Generation",
             "type": "integer"
           },
@@ -22283,7 +22239,7 @@
             "type": "string"
           },
           "value": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Value",
             "type": "integer"
           }
@@ -22429,8 +22385,8 @@
         "additionalProperties": false,
         "properties": {
           "max_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 1.0,
+            "maximum": 1073741824,
+            "minimum": 1,
             "title": "Max Bytes",
             "type": "integer"
           },
@@ -22583,8 +22539,8 @@
         "additionalProperties": false,
         "properties": {
           "max_total_bytes": {
-            "maximum": 2147483648.0,
-            "minimum": 1.0,
+            "maximum": 2147483648,
+            "minimum": 1,
             "title": "Max Total Bytes",
             "type": "integer"
           },
@@ -23100,8 +23056,8 @@
         "additionalProperties": false,
         "properties": {
           "stop_timeout_seconds": {
-            "maximum": 600.0,
-            "minimum": 1.0,
+            "maximum": 600,
+            "minimum": 1,
             "title": "Stop Timeout Seconds",
             "type": "integer"
           }
@@ -23117,12 +23073,12 @@
         "description": "Unified (DGX Spark) memory one role needs.",
         "properties": {
           "peak_bytes": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Peak Bytes",
             "type": "integer"
           },
           "reserve_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reserve Bytes",
             "type": "integer"
           }
@@ -23296,8 +23252,8 @@
             "type": "array"
           },
           "port": {
-            "maximum": 65535.0,
-            "minimum": 1024.0,
+            "maximum": 65535,
+            "minimum": 1024,
             "title": "Port",
             "type": "integer"
           }
@@ -23860,7 +23816,7 @@
             "type": "string"
           },
           "reclaimed_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reclaimed Bytes",
             "type": "integer"
           },
@@ -24046,20 +24002,20 @@
             "type": "string"
           },
           "max_file_bytes": {
-            "maximum": 1073741824.0,
-            "minimum": 1.0,
+            "maximum": 1073741824,
+            "minimum": 1,
             "title": "Max File Bytes",
             "type": "integer"
           },
           "max_files": {
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "maximum": 32,
+            "minimum": 1,
             "title": "Max Files",
             "type": "integer"
           },
           "max_total_bytes": {
-            "maximum": 2147483648.0,
-            "minimum": 1.0,
+            "maximum": 2147483648,
+            "minimum": 1,
             "title": "Max Total Bytes",
             "type": "integer"
           },
@@ -24073,8 +24029,8 @@
             "type": "array"
           },
           "min_files": {
-            "maximum": 32.0,
-            "minimum": 0.0,
+            "maximum": 32,
+            "minimum": 0,
             "title": "Min Files",
             "type": "integer"
           }
@@ -24177,17 +24133,17 @@
             "type": "string"
           },
           "data": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Data",
             "type": "integer"
           },
           "pipeline": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Pipeline",
             "type": "integer"
           },
           "tensor": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Tensor",
             "type": "integer"
           }
@@ -24206,8 +24162,8 @@
         "properties": {
           "affected_ranks": {
             "items": {
-              "maximum": 499.0,
-              "minimum": 0.0,
+              "maximum": 499,
+              "minimum": 0,
               "type": "integer"
             },
             "maxItems": 500,
@@ -24236,8 +24192,8 @@
             ]
           },
           "expected_rank_count": {
-            "maximum": 500.0,
-            "minimum": 1.0,
+            "maximum": 500,
+            "minimum": 1,
             "title": "Expected Rank Count",
             "type": "integer"
           },
@@ -24253,8 +24209,8 @@
           "installed_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 0.0,
+                "maximum": 9223372036854775807,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -24274,8 +24230,8 @@
           },
           "present_ranks": {
             "items": {
-              "maximum": 499.0,
-              "minimum": 0.0,
+              "maximum": 499,
+              "minimum": 0,
               "type": "integer"
             },
             "maxItems": 500,
@@ -24295,8 +24251,8 @@
             "title": "Projection Issue"
           },
           "rank": {
-            "maximum": 499.0,
-            "minimum": 0.0,
+            "maximum": 499,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
@@ -24318,8 +24274,8 @@
           "required_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 0.0,
+                "maximum": 9223372036854775807,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -25098,8 +25054,8 @@
             "type": "string"
           },
           "mapping_generation": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Mapping Generation",
             "type": "integer"
           },
@@ -25783,7 +25739,7 @@
             "type": "string"
           },
           "node_count": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Node Count",
             "type": "integer"
           },
@@ -25823,7 +25779,7 @@
         "additionalProperties": false,
         "properties": {
           "count": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Count",
             "type": "integer"
           },
@@ -26344,8 +26300,8 @@
             "type": "string"
           },
           "attempt": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Attempt",
             "type": "integer"
           },
@@ -26815,7 +26771,7 @@
           "batch_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -26827,7 +26783,7 @@
           "concurrency_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -26839,7 +26795,7 @@
           "context_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -26874,7 +26830,7 @@
           "runtime_overhead_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -26886,7 +26842,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -26898,7 +26854,7 @@
           "weights_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -27116,7 +27072,7 @@
         "description": "Possible remaining bytes for one exact active run reservation.",
         "properties": {
           "maximum_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Maximum Bytes",
             "type": "integer"
           },
@@ -27136,8 +27092,8 @@
             "type": "string"
           },
           "run_generation": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 1.0,
+            "maximum": 9223372036854775807,
+            "minimum": 1,
             "title": "Run Generation",
             "type": "integer"
           },
@@ -27218,7 +27174,7 @@
           "observed_memory_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -27228,13 +27184,13 @@
             "title": "Observed Memory Bytes"
           },
           "rank": {
-            "maximum": 2147483647.0,
-            "minimum": 0.0,
+            "maximum": 2147483647,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
           "reserved_memory_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reserved Memory Bytes",
             "type": "integer"
           },
@@ -27287,8 +27243,8 @@
             ]
           },
           "expected_rank_count": {
-            "maximum": 500.0,
-            "minimum": 1.0,
+            "maximum": 500,
+            "minimum": 1,
             "title": "Expected Rank Count",
             "type": "integer"
           },
@@ -27343,8 +27299,8 @@
           },
           "present_ranks": {
             "items": {
-              "maximum": 499.0,
-              "minimum": 0.0,
+              "maximum": 499,
+              "minimum": 0,
               "type": "integer"
             },
             "maxItems": 500,
@@ -27364,14 +27320,14 @@
             "title": "Projection Issue"
           },
           "rank": {
-            "maximum": 499.0,
-            "minimum": 0.0,
+            "maximum": 499,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
           "rank_age_seconds": {
             "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Rank Age Seconds",
             "type": "number"
           },
@@ -27750,7 +27706,7 @@
           "image_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -27944,7 +27900,7 @@
         "properties": {
           "completed_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Completed Bytes",
             "type": "integer"
           },
@@ -27995,7 +27951,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -28092,12 +28048,12 @@
           },
           "protected_referenced_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Protected Referenced Bytes",
             "type": "integer"
           },
           "reclaimed_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reclaimed Bytes",
             "type": "integer"
           },
@@ -28150,7 +28106,7 @@
         "properties": {
           "active_runs": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Active Runs",
             "type": "integer"
           },
@@ -28452,7 +28408,7 @@
           "image_bytes": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -28681,7 +28637,7 @@
         "description": "Exact installed membership observed without a serving workload.",
         "properties": {
           "active_runs": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Active Runs",
             "type": "integer"
           },
@@ -28734,7 +28690,7 @@
             "title": "Subphase"
           },
           "unwithdrawn_routes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Unwithdrawn Routes",
             "type": "integer"
           }
@@ -28869,7 +28825,7 @@
         "properties": {
           "completed_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Completed Bytes",
             "type": "integer"
           },
@@ -28925,7 +28881,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -28953,7 +28909,7 @@
           },
           "completed_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Completed Bytes",
             "type": "integer"
           },
@@ -29049,7 +29005,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -29075,7 +29031,7 @@
             "type": "string"
           },
           "downloaded_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Downloaded Bytes",
             "type": "integer"
           },
@@ -29113,7 +29069,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -29147,7 +29103,7 @@
             "type": "string"
           },
           "downloaded_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Downloaded Bytes",
             "type": "integer"
           },
@@ -29200,7 +29156,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -29447,7 +29403,7 @@
           },
           "completed_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Completed Bytes",
             "type": "integer"
           },
@@ -29567,7 +29523,7 @@
           "final_verify_started_at": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -29583,8 +29539,8 @@
           },
           "item_index": {
             "default": 0,
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Item Index",
             "type": "integer"
           },
@@ -29633,8 +29589,8 @@
           "operation_phase_index": {
             "anyOf": [
               {
-                "maximum": 31.0,
-                "minimum": 0.0,
+                "maximum": 31,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -29666,8 +29622,8 @@
           },
           "phase_index": {
             "default": 0,
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Phase Index",
             "type": "integer"
           },
@@ -29735,7 +29691,7 @@
           },
           "phase_retry_generation": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Phase Retry Generation",
             "type": "integer"
           },
@@ -29764,7 +29720,7 @@
           "retry_attempt": {
             "anyOf": [
               {
-                "minimum": 2.0,
+                "minimum": 2,
                 "type": "integer"
               },
               {
@@ -29815,7 +29771,7 @@
           "startup_budget_seconds": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -29846,7 +29802,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -29863,8 +29819,8 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
-                "maximum": 2147483647.0,
-                "minimum": 1.0,
+                "maximum": 2147483647,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -29887,8 +29843,8 @@
             "type": "string"
           },
           "index": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Index",
             "type": "integer"
           },
@@ -30217,7 +30173,7 @@
             "title": "Recipe Revision Id"
           },
           "reclaimed_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reclaimed Bytes",
             "type": "integer"
           },
@@ -30424,7 +30380,7 @@
         "properties": {
           "completed_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Completed Bytes",
             "type": "integer"
           },
@@ -30469,14 +30425,14 @@
             "title": "Phase"
           },
           "phase_count": {
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "maximum": 32,
+            "minimum": 1,
             "title": "Phase Count",
             "type": "integer"
           },
           "phase_index": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Phase Index",
             "type": "integer"
           },
@@ -30495,7 +30451,7 @@
           "startup_budget_seconds": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -30541,7 +30497,7 @@
           "total_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -30586,8 +30542,8 @@
             "type": "string"
           },
           "rank": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
@@ -30691,8 +30647,8 @@
             "type": "string"
           },
           "mapping_generation": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Mapping Generation",
             "type": "integer"
           },
@@ -30776,7 +30732,7 @@
         "description": "One exact rank and whether its cleanup already succeeded.",
         "properties": {
           "installed_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Installed Bytes",
             "type": "integer"
           },
@@ -30786,8 +30742,8 @@
             "type": "string"
           },
           "rank": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
@@ -30879,8 +30835,8 @@
             "type": "array"
           },
           "image_bytes": {
-            "maximum": 17592186044416.0,
-            "minimum": 1.0,
+            "maximum": 17592186044416,
+            "minimum": 1,
             "title": "Image Bytes",
             "type": "integer"
           },
@@ -30890,8 +30846,8 @@
             "type": "string"
           },
           "item_index": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Item Index",
             "type": "integer"
           },
@@ -30906,8 +30862,8 @@
             "type": "string"
           },
           "phase_index": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Phase Index",
             "type": "integer"
           },
@@ -30945,8 +30901,8 @@
             "type": "integer"
           },
           "workload_intent_ordinal": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Workload Intent Ordinal",
             "type": "integer"
           }
@@ -30998,7 +30954,7 @@
             "title": "Effective Execution Key"
           },
           "image_bytes": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Image Bytes",
             "type": "integer"
           },
@@ -31090,7 +31046,7 @@
           "model_artifact_set_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -31275,7 +31231,7 @@
           "copied_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -31299,7 +31255,7 @@
           "downloaded_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -31756,7 +31712,7 @@
             "title": "Build Id"
           },
           "image_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Image Bytes",
             "type": "integer"
           },
@@ -31813,7 +31769,7 @@
             "$ref": "#/components/schemas/ControllerAssetState"
           },
           "image_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Image Bytes",
             "type": "integer"
           },
@@ -31905,8 +31861,8 @@
             "type": "string"
           },
           "image_bytes": {
-            "maximum": 17592186044416.0,
-            "minimum": 1.0,
+            "maximum": 17592186044416,
+            "minimum": 1,
             "title": "Image Bytes",
             "type": "integer"
           },
@@ -32059,14 +32015,14 @@
           },
           "copied_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Copied Bytes",
             "type": "integer"
           },
           "image_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32090,7 +32046,7 @@
           "missing_image_distribution_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32103,7 +32059,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "minimum": 0.0,
+                  "minimum": 0,
                   "type": "integer"
                 },
                 "type": "object"
@@ -32117,7 +32073,7 @@
           "missing_nas_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32129,7 +32085,7 @@
           "missing_spark_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32165,7 +32121,7 @@
           },
           "reclaimable_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reclaimable Bytes",
             "type": "integer"
           },
@@ -32181,7 +32137,7 @@
           "required_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32192,7 +32148,7 @@
           },
           "reused_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reused Bytes",
             "type": "integer"
           },
@@ -32427,8 +32383,8 @@
             "type": "string"
           },
           "observed_at": {
-            "maximum": 1.8446744073709552e+19,
-            "minimum": 0.0,
+            "maximum": 18446744073709551615,
+            "minimum": 0,
             "title": "Observed At",
             "type": "integer"
           }
@@ -32804,7 +32760,7 @@
           "disk_free_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32816,7 +32772,7 @@
           "disk_required_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32828,7 +32784,7 @@
           "memory_available_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32840,7 +32796,7 @@
           "memory_capacity_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32852,7 +32808,7 @@
           "memory_floor_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32906,7 +32862,7 @@
           "memory_required_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -32932,16 +32888,16 @@
           },
           "ports_required": {
             "items": {
-              "maximum": 65535.0,
-              "minimum": 1.0,
+              "maximum": 65535,
+              "minimum": 1,
               "type": "integer"
             },
             "title": "Ports Required",
             "type": "array"
           },
           "rank": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
@@ -33014,8 +32970,8 @@
             "type": "string"
           },
           "rank": {
-            "maximum": 31.0,
-            "minimum": 0.0,
+            "maximum": 31,
+            "minimum": 0,
             "title": "Rank",
             "type": "integer"
           },
@@ -33110,7 +33066,7 @@
             "type": "string"
           },
           "reserved_bytes": {
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Reserved Bytes",
             "type": "integer"
           },
@@ -33873,10 +33829,12 @@
             "type": "string"
           },
           "maximum": {
+            "default": null,
             "title": "Maximum",
             "type": "null"
           },
           "minimum": {
+            "default": null,
             "title": "Minimum",
             "type": "null"
           },
@@ -33928,7 +33886,7 @@
           "expected_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -33952,7 +33910,7 @@
           "missing_bytes": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -33968,7 +33926,7 @@
           },
           "present_bytes": {
             "default": 0,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Present Bytes",
             "type": "integer"
           },
@@ -34041,8 +33999,8 @@
           "cpu_frequency_avg_mhz": {
             "anyOf": [
               {
-                "maximum": 20000.0,
-                "minimum": 1.0,
+                "maximum": 20000,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -34054,8 +34012,8 @@
           "cpu_frequency_max_mhz": {
             "anyOf": [
               {
-                "maximum": 20000.0,
-                "minimum": 1.0,
+                "maximum": 20000,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -34067,8 +34025,8 @@
           "cpu_frequency_min_mhz": {
             "anyOf": [
               {
-                "maximum": 20000.0,
-                "minimum": 1.0,
+                "maximum": 20000,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -34080,8 +34038,8 @@
           "disk_free_bytes": {
             "anyOf": [
               {
-                "maximum": 17592186044416.0,
-                "minimum": 0.0,
+                "maximum": 17592186044416,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34093,8 +34051,8 @@
           "disk_total_bytes": {
             "anyOf": [
               {
-                "maximum": 17592186044416.0,
-                "minimum": 0.0,
+                "maximum": 17592186044416,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34106,8 +34064,8 @@
           "gpu_memory_free_bytes": {
             "anyOf": [
               {
-                "maximum": 17592186044416.0,
-                "minimum": 0.0,
+                "maximum": 17592186044416,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34119,8 +34077,8 @@
           "gpu_memory_total_bytes": {
             "anyOf": [
               {
-                "maximum": 17592186044416.0,
-                "minimum": 0.0,
+                "maximum": 17592186044416,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34132,8 +34090,8 @@
           "gpu_temperature_c": {
             "anyOf": [
               {
-                "maximum": 150.0,
-                "minimum": 0.0,
+                "maximum": 150,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34145,8 +34103,8 @@
           "gpu_utilization_percent": {
             "anyOf": [
               {
-                "maximum": 100.0,
-                "minimum": 0.0,
+                "maximum": 100,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -34163,8 +34121,8 @@
           "memory_available_bytes": {
             "anyOf": [
               {
-                "maximum": 17592186044416.0,
-                "minimum": 0.0,
+                "maximum": 17592186044416,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34176,8 +34134,8 @@
           "memory_total_bytes": {
             "anyOf": [
               {
-                "maximum": 17592186044416.0,
-                "minimum": 0.0,
+                "maximum": 17592186044416,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34217,7 +34175,7 @@
         "properties": {
           "age_seconds": {
             "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Age Seconds",
             "type": "number"
           },
@@ -34268,8 +34226,8 @@
             "type": "string"
           },
           "number": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Number",
             "type": "integer"
           },
@@ -34277,8 +34235,8 @@
             "$ref": "#/components/schemas/SavedProfileProjectionIssue"
           },
           "revision": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "maximum": 2147483647,
+            "minimum": 1,
             "title": "Revision",
             "type": "integer"
           },
@@ -34317,8 +34275,8 @@
           "expected_rank_count": {
             "anyOf": [
               {
-                "maximum": 500.0,
-                "minimum": 1.0,
+                "maximum": 500,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -34346,8 +34304,8 @@
           "installed_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 0.0,
+                "maximum": 9223372036854775807,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34376,8 +34334,8 @@
             "anyOf": [
               {
                 "items": {
-                  "maximum": 499.0,
-                  "minimum": 0.0,
+                  "maximum": 499,
+                  "minimum": 0,
                   "type": "integer"
                 },
                 "maxItems": 500,
@@ -34398,8 +34356,8 @@
           "rank": {
             "anyOf": [
               {
-                "maximum": 499.0,
-                "minimum": 0.0,
+                "maximum": 499,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34519,8 +34477,8 @@
           "expected_rank_count": {
             "anyOf": [
               {
-                "maximum": 500.0,
-                "minimum": 1.0,
+                "maximum": 500,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -34576,8 +34534,8 @@
             "anyOf": [
               {
                 "items": {
-                  "maximum": 499.0,
-                  "minimum": 0.0,
+                  "maximum": 499,
+                  "minimum": 0,
                   "type": "integer"
                 },
                 "maxItems": 500,
@@ -34598,8 +34556,8 @@
           "rank": {
             "anyOf": [
               {
-                "maximum": 499.0,
-                "minimum": 0.0,
+                "maximum": 499,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -34932,7 +34890,7 @@
             "type": "string"
           },
           "loop_sequence": {
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Loop Sequence",
             "type": "integer"
           },
@@ -38056,8 +38014,7 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Model Library",
-        "x-vonk-response-max-bytes": 1048576
+        "summary": "Model Library"
       }
     },
     "/api/model/operations/{operation_id}": {
@@ -38876,8 +38833,7 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Operations View",
-        "x-vonk-response-max-bytes": 1048576
+        "summary": "Operations View"
       }
     },
     "/api/operations/{operation_id}": {
@@ -38956,8 +38912,7 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Operation View",
-        "x-vonk-response-max-bytes": 1048576
+        "summary": "Operation View"
       }
     },
     "/api/operations/{operation_id}/evidence": {
@@ -40700,8 +40655,7 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Recipe Library",
-        "x-vonk-response-max-bytes": 1048576
+        "summary": "Recipe Library"
       }
     },
     "/api/recipe/operations/{operation_id}": {
