@@ -15,14 +15,21 @@ from datetime import UTC, datetime
 from typing import Literal
 from urllib.parse import quote
 
-from pydantic import ConfigDict, Field, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import FailureCode, LifecycleState, StateAlias
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
 from . import agent_operation_states
-from .bounded_json import BoundedJSONError, mapping, require_integer, sequence
+from .bounded_json import BoundedJSONError, require_integer, sequence
 from .logging import redact_text
 from .models import (
     AgentOperation,
@@ -33,6 +40,7 @@ from .models import (
 )
 from .operation_blockers import OperationBlocker, read_blockers
 from .operation_contract import OperationEvidenceDownload
+from .operation_item_contract import OperationItem, OperationResultFacts, operation_item
 from .strict_json import StrictJSONModel, read_stored_model
 
 MAX_LOG_BYTES = 2048
@@ -208,35 +216,88 @@ def log_tail(value: str) -> FailureLogTail:
     )
 
 
-def failure_code(result: Mapping[str, object]) -> tuple[str, str | None]:
+def failure_code(result: OperationResultFacts) -> tuple[str, str | None]:
     """Return the stable error code and redacted detail a failure result names."""
-    code = (
-        result.get("error_code")
-        or result.get("code")
-        or FailureCode.OPERATION_FAILED.value
-    )
+    code = result.error_code or result.code or FailureCode.OPERATION_FAILED.value
     code = re.sub(r"[^a-z0-9_]", "_", str(code).lower())[:64]
     if not code or not code[0].isalpha():
         code = FailureCode.OPERATION_FAILED.value
-    detail = (
-        result.get("detail")
-        or result.get("diagnostic")
-        or result.get("helper_error_code")
-    )
+    detail = result.detail or result.diagnostic or result.helper_error_code
     return code, safe_text(str(detail))[:1024] if detail is not None else None
 
 
-def classification(kind: str, result: Mapping[str, object]) -> FailureCategory:
+def classification(kind: str, result: OperationResultFacts) -> FailureCategory:
     # Phase/state comes from typed fields. Classification uses stable emitted
     # error/diagnostic codes, never searches logs to invent operation progress.
     code = " ".join(
-        str(result.get(key, ""))
-        for key in ("error_code", "code", "diagnostic", "helper_error_code")
+        value or ""
+        for value in (
+            result.error_code,
+            result.code,
+            result.diagnostic,
+            result.helper_error_code,
+        )
     ).casefold()
     for category, markers in _CATEGORY_MARKERS:
         if any(marker in code for marker in markers):
             return category
     return "runtime" if kind.startswith(("recipe.", "agent.upgrade")) else "unknown"
+
+
+class AttemptPhase(BaseModel):
+    """The one thing the evidence reads of a family's progress document."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    phase: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tolerate(cls, value: object) -> object:
+        phase = (
+            value.get("phase")
+            if isinstance(value, Mapping)
+            else getattr(value, "phase", None)
+        )
+        return {"phase": phase if isinstance(phase, str) else None}
+
+
+class FailedAttempt(BaseModel):
+    """One failed attempt of any family: what the evidence bundle is built from."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    attempt: int
+    kind: str
+    node_ids: list[str] = Field(default_factory=list)
+    updated_at: str
+    source: EvidenceSource | None = None
+    rank: int | None = None
+    #: A Controller-owned record has no Spark operation, so no agent observations.
+    agent_operation: bool = True
+    progress: AttemptPhase | None = None
+    result: OperationResultFacts = Field(default_factory=OperationResultFacts)
+    blockers: list[OperationBlocker] | None = None
+
+    @field_validator("node_ids", mode="before")
+    @classmethod
+    def _node_ids(cls, value: object) -> object:
+        return [] if value is None else value
+
+    @field_validator("blockers", mode="before")
+    @classmethod
+    def _readable_blockers(cls, value: object) -> object:
+        return None if value is None else read_blockers(value)
+
+    @field_validator("result", mode="before")
+    @classmethod
+    def _result(cls, value: object) -> object:
+        return {} if value is None else value
+
+    @property
+    def evidence_source(self) -> EvidenceSource:
+        return self.source or ("agent" if self.node_ids else "controller")
 
 
 def _required_text(value: object, detail: str) -> str:
@@ -298,58 +359,48 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
     return diagnostics
 
 
-def collect_failure(
-    item: Mapping[str, object], *, now: datetime
-) -> FailureEvidenceBundle:
-    result = mapping(item.get("result")) or {}
-    progress = mapping(item.get("progress")) or {}
+def collect_failure(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBundle:
+    result = item.result
     errors: list[str] = []
-    raw = result.get("diagnostics")
-    if raw is not None:
+    diagnostics: FailureDiagnostics | None = None
+    if result.diagnostics_invalid:
+        errors.append("agent-diagnostics-invalid")
+    elif result.diagnostics is not None:
         try:
-            diagnostics = sanitize_diagnostics(raw)
+            diagnostics = sanitize_diagnostics(result.diagnostics)
         except (ValueError, TypeError):
             errors.append("agent-diagnostics-invalid")
-            raw = None
-    if raw is None:
-        phase = progress.get("phase") or result.get("stage") or "unknown"
+    if diagnostics is None:
+        phase = (
+            (item.progress.phase if item.progress is not None else None)
+            or result.stage
+            or "unknown"
+        )
         diagnostics = FailureDiagnostics(
             collected_at=now.isoformat(),
             phase=safe_text(str(phase))[:80],
-            category=classification(str(item["kind"]), result),
-            stdout=log_tail(str(result.get("stdout", ""))),
-            stderr=log_tail(str(result.get("stderr", result.get("log_excerpt", "")))),
+            category=classification(item.kind, result),
+            stdout=log_tail(result.stdout or ""),
+            stderr=log_tail(result.stderr or result.log_excerpt or ""),
             versions=[],
             sandbox=[],
             storage=[],
             preflight=[],
             collector_errors=["agent-observations-unavailable"]
-            if item.get("node_ids") and item.get("agent_operation", True)
+            if item.node_ids and item.agent_operation
             else [],
         )
     error_code, detail = failure_code(result)
-    summary = (
-        result.get("summary")
-        or result.get("reason")
-        or result.get("detail")
-        or item.get("failure")
-        or "Operation failed"
-    )
-    node_ids = _required_node_ids(item.get("node_ids"))
-    source: EvidenceSource
-    if "source" in item:
-        source = _EVIDENCE_SOURCE.validate_python(item["source"], strict=True)
-    else:
-        source = "agent" if item.get("node_ids") else "controller"
+    summary = result.summary or result.reason or result.detail or "Operation failed"
     return FailureEvidenceBundle(
         context=EvidenceContext(
-            operation_id=_required_text(item["id"], "operation id"),
-            attempt=require_integer(item.get("attempt"), "operation attempt"),
-            kind=_required_text(item["kind"], "operation kind"),
-            node_ids=node_ids[:128],
-            updated_at=_required_text(item["updated_at"], "operation updated_at"),
-            source=source,
-            rank=_optional_int(item.get("rank"), "operation rank"),
+            operation_id=item.id,
+            attempt=item.attempt,
+            kind=item.kind,
+            node_ids=item.node_ids[:128],
+            updated_at=item.updated_at,
+            source=item.evidence_source,
+            rank=item.rank,
         ),
         collected_at=now.isoformat(),
         summary=safe_text(str(summary))[:512],
@@ -361,7 +412,7 @@ def collect_failure(
             blocker.model_copy(
                 update={"detail": safe_text(blocker.detail)[:512] or "-"}
             )
-            for blocker in read_blockers(item.get("blockers"))
+            for blocker in item.blockers or []
         ],
     )
 
@@ -396,29 +447,26 @@ def failed_attempt_condition(operation, attempt):
     )
 
 
-def _fallback_bundle(
-    item: Mapping[str, object], *, now: datetime
-) -> FailureEvidenceBundle:
+def _fallback_bundle(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBundle:
     """A bounded bundle for a row the collector could not read.
 
     The download reports the collector failure separately and never echoes the
     exception, which may quote the unredacted value that broke it.
     """
     empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
-    result = mapping(item.get("result")) or {}
-    error_code, _ = failure_code(result)
+    error_code, _ = failure_code(item.result)
     return FailureEvidenceBundle(
         context=EvidenceContext(
-            operation_id=str(item["id"]),
-            attempt=require_integer(item["attempt"], "operation attempt"),
-            kind=str(item["kind"]),
-            node_ids=_required_node_ids(item.get("node_ids"))[:128],
-            updated_at=str(item["updated_at"]),
-            source="agent" if item.get("node_ids") else "controller",
+            operation_id=item.id,
+            attempt=item.attempt,
+            kind=item.kind,
+            node_ids=item.node_ids[:128],
+            updated_at=item.updated_at,
+            source="agent" if item.node_ids else "controller",
         ),
         collected_at=now.isoformat(),
         summary=safe_text(
-            str(result.get("reason") or result.get("summary") or "Operation failed")
+            item.result.reason or item.result.summary or "Operation failed"
         )[:512],
         error_code=error_code,
         diagnostics=FailureDiagnostics(
@@ -464,22 +512,17 @@ class FailureEvidenceService:
         except Exception:  # noqa: BLE001 - diagnostics cannot replace the original operation result
             return _fallback_bundle(item, now=now)
 
-    def decorate(self, item: Mapping[str, object]) -> dict[str, object]:
+    def decorate(self, item: OperationItem) -> OperationItem:
         """Name the diagnostics download when this failed attempt has one."""
-        if item.get("state") not in FAILED_ATTEMPT_STATES and not item.get("blockers"):
-            return dict(item)
-        operation_id = _required_text(item["id"], "operation id")
-        attempt = require_integer(item["attempt"], "operation attempt")
-        if self._failed_item(operation_id, attempt) is None:
-            return dict(item)
-        return dict(
-            item,
-            evidence_download=OperationEvidenceDownload(
-                href=evidence_href(operation_id, attempt)
-            ).model_dump(mode="json"),
+        if item.state not in FAILED_ATTEMPT_STATES and not item.blockers:
+            return item
+        if self._failed_item(item.id, item.attempt) is None:
+            return item
+        return item.with_evidence_download(
+            OperationEvidenceDownload(href=evidence_href(item.id, item.attempt))
         )
 
-    def _failed_item(self, operation_id: str, attempt: int) -> dict[str, object] | None:
+    def _failed_item(self, operation_id: str, attempt: int) -> FailedAttempt | None:
         """Load one failed attempt from whichever durable family owns the id."""
         with self.sessions() as session:
             row = session.execute(
@@ -514,16 +557,13 @@ class FailureEvidenceService:
                 # advertised under as well as to the stored one.
                 and attempt in {job.current_attempt, max(1, job.current_attempt)}
             ):
-                result = dict(mapping(job.result) or {})
-                if (
-                    not (result.get("reason") or result.get("summary"))
-                    and job.status_reason
-                ):
-                    result["reason"] = job.status_reason
-                if "diagnostics" not in result:
+                result = OperationResultFacts.model_validate(job.result)
+                if not (result.reason or result.summary) and job.status_reason:
+                    result = result.model_copy(update={"reason": job.status_reason})
+                if result.diagnostics is None and not result.diagnostics_invalid:
                     diagnostics = self._child_diagnostics(session, job.id)
                     if diagnostics is not None:
-                        result["diagnostics"] = diagnostics.model_dump(mode="json")
+                        result = result.model_copy(update={"diagnostics": diagnostics})
                 return self._item(
                     job,
                     attempt=attempt,
@@ -552,24 +592,38 @@ class FailureEvidenceService:
             if application is not None and application.state in FAILED_ATTEMPT_STATES:
                 from .fleet_profiles import FleetProfileService
 
-                item = FleetProfileService._operation_item(application)
-                if item["attempt"] != attempt:
+                projected = operation_item(
+                    FleetProfileService._operation_item(application)
+                )
+                if projected.attempt != attempt:
                     return None
-                item["source"] = "controller"
-                # The Controller owns this record, but its children ran on
-                # Sparks: their captured evidence is this application's too.
-                item["agent_operation"] = False
-                result = dict(mapping(item["result"]) or mapping(item["failure"]) or {})
-                if "diagnostics" not in result:
-                    child = self._application_child_diagnostics(session, application)
+                result = (
+                    projected.result
+                    or OperationResultFacts.of(projected.failure)
+                    or OperationResultFacts()
+                )
+                if result.diagnostics is None and not result.diagnostics_invalid:
+                    child = self._application_child_diagnostics(session, application.id)
                     if child is not None:
-                        result["diagnostics"] = child.model_dump(mode="json")
-                item["result"] = result
-                return item
+                        result = result.model_copy(update={"diagnostics": child})
+                return FailedAttempt(
+                    id=projected.id,
+                    attempt=projected.attempt,
+                    kind=projected.kind,
+                    node_ids=projected.node_ids,
+                    updated_at=projected.updated_at or "",
+                    source="controller",
+                    # The Controller owns this record; exact children own the
+                    # captured Spark diagnostics carried above.
+                    agent_operation=False,
+                    progress=AttemptPhase.model_validate(projected.progress),
+                    result=result,
+                    blockers=projected.blockers,
+                )
         return None
 
     @staticmethod
-    def _child_diagnostics(session, job_id: str) -> FailureDiagnostics | None:
+    def _child_diagnostics(session: Session, job_id: str) -> FailureDiagnostics | None:
         """The Spark-side diagnostics of the newest failed child of a Job.
 
         A Controller-owned parent fails because a child operation failed on a
@@ -597,7 +651,8 @@ class FailureEvidenceService:
             # One persisted receipt has the producer's bounded evidence size.
             .limit(1)
         ).scalar_one_or_none()
-        diagnostics = mapping((mapping(result) or {}).get("diagnostics"))
+        facts = OperationResultFacts.model_validate(result)
+        diagnostics = facts.diagnostics
         if diagnostics is None:
             return None
         try:
@@ -608,7 +663,7 @@ class FailureEvidenceService:
 
     @classmethod
     def _application_child_diagnostics(
-        cls, session, application
+        cls, session: Session, application_id: str
     ) -> FailureDiagnostics | None:
         """Diagnostics of the newest failed run-switch child of an application."""
         result = session.execute(
@@ -621,7 +676,7 @@ class FailureEvidenceService:
             .where(
                 Job.kind == "recipe.run-switch.v2",
                 Job.state.in_(FAILED_ATTEMPT_STATES),
-                Job.result["profile_application_id"].as_string() == application.id,
+                Job.result["profile_application_id"].as_string() == application_id,
                 failed_attempt_condition(AgentOperation, AgentOperationAttempt),
                 AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
             )
@@ -632,7 +687,8 @@ class FailureEvidenceService:
             )
             .limit(1)
         ).scalar_one_or_none()
-        diagnostics = mapping((mapping(result) or {}).get("diagnostics"))
+        facts = OperationResultFacts.model_validate(result)
+        diagnostics = facts.diagnostics
         if diagnostics is None:
             return None
         try:
@@ -647,26 +703,28 @@ class FailureEvidenceService:
         *,
         attempt: int,
         kind: str,
-        node_ids: object,
+        node_ids: list[str],
         source: EvidenceSource,
         progress: object,
         result: object,
-    ) -> dict[str, object]:
+    ) -> FailedAttempt:
         payload = getattr(operation, "payload", None) or {}
-        return {
-            "id": operation.id,
-            "attempt": attempt,
-            "kind": kind,
-            "node_ids": node_ids,
-            "updated_at": _aware(operation.updated_at).isoformat(),
-            "source": source,
-            "rank": payload.get("rank") if type(payload.get("rank")) is int else None,
-            "progress": progress,
-            "result": result
-            or payload.get("failure")
-            or {
-                "reason": getattr(operation, "last_error", None)
-                or getattr(operation, "status_reason", None)
-                or "Operation failed"
-            },
-        }
+        return FailedAttempt(
+            id=operation.id,
+            attempt=attempt,
+            kind=kind,
+            node_ids=node_ids,
+            updated_at=_aware(operation.updated_at).isoformat(),
+            source=source,
+            rank=payload.get("rank") if type(payload.get("rank")) is int else None,
+            progress=AttemptPhase.model_validate(progress),
+            result=OperationResultFacts.model_validate(
+                result
+                or payload.get("failure")
+                or {
+                    "reason": getattr(operation, "last_error", None)
+                    or getattr(operation, "status_reason", None)
+                    or "Operation failed"
+                }
+            ),
+        )

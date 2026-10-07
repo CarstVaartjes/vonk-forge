@@ -69,6 +69,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor
+from vonk_control.job_documents import AvailabilityJobPayload, AvailabilityModelChild
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Job
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
@@ -152,19 +153,21 @@ if mode == "new-consumer":
     with sessions() as session:
         row = session.get(Job, second.id)
         assert row is not None
-        payload = dict(row.payload)
+        payload = AvailabilityJobPayload.model_validate_json(json.dumps(row.payload))
     child = availability._current_model_child(
         payload, actor="operator", parent_request_key=second.request_id
     )
     assert child is not None
-    assert child["id"] != config["child_id"]
+    assert child.id != config["child_id"]
     assert availability._update_model_progress(claim, child)
     try:
         # A stale candidate read that raced cancellation cannot attach the old
         # child after its durable cancellation fence committed.
         availability._update_model_progress(
             claim,
-            {"id": config["child_id"], "state": "running"},
+            AvailabilityModelChild.model_validate_json(
+                json.dumps({"id": config["child_id"], "state": "running"})
+            ),
         )
     except Exception as error:
         assert getattr(error, "code", None) == "recipe_image.model_child_cancelled"

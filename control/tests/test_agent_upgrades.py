@@ -8,10 +8,16 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.contracts import AgentUpgradeResult
 from vonk_control import agent_operation_states as aos
 from vonk_control import agent_upgrades as agent_upgrades_module
 from vonk_control import job_states
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_upgrade_contract import (
+    AgentUpgradePackage,
+    AgentUpgradeRepairManifest,
+    AgentUpgradeRequestIntent,
+)
 from vonk_control.agent_upgrade_status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
 )
@@ -74,6 +80,9 @@ REPAIR_MANIFEST = {
     "authority_sha256": REPAIR_AUTHORITY_SHA256,
     "package": REPAIR_PACKAGE,
 }
+PACKAGE_MODEL = AgentUpgradePackage.model_validate(PACKAGE)
+REPAIR_PACKAGE_MODEL = AgentUpgradePackage.model_validate(REPAIR_PACKAGE)
+REPAIR_MANIFEST_MODEL = AgentUpgradeRepairManifest.model_validate(REPAIR_MANIFEST)
 OLD_IDENTITY = {
     "architecture": "linux-arm64",
     "binary_digest": "f" * 64,
@@ -171,21 +180,21 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
         clock=lambda: now,
     )
 
-    ordinary = upgrades.preview([NODE_A], REPAIR_PACKAGE)
+    ordinary = upgrades.preview([NODE_A], REPAIR_PACKAGE_MODEL)
     plan = upgrades.preview(
         [NODE_A],
-        REPAIR_PACKAGE,
-        repair_manifest=REPAIR_MANIFEST,
+        REPAIR_PACKAGE_MODEL,
+        repair_manifest=REPAIR_MANIFEST_MODEL,
     )
     assert plan.plan_digest != ordinary.plan_digest
-    assert plan.repair_manifest == REPAIR_MANIFEST
+    assert plan.repair_manifest == REPAIR_MANIFEST_MODEL
     job = upgrades.apply(
         [NODE_A],
-        REPAIR_PACKAGE,
+        REPAIR_PACKAGE_MODEL,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
-        repair_manifest=REPAIR_MANIFEST,
+        repair_manifest=REPAIR_MANIFEST_MODEL,
     )
 
     assert job.payload["repair_manifest"] == REPAIR_MANIFEST
@@ -219,8 +228,8 @@ def test_repair_plan_requires_one_explicit_bound_spark(tmp_path, node_ids) -> No
     with pytest.raises(AgentUpgradeConflict, match="exactly its explicit Spark"):
         upgrades.preview(
             node_ids,
-            REPAIR_PACKAGE,
-            repair_manifest=REPAIR_MANIFEST,
+            REPAIR_PACKAGE_MODEL,
+            repair_manifest=REPAIR_MANIFEST_MODEL,
         )
 
 
@@ -254,14 +263,20 @@ def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_lea
         "https://install.vonkforge.ai/repair-capsules/latest/vonk-forge-agent.deb"
     )
     with pytest.raises(AgentUpgradeConflict, match="URL is not canonical"):
-        upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=mutable)
+        upgrades.preview(
+            [NODE_A],
+            REPAIR_PACKAGE_MODEL,
+            repair_manifest=AgentUpgradeRepairManifest.model_validate(mutable),
+        )
 
     legacy = json.loads(json.dumps(REPAIR_MANIFEST))
     legacy["schema_version"] = 1
-    with pytest.raises(AgentUpgradeConflict, match="manifest is invalid"):
-        upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=legacy)
+    with pytest.raises(ValueError, match="schema_version"):
+        AgentUpgradeRepairManifest.model_validate(legacy)
 
-    plan = upgrades.preview([NODE_A], REPAIR_PACKAGE, repair_manifest=REPAIR_MANIFEST)
+    plan = upgrades.preview(
+        [NODE_A], REPAIR_PACKAGE_MODEL, repair_manifest=REPAIR_MANIFEST_MODEL
+    )
     changed = json.loads(json.dumps(REPAIR_MANIFEST))
     changed["package"]["package_signature"] = "6" * 128
     changed_package = {**REPAIR_PACKAGE, "package_signature": "6" * 128}
@@ -269,11 +284,11 @@ def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_lea
     # plan is applied instead of refusing it as stale.
     job = upgrades.apply(
         [NODE_A],
-        changed_package,
+        AgentUpgradePackage.model_validate(changed_package),
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
-        repair_manifest=changed,
+        repair_manifest=AgentUpgradeRepairManifest.model_validate(changed),
     )
     assert job.payload_digest != plan.plan_digest
     assert job.payload["package"] == changed_package
@@ -313,11 +328,11 @@ def test_rollout_queues_only_one_spark_until_new_identity_is_proven(tmp_path) ->
         clock=lambda: now,
     )
     operations.set_result_consumer(upgrades.consume_agent_result)
-    plan = upgrades.preview(None, PACKAGE)
+    plan = upgrades.preview(None, PACKAGE_MODEL)
     assert plan.node_ids == (NODE_A, NODE_B)
     job = upgrades.apply(
         None,
-        PACKAGE,
+        PACKAGE_MODEL,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
@@ -430,7 +445,7 @@ def test_fenced_retry_waits_while_another_spark_is_installing(tmp_path) -> None:
         is None
     )
     # Spark B handed off to its helper and awaits its new identity.
-    operations.succeed(second, _target_evidence())
+    operations.succeed(second, AgentUpgradeResult.model_validate(_target_evidence()))
     assert (
         operations.claim(
             NODE_A,
@@ -1038,7 +1053,7 @@ def test_success_result_cannot_advance_without_exact_fresh_agent_identity(
     claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
 
     # Even an otherwise well-formed success result is not identity evidence.
-    operations.succeed(claim, _target_evidence())
+    operations.succeed(claim, AgentUpgradeResult.model_validate(_target_evidence()))
     assert (
         operations.claim(
             NODE_A,
@@ -1067,7 +1082,7 @@ def test_success_result_uses_signed_digests_over_version_metadata(tmp_path) -> N
 
     evidence = _target_evidence()
     evidence["package_version"] = "0.0.1-local"
-    operations.succeed(claim, evidence)
+    operations.succeed(claim, AgentUpgradeResult.model_validate(evidence))
     runtime_identity = {**NEW_IDENTITY, "semantic_version": "0.0.1"}
     assert (
         operations.claim(
@@ -1269,7 +1284,7 @@ def test_replay_returns_original_job_before_replanning_and_checks_actor_and_scop
 
     replay = upgrades.apply(
         None,
-        PACKAGE,
+        PACKAGE_MODEL,
         plan_digest="0" * 64,
         actor="admin",
         request_id=job.request_id,
@@ -1283,7 +1298,7 @@ def test_replay_returns_original_job_before_replanning_and_checks_actor_and_scop
         upgrades.get_request(
             job.request_id,
             actor="another-admin",
-            request_intent={"all": True, "selectors": None},
+            request_intent=AgentUpgradeRequestIntent(all=True, selectors=None),
         )
     with pytest.raises(
         AgentUpgradeConflict, match="request key was already used differently"
@@ -1291,7 +1306,9 @@ def test_replay_returns_original_job_before_replanning_and_checks_actor_and_scop
         upgrades.get_request(
             job.request_id,
             actor="admin",
-            request_intent={"all": False, "selectors": [NODE_A, NODE_B]},
+            request_intent=AgentUpgradeRequestIntent(
+                all=False, selectors=[NODE_A, NODE_B]
+            ),
         )
 
 
@@ -1307,12 +1324,12 @@ def test_offline_spark_is_deferred_and_upgraded_when_it_reconnects(tmp_path) -> 
             node = session.get(AgentNode, node_id)
             assert node is not None
             node.last_seen_at = clock() - timedelta(minutes=10)
-    assert upgrades.preview([NODE_B], PACKAGE).node_ids == (NODE_B,)
-    plan = upgrades.preview(None, PACKAGE)
+    assert upgrades.preview([NODE_B], PACKAGE_MODEL).node_ids == (NODE_B,)
+    plan = upgrades.preview(None, PACKAGE_MODEL)
     assert plan.node_ids == (NODE_A, NODE_B)
     job = upgrades.apply(
         None,
-        PACKAGE,
+        PACKAGE_MODEL,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
@@ -1411,7 +1428,7 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(
         transport=httpx2.MockTransport(handler),
     )
 
-    assert upgrades.current_package() == {
+    assert upgrades.current_package().model_dump(mode="json") == {
         **PACKAGE,
         "package_url": f"https://install.vonkforge.ai/{package_path}",
     }
@@ -1539,7 +1556,7 @@ def test_a_release_that_is_mid_publication_is_fetched_again(
         transport=httpx2.MockTransport(handler),
     )
 
-    assert upgrades.current_package()["package_sha256"] == PACKAGE["package_sha256"]
+    assert upgrades.current_package().package_sha256 == PACKAGE["package_sha256"]
     assert manifest_requests == 2
 
 
@@ -1690,10 +1707,10 @@ def _rollout(
         clock=service_clock,
     )
     operations.set_result_consumer(upgrades.consume_agent_result)
-    plan = upgrades.preview(None, PACKAGE)
+    plan = upgrades.preview(None, PACKAGE_MODEL)
     job = upgrades.apply(
         None,
-        PACKAGE,
+        PACKAGE_MODEL,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
@@ -1826,10 +1843,10 @@ def test_latest_request_supersedes_an_older_paused_rollout(
         waiting = session.get(Job, old_job.id)
         assert waiting is not None
         waiting.state = "waiting-for-operator"
-    plan = upgrades.preview(None, PACKAGE)
+    plan = upgrades.preview(None, PACKAGE_MODEL)
     current = upgrades.apply(
         None,
-        PACKAGE,
+        PACKAGE_MODEL,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
@@ -2010,18 +2027,18 @@ def test_fleet_upgrade_all_treats_an_already_current_spark_as_a_no_op(
 
     plan = upgrades.preview(
         [NODE_A, NODE_B],
-        PACKAGE,
-        request_intent={"all": True, "selectors": None},
+        PACKAGE_MODEL,
+        request_intent=AgentUpgradeRequestIntent(all=True, selectors=None),
     )
     assert plan.node_ids == (NODE_B,)
     assert plan.skipped == {NODE_A: "already runs the requested agent build"}
     job = upgrades.apply(
         [NODE_A, NODE_B],
-        PACKAGE,
+        PACKAGE_MODEL,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
-        request_intent={"all": True, "selectors": None},
+        request_intent=AgentUpgradeRequestIntent(all=True, selectors=None),
     )
     assert job.targets == [NODE_B]
     with sessions() as session:
@@ -2038,11 +2055,11 @@ def test_fleet_upgrade_all_treats_an_already_current_spark_as_a_no_op(
 
     everyone_current = upgrades.apply(
         [NODE_A, NODE_B],
-        PACKAGE,
+        PACKAGE_MODEL,
         plan_digest="0" * 64,
         actor="admin",
         request_id=str(uuid.uuid4()),
-        request_intent={"all": True, "selectors": None},
+        request_intent=AgentUpgradeRequestIntent(all=True, selectors=None),
     )
     assert everyone_current.state == "succeeded"
     assert everyone_current.targets == []

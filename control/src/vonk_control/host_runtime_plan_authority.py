@@ -423,11 +423,11 @@ def _validate_recovery_start_generation(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 "vonk:singleton-recovery-stop:"
-                f"{authority.run.id}:{current_generation}:{marker['deadline']}",
+                f"{authority.run.id}:{current_generation}:{marker.deadline}",
             )
         )
         if (
-            marker["failed_rank"] != 0
+            marker.failed_rank != 0
             or parent.request_id != expected_request_id
             or len(expected_nodes) != 1
             or len(phases) != 1
@@ -439,12 +439,12 @@ def _validate_recovery_start_generation(
             )
         topology = "singleton"
     elif parent.actor == "system:distributed-recovery":
-        failed_rank = marker["failed_rank"]
+        failed_rank = marker.failed_rank
         expected_request_id = str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 f"vonk:distributed-recovery:{authority.run.id}:"
-                f"{failed_rank}:{marker['deadline']}",
+                f"{failed_rank}:{marker.deadline}",
             )
         )
         if (

@@ -1676,7 +1676,8 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
     withdrawn = verify_active_route_bundle(root)
     assert withdrawn.marker.state == "maintenance"
     assert withdrawn.marker.generation > renewed.marker.generation
-    assert withdrawn.routes["routes"] == {}
+    assert withdrawn.routes is not None
+    assert withdrawn.routes.routes == {}
     assert _supervisor(monkeypatch, root)._active_request() is not None
 
 
@@ -1937,11 +1938,10 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     service = atomic_service(base, root, clock)
     service.publish_run(first)
     accepted = verify_active_route_bundle(root)
-    assert isinstance(accepted.routes["routes"], dict)
-    assert isinstance(accepted.litellm["model_list"], list)
-    original_endpoint = deepcopy(accepted.routes["routes"]["qwen"])
-    assert isinstance(original_endpoint, dict)
-    original_model = deepcopy(accepted.litellm["model_list"][0])
+    assert accepted.routes is not None
+    assert accepted.litellm is not None
+    original_endpoint = deepcopy(accepted.routes.routes["qwen"])
+    original_model = deepcopy(accepted.litellm.model_list[0])
     with service.sessions.begin() as session:
         run = _recipe_run(session, first)
         node = session.scalar(select(RunNode).where(RunNode.run_id == first))
@@ -1964,16 +1964,12 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
             node.endpoint = {"url": "not an endpoint"}
     service.publish_run(second)
     added = verify_active_route_bundle(root)
-    assert isinstance(added.routes["routes"], dict)
-    assert isinstance(added.litellm["model_list"], list)
-    assert added.routes["routes"]["qwen"] == original_endpoint
+    assert added.routes is not None
+    assert added.litellm is not None
+    assert added.routes.routes["qwen"] == original_endpoint
     assert sorted(_live_models(root)) == ["qwen", "second"]
     assert (
-        next(
-            model
-            for model in added.litellm["model_list"]
-            if model["model_name"] == "qwen"
-        )
+        next(model for model in added.litellm.model_list if model.model_name == "qwen")
         == original_model
     )
 
@@ -2012,8 +2008,8 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     service.withdraw_run(second)
     removed = verify_active_route_bundle(root)
     assert _live_models(root) == ["qwen"]
-    assert isinstance(removed.routes["routes"], dict)
-    assert removed.routes["routes"]["qwen"] == original_endpoint
+    assert removed.routes is not None
+    assert removed.routes.routes["qwen"] == original_endpoint
     assert service.maintain() is False  # exact snapshot identity does not churn
     with service.sessions.begin() as session:
         run = _recipe_run(session, first)
@@ -2031,11 +2027,8 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     recovered = verify_active_route_bundle(root)
     assert recovered.marker.generation > removed.marker.generation
     assert _live_models(root) == ["qwen"]
-    assert isinstance(recovered.routes["routes"], dict)
-    assert (
-        recovered.routes["routes"]["qwen"]["observed_at"]
-        != original_endpoint["observed_at"]
-    )
+    assert recovered.routes is not None
+    assert recovered.routes.routes["qwen"].observed_at != original_endpoint.observed_at
     fresh = add_running_run(
         base, first, alias="fresh", route_state="pending", identity=4
     )
