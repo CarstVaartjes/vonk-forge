@@ -1727,6 +1727,7 @@ def test_known_rotation_capacity_refusal_preserves_active_certificate(
     assert refusal.value.reason_code == "certificate.response_unrepresentable"
     assert len(authority.calls) == calls
     with sessions() as session:
-        assert session.get(AgentCertificate, issued.serial).state == "active"
+        source = session.get(AgentCertificate, issued.serial)
+        assert source is not None and source.state == "active"
         intent = session.scalar(select(AgentCertificateRotation))
         assert intent is not None and intent.state == "issuing"
