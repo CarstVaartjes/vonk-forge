@@ -172,6 +172,52 @@ impl StateStore {
         })
     }
 
+    /// Scan progress shares the node-bound, FULL-synchronous journal with
+    /// effects. Saving follows delivery, so a refused report replays its page.
+    pub fn observation_checkpoint(
+        &self,
+    ) -> Result<Option<crate::oci::RecipeRunObservationCheckpoint>, StateError> {
+        let value: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT value FROM metadata WHERE key='recipe_observation_scan_v1'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if value.as_ref().is_some_and(|value| value.len() > 16 * 1024) {
+            return Err(StateError::Identity);
+        }
+        value
+            .map(|value| parse_strict(value.as_bytes()).map_err(StateError::from))
+            .transpose()
+    }
+
+    pub fn save_observation_checkpoint(
+        &mut self,
+        checkpoint: Option<&crate::oci::RecipeRunObservationCheckpoint>,
+    ) -> Result<(), StateError> {
+        match checkpoint {
+            Some(checkpoint) => {
+                let body = canonical_json(checkpoint)?;
+                if body.len() > 16 * 1024 {
+                    return Err(StateError::Identity);
+                }
+                let text = std::str::from_utf8(&body).map_err(|_| StateError::Identity)?;
+                self.connection.execute(
+                    "INSERT INTO metadata(key,value) VALUES ('recipe_observation_scan_v1',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [text],
+                )?;
+            }
+            None => {
+                self.connection.execute(
+                    "DELETE FROM metadata WHERE key='recipe_observation_scan_v1'",
+                    [],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// Restore a disposable local journal after proven stored-state damage.
     /// The Controller remains the authority for claims and observes exact
     /// effects before reissuing work. Keep the damaged journal for diagnostics.

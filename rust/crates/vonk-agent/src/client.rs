@@ -32,7 +32,7 @@ use crate::{
     failure_evidence::sanitize_text,
     identity::{IdentityPaths, active_identity_paths},
     inventory::Inventory,
-    oci::MAX_MANAGED_RECIPE_RUNS,
+    oci::MAX_RECIPE_RUN_OBSERVATIONS_PER_BATCH,
     pair::verify_ca_pin,
     runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
@@ -392,7 +392,7 @@ pub fn build_exact_recipe_run_observations(
     observed_at: chrono::DateTime<chrono::Utc>,
     observations: &[ExactRecipeRunObservation],
 ) -> Result<RecipeRunObservationsWire, ClientError> {
-    if observations.len() > MAX_MANAGED_RECIPE_RUNS {
+    if observations.len() > MAX_RECIPE_RUN_OBSERVATIONS_PER_BATCH {
         return Err(ClientError::Protocol);
     }
     let mut run_ids = std::collections::BTreeSet::new();

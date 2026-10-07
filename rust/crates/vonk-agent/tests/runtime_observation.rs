@@ -541,3 +541,274 @@ fn unbound_compiled_placement_requires_addresses_only_at_execution() {
     let bound = schema2_dual_plan();
     bound.runtime.placement.validate_bound().unwrap();
 }
+
+fn native_observation_plan(root: &Path) -> CompiledExecutionPlan {
+    let mut plan = schema2_single_plan();
+    persist_plan(root, &plan);
+    plan.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+    plan.security.network_mode = "bridge".parse().unwrap();
+    plan.validate().unwrap();
+    plan
+}
+
+/// The native retained Start producer, node-bound SQLite checkpoint and a new
+/// runtime/store instance on every page share the same exact generation.
+#[test]
+fn sixty_five_native_starts_survive_durable_pagination_and_restart() {
+    use std::collections::BTreeSet;
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let mut expected = BTreeSet::new();
+    for _ in 0..65 {
+        let id = uuid::Uuid::new_v4();
+        runtime
+            .prepare_start_with_inspection_identity(
+                &plan,
+                INSTALLATION,
+                &id.to_string(),
+                &placement(&plan),
+                &identity(&plan),
+            )
+            .unwrap();
+        expected.insert(id);
+    }
+    let database = root.path().join("agent-state.sqlite");
+    let mut observed = BTreeSet::new();
+    let mut pages = 0;
+    loop {
+        let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+        let checkpoint = state.observation_checkpoint().unwrap();
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        };
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        assert!(page.plans.len() <= 64);
+        assert!(page.failures.is_empty());
+        assert!(!page.empty_snapshot_safe);
+        for plan in &page.plans {
+            assert_eq!(plan.run_generation, 2);
+            assert!(
+                observed.insert(plan.run_id),
+                "restart must resume rather than replay an already delivered page"
+            );
+        }
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        assert_eq!(state.observation_checkpoint().unwrap(), page.checkpoint);
+        pages += 1;
+        if page.complete {
+            break;
+        }
+        assert!(pages < 70);
+    }
+    assert!(pages >= 2);
+    assert_eq!(observed, expected);
+}
+
+fn historical_runs(root: &Path, count: usize) {
+    for _ in 0..count {
+        fs::create_dir_all(root.join("runs").join(uuid::Uuid::new_v4().to_string())).unwrap();
+    }
+}
+
+#[test]
+fn history_beyond_4096_keeps_cursor_progress_during_new_arrivals_and_restart() {
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    historical_runs(root.path(), 4097);
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            INSTALLATION,
+            RUN,
+            &placement(&plan),
+            &identity(&plan),
+        )
+        .unwrap();
+    let database = root.path().join("agent-state.sqlite");
+    let mut found = false;
+    let mut pages = 0;
+    loop {
+        let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+        let checkpoint = state.observation_checkpoint().unwrap();
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        };
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        found |= page.plans.iter().any(|plan| plan.run_id.to_string() == RUN);
+        assert!(!page.empty_snapshot_safe);
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        pages += 1;
+        if page.complete {
+            break;
+        }
+        // A root stamp changes at every page. Resetting to zero would never
+        // reach EOF/history tail; witnessed filesystem progress must survive.
+        historical_runs(root.path(), 1);
+        assert!(pages < 80, "new arrivals must not rewind every page");
+    }
+    assert!(pages > 16);
+    assert!(
+        found,
+        "the retained Start must reach the consumer beyond old history"
+    );
+}
+
+#[test]
+fn complete_empty_history_uses_initial_cutoff_and_partial_scan_is_never_empty() {
+    let root = tempdir().unwrap();
+    historical_runs(root.path(), 4097);
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let first = runtime.recipe_run_inspection_page(None).unwrap();
+    assert!(!first.complete);
+    assert!(!first.empty_snapshot_safe);
+    let original_cutoff = first.observed_at;
+    let mut checkpoint = first.checkpoint;
+    loop {
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        checkpoint = page.checkpoint;
+        if page.complete {
+            assert!(page.empty_snapshot_safe);
+            assert_eq!(page.observed_at, original_cutoff);
+            break;
+        }
+        assert!(!page.empty_snapshot_safe);
+    }
+}
+
+#[test]
+fn interrupted_empty_scan_cannot_erase_a_native_start_arriving_between_pages() {
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    historical_runs(root.path(), 4097);
+    let database = root.path().join("agent-state.sqlite");
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let first = runtime.recipe_run_inspection_page(None).unwrap();
+    let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+    state
+        .save_observation_checkpoint(first.checkpoint.as_ref())
+        .unwrap();
+    drop(state);
+    let plan = native_observation_plan(root.path());
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            INSTALLATION,
+            RUN,
+            &placement(&plan),
+            &identity(&plan),
+        )
+        .unwrap();
+    let mut found = false;
+    // Arrivals before the cursor may belong to the next cycle. Both cycles
+    // must stay truthful; the next complete cycle must recover the new run.
+    for _ in 0..100 {
+        let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+        let checkpoint = state.observation_checkpoint().unwrap();
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        assert!(!page.empty_snapshot_safe);
+        found |= page.plans.iter().any(|plan| plan.run_id.to_string() == RUN);
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        if page.complete && found {
+            return;
+        }
+    }
+    panic!("the original scan and subsequent complete cycle must recover the new Start");
+}
+
+#[test]
+fn damaged_and_symlinked_runs_do_not_hide_exact_healthy_generation_on_later_pages() {
+    use std::os::unix::fs::symlink;
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("untouched"), b"external state").unwrap();
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            INSTALLATION,
+            RUN,
+            &placement(&plan),
+            &identity(&plan),
+        )
+        .unwrap();
+    for _ in 0..17 {
+        let id = uuid::Uuid::new_v4().to_string();
+        fs::create_dir_all(root.path().join("runs").join(&id)).unwrap();
+        let metadata = root.path().join("run-metadata").join(&id);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::write(metadata.join("lifecycle.json"), b"not-json").unwrap();
+    }
+    symlink(
+        outside.path(),
+        root.path()
+            .join("runs")
+            .join(uuid::Uuid::new_v4().to_string()),
+    )
+    .unwrap();
+    let database = root.path().join("state.sqlite");
+    let mut healthy = 0;
+    let mut damaged = 0;
+    for _ in 0..30 {
+        let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+        let checkpoint = state.observation_checkpoint().unwrap();
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        assert!(!page.empty_snapshot_safe);
+        damaged += page.failures.len();
+        for plan in page.plans {
+            assert_eq!(plan.run_id.to_string(), RUN);
+            assert_eq!(plan.run_generation, 2);
+            healthy += 1;
+        }
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        if page.complete {
+            break;
+        }
+    }
+    assert_eq!(healthy, 1);
+    assert_eq!(damaged, 18);
+    assert_eq!(
+        fs::read(outside.path().join("untouched")).unwrap(),
+        b"external state"
+    );
+}

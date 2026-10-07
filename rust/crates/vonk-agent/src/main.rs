@@ -14,7 +14,7 @@ use vonk_agent::{
     client::AgentHttpClient,
     config::{AgentConfig, DEFAULT_CONFIG_PATH, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
     executor::{
-        ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError,
+        ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError, RecipeObservationSweep,
         run_once_with_claim_hook,
     },
     inventory::{
@@ -318,13 +318,26 @@ async fn run_control_lane(
                 incoming: Path::new("/var/lib/vonk-forge/incoming"),
             },
         };
+        let checkpoint = match state.observation_checkpoint() {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                // Damaged scan progress is separate from effect receipts. A
+                // fresh scan is unknown until complete; preserve the journal.
+                eprintln!("vonk-agent: run scan checkpoint unavailable: {error}");
+                None
+            }
+        };
         let exact_observation_result = executor
             .recipes
-            .report_exact_recipe_run_observations()
+            .report_recipe_run_observation_page(checkpoint.as_ref())
             .await;
-        let local_managed_runs = executor.recipes.managed_recipe_run_count().unwrap_or(0);
-        let exact_observation_count =
-            managed_run_count(&exact_observation_result, local_managed_runs);
+        let mut empty_snapshot_safe = observation_snapshot_is_empty(&exact_observation_result);
+        if let Ok(sweep) = &exact_observation_result {
+            if let Err(error) = state.save_observation_checkpoint(sweep.checkpoint.as_ref()) {
+                eprintln!("vonk-agent: run scan checkpoint not saved: {error}");
+                empty_snapshot_safe = false;
+            }
+        }
         if let Err(error) = &exact_observation_result {
             // A failed report must not terminate the claim lane: a
             // stop/recovery operation may already be waiting for us.
@@ -332,7 +345,7 @@ async fn run_control_lane(
         }
         let wait_seconds = claim_wait_seconds(
             POLL_MAX_SECONDS,
-            exact_observation_count,
+            usize::from(!empty_snapshot_safe),
             readiness_published,
         );
         let fingerprint = vonk_agent::runtime_preflight::host_fingerprint(
@@ -559,14 +572,12 @@ where
     outcome
 }
 
-/// A refused sweep reports no count, but the runs it could not report are
-/// still retained locally.  Counting them as absent made the agent fall back
-/// to the idle claim cadence exactly when it had work to observe.
-fn managed_run_count(
-    result: &Result<usize, RecipeObservationError>,
-    local_managed_runs: usize,
-) -> usize {
-    result.as_ref().copied().unwrap_or(local_managed_runs)
+/// Unknown and partial zero-count pages stay on the active cadence. Only a
+/// delivered authoritative empty snapshot allows the longer idle poll.
+fn observation_snapshot_is_empty(
+    result: &Result<RecipeObservationSweep, RecipeObservationError>,
+) -> bool {
+    result.as_ref().is_ok_and(|sweep| sweep.empty_snapshot_safe)
 }
 
 fn claim_wait_seconds(
@@ -590,7 +601,7 @@ mod tests {
     use super::{
         LaneExitWithRotation, claim_wait_seconds, collect_inventory_until_ready,
         ensure_startup_identity, inventory_refresh_due, inventory_retry_delay, loop_error_is_fatal,
-        managed_run_count, report_ready_after_self_test, rotate_until_settled,
+        observation_snapshot_is_empty, report_ready_after_self_test, rotate_until_settled,
         supervise_lanes_with_rotation,
     };
     use std::{
@@ -701,10 +712,27 @@ mod tests {
     #[test]
     fn refused_observation_sweep_keeps_the_managed_run_cadence() {
         let refused = Err(RecipeObservationError::Report(ClientError::Protocol));
-        let count = managed_run_count(&refused, 1);
-        assert_eq!(count, 1);
-        assert_eq!(claim_wait_seconds(60, count, true), 10);
-        assert_eq!(managed_run_count(&Ok(2), 0), 2);
+        assert!(!observation_snapshot_is_empty(&refused));
+        assert_eq!(
+            claim_wait_seconds(
+                60,
+                usize::from(!observation_snapshot_is_empty(&refused)),
+                true
+            ),
+            10
+        );
+        let partial = Ok(vonk_agent::executor::RecipeObservationSweep {
+            reported: 0,
+            checkpoint: None,
+            empty_snapshot_safe: false,
+        });
+        assert!(!observation_snapshot_is_empty(&partial));
+        let complete = Ok(vonk_agent::executor::RecipeObservationSweep {
+            reported: 0,
+            checkpoint: None,
+            empty_snapshot_safe: true,
+        });
+        assert!(observation_snapshot_is_empty(&complete));
     }
 
     #[test]
