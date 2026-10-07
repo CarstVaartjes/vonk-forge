@@ -689,6 +689,77 @@ def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
     assert all("/usr/bin/install" not in argv for argv in observed)
 
 
+def test_owned_management_peer_survives_gateway_namespace_replacement(
+    tmp_path: Path,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.temporary_root = tmp_path
+    run.project = "vonk-spark-42-arm64"
+    run.synthetic_interfaces = []
+    run.synthetic_fabric_octet = 42
+    observed: list[list[str]] = []
+    generation = 0
+    foreign_host = False
+
+    def command(argv, *, cwd, timeout=300):
+        assert cwd == tmp_path
+        observed.append(argv)
+        if argv[-3:] == ["ps", "--quiet", "litellm"]:
+            stdout = ("a" if generation == 0 else "b") * 64 + "\n"
+        elif argv[:2] == ["docker", "inspect"]:
+            stdout = "4242\n" if generation == 0 else "5151\n"
+        elif "address" in argv and "show" in argv:
+            interface = argv[-1]
+            peer = interface.startswith("vnas")
+            address = "172.31.42.2" if peer else "172.31.42.1"
+            if foreign_host and not peer:
+                address = "172.26.0.1"
+            stdout = json.dumps(
+                [
+                    {
+                        "ifname": interface,
+                        "addr_info": [
+                            {"family": "inet", "local": address, "prefixlen": 30}
+                        ],
+                    }
+                ]
+            )
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout)
+
+    run._run_command = command
+    run._prepare_synthetic_firewall_environment()
+    original_environment = dict(run.firewall_environment)
+    original_interfaces = list(run.synthetic_interfaces)
+    observed.clear()
+    run._detach_synthetic_management_peer()
+    generation = 1  # Compose replaces the gateway; accepted Start is unchanged.
+    run._attach_synthetic_management_peer()
+    moves = [argv for argv in observed if "link" in argv and "netns" in argv]
+    assert len(moves) == 2
+    assert moves[0][2:6] == ["--target", "4242", "--net", "/usr/sbin/ip"]
+    assert moves[0][-1] == str(lifecycle.os.getpid())
+    assert moves[1][-1] == "5151"
+    assert all(argv[-3].startswith("vnas") for argv in moves)
+    assert run.synthetic_management_owner == ("b" * 64, "5151")
+    assert run.synthetic_interfaces == original_interfaces
+    assert run.firewall_environment == original_environment
+    # Replacing the gateway never deletes/recreates the accepted host device,
+    # changes its .1 address, or touches the independent fabric interface.
+    mutations = [argv for argv in observed if "set" in argv or "replace" in argv]
+    assert all(original_interfaces[0] not in argv for argv in mutations)
+    assert all(original_interfaces[1] not in argv for argv in mutations)
+    assert not any("delete" in argv or "add" in argv for argv in observed)
+    observed.clear()
+    foreign_host = True
+    with pytest.raises(lifecycle.LifecycleError, match="address owner changed"):
+        run._detach_synthetic_management_peer()
+    assert not any("netns" in argv or "set" in argv for argv in observed)
+
+
 def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     tmp_path: Path,
 ) -> None:
