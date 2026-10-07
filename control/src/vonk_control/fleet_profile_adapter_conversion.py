@@ -18,7 +18,7 @@ from pydantic import Field, ValidationError
 from sqlalchemy import cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import AgentProtocolError, canonical_message
 
 from .fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -117,6 +117,12 @@ def _job_proof(
     job = session.get(Job, operation_id)
     if job is None:
         raise _UnprovenJournal("exact child row is unavailable")
+    if (
+        not isinstance(job.payload, dict)
+        or not isinstance(job.targets, list)
+        or any(not isinstance(node, str) for node in job.targets)
+    ):
+        raise _UnprovenJournal("exact child payload or target scope is malformed")
     expected_key = profile_switch_child_request_key(row.id, index, item.kind, item.id)
     expected_kind = {
         "run": "recipe.run-switch.v2",
@@ -541,7 +547,7 @@ def try_convert_application(
         return ProfileAdapterConversionOutcome(state="current")
     try:
         converted = _convert(session, row)
-    except (ValidationError, _UnprovenJournal) as error:
+    except (ValidationError, _UnprovenJournal, AgentProtocolError) as error:
         detail = (
             str(error)
             if isinstance(error, _UnprovenJournal)
