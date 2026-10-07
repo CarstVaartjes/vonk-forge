@@ -29,22 +29,15 @@ _HOME_VARIABLE_PATH = re.compile(r"(?:~|\$HOME|\$\{HOME\})/\$")
 
 
 def shell_scripts(root: Path = ROOT) -> list[Path]:
-    tracked = subprocess.run(
-        ["git", "ls-files", *SHELL_DIRECTORIES],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split("\n")
     found = []
-    for name in tracked:
-        path = root / name
-        if not name or not path.is_file():
-            continue
-        with path.open("rb") as stream:
-            first = stream.readline()
-        if _SHEBANG.match(first) or name.endswith(".sh"):
-            found.append(path)
+    for directory in SHELL_DIRECTORIES:
+        for path in sorted((root / directory).rglob("*")):
+            if path.is_symlink() or not path.is_file():
+                continue
+            with path.open("rb") as stream:
+                first = stream.readline()
+            if _SHEBANG.match(first) or path.suffix == ".sh":
+                found.append(path)
     return found
 
 
@@ -123,3 +116,13 @@ def test_shellcheck_quoting_rules_pass() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_shell_discovery_includes_files_without_a_git_index(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    script = scripts / "new-script"
+    script.write_text('#!/bin/sh\nrm -rf "$work"\n')
+    (scripts / "notes.txt").write_text("ordinary documentation\n")
+    assert shell_scripts(tmp_path) == [script]
+    assert unguarded_removes(script.read_text())
