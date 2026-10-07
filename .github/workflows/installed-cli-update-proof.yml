@@ -1,0 +1,71 @@
+name: Installed signed CLI update proof
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/installed-cli-update-proof.yml'
+      - 'tests/cluster_profiles/test_cli_update.py'
+      - 'src/cluster_profiles/cli_update.py'
+      - 'src/cluster_profiles/build_identity.py'
+      - 'src/cluster_profiles/runtime_identity.py'
+      - 'tools/hatch_build.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+
+permissions:
+  contents: read
+
+jobs:
+  signed-update:
+    name: Actual signed wheel uv tool update
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Provide canonical recipe dependency
+        uses: ./.github/actions/recipe-library
+      - name: Prepare locked Python tooling
+        uses: ./.github/actions/python-env
+      - name: Prepare isolated locked CLI resolver cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/signed-update-dependencies" \
+            scripts/retry-dependency-fetch uv sync --project . --frozen --no-dev --no-install-project
+          test -d "$RUNNER_TEMP/signed-update-cache"
+      - name: Exercise actual installed updater and reject corrupted bytes
+        shell: bash
+        env:
+          VONK_SIGNED_UPDATE_PROOF: '1'
+          VONK_SIGNED_UPDATE_CACHE: ${{ runner.temp }}/signed-update-cache
+          VONK_SIGNED_UPDATE_REPORT: ${{ runner.temp }}/signed-update-report.json
+        run: |
+          set -euo pipefail
+          uv run --project control --frozen pytest -q -n 0 \
+            tests/cluster_profiles/test_cli_update.py::test_installed_cli_signed_update_replaces_actual_uv_tool \
+            --junitxml="$RUNNER_TEMP/signed-update-junit.xml"
+          python3 - <<'PY'
+          import json, os, xml.etree.ElementTree as ET
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          cases = ET.parse(root / 'signed-update-junit.xml').findall('.//testcase')
+          assert len(cases) == 1
+          assert not any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error'))
+          proof = json.loads((root / 'signed-update-report.json').read_text())
+          assert proof['tampered_wheel_retained_prior_tool_receipt']
+          assert proof['real_uv_tool_receipt_changed']
+          PY
+      - name: Retain scoped signed updater evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: installed-signed-cli-update-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/signed-update-report.json
+            ${{ runner.temp }}/signed-update-junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
