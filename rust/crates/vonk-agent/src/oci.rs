@@ -4188,6 +4188,8 @@ mod tests {
             };
         let first = execute("first");
         assert_fallbacks(&first, &plan.artifacts);
+        // Preserve the captured production cause in the hosted proof log.
+        eprint!("{first}");
         let model = data
             .join("installations")
             .join(FIRST)
@@ -4205,6 +4207,7 @@ mod tests {
         fs::write(&model, b"damaged").unwrap();
         let recovered = execute("recover");
         assert_fallbacks(&recovered, &plan.artifacts[..1]);
+        eprint!("{recovered}");
         assert_eq!(fs::read(&model).unwrap(), b"primary");
         assert_ne!(fs::metadata(&model).unwrap().ino(), after.ino());
         let installation = data.join("installations").join(FIRST);
