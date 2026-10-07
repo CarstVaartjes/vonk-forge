@@ -61,7 +61,11 @@ jobs:
             exit 1
           fi
           cat /tmp/cas-no-delete-counterexample.log
-          rg -q 'expired exclusive CAS bytes survived' /tmp/cas-no-delete-counterexample.log
+          python - <<'PY'
+          from pathlib import Path
+          log = Path("/tmp/cas-no-delete-counterexample.log").read_text()
+          assert "AssertionError: expired exclusive CAS bytes survived" in log, log
+          PY
           cp "$backup" "$owner"
           cmp "$backup" "$owner"
           git diff --exit-code -- "$owner"
