@@ -1,7 +1,7 @@
 import {LosslessNumber} from "lossless-json";
 import {compareWire, type WireNumber} from "../api/contract-numeric";
 import {validateComponent} from "../api/contract-json";
-import {useCallback, useEffect, useReducer, useState} from "react";
+import {useCallback, useEffect, useReducer, useRef, useState} from "react";
 import type {
   ControlApi,
   FleetChangeEvent,
@@ -51,11 +51,10 @@ export function useFleetStream(api: ControlApi) {
     dispatch({type: "retry"});
     setGeneration(value => value + 1);
   }, []);
+  const currentRefresh = useRef<((signal?: AbortSignal) => Promise<void>) | undefined>(undefined);
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    const snapshot = await api.visualFleet(signal);
-    dispatch({type: "requested-snapshot", snapshot});
-    setLastUpdatedAt(Date.now()); setRefreshError("");
-  }, [api]);
+    await currentRefresh.current?.(signal);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -87,13 +86,16 @@ export function useFleetStream(api: ControlApi) {
       scheduleRefresh(delay);
     }
 
-    async function requestSnapshot(reason: "initial" | "poll" | "reconcile" | "refresh"): Promise<void> {
+    async function requestSnapshot(reason: "initial" | "poll" | "reconcile" | "refresh", signal?: AbortSignal): Promise<void> {
       if (!active) return;
       if (requestInFlight) {
         if (reason === "refresh") refreshQueued = true;
         return;
       }
       const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signal?.aborted) return;
+      signal?.addEventListener("abort", abort, {once: true});
       const requestTimelineGeneration = timelineGeneration;
       controllers.add(controller);
       requestInFlight = true;
@@ -121,6 +123,7 @@ export function useFleetStream(api: ControlApi) {
           }
         }
       } finally {
+        signal?.removeEventListener("abort", abort);
         controllers.delete(controller);
         requestInFlight = false;
         if (active && requiredRefreshCursor !== null) {
@@ -218,6 +221,7 @@ export function useFleetStream(api: ControlApi) {
       scheduleRefresh();
     }
 
+    currentRefresh.current = signal => requestSnapshot("refresh", signal);
     void requestSnapshot("initial");
     const source = typeof EventSource === "function"
       ? new EventSource("/api/fleet/stream")
@@ -236,6 +240,7 @@ export function useFleetStream(api: ControlApi) {
 
     return () => {
       active = false;
+      currentRefresh.current = undefined;
       stopPolling();
       stopReconciliation();
       clearInterval(freshnessTimer);
