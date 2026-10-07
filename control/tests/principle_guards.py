@@ -98,6 +98,72 @@ def positive_comparisons(node: ast.AST, positive: bool = True):
         yield from positive_comparisons(child, positive)
 
 
+def diagnostic_report_subjects(scope: ast.AST) -> set[str]:
+    """File-backed reports with asserted failure causes are evidence, not job state.
+
+    Require both the JSON file read and positive cause evidence on the same
+    subject. A variable named report, a state field, or a bare failed status
+    alone must still be scanned.
+    """
+    file_reports: set[str] = set()
+    for node in ast.walk(scope):
+        value = node.value if isinstance(node, ast.Assign) else None
+        target = node.targets[0] if isinstance(node, ast.Assign) else None
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "append"
+            and len(node.args) == 1
+        ):
+            value, target = node.args[0], node.func.value
+        if (
+            isinstance(target, ast.Name)
+            and isinstance(value, ast.Call)
+            and ast.unparse(value.func) == "json.loads"
+            and len(value.args) == 1
+            and isinstance(value.args[0], ast.Call)
+            and name(value.args[0].func) == "read_text"
+        ):
+            file_reports.add(target.id)
+
+    subjects: set[str] = set()
+    for node in local_nodes(scope):
+        if not isinstance(node, ast.Assert):
+            continue
+        fields: list[ast.expr] = []
+        if isinstance(node.test, ast.Subscript):
+            fields.append(node.test)
+        for comparison in positive_comparisons(node.test):
+            if isinstance(comparison, ast.Compare) and all(
+                isinstance(op, ast.In) for op in comparison.ops
+            ):
+                fields.extend(comparison.comparators)
+        for field in fields:
+            if (
+                isinstance(field, ast.Subscript)
+                and isinstance(field.slice, ast.Constant)
+                and field.slice.value == "cause"
+                and isinstance(field.value, ast.Subscript)
+                and isinstance(field.value.slice, ast.Constant)
+                and field.value.slice.value == "failure"
+            ):
+                subject = field.value.value
+                root = subject.value if isinstance(subject, ast.Subscript) else subject
+                if isinstance(root, ast.Name) and root.id in file_reports:
+                    subjects.add(ast.dump(subject))
+    return subjects
+
+
+def is_diagnostic_report_status(comparison: ast.Compare, subjects: set[str]) -> bool:
+    return any(
+        isinstance(operand, ast.Subscript)
+        and isinstance(operand.slice, ast.Constant)
+        and operand.slice.value == "status"
+        and ast.dump(operand.value) in subjects
+        for operand in (comparison.left, *comparison.comparators)
+    )
+
+
 def status_code(call: ast.Call) -> int | None:
     for kw in call.keywords:
         if kw.arg == "status_code":
@@ -339,6 +405,7 @@ def scan_source(
             self.get = False
             self.context = ""
             self.resource_refusal = False
+            self.diagnostic_reports: set[str] = set()
 
         def add(self, node: ast.AST, kind: str):
             sites.append(
@@ -356,6 +423,10 @@ def scan_source(
             self.scope.pop()
 
         def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef):
+            old_reports = self.diagnostic_reports
+            self.diagnostic_reports = (
+                diagnostic_report_subjects(node) if mode == "tests" else set()
+            )
             old_receiver = self.receiver
             self.receiver = node if isinstance(node, ast.FunctionDef) else None
             old_get, old_context = self.get, self.context
@@ -425,6 +496,7 @@ def scan_source(
                     ):
                         self.add(node, "ending-without-fresh-request")
             self.scope.pop()
+            self.diagnostic_reports = old_reports
             self.get, self.context = old_get, old_context
             self.receiver = old_receiver
 
@@ -589,6 +661,9 @@ def scan_source(
                     self.add(node, "refused-read-assertion")
                 if (
                     values & {"failed", "FAILED"}
+                    and not is_diagnostic_report_status(
+                        comparison, self.diagnostic_reports
+                    )
                     and TRANSIENT.search(self.context)
                     and not re.search(
                         r"assert[^\n]*(?:reason_code|\.code\b)", self.context
