@@ -2103,7 +2103,7 @@ class RunSwitchFleetProfileAdapter:
             self._write_state(session, application, state)
             # Observation of issued children continues under retained authority;
             # each new effect still requires the author's current mutation role.
-            FleetProfileService._authorize(session, state.actor, mutation=False)
+            FleetProfileService._authorize(session, state.actor, serialize=False)
             operation = self._start_child(
                 application_id,
                 item,
@@ -3650,8 +3650,16 @@ class FleetProfileService:
                 return False
 
     @staticmethod
-    def _authorize(session: Session, actor: str, *, mutation: bool = True) -> None:
-        if mutation:
+    def _authorize(
+        session: Session,
+        actor: str,
+        *,
+        mutation: bool = True,
+        serialize: bool = True,
+    ) -> None:
+        # Queue preflight requires mutation roles too, but cannot hold this
+        # parent lock across the child's separate serialized acceptance.
+        if mutation and serialize:
             serialize_user_authority(session)
         user = session.scalar(select(User).where(User.subject == actor))
         if not FleetProfileService._user_has_profile_authority(user, mutation=mutation):
