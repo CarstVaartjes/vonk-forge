@@ -835,7 +835,11 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
         return json.loads(observed.stdout)
 
     before = identity()
-    assert before == {"version": "0.1.1", "source_sha": "c" * 40}
+    assert before == {
+        "version": "0.1.1",
+        "source_sha": "c" * 40,
+        "control_contract_sha256": candidate_identity["control_contract_sha256"],
+    }
     receipt_path = python.parent.parent / "uv-receipt.toml"
     before_tool_receipt = receipt_path.read_bytes()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -867,10 +871,21 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             assert applied.returncode == 0, applied.stderr
             receipt = json.loads(applied.stdout)
             after = identity()
-            assert after == {"version": "1.2.3", "source_sha": "b" * 40}
+            assert after == {
+                "version": "1.2.3",
+                "source_sha": "b" * 40,
+                "control_contract_sha256": candidate_identity[
+                    "control_contract_sha256"
+                ],
+            }
             assert receipt["updated"] is True
             assert receipt["compatibility"] == "compatible"
-            assert receipt["previous"] == before and receipt["current"] == after
+            assert receipt["previous"] == {
+                key: before[key] for key in ("version", "source_sha")
+            }
+            assert receipt["current"] == {
+                key: after[key] for key in ("version", "source_sha")
+            }
             assert requests.count(wheel_path) == 2
             assert requests.count("/api/cli/contract") == 1
             assert "/api/platform" not in requests
