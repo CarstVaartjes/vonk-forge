@@ -7,12 +7,15 @@ from pathlib import Path
 from typing import Self
 
 from httpx import Response
+from httpx2 import Response as Response2
 
 from cluster_profiles.control_client import ControlClient
 
+type ObservationHTTPResponse = Response | Response2
+
 
 class ObservationHTTPPeer:
-    def __init__(self, response: Response) -> None:
+    def __init__(self, response: ObservationHTTPResponse) -> None:
         self.status = response.status_code
         self.headers = Message()
         for key, value in response.headers.items():
@@ -29,7 +32,7 @@ class ObservationHTTPPeer:
         self._body.close()
 
 
-def observation_document(response: Response) -> dict[str, object]:
+def observation_document(response: ObservationHTTPResponse) -> dict[str, object]:
     """Exercise real envelope, receipt and bundled canonical-schema validation."""
     with tempfile.TemporaryDirectory() as directory:
         token = Path(directory) / "token"

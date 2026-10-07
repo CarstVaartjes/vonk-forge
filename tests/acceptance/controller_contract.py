@@ -49,7 +49,17 @@ class ObservationResponseContract:
 
     def _validate(self, value: object, schema: dict[str, object]) -> None:
         validator = source_schema_validator(schema)
-        if not validator.is_valid(value):
+        # As in the production receiver, establish the validator's recursive
+        # JSON instance type from actual JSON bytes rather than a type cast.
+        # Integral float tokens remain floats and the shared strict checker
+        # still refuses them; non-JSON values never become accepted payloads.
+        try:
+            instance = json.loads(json.dumps(value, allow_nan=False))
+        except (TypeError, ValueError):
+            raise ContractSkew(
+                f"{self.label} observation violates its source schema"
+            ) from None
+        if not validator.is_valid(instance):
             raise ContractSkew(f"{self.label} observation violates its source schema")
 
     def _payload(self, value: object) -> dict[str, object]:
