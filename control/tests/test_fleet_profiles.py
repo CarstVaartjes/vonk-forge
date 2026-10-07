@@ -4199,7 +4199,7 @@ def test_a_replaced_workload_keeps_serving_until_its_successor_starts() -> None:
         ["leftover"],
     )
 
-    assert [(item["kind"], item["id"]) for item in queue] == [
+    assert [(item.kind, item.id) for item in queue] == [
         # Two new runs take the spread workload's Sparks separately; neither
         # one alone can stop it, so it stops first.
         ("stop", "spread"),
