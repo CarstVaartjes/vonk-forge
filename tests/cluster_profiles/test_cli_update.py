@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 
 import pytest
 from cryptography import x509
@@ -644,8 +644,9 @@ def test_update_preserves_installed_tool_for_unknown_or_mixed_complete_workers(
     assert result["compatibility"] == "controller-contract-unavailable-or-different"
 
 
-@pytest.fixture(scope="module")
-def signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
+def _prepare_signed_update_tool(
+    tmp_path_factory: pytest.TempPathFactory, *, prior_root: Path | None = None
+):
     """Build and install once; no test resolves dependencies over the network."""
     if os.environ.get("VONK_SIGNED_UPDATE_PROOF") != "1":
         pytest.skip("run the designated hosted signed CLI update proof lane")
@@ -681,9 +682,14 @@ def signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
         "UV_CACHE_DIR": str(cache),
     }
     wheels = []
-    for name, source, version in (
-        ("old", "c" * 40, "0.1.1"),
-        ("accepted", "b" * 40, "1.2.3"),
+    for name, build_root, source, version in (
+        (
+            "old",
+            prior_root or root,
+            _source_revision(prior_root) if prior_root else "c" * 40,
+            "0.1.1",
+        ),
+        ("accepted", root, _source_revision(root) if prior_root else "b" * 40, "1.2.3"),
     ):
         directory = workspace / name
         built = subprocess.run(
@@ -697,7 +703,7 @@ def signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
                 "--directory",
                 str(directory),
             ],
-            cwd=root,
+            cwd=build_root,
             env={
                 **environment,
                 "VONK_BUILD_SOURCE_SHA": source,
@@ -727,18 +733,41 @@ def signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
     return workspace, environment, executable, python, wheels[1]
 
 
-@pytest.mark.linux_only
-@pytest.mark.slow(60)  # Two real updater processes, one actual offline uv replacement.
-def test_installed_cli_signed_update_replaces_actual_uv_tool(
-    signed_update_tool,
-) -> None:
-    """Catch verified bytes followed by a fake success or wrong-environment install."""
+def _source_revision(root: Path) -> str:
+    checked = subprocess.run(
+        ["git", "diff", "--exit-code", "HEAD", "--"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert checked.returncode == 0, "proof source tree has tracked changes"
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert len(revision) == 40
+    return revision
+
+
+@pytest.fixture(scope="module")
+def signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
+    return _prepare_signed_update_tool(tmp_path_factory)
+
+
+@pytest.fixture(scope="module")
+def transition_signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
+    prior = Path(os.environ["VONK_PRIOR_STABLE_CLI_ROOT"]).resolve()
+    assert _source_revision(prior) == os.environ["VONK_PRIOR_STABLE_SOURCE_SHA"]
+    return _prepare_signed_update_tool(tmp_path_factory, prior_root=prior)
+
+
+def _proof_tls_files(workspace: Path) -> tuple[Path, Path]:
     import ipaddress
 
-    workspace, environment, executable, python, wheel = signed_update_tool
-    key, objects = _signed_publication(
-        workspace, source_sha="b" * 40, wheel=wheel.read_bytes()
-    )
     tls_key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
     now = datetime.now(UTC)
@@ -767,6 +796,20 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             serialization.NoEncryption(),
         )
     )
+    return cert_path, tls_key_path
+
+
+@pytest.mark.linux_only
+@pytest.mark.slow(60)  # Two real updater processes, one actual offline uv replacement.
+def test_installed_cli_signed_update_replaces_actual_uv_tool(
+    signed_update_tool,
+) -> None:
+    """Catch verified bytes followed by a fake success or wrong-environment install."""
+    workspace, environment, executable, python, wheel = signed_update_tool
+    key, objects = _signed_publication(
+        workspace, source_sha="b" * 40, wheel=wheel.read_bytes()
+    )
+    cert_path, tls_key_path = _proof_tls_files(workspace)
     responses = {
         url.removeprefix("https://install.vonkforge.ai"): content
         for url, content in objects.items()
@@ -898,3 +941,320 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
         finally:
             server.shutdown()
             worker.join(timeout=5)
+
+
+@pytest.mark.linux_only
+@pytest.mark.slow(180)  # Real old/new builds, TLS Controller and offline uv install.
+def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
+    transition_signed_update_tool, monkeypatch
+) -> None:
+    """Catch an old updater deadlocked on the Controller's new full API media."""
+    import socket
+
+    import uvicorn
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control import api as api_module
+    from vonk_control import platform_observation
+    from vonk_control import worker as worker_module
+    from vonk_control.auth import Actor, TokenCodec
+    from vonk_control.models import Base
+    from vonk_control.observation_transfer import OBSERVATION_MEDIA_TYPE
+    from vonk_control.operation_api import admin_openapi_schema
+    from vonk_control.platform_observation import PlatformObservation, PlatformObserver
+    from vonk_control.worker import WorkerHeartbeatRecorder
+
+    from cluster_profiles import runtime_identity
+    from cluster_profiles.control_client import ControlClient
+    from cluster_profiles.runtime_identity import verified_wheel_identity
+
+    workspace, environment, executable, python, candidate_wheel = (
+        transition_signed_update_tool
+    )
+    root = Path(__file__).resolve().parents[2]
+    prior = Path(os.environ["VONK_PRIOR_STABLE_CLI_ROOT"]).resolve()
+    current_source = _source_revision(root)
+    prior_source = _source_revision(prior)
+    # The real server executes the exact reviewed root whose identity the build
+    # stamps. A candidate's expected identity alone cannot bless foreign code.
+    for module in (api_module, platform_observation, worker_module):
+        assert Path(module.__file__).resolve().is_relative_to(root / "control/src")
+    assert Path(runtime_identity.__file__).resolve().is_relative_to(root / "src")
+    [old_wheel] = (workspace / "old").glob("*.whl")
+    with zipfile.ZipFile(old_wheel) as archive:
+        old_identity = verified_wheel_identity(
+            archive, source_sha=prior_source, version="0.1.1"
+        )
+        old_stable_resource = archive.read(
+            "cluster_profiles/schemas/cli-update-contract.schema.json"
+        )
+    with zipfile.ZipFile(candidate_wheel) as archive:
+        candidate_identity = verified_wheel_identity(
+            archive, source_sha=current_source, version="1.2.3"
+        )
+        candidate_stable_resource = archive.read(
+            "cluster_profiles/schemas/cli-update-contract.schema.json"
+        )
+    assert (
+        old_identity.control_contract_sha256
+        != candidate_identity.control_contract_sha256
+    )
+    assert (
+        hashlib.sha256(old_stable_resource).digest()
+        == hashlib.sha256(candidate_stable_resource).digest()
+    )
+    assert prior_source != current_source
+    # These are actual wheel producer facts, additionally bound above to the
+    # executing source root and below to the server's own compiled API graph.
+    monkeypatch.setattr(
+        platform_observation, "packaged_runtime_identity", lambda: candidate_identity
+    )
+    monkeypatch.setattr(
+        runtime_identity, "packaged_runtime_identity", lambda: candidate_identity
+    )
+    engine = create_engine(f"sqlite:///{workspace / 'controller.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+
+    def clock():
+        return datetime.now(UTC)
+
+    recorder = WorkerHeartbeatRecorder(
+        sessions,
+        process_instance_id=hashlib.sha256(b"actual-transition-worker").hexdigest(),
+        clock=clock,
+    )
+    recorder.completed_loop()
+
+    class ReadOnlyJobs:
+        def enqueue(self, *_args, **_kwargs):
+            raise AssertionError("update compatibility cannot enqueue Controller work")
+
+        def get(self, job_id):
+            raise KeyError(job_id)
+
+    codec = TokenCodec(os.urandom(32))
+    app = api_module.create_app(
+        jobs=ReadOnlyJobs(),
+        tokens=codec,
+        platform_observer=PlatformObserver(sessions, clock=clock),
+    )
+    assert (
+        contract_fingerprint(admin_openapi_schema(app))
+        == candidate_identity.control_contract_sha256
+    )
+    token = codec.issue(
+        Actor("viewer", "viewer"), ttl_seconds=180, now=int(time.time())
+    )
+    token_path = workspace / "transition-controller-token"
+    token_path.write_text(token)
+    token_path.chmod(0o600)
+    cert_path, tls_key_path = _proof_tls_files(workspace)
+    key, objects = _signed_publication(
+        workspace, source_sha=current_source, wheel=candidate_wheel.read_bytes()
+    )
+    responses = {
+        url.removeprefix("https://install.vonkforge.ai"): content
+        for url, content in objects.items()
+    }
+    [wheel_path] = [path for path in responses if path.endswith(".whl")]
+    api_responses = []
+
+    async def traced_app(scope, receive, send):
+        async def traced_send(message):
+            if message["type"] == "http.response.start":
+                api_responses.append(
+                    (
+                        scope["path"],
+                        message["status"],
+                        dict(message["headers"]).get(b"content-type", b"").decode(),
+                    )
+                )
+            await send(message)
+
+        await app(scope, receive, traced_send)
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    control_origin = f"https://127.0.0.1:{listener.getsockname()[1]}"
+    controller = uvicorn.Server(
+        uvicorn.Config(
+            traced_app,
+            ssl_keyfile=str(tls_key_path),
+            ssl_certfile=str(cert_path),
+            lifespan="off",
+            log_level="warning",
+            access_log=False,
+        )
+    )
+    controller_thread = Thread(
+        target=lambda: controller.run(sockets=[listener]), daemon=True
+    )
+    worker_stop = Event()
+    worker_errors = []
+
+    def renew_worker():
+        while not worker_stop.wait(1):
+            try:
+                recorder.completed_loop()
+            except (SQLAlchemyError, OSError, ValueError) as error:
+                worker_errors.append(error)
+                return
+
+    worker_thread = Thread(target=renew_worker, daemon=True)
+
+    class PublicationHost(BaseHTTPRequestHandler):
+        def do_GET(self):
+            content = responses.get(self.path)
+            self.send_response(200 if content is not None else 404)
+            self.end_headers()
+            self.wfile.write(content or b"")
+
+        def log_message(self, *_args):
+            pass
+
+    environment = {
+        **environment,
+        "SSL_CERT_FILE": str(cert_path),
+        "VONK_CONTROL_URL": control_origin,
+        "VONK_CONTROL_TOKEN_FILE": str(token_path),
+    }
+
+    def invoke(command):
+        return subprocess.run(
+            command,
+            env=environment,
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+
+    def identity():
+        response = invoke([str(executable), "--json", "--version"])
+        assert response.returncode == 0, response.stderr
+        return json.loads(response.stdout)
+
+    try:
+        controller_thread.start()
+        worker_thread.start()
+        deadline = time.monotonic() + 5
+        while not controller.started and time.monotonic() < deadline:
+            assert controller_thread.is_alive(), "genuine Controller did not start"
+            time.sleep(0.02)
+        assert controller.started
+        tls_context = ssl.create_default_context(cafile=str(cert_path))
+        client = ControlClient(
+            control_origin,
+            token_path,
+            opener=lambda request, timeout: cli_update.urllib.request.urlopen(
+                request, timeout=timeout, context=tls_context
+            ),
+        )
+        platform = PlatformObservation.model_validate_json(
+            json.dumps(client.get("/api/platform"))
+        )
+        assert platform.api.source_sha == current_source
+        assert platform.workers is not None and len(platform.workers) == 1
+        assert platform.workers[0].source_sha == current_source
+        assert api_responses[-1] == ("/api/platform", 200, OBSERVATION_MEDIA_TYPE)
+        assert client.get("/api/cli/contract")["worker_compatibility"] == "compatible"
+        before = identity()
+        assert before == {"version": "0.1.1", "source_sha": prior_source}
+        tool_receipt_path = python.parent.parent / "uv-receipt.toml"
+        before_tool_receipt = tool_receipt_path.read_bytes()
+        boundary = len(api_responses)
+        with ThreadingHTTPServer(("127.0.0.1", 0), PublicationHost) as publication:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(cert_path, tls_key_path)
+            publication.socket = context.wrap_socket(
+                publication.socket, server_side=True
+            )
+            publication_thread = Thread(target=publication.serve_forever, daemon=True)
+            publication_thread.start()
+            origin = f"https://127.0.0.1:{publication.server_port}"
+            driver = "import json,sys; from pathlib import Path; from cluster_profiles import cli_update; assert Path(cli_update.__file__).is_relative_to(sys.prefix); print(json.dumps(cli_update.run_update(channel='stable',apply=True,origin=sys.argv[1],public_key=Path(sys.argv[2]))))"
+            try:
+                responses[wheel_path] = b"!" + responses[wheel_path][1:]
+                rejected = invoke([str(python), "-c", driver, origin, str(key)])
+                assert rejected.returncode != 0
+                assert "CLI wheel digest or size is invalid" in rejected.stderr
+                assert identity() == before
+                assert tool_receipt_path.read_bytes() == before_tool_receipt
+                responses[wheel_path] = candidate_wheel.read_bytes()
+                # A real renewal can land after a capture's fixed timestamp.
+                # Unknown preserves the old tool; retry the same signed bytes
+                # through the ordinary updater, never substitute a receipt.
+                for _attempt in range(3):
+                    applied = invoke([str(python), "-c", driver, origin, str(key)])
+                    assert applied.returncode == 0, applied.stderr
+                    receipt = json.loads(applied.stdout)
+                    if receipt["updated"]:
+                        break
+                    assert (
+                        receipt["compatibility"]
+                        == "controller-contract-unavailable-or-different"
+                    )
+                    assert receipt["controller"]["worker_compatibility"] == "unknown"
+                    assert (
+                        receipt["controller"]["worker_issue"]
+                        == "worker-observation-unavailable"
+                    )
+                    assert identity() == before
+                    assert tool_receipt_path.read_bytes() == before_tool_receipt
+                    time.sleep(0.25)
+                after = identity()
+                assert not worker_errors
+                assert worker_thread.is_alive()
+                assert after == {"version": "1.2.3", "source_sha": current_source}
+                assert (
+                    receipt["updated"] is True
+                    and receipt["compatibility"] == "compatible"
+                )
+                assert tool_receipt_path.read_bytes() != before_tool_receipt
+                update_paths = [
+                    path for path, _status, _media in api_responses[boundary:]
+                ]
+                assert update_paths and set(update_paths) == {"/api/cli/contract"}
+                Path(os.environ["VONK_SIGNED_UPDATE_REPORT"]).write_text(
+                    json.dumps(
+                        {
+                            "prior_source": prior_source,
+                            "candidate_source": current_source,
+                            "old_control_fingerprint": old_identity.control_contract_sha256,
+                            "new_control_fingerprint": candidate_identity.control_contract_sha256,
+                            "stable_schema_resource_sha256": hashlib.sha256(
+                                old_stable_resource
+                            ).hexdigest(),
+                            "before": before,
+                            "after": after,
+                            "real_controller_ndjson_observed": True,
+                            "actual_complete_fresh_worker_capture": True,
+                            "tampered_wheel_retained_prior_tool_receipt": True,
+                            "real_uv_tool_receipt_changed": True,
+                        },
+                        indent=2,
+                    )
+                    + "\n"
+                )
+            finally:
+                publication.shutdown()
+                publication_thread.join(timeout=5)
+                assert not publication_thread.is_alive(), (
+                    "publication fixture did not stop"
+                )
+    finally:
+        try:
+            worker_stop.set()
+            if worker_thread.ident is not None:
+                worker_thread.join(timeout=5)
+            controller.should_exit = True
+            if controller_thread.ident is not None:
+                controller_thread.join(timeout=5)
+            assert not worker_thread.is_alive(), "worker fixture did not stop"
+            assert not controller_thread.is_alive(), "Controller fixture did not stop"
+        finally:
+            listener.close()
+            engine.dispose()
