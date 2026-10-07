@@ -2110,9 +2110,8 @@ class RunSwitchFleetProfileAdapter:
                 preceding.append(set(nodes))
                 continue
             self._write_state(session, application, state)
-            # Observation of issued children continues under retained authority;
-            # each new effect still requires the author's current mutation role.
-            FleetProfileService._authorize(session, state.actor, serialize=False)
+            # Accepted effects are maintained by the platform. The author is
+            # audit provenance, not a continuing permission dependency.
             operation = self._start_child(
                 application_id,
                 item,
@@ -3670,11 +3669,9 @@ class FleetProfileService:
         actor: str,
         *,
         mutation: bool = True,
-        serialize: bool = True,
     ) -> None:
-        # Queue preflight requires mutation roles too, but cannot hold this
-        # parent lock across the child's separate serialized acceptance.
-        if mutation and serialize:
+        # Serialize current authority only when accepting a new user mutation.
+        if mutation:
             serialize_user_authority(session)
         user = session.scalar(select(User).where(User.subject == actor))
         if not FleetProfileService._user_has_profile_authority(user, mutation=mutation):
@@ -3684,11 +3681,7 @@ class FleetProfileService:
 
     @staticmethod
     def _user_has_profile_authority(user: User | None, *, mutation: bool) -> bool:
-        """Check current profile authority without acquiring mutation fences.
-
-        Read-only views use this to explain a blocked roster reconciliation;
-        mutation callers still serialize authority changes before checking it.
-        """
+        """Check current authority at the user-request boundary."""
         if (
             user is None
             or user.disabled_at is not None
@@ -3721,6 +3714,7 @@ class FleetProfileService:
         actor: str,
         *,
         node_ids: Sequence[str] = (),
+        platform_maintenance: bool = False,
     ) -> Iterator[Session]:
         """Open the short transaction used to accept a reviewed profile plan.
 
@@ -3730,7 +3724,8 @@ class FleetProfileService:
         exact plan, roster, catalog and capacity checks remain authoritative.
         """
         with self._sessions.begin() as session:
-            self._authorize(session, actor)
+            if not platform_maintenance:
+                self._authorize(session, actor)
             try:
                 acquire_admission_keys(
                     session,
@@ -5934,7 +5929,10 @@ class FleetProfileService:
             update={"plan_digest": pending_plan_digest}
         )
         with self._sessions.begin() as session:
-            self._authorize(session, actor)
+            # A selection precondition binds maintenance to existing accepted
+            # intent; a new user request must still be authorized now.
+            if selection_precondition is None:
+                self._authorize(session, actor)
             existing = session.scalar(
                 select(FleetProfileApplication).where(
                     FleetProfileApplication.request_key == request_key
@@ -6238,10 +6236,8 @@ class FleetProfileService:
                 progress = _persisted_profile_progress(row)
                 if not _owns_pending_admission(row, progress):
                     return
-                # A persisted request may outlive the authority that accepted
-                # it. Recheck that authority before fencing workloads or
-                # recording cancellation against older operations.
-                self._authorize(session, row.actor)
+                # Continue accepted intent under platform authority. Selection
+                # and exact-plan fences below still reject superseded effects.
                 profile = session.get(FleetProfile, row.profile_id)
                 if profile is None:
                     raise MissingRecord(
@@ -6530,7 +6526,9 @@ class FleetProfileService:
         retry_of_application_id: str | None = None,
         automatic_cache_recovery: bool = False,
         pending_application_id: str | None = None,
+        platform_maintenance: bool = False,
     ) -> FleetProfileApplicationView:
+        """Admit new submissions as their actor; maintain accepted intent as the platform."""
         now = _aware(self._clock())
         reviewed_plan_digest = preview.plan_digest
         application_id = pending_application_id or str(uuid.uuid4())
@@ -6550,7 +6548,13 @@ class FleetProfileService:
                 )
             }
         )
-        with self._admission_session(actor, node_ids=preview.scope.node_ids) as session:
+        with self._admission_session(
+            actor,
+            node_ids=preview.scope.node_ids,
+            # A durable pending receipt also exists during a NEW submission.
+            # Only the maintenance callers may bypass current actor authority.
+            platform_maintenance=platform_maintenance,
+        ) as session:
             profile = session.get(
                 FleetProfile, preview.profile_id, with_for_update={"nowait": True}
             )
@@ -7818,7 +7822,8 @@ class FleetProfileService:
         """
         decline: tuple[str, str] | None = None
         with self._sessions() as session:
-            self._authorize(session, actor)
+            if not automatic_cache_recovery:
+                self._authorize(session, actor)
             replay = session.scalar(
                 select(FleetProfileApplication).where(
                     FleetProfileApplication.request_key == request_key
@@ -7979,6 +7984,7 @@ class FleetProfileService:
             operation_kind=operation_kind,
             retry_of_application_id=application_id,
             automatic_cache_recovery=automatic_cache_recovery,
+            platform_maintenance=automatic_cache_recovery,
         )
 
     def operation_provider(self) -> OperationProviderProtocol:
@@ -8689,14 +8695,6 @@ class FleetProfileService:
                 )
             if not roster_changed and not drift_signature:
                 return False
-            if not self._user_has_profile_authority(
-                session.scalar(select(User).where(User.subject == selected.actor)),
-                mutation=True,
-            ):
-                # Do not repeatedly preview or persist pending admissions
-                # under revoked authority. The view derives the blocker from
-                # this same roster mismatch and current authority state.
-                return False
 
         # Preserve the accepted topology exactly. Preview compares it with the
         # current roster and owns the incomplete multi-Spark cleanup decision.
@@ -8743,14 +8741,8 @@ class FleetProfileService:
                 actor=selected.actor,
                 operation_kind="fleet-profile.apply",
                 pending_application_id=pending.id,
+                platform_maintenance=True,
             )
-        except FleetProfilePermissionDenied:
-            # The accepted snapshot remains selected, but revoked authority
-            # cannot authorize a roster effect. Retire only this unbound
-            # admission receipt so it cannot become a retrying shadow intent.
-            if pending is not None:
-                self._discard_pending_application(pending.id)
-            return False
         except (FleetProfileAdmissionBusy, FleetProfileAdmissionEffectBusy) as error:
             if pending is None:
                 raise
@@ -9823,6 +9815,7 @@ class FleetProfileService:
                 actor=actor,
                 operation_kind="fleet-profile.apply",
                 pending_application_id=application_id,
+                platform_maintenance=True,
             )
         except (
             FleetProfileAdmissionBusy,
@@ -10907,25 +10900,6 @@ class FleetProfileService:
                 .order_by(AgentNode.node_id)
             )
         )
-        roster_node_ids = tuple(node.node_id for node in roster)
-        roster_authority_blocked = bool(
-            selection is not None
-            and selection.profile_id == row.id
-            and roster_node_ids != selection.roster_node_ids
-            and not self._user_has_profile_authority(
-                session.scalar(select(User).where(User.subject == selection.actor)),
-                mutation=True,
-            )
-        )
-        if roster_authority_blocked:
-            warnings.append(
-                "Fleet membership changed since this profile was loaded, but "
-                "automatic reconciliation is blocked because the original "
-                "profile author no longer has profile-load authority. Restore "
-                "that authority or explicitly load this profile as an "
-                "authorized administrator; roster reconciliation will retry "
-                "automatically when authority is available."
-            )
         display_names = {
             item.node_id: item.display_name
             for item in session.scalars(
@@ -10968,20 +10942,7 @@ class FleetProfileService:
                 cached=cache_cached, missing=cache_missing, unknown=cache_unknown
             ),
             warnings=sorted(set(warnings)),
-            next_actions=[
-                *(
-                    [
-                        (
-                            "Restore the original profile author's profile-load "
-                            "authority or explicitly load this profile as an "
-                            "authorized administrator."
-                        )
-                    ]
-                    if roster_authority_blocked
-                    else []
-                ),
-                f"vonkctl --profile {row.number} profile load",
-            ],
+            next_actions=[f"vonkctl --profile {row.number} profile load"],
             profile_digest=_digest(document),
             created_by=row.created_by,
             created_at=_aware(row.created_at),
