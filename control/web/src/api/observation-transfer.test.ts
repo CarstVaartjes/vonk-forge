@@ -1,13 +1,9 @@
+// @vitest-environment node
 import {readFileSync} from "node:fs";
-import {webcrypto} from "node:crypto";
-import {Blob as NativeBlob} from "node:buffer";
 import {contractEqual} from "./contract-numeric";
 import {validateComponent} from "./contract-json";
 import {ObservationUnavailable, readObservationTransfer} from "./observation-transfer";
 import {stringifyContractJson} from "./contract-numeric";
-
-beforeEach(() => { vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("Blob", NativeBlob); });
-afterEach(() => vi.unstubAllGlobals());
 
 const transfer_id = "00000000-0000-4000-8000-000000000001";
 const payload = {event_cursor: 0, generated_at: "2026-10-07T00:00:00Z", authority_revision: "a".repeat(64), nodes: []};
