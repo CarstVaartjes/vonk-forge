@@ -498,7 +498,10 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
         before_constraints = {
             table: (
                 inspect(connection).get_pk_constraint(table),
-                inspect(connection).get_foreign_keys(table),
+                sorted(
+                    inspect(connection).get_foreign_keys(table),
+                    key=lambda value: json.dumps(value, sort_keys=True),
+                ),
                 sorted(
                     inspect(connection).get_unique_constraints(table),
                     key=lambda value: json.dumps(value, sort_keys=True),
@@ -513,7 +516,10 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
         after_constraints = {
             table: (
                 inspect(connection).get_pk_constraint(table),
-                inspect(connection).get_foreign_keys(table),
+                sorted(
+                    inspect(connection).get_foreign_keys(table),
+                    key=lambda value: json.dumps(value, sort_keys=True),
+                ),
                 sorted(
                     inspect(connection).get_unique_constraints(table),
                     key=lambda value: json.dumps(value, sort_keys=True),
