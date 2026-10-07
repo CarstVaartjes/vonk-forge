@@ -7378,7 +7378,10 @@ class RecipeOperationService:
                 )
                 direct_scope = direct.job_run_stop_authorization
                 if direct_scope is None:
-                    raise ValueError("exact JobRun Stop scope is missing")
+                    return unproven(
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        "run JobRun Stop accepted scope is unreadable: exact JobRun Stop scope is missing",
+                    )
                 authorization = direct_scope
             except (TypeError, ValueError) as error:
                 return unproven(
