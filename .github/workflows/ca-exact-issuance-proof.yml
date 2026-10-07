@@ -110,5 +110,6 @@ jobs:
             artifacts/ca-proof
             deploy/compose/step-ca/service/go.mod
             deploy/compose/step-ca/service/go.sum
+            deploy/compose/step-ca/service/*.go
           if-no-files-found: error
           retention-days: 7
