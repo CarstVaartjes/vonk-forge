@@ -2501,6 +2501,14 @@
   ],
   "exceptions": [
     {
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "function": "test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim",
+      "kind": "operator-wait-assertion",
+      "count": 2,
+      "reason": "security-edge",
+      "justification": "An issued irreversible artifact job has an unobserved effect after lease expiry; replaying it or releasing its reservation would duplicate user work. The connected test retains ownership across Controller restart until the superseding Stop receives the exact old fenced cancellation acknowledgement, then proves same-key Stop replay, SQL hold release, fresh inventory, and fresh same-scope run/job admission with an actual agent claim."
+    },
+    {
       "path": "control/tests/test_fleet_profile_continuity.py",
       "function": "test_selected_cancel_fences_both_original_and_new_node_ordinals",
       "kind": "ending-without-fresh-request",
