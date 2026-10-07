@@ -29,8 +29,18 @@ concurrency:
 
 jobs:
   connected-proof:
-    name: Real pinned Authority, durable journal and fenced response
-    runs-on: ubuntu-24.04
+    name: Real pinned Authority, durable journal and fenced response (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -94,8 +104,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(uname -m)" = "${{ matrix.machine }}"
           docker build --file deploy/compose/step-ca/Dockerfile --target runtime \
+            --platform "linux/${{ matrix.architecture }}" \
             --tag vonk-ca-proof:"$GITHUB_SHA" .
+          test "$(docker image inspect --format '{{.Architecture}}' \
+            vonk-ca-proof:"$GITHUB_SHA")" = "${{ matrix.architecture }}"
           docker save vonk-ca-proof:"$GITHUB_SHA" --output artifacts/ca-proof/ca-image.tar
           docker image inspect vonk-ca-proof:"$GITHUB_SHA" > artifacts/ca-proof/image-inspect.json
       - name: Prepare the locked Controller environment
@@ -191,7 +205,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ca-exact-issuance-${{ github.sha }}
+          name: ca-exact-issuance-${{ github.sha }}-${{ matrix.architecture }}
           path: |
             artifacts/ca-proof
             deploy/compose/step-ca/service/go.mod
