@@ -100,6 +100,7 @@ from .state_filters import state_filter
 from .strict_json import (
     StrictModel,
     read_stored_model,
+    serialize_json_value,
     warn_unreadable_once,
 )
 
@@ -1188,7 +1189,18 @@ def operation_detail_response(
 
 def _response_bytes(response: StrictModel) -> int:
     # JSONResponse emits compact UTF-8; key ordering does not affect byte size.
-    return len(canonical_message(response.model_dump(mode="json")))
+    return len(canonical_message(serialize_json_value(response)))
+
+
+class OperationResponseTooLarge(RuntimeError):
+    """A genuinely indivisible observation cannot fit the owning reader."""
+
+    def __init__(self, observed_bytes: int) -> None:
+        super().__init__(
+            f"Operation observation requires {observed_bytes} bytes; "
+            f"reader budget is {MAX_CONTROL_DOCUMENT_BYTES} bytes. "
+            "Durable operation state is unchanged."
+        )
 
 
 def bounded_operation_detail(
@@ -1211,11 +1223,7 @@ def bounded_operation_detail(
     ] = [("progress", detail.progress), ("cancellation", detail.cancellation)]
     decorations = sorted(
         optional_facts,
-        key=lambda pair: (
-            len(canonical_message(pair[1].model_dump(mode="json")))
-            if pair[1] is not None
-            else 0
-        ),
+        key=lambda pair: len(canonical_message(pair[1])) if pair[1] is not None else 0,
         reverse=True,
     )
     for field, value in decorations:
@@ -1231,9 +1239,8 @@ def bounded_operation_detail(
         detail = detail.model_copy(update={field: None, "projection_issues": issues})
         if _response_bytes(detail) + envelope_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
             return detail
-    # Required identity/membership and all remaining bounded scalar facts fit;
-    # reaching this means the canonical projection has changed without proof.
-    raise AssertionError("required operation facts exceed the response allocation")
+    # Never truncate identity or authority to manufacture a fitting observation.
+    raise OperationResponseTooLarge(_response_bytes(detail) + envelope_bytes)
 
 
 def bounded_operations_response(
@@ -1261,30 +1268,50 @@ def bounded_operations_response(
             boundary=[created_at.isoformat(), operation_id],
         )
 
-    projected = []
+    projected: list[OperationDetailResponse] = []
+    prefix_bytes = 0
+    best_count = 0
+    best_cursor = None
+    cursorless_envelope = _response_bytes(
+        OperationsResponse(operations=[], total=page.total, next_cursor=None)
+    )
     for index, detail in enumerate(details):
+        cursor = continuation(index)
         single = OperationsResponse(
-            operations=[detail], total=page.total, next_cursor=continuation(index)
+            operations=[detail], total=page.total, next_cursor=cursor
         )
         envelope = _response_bytes(single) - _response_bytes(detail)
-        projected.append(bounded_operation_detail(detail, envelope_bytes=envelope))
-    envelope = OperationsResponse(operations=[], total=page.total, next_cursor=None)
-    envelope_size = _response_bytes(envelope)
-    prefix_sizes = [0]
-    for detail in projected:
-        prefix_sizes.append(prefix_sizes[-1] + _response_bytes(detail))
-    for count in range(len(projected), 0, -1):
-        cursor = continuation(count - 1)
-        cursor_size = len(canonical_message(cursor))
-        size = envelope_size + prefix_sizes[count] + count - 1 + cursor_size - 4
-        if size <= MAX_CONTROL_DOCUMENT_BYTES:
-            return OperationsResponse(
-                operations=projected[:count], total=page.total, next_cursor=cursor
-            )
-    if projected:
-        raise AssertionError("bounded first operation does not fit its exact envelope")
+        try:
+            projected_detail = bounded_operation_detail(detail, envelope_bytes=envelope)
+        except OperationResponseTooLarge:
+            if not projected:
+                raise
+            # This row remains the first boundary of a later page. It cannot
+            # poison an earlier fitting contiguous prefix or be skipped.
+            break
+        projected.append(projected_detail)
+        prefix_bytes += _response_bytes(projected_detail)
+        comma_bytes = len(projected) - 1
+        exact_envelope = _response_bytes(
+            OperationsResponse(operations=[], total=page.total, next_cursor=cursor)
+        )
+        if exact_envelope + prefix_bytes + comma_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
+            best_count = len(projected)
+            best_cursor = cursor
+        if (
+            cursorless_envelope + prefix_bytes + comma_bytes
+            > MAX_CONTROL_DOCUMENT_BYTES
+        ):
+            # Even removing the cursor cannot make this or a longer prefix fit.
+            break
+    if not details:
+        return OperationsResponse(
+            operations=[], total=page.total, next_cursor=page.next_cursor
+        )
+    if best_count == 0:
+        raise OperationResponseTooLarge(cursorless_envelope + prefix_bytes)
     return OperationsResponse(
-        operations=[], total=page.total, next_cursor=page.next_cursor
+        operations=projected[:best_count], total=page.total, next_cursor=best_cursor
     )
 
 

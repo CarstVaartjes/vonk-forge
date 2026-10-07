@@ -1,5 +1,6 @@
 import {afterEach, expect, test, vi} from "vitest";
 import {ApiClient} from "./client";
+import {ContractResponseTooLarge} from "./contract-json";
 import {modelLibrary, recipeLibrary} from "../test-fixtures/library";
 
 const SINCE = "2026-09-01T00:00:00.000Z";
@@ -189,4 +190,16 @@ test("native artifact upload rejects an undeclared JSON receipt before exposing 
   }, new Blob(["x"]));
   await expect(request).rejects.toThrow("Invalid Control API contract");
   expect(responseType).toBe("text");
+});
+
+
+test.each(["bespoke", "generated"])("%s JSON consumer uses the same producer-owned streaming budget", async path => {
+  const cancel = vi.fn();
+  vi.stubGlobal("fetch", async () => new Response(new ReadableStream<Uint8Array>({
+    pull(controller) { controller.enqueue(new Uint8Array(1048577)); }, cancel,
+  }, {highWaterMark: 0}), {headers: {"content-type": "application/json"}}));
+  const client = new ApiClient();
+  const request = path === "bespoke" ? client.request("/api/operations") : client.operations();
+  await expect(request).rejects.toBeInstanceOf(ContractResponseTooLarge);
+  expect(cancel).toHaveBeenCalledOnce();
 });

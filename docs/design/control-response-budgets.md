@@ -9,18 +9,21 @@ has already satisfied. Request body limits do not establish response limits.
 
 `GET /api/operations` retains its requested item limit, filters, newest-first
 `created_at/id` ordering, signed continuation, and authoritative total. The
-producer measures compact UTF-8 JSON for each detail and the complete response
+producer applies the real optional-None presence policy and measures compact UTF-8 JSON for each detail and the complete response
 envelope, including the actual signed cursor. It selects the largest contiguous
 prefix within the existing CLI reader allocation. It does not skip an oversized
 row, reduce the total, or change an accepted operation. A shortened page's cursor
 is issued at its last returned original row using the existing order and filter
-context. Item bytes are measured once and summed; page selection is linear in
-the candidate count rather than repeatedly serializing growing pages.
+context. Item bytes are measured once and summed; prefix selection stops when even the
+cursorless envelope cannot fit. It never projects later rows after that boundary.
+An indivisible later row cannot abort an earlier fitting prefix. If the first
+row has genuinely indivisible remaining facts, a bounded declared 503 reports
+the observed byte count; identity and authority are never truncated.
 
 An indivisible optional progress or cancellation decoration may itself exceed
 that allocation. The producer retains identity, actual kind/state/attempt,
 parent/owner, node membership, and unaffected evidence. Only the oversized
-optional fact reads as null, accompanied by a canonical `OperationProjectionIssue`
+optional fact reads as unavailable, accompanied by a canonical `OperationProjectionIssue`
 identifying the unavailable field, reason, observed full response bytes, and
 reader budget. CLI and browser show that cause. This says the fact is unavailable
 in this observation; it does not say no progress occurred, no cancellation was
@@ -37,8 +40,10 @@ identity/state retained. These large proofs run in hosted CI.
 
 Only proven operation list/detail and existing byte-sized model/recipe Library
 page routes declare `x-vonk-response-max-bytes` in their canonical OpenAPI
-operation. Consumers may stream-check that owner limit before appending body
-bytes. This metadata is not an API-wide limit. A browser transport must not
+operation. The browser exports that metadata from the canonical schema and both
+HTTP paths check declared length and actual streamed bytes before decoding or
+retaining each chunk, cancelling on excess. Split UTF-8 tokens retain their
+original meaning through streaming decoding. This metadata is not an API-wide limit. A browser transport must not
 infer an outgoing response bound from an incoming request cap or a schema item
 count. The existing CLI's bounded `read(limit + 1)` protects the real installed
 HTTP path; mocked/generated transports with preallocated bodies are not proof

@@ -49,9 +49,50 @@ export function validateControlParameters(method: string, path: string, paramete
     if (validator ? !validator(parseContractJson(stringifyContractJson(values))) : Object.keys(values).length !== 0) throw new ContractViolation(method, path, 0);
   }
 }
-/** Consume once; route owners, rather than the parser, determine byte budgets. */
+export class ContractResponseTooLarge extends ContractViolation {
+  constructor(method: string, path: string, status: number,
+    readonly budgetBytes: number, readonly observedBytes: string) {
+    super(method, path, status);
+    this.name = "ContractResponseTooLarge";
+    this.message = `Control API response exceeds its producer byte budget: ${method} ${this.path} (limit ${budgetBytes} bytes)`;
+  }
+}
+/** Check actual wire bytes before decoding or retaining each body chunk. */
+export async function readControlResponseText(response: Response, method: string, path: string): Promise<string> {
+  const budget = routeFor(method, path)?.responseMaxBytes;
+  if (budget === undefined) return response.text();
+  const reader = response.body?.getReader();
+  let received = 0;
+  const chunks: string[] = [];
+  const decoder = new TextDecoder();
+  try {
+    const declared = response.headers.get("content-length");
+    if (declared !== null && /^[0-9]+$/.test(declared) && BigInt(declared) > BigInt(budget)) {
+      throw new ContractResponseTooLarge(method, path, response.status, budget, declared);
+    }
+    if (!reader) return "";
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (next.value.byteLength > budget - received) {
+        throw new ContractResponseTooLarge(method, path, response.status, budget,
+          (BigInt(received) + BigInt(next.value.byteLength)).toString());
+      }
+      received += next.value.byteLength;
+      chunks.push(decoder.decode(next.value, {stream: true}));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join("");
+  } catch (cause) {
+    await reader?.cancel().catch(() => undefined);
+    throw cause;
+  } finally {
+    reader?.releaseLock();
+  }
+}
+/** Consume once; only actual producer-owned route budgets apply. */
 export async function readControlResponse(response: Response, method: string, path: string): Promise<unknown> {
-  return validateControlBody(method, path, response.status, response.headers.get("content-type") ?? "", await response.text());
+  return validateControlBody(method, path, response.status, response.headers.get("content-type") ?? "", await readControlResponseText(response, method, path));
 }
 /** openapi-fetch must consume the validated value instead of calling JSON.parse. */
 export class ContractResponse extends Response {

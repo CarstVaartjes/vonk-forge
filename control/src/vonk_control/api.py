@@ -117,6 +117,7 @@ from .operation_api import (
     OperationApiServices,
     OperationDetailResponse,
     OperationOwnerReference,
+    OperationResponseTooLarge,
     OperationsResponse,
     ReadyzResponse,
     RequestValidationIssue,
@@ -1132,14 +1133,17 @@ def create_app(
                 status_code=503, detail="operation projection unavailable"
             ) from None
         items = [activity_detail(item, tolerate_unreadable=True) for item in page.items]
-        return bounded_operations_response(
-            page,
-            items,
-            cursors=operations.cursor_codec or cursor_codec,
-            state=operation_state,
-            node_id=node_id,
-            request_id=request_id,
-        )
+        try:
+            return bounded_operations_response(
+                page,
+                items,
+                cursors=operations.cursor_codec or cursor_codec,
+                state=operation_state,
+                node_id=node_id,
+                request_id=request_id,
+            )
+        except OperationResponseTooLarge as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
 
     @app.get(
         "/api/operations/{operation_id}",
@@ -1168,6 +1172,8 @@ def create_app(
             return bounded_operation_detail(
                 activity_detail(item, tolerate_unreadable=True)
             )
+        except OperationResponseTooLarge as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
         except BoundedJSONError as error:
             raise HTTPException(status_code=503, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):

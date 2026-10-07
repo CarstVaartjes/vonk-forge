@@ -28,8 +28,10 @@ from vonk_control.models import (
     Job,
 )
 from vonk_control.operation_api import (
+    OperationDetailResponse,
     OperationListPage,
     OperationsResponse,
+    _response_bytes,
     durable_operation_services,
     operation_detail_response,
 )
@@ -98,7 +100,7 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
                     authority_revision="a" * 40,
                     state="running",
                     current_attempt=1,
-                    created_at=now + timedelta(seconds=index),
+                    created_at=now,
                     updated_at=now,
                 )
             )
@@ -136,11 +138,18 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
     assert len(canonical_message(aggregate)) > MAX_CONTROL_DOCUMENT_BYTES
     affected = operation_item(unbounded.items[0]).id
     oversized = False
+    indivisible_id: str | None = None
     native_get = source.get_operation
     native_list = source.list_operations
 
     def detail(identifier: str):
         item = operation_item(native_get(identifier))
+        # Defensive canonical boundary: SQL timestamps are actual datetimes,
+        # but the public optional string field itself has no length bound.
+        if identifier == indivisible_id:
+            return item.model_copy(
+                update={"updated_at": "x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)}
+            )
         return (
             item.model_copy(update={"progress": aggregate})
             if oversized and identifier == affected
@@ -206,7 +215,7 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
             assert document["total"] == 20
             assert document["operations"]
             observed.extend(row["id"] for row in document["operations"])
-            cursor = document["next_cursor"]
+            cursor = document.get("next_cursor")
             if cursor is None:
                 break
         assert observed == [operation_item(row).id for row in unbounded.items]
@@ -218,7 +227,7 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
         unknown = response.json()
         assert unknown["id"] == affected and unknown["kind"] == "node.probe"
         assert unknown["state"] == "running" and unknown["attempt"] == 1
-        assert unknown["node_ids"] == [NODE] and unknown["progress"] is None
+        assert unknown["node_ids"] == [NODE] and unknown.get("progress") is None
         assert unknown["projection_issues"][0]["field"] == "progress"
         assert (
             unknown["projection_issues"][0]["observed_bytes"]
@@ -241,4 +250,38 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
         assert repaired.status_code == 200
         assert repaired.json()["progress"]["members"]
         assert repaired.json().get("projection_issues") is None
+        assert _response_bytes(
+            OperationDetailResponse.model_validate_json(repaired.content)
+        ) == len(repaired.content)
+        indivisible_id = operation_item(unbounded.items[1]).id
+        first = api.get("/api/operations", headers=headers, params={"limit": 20})
+        assert first.status_code == 200
+        first_document = first.json()
+        assert [item["id"] for item in first_document["operations"]] == [affected]
+        assert first_document["total"] == 20
+        assert _response_bytes(
+            OperationsResponse.model_validate_json(first.content)
+        ) == len(first.content)
+        continuation = first_document["next_cursor"]
+        denied_observation = api.get(
+            "/api/operations",
+            headers=headers,
+            params={"limit": 20, "cursor": continuation},
+        )
+        direct = api.get(f"/api/operations/{indivisible_id}", headers=headers)
+        for refusal in (denied_observation, direct):
+            assert refusal.status_code == 503
+            assert len(refusal.content) < MAX_CONTROL_DOCUMENT_BYTES
+            assert "reader budget" in refusal.json()["detail"]
+        indivisible_id = None
+        resumed = api.get(
+            "/api/operations",
+            headers=headers,
+            params={"limit": 20, "cursor": continuation},
+        )
+        assert resumed.status_code == 200 and resumed.json()["total"] == 20
+        assert (
+            resumed.json()["operations"][0]["id"]
+            == operation_item(unbounded.items[1]).id
+        )
     engine.dispose()

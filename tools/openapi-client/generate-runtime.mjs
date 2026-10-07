@@ -118,7 +118,11 @@ for (const [route, item] of Object.entries(document.paths)) {
       const name = `contract${index++}`; register(content.schema, name); requests[media] = name;
       normalization[name] = shape(content.schema);
     }
-    routes.push({route, method: method.toUpperCase(), responses, requests, parameters});
+    const responseMaxBytes = operation["x-vonk-response-max-bytes"];
+    if (responseMaxBytes !== undefined && (!Number.isSafeInteger(responseMaxBytes) || responseMaxBytes < 1)) {
+      throw new Error(`Invalid producer response byte budget: ${method} ${route}`);
+    }
+    routes.push({route, method: method.toUpperCase(), responses, requests, parameters, responseMaxBytes});
   }
 }
 const shapes = {};
@@ -136,7 +140,7 @@ if (schemaOnly) {
 }
 // Ajv's generated code is JavaScript. Keep it JavaScript instead of inventing
 // annotations or suppressing TypeScript errors in a generated .ts file.
-fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>}[];\n');
+fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responseMaxBytes?: number; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>}[];\n');
 // Route tables refer to the actual exported functions, never string names.
 const routeCode = JSON.stringify(routes).replace(/"(contract[0-9]+)"/g, "$1");
 const destination = path.join(out, "runtime.generated.js");
