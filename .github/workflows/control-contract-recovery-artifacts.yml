@@ -1,0 +1,78 @@
+name: Complete control contract recovery artifacts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/control-contract-recovery-artifacts.yml
+      - control/src/**
+      - agent_protocol/**
+      - scripts/generate-control-clients
+      - tools/openapi-client/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: control-contract-recovery-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Generate every current control contract output from exact source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact current producer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Prepare locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Prepare pinned Node generator
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "26"
+      - name: Install pinned TypeScript generator
+        run: scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client
+      - name: Generate all canonical language outputs
+        run: scripts/generate-control-clients
+      - name: Preserve all current generator outputs and immutable provenance
+        env:
+          VONK_PROOF_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, runpy, shutil, subprocess, os
+          source_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          assert source_sha == os.environ["VONK_PROOF_SOURCE_SHA"]
+          generator = runpy.run_path("scripts/generate-control-clients")
+          names = ["OPENAPI", "CLI_OPENAPI_OUTPUT", "PYTHON_OUTPUT", "TYPESCRIPT_OUTPUT", "TYPESCRIPT_VOCABULARY"]
+          output = pathlib.Path("artifacts/control-contract-recovery")
+          paths = {}
+          for name in names:
+              root = generator[name]
+              files = sorted(root.rglob("*.py")) if root.is_dir() else [root]
+              assert files, f"generator output {name} must be present"
+              for source in files:
+                  path = str(source.relative_to(pathlib.Path.cwd()))
+                  destination = output / path
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(source, destination)
+                  paths[path] = hashlib.sha256(source.read_bytes()).hexdigest()
+          inputs = ["scripts/generate-control-clients", "control/openapi-python-client.yaml", "control/uv.lock", "tools/openapi-client/package-lock.json"]
+          manifest = {"source_sha": source_sha, "generator_outputs": names, "source_sha256": {path: hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest() for path in inputs}, "sha256": paths}
+          (output / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+          PY
+      - name: Retain exact source-owned contract output set
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: control-contract-recovery-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/control-contract-recovery
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verify generated documents with their actual owner
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          tests/test_generated_contracts.py::test_control_openapi_documents_are_current
