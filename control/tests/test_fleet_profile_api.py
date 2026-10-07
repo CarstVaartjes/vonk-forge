@@ -89,6 +89,48 @@ def test_profile_preview_requires_administrator_before_reading_profile(role):
     )
 
 
+@pytest.mark.parametrize("role", ("viewer", "operator"))
+def test_non_admin_cannot_change_an_accepted_profile(role: str) -> None:
+    client, codec = _client(with_idle_spark=True)
+    admin = _headers(codec, "administrator")
+    saved = client.put(
+        "/api/profile/1",
+        headers=admin,
+        json={"name": "Standing intent", "assignments": []},
+    )
+    assert saved.status_code == 200
+    assert (
+        client.post(
+            "/api/profile/1/load",
+            headers=admin,
+            json={"request_key": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
+        ).status_code
+        == 202
+    )
+    before = client.get("/api/profile/1", headers=admin).json()
+    changed = client.put(
+        "/api/profile/1",
+        headers=_headers(codec, role),
+        json={"name": "Unauthorized edit", "assignments": [], "expected_revision": 1},
+    )
+    assert changed.status_code == 403
+    after = client.get("/api/profile/1", headers=admin).json()
+    assert (after["revision"], after["profile_digest"], after["loaded_revision"]) == (
+        before["revision"],
+        before["profile_digest"],
+        before["loaded_revision"],
+    )
+    # A rejected request leaves no gate preventing a fresh admin edit.
+    assert (
+        client.put(
+            "/api/profile/1",
+            headers=admin,
+            json={"name": "Authorized edit", "assignments": [], "expected_revision": 1},
+        ).status_code
+        == 200
+    )
+
+
 def test_profile_operator_routes_are_singular_and_unversioned() -> None:
     client, codec = _client()
     response = client.get("/api/profile", headers=_headers(codec))
