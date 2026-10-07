@@ -53,7 +53,7 @@ jobs:
           paths = {}
           for name in names:
               root = generator[name]
-              files = sorted(root.rglob("*.py")) if root.is_dir() else [root]
+              files = sorted(path for path in root.rglob("*") if path.is_file() and not any(part in {"__pycache__", ".ruff_cache"} for part in path.parts)) if root.is_dir() else [root]
               assert files, f"generator output {name} must be present"
               for source in files:
                   path = str(source.relative_to(pathlib.Path.cwd()))
@@ -61,8 +61,17 @@ jobs:
                   destination.parent.mkdir(parents=True, exist_ok=True)
                   shutil.copyfile(source, destination)
                   paths[path] = hashlib.sha256(source.read_bytes()).hexdigest()
+          mandatory = ["control/openapi.json", "src/cluster_profiles/schemas/control-openapi.json", "control/web/src/api/generated.d.ts", "control/web/src/api/vocabulary.generated.ts", "src/cluster_profiles/generated_control/__init__.py"]
+          assert all(path in paths for path in mandatory), "all canonical roots including the installed CLI schema are mandatory"
           inputs = ["scripts/generate-control-clients", "control/openapi-python-client.yaml", "control/uv.lock", "tools/openapi-client/package-lock.json"]
-          manifest = {"source_sha": source_sha, "generator_outputs": names, "source_sha256": {path: hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest() for path in inputs}, "sha256": paths}
+          inputs += [path for path in subprocess.check_output(["git", "ls-files", "control/src", "agent_protocol/src"], text=True).splitlines() if path.endswith(".py")]
+          blobs = {}
+          for path in inputs:
+              blob = subprocess.check_output(["git", "rev-parse", f"HEAD:{path}"], text=True).strip()
+              source = subprocess.check_output(["git", "cat-file", "blob", blob])
+              assert source == pathlib.Path(path).read_bytes(), f"source input changed during generation: {path}"
+              blobs[path] = {"git_blob": blob, "sha256": hashlib.sha256(source).hexdigest()}
+          manifest = {"source_sha": source_sha, "generator_outputs": names, "mandatory_paths": mandatory, "source_inputs": blobs, "sha256": paths}
           (output / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
           PY
       - name: Retain exact source-owned contract output set
