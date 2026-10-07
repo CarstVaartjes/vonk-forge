@@ -6,12 +6,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import CatalogCode
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, CatalogValidationError
 from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.source_bundles import SourceBundleStore
+from vonk_forge_contracts import document_sha256
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -66,6 +69,119 @@ def test_import_persists_canonical_model_recipe_and_package_identity(
         revisions = session.scalars(select(CatalogDocumentRevision)).all()
         assert {revision.kind for revision in revisions} == {"model", "recipe"}
     client.close()
+
+
+def test_import_binds_captured_published_documents_before_sql(
+    service: CatalogService, tmp_path: Path
+) -> None:
+    """Catch caller mutation changing already-validated bytes or dropping nulls."""
+    client, item = _item(tmp_path)
+    recipe = copy.deepcopy(dict(item.document))
+    dependencies = [copy.deepcopy(dict(value)) for value in item.dependencies]
+    # An explicitly present canonical null belongs to the published digest;
+    # normalizing through a model must not erase its source presence.
+    metadata = recipe["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["alignment"] = None
+    captured_recipe = copy.deepcopy(recipe)
+    captured_dependencies = copy.deepcopy(dependencies)
+    expected_digest = document_sha256(captured_recipe)
+    with service._sessions() as session:
+        engine = session.get_bind()
+    assert isinstance(engine, Engine)
+    mutated = False
+
+    def mutate_caller(
+        connection: Connection,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: ExecutionContext,
+        executemany: bool,
+    ) -> None:
+        nonlocal mutated
+        if not mutated and "catalog_document_revisions" in statement.lower():
+            mutated = True
+            metadata = recipe["metadata"]
+            identity = dependencies[0]["identity"]
+            assert isinstance(metadata, dict) and isinstance(identity, dict)
+            metadata["description"] = "Caller replaced this after validation"
+            identity["slug"] = "caller-replaced-after-validation"
+
+    event.listen(engine, "before_cursor_execute", mutate_caller)
+    try:
+        imported = service.import_recipe_library(
+            "test",
+            library_commit=item.library_commit,
+            source_path=item.source_path,
+            document=recipe,
+            expected_content_sha256=expected_digest,
+            dependency_documents=dependencies,
+        )
+    except CatalogValidationError as error:
+        if error.code != CatalogCode.MODEL_REFERENCE_MISSING:
+            raise
+        assert mutated
+        assert dependencies[0]["identity"] != captured_dependencies[0]["identity"]
+        pytest.fail(
+            "Captured catalog identity changed after validation: caller mutation "
+            "made the original pinned model reference unavailable"
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", mutate_caller)
+        client.close()
+    assert (
+        mutated and recipe != captured_recipe and dependencies != captured_dependencies
+    )
+    actual = service.get_recipe(imported.recipe_id)
+    assert actual.document == captured_recipe
+    assert actual.content_sha256 == expected_digest
+    with service._sessions() as session:
+        stored_models = session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model"
+            )
+        ).all()
+    assert {row.content_digest for row in stored_models} == {
+        document_sha256(document) for document in captured_dependencies
+    }
+    assert {row.content_digest: row.document for row in stored_models} == {
+        document_sha256(document): document for document in captured_dependencies
+    }
+
+
+@pytest.mark.parametrize("damage", ["model", "recipe", "dependency"])
+def test_import_rejects_malformed_batch_before_any_revision_is_written(
+    service: CatalogService, tmp_path: Path, damage: str
+) -> None:
+    """Catch writing valid earlier dependencies before later validation fails."""
+    client, item = _item(tmp_path)
+    recipe = copy.deepcopy(dict(item.document))
+    dependencies = [copy.deepcopy(dict(value)) for value in item.dependencies]
+    malformed = copy.deepcopy(dependencies[0])
+    malformed["identity"] = ["not-a-canonical-identity"]
+    try:
+        with pytest.raises(CatalogValidationError):
+            if damage == "model":
+                service.import_catalog_models("test", [*dependencies, malformed])
+            else:
+                digest = document_sha256(recipe)
+                if damage == "recipe":
+                    recipe["identity"] = ["not-a-canonical-identity"]
+                else:
+                    dependencies.append(malformed)
+                service.import_recipe_library(
+                    "test",
+                    library_commit=item.library_commit,
+                    source_path=item.source_path,
+                    document=recipe,
+                    expected_content_sha256=digest,
+                    dependency_documents=dependencies,
+                )
+        with service._sessions() as session:
+            assert session.scalars(select(CatalogDocumentRevision)).all() == []
+    finally:
+        client.close()
 
 
 def test_import_is_idempotent_and_persists_active_canonical_revision(

@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import OperationProgress, canonical_message
+from vonk_agent_protocol import LifecycleState, OperationProgress, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
@@ -473,6 +473,13 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     assert switch.progress.operation.total_bytes is None
     assert switch.progress.operation.eta_seconds is None
     assert switch.progress.members[1].state == "pending"
+    future = switch.progress.operation.members[1]
+    assert future.state == LifecycleState.QUEUED
+    assert future.completed_bytes == 0
+    assert future.total_bytes is None
+    assert future.bytes_per_second is None
+    assert future.eta_seconds is None
+    assert future.observed_at is None
 
     service.tick()
     profile_view = service.application(application.id)
