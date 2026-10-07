@@ -490,12 +490,14 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         )
         self._reapply_controller_site()
         self._assert_compose_image_graph()
+        self._detach_synthetic_management_peer()
         self._run_command(
             self._local_controller_up_command(),
             cwd=self.bundle,
             timeout=420,
             report_failure_output=True,
         )
+        self._attach_synthetic_management_peer()
         status = self._run_command(
             self._compose("ps", "--all", "--format", "json"), cwd=self.bundle
         )

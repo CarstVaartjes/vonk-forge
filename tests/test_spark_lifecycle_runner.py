@@ -151,6 +151,18 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         + "networks:\n  ingress: {}\n  cluster-egress: {}\n"
     )
 
+    import yaml
+
+    compose_path = bundle / "docker-compose.yaml"
+    compose_document = yaml.safe_load(compose_path.read_text())
+    published = yaml.safe_load(
+        (ENTRY_POINT.parents[2] / "deploy/compose/compose.yaml").read_text()
+    )
+    compose_document["services"]["caddy"]["entrypoint"] = published["services"][
+        "caddy"
+    ]["entrypoint"]
+    compose_path.write_text(yaml.safe_dump(compose_document))
+
     lifecycle._configure_acceptance_renewal(
         bundle,
         lifetime_seconds=lifecycle.CERTIFICATE_LIFETIME_SECONDS,
@@ -175,6 +187,106 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     caddyfile = (bundle / "acceptance-Caddyfile").read_text()
     assert "header_up X-Vonk-Agent-Source 172.31.42.1" in caddyfile
     assert "X-Vonk-Agent-Source {http.request.remote.host}" not in caddyfile
+
+    # Execute the actual shell wrapper and native secret-validating entrypoint.
+    # Only the staged mount paths and terminal Caddy executable are fixture
+    # resources; no container, network, or readiness result is mocked.
+    compose_document = yaml.safe_load(compose_path.read_text())
+    service = compose_document["services"]["caddy"]
+    secrets = tmp_path / "run/secrets"
+    secrets.mkdir(parents=True)
+    for name in (
+        "controller-server-certificate",
+        "controller-server-key",
+        "agent-client-ca",
+    ):
+        (secrets / name).write_text("fixture public certificate material")
+    (secrets / "agent-proxy-auth").write_text("a" * 32)
+    native_source = (
+        ENTRY_POINT.parents[2] / "deploy/compose/caddy/entrypoint.sh"
+    ).read_text()
+    native = tmp_path / "runtime/caddy/entrypoint.sh"
+    native.parent.mkdir(parents=True)
+    native.write_text(native_source.replace("/run/secrets/", str(secrets) + "/"))
+    executable = tmp_path / "bin/caddy"
+    executable.parent.mkdir()
+    captured = tmp_path / "caddy-arguments.json"
+    executable.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" > "$CAPTURE_ARGUMENTS"\n')
+    executable.chmod(0o755)
+    wrapper = [
+        argument.replace("$$", "$").replace(
+            "/run/vonk-runtime-assets/caddy/entrypoint.sh", str(native)
+        )
+        for argument in service["entrypoint"]
+    ]
+    # The former published wrapper discarded command arguments. Its native
+    # entrypoint therefore selected the packaged configuration, not the
+    # fixture's source-bound configuration. Exercise that exact countercase.
+    old_wrapper = wrapper[:3]
+    old_wrapper[2] = old_wrapper[2].removesuffix(' "$@"')
+    environment = {
+        "PATH": str(executable.parent) + os.pathsep + os.defpath,
+        "VONK_CONTROL_HOSTNAME": "spark.acceptance.invalid",
+        "CAPTURE_ARGUMENTS": str(captured),
+    }
+    subprocess.run(
+        [*old_wrapper, *service["command"]], check=True, timeout=2, env=environment
+    )
+    old_selected = captured.read_text().splitlines()
+    assert old_selected != service["command"][1:]
+    assert (
+        old_selected[old_selected.index("--config") + 1]
+        == "/run/vonk-runtime-assets/caddy/Caddyfile"
+    )
+    # A previous signed bundle uses the same native startup boundary without
+    # argv forwarding. Its fixture adaptation preserves the entire release's
+    # wait script and applies only the reviewed final-argv correction.
+    historical = published["services"]["caddy"]["entrypoint"][:3]
+    historical[2] = historical[2].removesuffix(' "$$@"')
+    adapted = lifecycle._acceptance_caddy_entrypoint(historical)
+    assert adapted[:2] == historical[:2]
+    assert adapted[2] == historical[2] + ' "$$@"'
+    historical_wrapper = [
+        argument.replace("$$", "$").replace(
+            "/run/vonk-runtime-assets/caddy/entrypoint.sh", str(native)
+        )
+        for argument in adapted
+    ]
+    subprocess.run(
+        [*historical_wrapper, *service["command"]],
+        check=True,
+        timeout=2,
+        env=environment,
+    )
+    assert captured.read_text().splitlines() == service["command"][1:]
+    assert service["entrypoint"] == published["services"]["caddy"]["entrypoint"]
+    with pytest.raises(lifecycle.LifecycleError, match="startup wrapper"):
+        lifecycle._acceptance_caddy_entrypoint(
+            ["/bin/sh", "-c", "exec foreign-startup"]
+        )
+    subprocess.run(
+        [*wrapper, *service["command"]],
+        check=True,
+        timeout=2,
+        env={
+            "PATH": str(executable.parent) + os.pathsep + os.defpath,
+            "VONK_CONTROL_HOSTNAME": "spark.acceptance.invalid",
+            "CAPTURE_ARGUMENTS": str(captured),
+        },
+    )
+    assert captured.read_text().splitlines() == service["command"][1:]
+    selected = captured.read_text().splitlines()
+    assert selected[selected.index("--config") + 1] == "/etc/caddy/Caddyfile"
+    from vonk_control.presence import ManagementAddressPolicy, PresenceError
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.synthetic_fabric_octet = 42
+    policy = ManagementAddressPolicy.parse(
+        run._controller_site_values()["VONK_MANAGEMENT_CIDRS"]
+    )
+    assert policy.validate("172.31.42.1") == "172.31.42.1"
+    with pytest.raises(PresenceError, match="outside configured"):
+        policy.validate("172.26.0.1")
 
 
 def test_synthetic_device_fixture_supports_the_arm64_spark_runner() -> None:
@@ -530,7 +642,7 @@ def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
 
     values = run._controller_site_values()
 
-    assert values["VONK_MANAGEMENT_CIDRS"] == "172.16.0.0/12"
+    assert values["VONK_MANAGEMENT_CIDRS"] == "172.31.42.0/30"
     assert values["VONK_DIRECT_FABRIC_CIDRS"] == "198.19.42.0/24"
 
 
@@ -575,6 +687,77 @@ def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
         not ("172.31.42.1/30" in argv and "198.19.42.1/24" in argv) for argv in observed
     )
     assert all("/usr/bin/install" not in argv for argv in observed)
+
+
+def test_owned_management_peer_survives_gateway_namespace_replacement(
+    tmp_path: Path,
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.temporary_root = tmp_path
+    run.project = "vonk-spark-42-arm64"
+    run.synthetic_interfaces = []
+    run.synthetic_fabric_octet = 42
+    observed: list[list[str]] = []
+    generation = 0
+    foreign_host = False
+
+    def command(argv, *, cwd, timeout=300):
+        assert cwd == tmp_path
+        observed.append(argv)
+        if argv[-3:] == ["ps", "--quiet", "litellm"]:
+            stdout = ("a" if generation == 0 else "b") * 64 + "\n"
+        elif argv[:2] == ["docker", "inspect"]:
+            stdout = "4242\n" if generation == 0 else "5151\n"
+        elif "address" in argv and "show" in argv:
+            interface = argv[-1]
+            peer = interface.startswith("vnas")
+            address = "172.31.42.2" if peer else "172.31.42.1"
+            if foreign_host and not peer:
+                address = "172.26.0.1"
+            stdout = json.dumps(
+                [
+                    {
+                        "ifname": interface,
+                        "addr_info": [
+                            {"family": "inet", "local": address, "prefixlen": 30}
+                        ],
+                    }
+                ]
+            )
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout)
+
+    run._run_command = command
+    run._prepare_synthetic_firewall_environment()
+    original_environment = dict(run.firewall_environment)
+    original_interfaces = list(run.synthetic_interfaces)
+    observed.clear()
+    run._detach_synthetic_management_peer()
+    generation = 1  # Compose replaces the gateway; accepted Start is unchanged.
+    run._attach_synthetic_management_peer()
+    moves = [argv for argv in observed if "link" in argv and "netns" in argv]
+    assert len(moves) == 2
+    assert moves[0][2:6] == ["--target", "4242", "--net", "/usr/sbin/ip"]
+    assert moves[0][-1] == str(lifecycle.os.getpid())
+    assert moves[1][-1] == "5151"
+    assert all(argv[-3].startswith("vnas") for argv in moves)
+    assert run.synthetic_management_owner == ("b" * 64, "5151")
+    assert run.synthetic_interfaces == original_interfaces
+    assert run.firewall_environment == original_environment
+    # Replacing the gateway never deletes/recreates the accepted host device,
+    # changes its .1 address, or touches the independent fabric interface.
+    mutations = [argv for argv in observed if "set" in argv or "replace" in argv]
+    assert all(original_interfaces[0] not in argv for argv in mutations)
+    assert all(original_interfaces[1] not in argv for argv in mutations)
+    assert not any("delete" in argv or "add" in argv for argv in observed)
+    observed.clear()
+    foreign_host = True
+    with pytest.raises(lifecycle.LifecycleError, match="address owner changed"):
+        run._detach_synthetic_management_peer()
+    assert not any("netns" in argv or "set" in argv for argv in observed)
 
 
 def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
