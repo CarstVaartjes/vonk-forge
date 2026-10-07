@@ -1092,8 +1092,12 @@ def _operation_item(
 
     progress = None
     result = None
+    status_reason = operation.status_reason
     if attempt is not None:
-        progress = _progress_projection(attempt.progress, operation.state)
+        try:
+            progress = _progress_projection(attempt.progress, operation.state)
+        except (TypeError, ValueError):
+            status_reason = "Stored progress evidence is unreadable; operation identity and state remain known."
         result = attempt.result
     receipt, unreadable = agent_receipt_for(operation.kind, operation.state, result)
     return OperationItem(
@@ -1112,7 +1116,7 @@ def _operation_item(
             else None
         ),
         state=operation.state,
-        status_reason=operation.status_reason,
+        status_reason=status_reason,
         updated_at=_aware(operation.updated_at).isoformat(),
     )
 

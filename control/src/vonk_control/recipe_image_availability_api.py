@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
@@ -10,6 +9,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
     ProgressPhase,
-    RecipeImageCode,
     state_adopter,
 )
 
@@ -44,6 +43,7 @@ from .recipe_image_availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )
+from .recipe_image_availability_view_contract import RecipeCacheRemovalStatus
 from .recipe_image_removal_contract import RecipeRemovalUnavailableView
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
@@ -421,64 +421,23 @@ def install_recipe_operator_routes(
 
     _ADMIN_OPERATION_IDS.update(RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS)
 
-    def removal_document(result: Mapping[str, object]) -> RecipeOperatorResponse:
-        with_model = result.get("with_model")
-        if not isinstance(with_model, bool):
-            raise RecipeImageAvailabilityError(
-                RecipeImageCode.OPERATION_INVALID,
-                "stored removal choice is malformed",
-            )
-        reclaimed_bytes = require_integer(
-            result.get("reclaimed_bytes"), "reclaimed bytes"
-        )
-        cancelled_operations = require_sequence(
-            result.get("cancelled_operations", []), "cancelled operations"
-        )
-        progress = _progress(result.get("progress"))
-        failure_value = result.get("failure")
-        failure = (
-            None
-            if failure_value is None
-            else read_stored_model(AvailabilityOperationFailure, failure_value)
-        )
-        return RecipeOperatorResponse.model_validate(
-            {
-                "action": "remove",
-                "selector": str(result["selector"]),
-                "request_key": str(result["request_key"]),
-                "operation_id": str(result["operation_id"]),
-                "recipe_revision_id": str(result["recipe_revision_id"]),
-                "with_model": with_model,
-                "state": result["state"],
-                "progress": progress,
-                "reclaimed_bytes": reclaimed_bytes,
-                "preserved": [
-                    str(item)
-                    for item in require_sequence(
-                        result.get("preserved", []), "preserved"
-                    )
-                ],
-                "next_actions": [
-                    str(item)
-                    for item in require_sequence(
-                        result.get("next_actions", []), "next actions"
-                    )
-                ],
-                "cancelled_operations": [str(item) for item in cancelled_operations],
-                "cancelled_builds": [
-                    str(item)
-                    for item in require_sequence(
-                        result.get("cancelled_builds", []), "cancelled builds"
-                    )
-                ],
-                "model_removals": [
-                    str(item)
-                    for item in require_sequence(
-                        result.get("model_removals", []), "model removals"
-                    )
-                ],
-                "failure": failure,
-            }
+    def removal_document(result: RecipeCacheRemovalStatus) -> RecipeOperatorResponse:
+        return RecipeOperatorResponse(
+            action=result.action,
+            selector=result.selector,
+            request_key=result.request_key,
+            operation_id=result.operation_id,
+            recipe_revision_id=result.recipe_revision_id,
+            with_model=result.with_model,
+            state=TypeAdapter(RecipeOperatorState).validate_python(result.state),
+            progress=result.progress,
+            reclaimed_bytes=result.reclaimed_bytes,
+            preserved=result.preserved,
+            next_actions=result.next_actions,
+            cancelled_operations=result.cancelled_operations,
+            cancelled_builds=result.cancelled_builds,
+            model_removals=result.model_removals,
+            failure=result.failure,
         )
 
     @app.get(

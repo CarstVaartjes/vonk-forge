@@ -81,6 +81,9 @@ from vonk_control.recipe_image_availability_api import (
     _view_document,
     install_recipe_operator_routes,
 )
+from vonk_control.recipe_image_availability_view_contract import (
+    RecipeCacheRemovalStatus,
+)
 from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
 )
@@ -881,7 +884,8 @@ def test_download_after_cache_removal_restores_the_image(tmp_path):
     removed = service.get_operator_request(
         "00000000-0000-4000-8000-000000000022", actor="operator"
     )
-    assert isinstance(removed, dict)
+    assert isinstance(removed, RecipeCacheRemovalStatus)
+    removed = removed.model_dump(mode="json", exclude_none=True)
     assert removed["state"] == "succeeded"
     # The worker takes the storage receipt only after committing its exact
     # checkpoint and deletion fence.
@@ -1295,8 +1299,8 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
     ]
     assert service.get(queued.id).state == "queued"
     observed = service.get_operator_operation(str(result["operation_id"]))
-    assert isinstance(observed, dict)
-    assert observed["operation_id"] == result["operation_id"]
+    assert isinstance(observed, RecipeCacheRemovalStatus)
+    assert observed.operation_id == result["operation_id"]
     with sessions() as session:
         build = session.get(RecipeBuild, "00000000-0000-4000-8000-000000000901")
         assert build is not None and build.state == "building"
@@ -1421,7 +1425,8 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     removal_started = True
     assert service.advance_removals(limit=1) == 1
     waiting = service.get_operator_request(request_key, actor="operator")
-    assert isinstance(waiting, dict)
+    assert isinstance(waiting, RecipeCacheRemovalStatus)
+    waiting = waiting.model_dump(mode="json", exclude_none=True)
     failure = require_mapping(waiting["failure"], "removal failure")
     retry_time = failure["retry_time"]
     assert waiting["state"] == LifecycleState.BACKOFF
@@ -1440,7 +1445,8 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     assert not receipt_path.exists()
     assert service.advance_removals(limit=1) == 1
     completed = service.get_operator_request(request_key, actor="operator")
-    assert isinstance(completed, dict)
+    assert isinstance(completed, RecipeCacheRemovalStatus)
+    completed = completed.model_dump(mode="json", exclude_none=True)
     assert completed["state"] == "succeeded"
     engine.dispose()
 
@@ -1543,7 +1549,8 @@ def test_recipe_removal_request_key_rejects_changed_intent(
     assert original["state"] == "queued"
     assert service.advance_removals(limit=1) == 1
     original = service.get_operator_request(request_id, actor="operator")
-    assert isinstance(original, dict)
+    assert isinstance(original, RecipeCacheRemovalStatus)
+    original = original.model_dump(mode="json", exclude_none=True)
     assert original["state"] == "succeeded"
     assert not any(path.is_file() for path in storage.root.rglob("*"))
 
@@ -1569,7 +1576,8 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
     assert original["state"] == "queued"
     assert service.advance_removals(limit=1) == 1
     observed = service.get_operator_request(request_id, actor="operator")
-    assert isinstance(observed, dict)
+    assert isinstance(observed, RecipeCacheRemovalStatus)
+    observed = observed.model_dump(mode="json", exclude_none=True)
     original = observed
     with sessions.begin() as session:
         head = session.scalar(
@@ -1628,7 +1636,7 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
         request_id=request_key,
         with_model=False,
     )
-    assert accepted["state"] == "queued"
+    assert accepted.state == "queued"
 
     changed_key = "00000000-0000-4000-8000-000000000042"
     with pytest.raises(RecipeImageAvailabilityError) as stale:
@@ -1665,8 +1673,8 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
         request_id=request_key,
         with_model=False,
     )
-    assert replay["operation_id"] == accepted["operation_id"]
-    assert replay["review_digest"] == before.review_digest
+    assert replay.operation_id == accepted.operation_id
+    assert replay.review_digest == before.review_digest
 
 
 def test_postgres_recipe_removal_persists_owner_before_first_unlink(
@@ -1820,7 +1828,8 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
     assert restarted.advance_removals(limit=1) == 1
     assert restarted.advance_removals(limit=1) == 1
     recovered = restarted.get_operator_request(request_id, actor="operator")
-    assert isinstance(recovered, dict)
+    assert isinstance(recovered, RecipeCacheRemovalStatus)
+    recovered = recovered.model_dump(mode="json", exclude_none=True)
     assert recovered["state"] == "succeeded"
     assert recovered["reclaimed_bytes"] == len(ARCHIVE)
 
@@ -1875,7 +1884,8 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
         assert service.advance_removals(limit=1) == 1
 
     waiting = service.get_operator_request(request_key, actor="operator")
-    assert isinstance(waiting, dict)
+    assert isinstance(waiting, RecipeCacheRemovalStatus)
+    waiting = waiting.model_dump(mode="json", exclude_none=True)
     assert waiting["state"] == LifecycleState.BACKOFF
     failure = require_mapping(waiting["failure"], "removal failure")
     assert failure["code"] == "artifact.reference_busy"
@@ -1886,7 +1896,8 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
 
     assert service.advance_removals(limit=1) == 1
     recovered = service.get_operator_request(request_key, actor="operator")
-    assert isinstance(recovered, dict)
+    assert isinstance(recovered, RecipeCacheRemovalStatus)
+    recovered = recovered.model_dump(mode="json", exclude_none=True)
     assert recovered["state"] == "succeeded"
 
 

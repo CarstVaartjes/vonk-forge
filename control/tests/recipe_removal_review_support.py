@@ -20,4 +20,4 @@ def remove_after_review(
         actor=actor,
         request_id=request_id,
         with_model=with_model,
-    )
+    ).model_dump(mode="json", exclude_none=True)
