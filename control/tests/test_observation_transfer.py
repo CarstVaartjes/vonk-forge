@@ -6,6 +6,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +22,7 @@ from vonk_control.fleet_projection import (
     FleetSnapshot,
     UnavailableRecipePresence,
 )
+from vonk_control.fleet_stream_contract import FleetRefreshEvent
 from vonk_control.models import AgentNode, Base
 from vonk_control.observation_transfer import (
     ObservationTransferChunk,
@@ -31,7 +33,11 @@ from vonk_control.observation_transfer import (
 )
 from vonk_control.strict_json import serialize_json_value
 
-from cluster_profiles.control_client import ControlClient, ControlMalformedResponse
+from cluster_profiles.control_client import (
+    ControlClient,
+    ControlMalformedResponse,
+    source_schema_validator,
+)
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from tests.observation_transfer_peer import ObservationHTTPPeer
 from tests.test_platform_observation import Jobs
@@ -263,3 +269,49 @@ def test_whole_membership_has_no_observation_only_512_group_cap(tmp_path):
     assert _client(tmp_path, response).request(
         "GET", "/api/fleet"
     ) == serialize_json_value(snapshot)
+
+
+@pytest.mark.parametrize(
+    ("path", "media", "component", "resource"),
+    [
+        (
+            "/api/fleet",
+            "application/x-vonk-observation+ndjson",
+            "ObservationTransferRecord",
+            "fleet",
+        ),
+        (
+            "/api/platform",
+            "application/x-vonk-observation+ndjson",
+            "ObservationTransferRecord",
+            "platform",
+        ),
+        ("/api/fleet/stream", "text/event-stream", "FleetStreamEvent", None),
+    ],
+)
+def test_stream_response_schema_validates_its_actual_canonical_record(
+    tmp_path, path, media, component, resource
+):
+    # FastAPI's raw non-JSON response default must not intersect the owning
+    # decoded record model with type:string. This is the actual app graph,
+    # including the response declaration, not a second consumer schema.
+    with _peer(_large_snapshot(tmp_path)) as peer:
+        graph = peer.app.openapi()
+    declared = graph["paths"][path]["get"]["responses"]["200"]["content"][media][
+        "schema"
+    ]
+    assert declared == {"$ref": f"#/components/schemas/{component}"}
+    model = (
+        FleetRefreshEvent(reset_reason="initial", event_cursor=0)
+        if resource is None
+        else ObservationTransferStart(
+            type="start",
+            transfer_id=str(uuid4()),
+            resource=resource,
+            encoding="base64-canonical-json-utf8-v1",
+        )
+    )
+    validator = source_schema_validator({"components": graph["components"], **declared})
+    record = serialize_json_value(model)
+    assert validator.is_valid(record)
+    assert not validator.is_valid(json.dumps(record))

@@ -18,6 +18,7 @@ from fastapi._compat import (
     get_definitions,
     get_flat_models_from_fields,
     get_model_name_map,
+    get_schema_from_model_field,
 )
 from fastapi.encoders import jsonable_encoder
 from fastapi.openapi.models import OpenAPI
@@ -152,6 +153,29 @@ def canonical_openapi(
             if result:
                 path, security_schemes, path_definitions = result
                 if path:
+                    # FastAPI defaults a non-JSON response class to a raw
+                    # string, then merges an additional response model into it.
+                    # Our declared record/frame schema describes each decoded
+                    # record, so retain its exact owning model field instead
+                    # of the impossible string-and-object intersection.
+                    stream_field = api_route.response_fields.get(200)
+                    if stream_field is not None:
+                        for operation in path.values():
+                            if not isinstance(operation, dict) or not (
+                                operation.get("x-vonk-response-record-max-bytes")
+                                or operation.get("x-vonk-response-frame-max-bytes")
+                            ):
+                                continue
+                            record_schema = get_schema_from_model_field(
+                                field=stream_field,
+                                model_name_map=model_name_map,
+                                field_mapping=field_mapping,
+                                separate_input_output_schemas=separate_input_output_schemas,
+                            )
+                            for media in operation["responses"]["200"][
+                                "content"
+                            ].values():
+                                media["schema"] = deepcopy(record_schema)
                     paths.setdefault(api_route.path_format, {}).update(path)
                 if security_schemes:
                     components.setdefault("securitySchemes", {}).update(
