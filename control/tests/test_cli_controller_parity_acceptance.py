@@ -29,10 +29,18 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileDefinition,
     FleetProfileInput,
 )
+from vonk_control.fleet_projection import FleetSnapshot
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import CatalogDocumentHead, CatalogDocumentRevision
+from vonk_control.observation_transfer import (
+    OBSERVATION_MEDIA_TYPE,
+    ObservationTransferResponse,
+    observation_response,
+)
 
 from cluster_profiles import cli
+
+from .observation_transfer_peer import observation_document
 
 ROOT = Path(__file__).resolve().parents[2]
 schema_path = Path(
@@ -114,41 +122,45 @@ def _library(kind: str) -> dict[str, Any]:
     return value
 
 
-def _fleet() -> dict[str, Any]:
-    return {
-        "event_cursor": 0,
-        "generated_at": NOW,
-        "authority_revision": "a" * 64,
-        "nodes": [
+def _fleet() -> FleetSnapshot:
+    return FleetSnapshot.model_validate_json(
+        json.dumps(
             {
-                "id": SPARK,
-                "display_name": "Atlas",
-                "hostname": "atlas",
-                "lifecycle": "active",
-                "labels": {},
-                "connection": {
-                    "agent_state": "active",
-                    "certificate_state": "valid",
-                    "online_state": "online",
-                    "offline_reason": None,
-                    "last_seen_at": NOW,
-                    "last_seen_age_seconds": 0,
-                },
-                "inventory": None,
-                "telemetry": None,
-                "installed": [],
-                "loaded": [],
-                "reservations": {
-                    "disk_bytes": 0,
-                    "unified_memory_bytes": 0,
-                    "host_memory_bytes": 0,
-                    "gpu_memory_bytes": 0,
-                    "port_count": 0,
-                },
-                "warnings": [],
+                "event_cursor": 0,
+                "generated_at": NOW,
+                "authority_revision": "a" * 64,
+                "nodes": [
+                    {
+                        "id": SPARK,
+                        "display_name": "Atlas",
+                        "hostname": "atlas",
+                        "lifecycle": "active",
+                        "labels": {},
+                        "connection": {
+                            "agent_state": "active",
+                            "certificate_state": "valid",
+                            "online_state": "online",
+                            "offline_reason": None,
+                            "last_seen_at": NOW,
+                            "last_seen_age_seconds": 0,
+                        },
+                        "inventory": None,
+                        "telemetry": None,
+                        "installed": [],
+                        "loaded": [],
+                        "reservations": {
+                            "disk_bytes": 0,
+                            "unified_memory_bytes": 0,
+                            "host_memory_bytes": 0,
+                            "gpu_memory_bytes": 0,
+                            "port_count": 0,
+                        },
+                        "warnings": [],
+                    }
+                ],
             }
-        ],
-    }
+        )
+    )
 
 
 def _route_template(path: str) -> str:
@@ -304,9 +316,9 @@ def _app() -> FastAPI:
         return library.recipe_library().model_dump(mode="json")
 
     @app.get("/api/fleet")
-    def fleet(request: Request) -> dict[str, Any]:
+    def fleet(request: Request) -> ObservationTransferResponse:
         _auth(request)
-        return _fleet()
+        return observation_response(_fleet(), resource="fleet")
 
     @app.post("/api/model/{selector}/download", status_code=202)
     def model_download(
@@ -409,6 +421,8 @@ class HTTPTransport:
     ) -> dict[str, object]:
         _validate_request(path, method, payload)
         headers = dict(extra_headers or {})
+        if method.upper() == "GET" and path == "/api/fleet":
+            headers["accept"] = OBSERVATION_MEDIA_TYPE
         if self.browser:
             headers["x-csrf-token"] = CSRF
             self.client.cookies.set("vonk_session", TOKEN)
@@ -419,6 +433,8 @@ class HTTPTransport:
         )
         if response.status_code >= 400:
             raise AssertionError(response.text)
+        if method.upper() == "GET" and path == "/api/fleet":
+            return observation_document(response)
         value = response.json() if response.content else {}
         _validate_contract(path, method, response.status_code, value)
         return value
@@ -451,6 +467,10 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
     assert _cli(
         cli_transport, "--profile", "1", "profile", "--json"
     ) == browser_transport.request("GET", "/api/profile/1")
+
+    assert _cli(cli_transport, "fleet", "--json") == browser_transport.request(
+        "GET", "/api/fleet"
+    )
 
     request: dict[str, object] = {"request_key": REQUEST_KEY}
     assert _cli(

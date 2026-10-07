@@ -62,6 +62,7 @@ from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.strict_json import serialize_json_value
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
+from .observation_transfer_peer import observation_document
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
@@ -738,13 +739,14 @@ def test_fleet_exposes_typed_visual_state() -> None:
     visual = client.get("/api/fleet", headers=operator)
 
     assert visual.status_code == 200
-    assert visual.json() == {
+    observed = observation_document(visual)
+    assert observed == {
         "event_cursor": 11,
         "generated_at": "2026-08-15T12:00:00Z",
         "authority_revision": COMMIT,
         "nodes": [],
     }
-    assert "evidence_digest" not in visual.json()
+    assert "evidence_digest" not in observed
 
 
 def test_job_status_has_typed_progress_fields_without_payloads() -> None:
