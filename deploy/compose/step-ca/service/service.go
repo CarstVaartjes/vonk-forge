@@ -52,6 +52,7 @@ func jsonReply(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
+
 // refusalReply implements the existing canonical CertificateRefusalReply wire
 // contract. Details come only from owned labels or measured byte counts; raw
 // authorization, CSR, certificate and storage errors never become HTTP data.

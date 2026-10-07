@@ -510,9 +510,13 @@ func TestAuthorityHTTPCanonicalRefusalsReachNativeProvider(t *testing.T) {
 				issuerTemplate.RawSubject = nil
 				issuerTemplate.Subject = pkix.Name{CommonName: strings.Repeat("i", 24*1024)}
 				der, err := x509.CreateCertificate(rand.Reader, &issuerTemplate, &issuerTemplate, issuerTemplate.PublicKey, f.c.Soft.Signer)
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				issuer, err := x509.ParseCertificate(der)
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				f.c.Policy.Issuer = issuer
 				f.c.Soft.CertificateChain = []*x509.Certificate{issuer}
 				f.binding.IssuerFingerprint = digest(issuer.Raw)
@@ -540,16 +544,22 @@ func TestAuthorityHTTPCanonicalRefusalsReachNativeProvider(t *testing.T) {
 			if python := os.Getenv("VONK_CA_REFUSAL_PYTHON"); python != "" {
 				server := httptest.NewTLSServer(f.handler)
 				defer server.Close()
-				if name != "authentication" { token = f.token(t, f.binding, nil) }
+				if name != "authentication" {
+					token = f.token(t, f.binding, nil)
+				}
 				payload, err := json.Marshal(map[string]any{
-					"origin": server.URL,
+					"origin":          server.URL,
 					"tls_certificate": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})),
-					"body": signRequest{string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: f.csr.Raw})), token, mustBindingJSON(t, f.binding), mode},
-					"expected": reply,
+					"body":            signRequest{string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: f.csr.Raw})), token, mustBindingJSON(t, f.binding), mode},
+					"expected":        reply,
 				})
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				root, err := filepath.Abs("../../../..")
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 				childContext, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 				defer cancel()
 				command := exec.CommandContext(childContext, python, "-m", "tests.ca_refusal_consumer")
@@ -559,7 +569,9 @@ func TestAuthorityHTTPCanonicalRefusalsReachNativeProvider(t *testing.T) {
 					t.Fatalf("native Python provider lost real HTTP refusal: %v %s", err, output)
 				}
 			}
-			if signerEntered { t.Fatal("refused request invoked private signer") }
+			if signerEntered {
+				t.Fatal("refused request invoked private signer")
+			}
 			if name == "capacity" {
 				receipt, err := f.j.Observe(f.binding)
 				if err != nil || receipt == nil || len(receipt.Chain) != 0 {
@@ -573,6 +585,8 @@ func TestAuthorityHTTPCanonicalRefusalsReachNativeProvider(t *testing.T) {
 func mustBindingJSON(t *testing.T, binding Binding) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(binding)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	return raw
 }
