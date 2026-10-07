@@ -124,9 +124,11 @@ jobs:
               echo "No changed Python files; skipping Ruff"
             else
               uv run --project control --frozen ruff check --force-exclude "${changed_python[@]}"
+              uv run --project control --frozen ruff format --check --force-exclude "${changed_python[@]}"
             fi
           else
             uv run --project control --frozen ruff check .
+            uv run --project control --frozen ruff format --check .
           fi
       - name: Check Python types
         shell: bash
@@ -912,6 +914,12 @@ jobs:
         run: >-
           uv run --project control --frozen pytest -s -q -n 0
           control/tests/test_fresh_launch_catalog_postgres_acceptance.py::test_fresh_postgres_imports_typed_canonical_model_recipe_api
+          control/tests/test_catalog_service.py
+      - name: Verify installed Activity byte refusal and same-read recovery
+        if: matrix.shard.index == 1
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_operation_response_budget_installed_cli.py::test_installed_activity_byte_continuation_and_aggregate_fact_recovery
 
       - name: Set up Docker Buildx for the candidate CA
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -1043,37 +1051,48 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # Match control/web/package-lock.json; browsers and system libraries are baked in.
+    # https://playwright.dev/docs/ci#via-containers
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Install pinned Node.js with admin web dependency cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26"
           cache: npm
           cache-dependency-path: control/web/package-lock.json
+      - name: Install Python for the dependency fetch helper
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
       - name: Install locked admin web dependencies
         run: scripts/retry-dependency-fetch npm ci --prefix control/web
+      - name: Check TypeScript lint, formatting and types
+        shell: bash
+        env:
+          WEB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          cd control/web
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            mapfile -d '' -t changed_web < <(git diff --name-only -z --diff-filter=ACMR "${WEB_BASE_SHA:?missing base SHA}" "$GITHUB_SHA" -- '*.ts' '*.tsx')
+            if ((${#changed_web[@]})); then
+              node_modules/.bin/biome check "${changed_web[@]/#/$GITHUB_WORKSPACE/}"
+            fi
+          else
+            npm run lint
+          fi
+          npm run typecheck
       - name: Run complete admin web suite
         run: npm test --prefix control/web -- --run
       - name: Build admin web application
         run: npm run build --prefix control/web
-      - name: Restore the pinned Chromium browser
-        id: playwright-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
-      - name: Install pinned Chromium browser and its system libraries
-        run: >-
-          scripts/retry-dependency-fetch control/web/node_modules/.bin/playwright
-          install --with-deps chromium
-      - name: Save the pinned Chromium browser
-        if: steps.playwright-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
       - name: Run fixture-backed Admin browser acceptance
         # Native contract consumers run with their Python-produced corpus and
         # development server in browser-contract-artifacts.yml.

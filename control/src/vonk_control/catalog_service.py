@@ -416,8 +416,11 @@ class CatalogService:
         with self._sessions.begin() as session:
             for value in dependencies:
                 self._upsert_canonical_document(session, value, actor=actor)
-            revision = self._upsert_canonical_document(session, captured, actor=actor)
-            self._select_imported_recipe_head(session, revision)
+            revision, head_selected = self._upsert_canonical_document(
+                session, captured, actor=actor
+            )
+            if not head_selected:
+                self._select_imported_recipe_head(session, revision)
             projected = read_catalog_projection(revision).model_dump(
                 mode="json", exclude_none=False
             )
@@ -494,7 +497,8 @@ class CatalogService:
 
     def _upsert_canonical_document(
         self, session: Session, captured: _CatalogImportDocument, *, actor: str
-    ) -> CatalogDocumentRevision:
+    ) -> tuple[CatalogDocumentRevision, bool]:
+        """Return the exact revision and whether this transaction selected its head."""
         document = json.loads(captured.document_json)
         parsed = captured.definition
         kind = str(parsed.kind)
@@ -510,7 +514,7 @@ class CatalogService:
             )
         )
         if existing is not None:
-            return existing
+            return existing, False
         service = CatalogEntityService(
             session, clock=self._clock, cursors=self._cursors
         )
@@ -551,7 +555,10 @@ class CatalogService:
                 actor=actor,
                 expected_revision=latest.revision_number if latest else None,
             )
-        return service.resolve(candidate.id, actor=actor)
+        # resolve selects this newly created candidate as the accepted head in
+        # this same transaction. Retain that completed work rather than issue
+        # another root/head read solely to discover the already-selected id.
+        return service.resolve(candidate.id, actor=actor), True
 
     def resolve_recipe_revision(
         self, document: Mapping[str, object], *, actor: str

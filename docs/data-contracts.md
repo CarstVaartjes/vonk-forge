@@ -53,6 +53,7 @@ of the 50 hand-written serde types of the baseline are generated now.
 | `rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs` | `PersistBindingInput` | test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones |
 | `rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs` | `SerializeInput` | test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones |
 | `rust/crates/vonk-agent/examples/restart_recovery_probe.rs` | `Request` | test harness: stdin request of the restart-recovery probe, not product data |
+| `rust/crates/vonk-agent/examples/acceptance_certificate_renewal.rs` | `Evidence` | test harness: stdout provenance of the separately built hosted certificate-renewal acceptance peer, never installed or read as a production wire document; records the real native rotation clock, exact agent binary/build identity, certificate/key changes and fixed thirty-day lifetimes |
 | `rust/crates/vonk-agent/src/base_images.rs` | `Descriptor` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
 | `rust/crates/vonk-agent/src/base_images.rs` | `ImageConfig` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
 | `rust/crates/vonk-agent/src/base_images.rs` | `Index` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
@@ -250,7 +251,7 @@ module defines its own.
 | | Before | After |
 | --- | --- | --- |
 | Rust hand-written serde types outside `generated.rs` (src) | 50 in 13 files | 11 in 6 files, all external formats or tolerant site files |
-| Rust serde types in examples and tests (harness inputs) | 7 | 7, allowlisted |
+| Rust serde types in examples and tests (harness inputs) | 7 | 8, allowlisted |
 | TypeScript hand-written API data shapes | 1 named by the owner (`CliTokenDownload`), plus an inline body type and a blocker shape | 0; 44 UI-only shapes allowlisted with reasons |
 | Python duplicate model groups (same name or same bases and fields) | 12 | 0 |
 | Python copies of contract words | 2 (`cli_states.py`, `route_activation.py`) | 0; both read generated modules |

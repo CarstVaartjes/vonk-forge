@@ -460,12 +460,12 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert detail_payload["document"]["runtime"] == serialize_json_value(
         expected_recipe.runtime
     )
-    assert detail_payload["document"][
-        "topology"
-    ] == serialize_json_value(expected_recipe.topology)
-    assert detail_payload["document"][
-        "settings"
-    ] == serialize_json_value(expected_recipe.settings)
+    assert detail_payload["document"]["topology"] == serialize_json_value(
+        expected_recipe.topology
+    )
+    assert detail_payload["document"]["settings"] == serialize_json_value(
+        expected_recipe.settings
+    )
     assert (
         detail_payload["identity"]["recipe_revision_id"]
         == recipe_revision_ids[detail_payload["identity"]["content_sha256"]]

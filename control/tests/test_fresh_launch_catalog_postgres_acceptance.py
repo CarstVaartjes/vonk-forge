@@ -276,9 +276,11 @@ def test_frozen_corpus_closure_is_dynamic() -> None:
         assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
 
 
-# Slow by design: migrates a fresh PostgreSQL database and imports the whole
-# frozen corpus through the real package reader before reading the API.
-@pytest.mark.slow(30)
+# Slow by design: cold-verifies every canonical package, imports the whole
+# corpus into fresh PostgreSQL, validates every API page and restarts the cache.
+# Hosted phase timings total about 32s for 223 Models and 301 Recipes; allow
+# 45s for this whole-corpus acceptance while retaining the same assertions.
+@pytest.mark.slow(45)
 def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:

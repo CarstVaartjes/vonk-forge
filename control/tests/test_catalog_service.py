@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CatalogCode
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, CatalogValidationError
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.models import Base, CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import document_sha256
 
@@ -210,6 +210,76 @@ def test_import_is_idempotent_and_persists_active_canonical_revision(
         ).all()
     assert [revision.document_id for revision in revisions] == [first.recipe_id]
     client.close()
+
+
+def test_reimport_selects_retained_recipe_head_without_rebinding_models(
+    service: CatalogService, tmp_path: Path
+) -> None:
+    """A fresh resolution selects once; a later exact import restores its head."""
+    client, item = _item(tmp_path)
+    original = copy.deepcopy(dict(item.document))
+    changed = copy.deepcopy(original)
+    metadata = changed["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["description"] = "A later accepted recipe revision"
+
+    def import_document(document: dict[str, object]):
+        return service.import_recipe_library(
+            "test",
+            library_commit=item.library_commit,
+            source_path=item.source_path,
+            document=document,
+            expected_content_sha256=document_sha256(document),
+            dependency_documents=item.dependencies,
+        )
+
+    try:
+        first = import_document(original)
+        with service._sessions() as session:
+            head = session.scalar(
+                select(CatalogDocumentHead).where(CatalogDocumentHead.kind == "recipe")
+            )
+            assert head is not None
+            assert (
+                head.active_revision_id,
+                head.candidate_revision_id,
+                head.generation,
+            ) == (first.id, None, 1)
+            model_heads = {
+                row.id: (row.active_revision_id, row.generation)
+                for row in session.scalars(
+                    select(CatalogDocumentHead).where(
+                        CatalogDocumentHead.kind == "model"
+                    )
+                )
+            }
+        later = import_document(changed)
+        assert later.id != first.id
+        assert service.get_recipe(first.recipe_id).id == later.id
+        restored = import_document(original)
+        assert restored.id == first.id
+        assert service.get_recipe(first.recipe_id).document == original
+        assert service.get_recipe(first.recipe_id).content_sha256 == item.content_sha256
+        with service._sessions() as session:
+            head = session.scalar(
+                select(CatalogDocumentHead).where(CatalogDocumentHead.kind == "recipe")
+            )
+            assert head is not None
+            assert (
+                head.active_revision_id,
+                head.candidate_revision_id,
+                head.generation,
+            ) == (first.id, None, 3)
+            assert model_heads == {
+                row.id: (row.active_revision_id, row.generation)
+                for row in session.scalars(
+                    select(CatalogDocumentHead).where(
+                        CatalogDocumentHead.kind == "model"
+                    )
+                )
+            }
+    finally:
+        client.close()
 
 
 def test_import_rejects_changed_recipe_digest(

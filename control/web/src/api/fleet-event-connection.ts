@@ -1,10 +1,13 @@
-import {contractRoutes} from "./runtime.generated.js";
-import type {components} from "./generated";
-import {formatWire, type WireNumber} from "./contract-numeric";
-import {ContractViolation, validateComponent} from "./contract-json";
+import { contractRoutes } from "./runtime.generated.js";
+import type { components } from "./generated";
+import { formatWire, type WireNumber } from "./contract-numeric";
+import { ContractViolation, validateComponent } from "./contract-json";
 
 export function matchesFleetCursor(identifier: string, canonicalCursor: WireNumber): boolean {
-  return /^[0-9]+$/.test(identifier) && identifier.replace(/^0+(?=[0-9])/, "") === formatWire(canonicalCursor);
+  return (
+    /^[0-9]+$/.test(identifier) &&
+    identifier.replace(/^0+(?=[0-9])/, "") === formatWire(canonicalCursor)
+  );
 }
 
 function retryAfterMilliseconds(value: string | null): bigint | undefined {
@@ -20,25 +23,46 @@ function retryAfterMilliseconds(value: string | null): bigint | undefined {
  * https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream
  * Invalid UTF-8 is refused by the Control contract rather than repaired.
  */
-export async function readFleetEvents(response: Response, dispatch: (event: MessageEvent<string>) => void, retry: (milliseconds: bigint) => void): Promise<void> {
+export async function readFleetEvents(
+  response: Response,
+  dispatch: (event: MessageEvent<string>) => void,
+  retry: (milliseconds: bigint) => void,
+): Promise<void> {
   const path = "/api/fleet/stream";
-  const limit = contractRoutes.find(route => route.route === path && route.method === "GET")?.frameMaxBytes;
+  const limit = contractRoutes.find(
+    (route) => route.route === path && route.method === "GET",
+  )?.frameMaxBytes;
   if (!limit || !response.body) throw new ContractViolation("GET", path, response.status);
   const byteLimit = limit;
   const reader = response.body.getReader();
   const line = new Uint8Array(limit);
-  const decoder = new TextDecoder("utf-8", {fatal: true, ignoreBOM: true});
-  let lineBytes = 0, frameBytes = 0;
-  let carriageReturn = false, firstLine = true;
-  let identifier = "", eventType = "";
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  let lineBytes = 0,
+    frameBytes = 0;
+  let carriageReturn = false,
+    firstLine = true;
+  let identifier = "",
+    eventType = "";
   let data: string[] = [];
   function processLine(): void {
     let text = decoder.decode(line.subarray(0, lineBytes));
     lineBytes = 0;
-    if (firstLine) { firstLine = false; if (text.startsWith("\uFEFF")) text = text.slice(1); }
+    if (firstLine) {
+      firstLine = false;
+      if (text.startsWith("\uFEFF")) text = text.slice(1);
+    }
     if (!text) {
-      if (data.length) dispatch(new MessageEvent(eventType || "message", {data: data.join("\n"), lastEventId: identifier, origin: new URL(response.url || location.origin).origin}));
-      data = []; eventType = ""; frameBytes = 0;
+      if (data.length)
+        dispatch(
+          new MessageEvent(eventType || "message", {
+            data: data.join("\n"),
+            lastEventId: identifier,
+            origin: new URL(response.url || location.origin).origin,
+          }),
+        );
+      data = [];
+      eventType = "";
+      frameBytes = 0;
       return;
     }
     if (text.startsWith(":")) return;
@@ -57,12 +81,16 @@ export async function readFleetEvents(response: Response, dispatch: (event: Mess
   }
   try {
     while (true) {
-      const {done, value} = await reader.read();
+      const { done, value } = await reader.read();
       if (done) break;
       for (const byte of value) {
         if (carriageReturn) {
           carriageReturn = false;
-          if (byte === 10) { count(); processLine(); continue; }
+          if (byte === 10) {
+            count();
+            processLine();
+            continue;
+          }
           processLine();
         }
         // Account actual wire bytes before retaining or decoding a line. The
@@ -76,9 +104,15 @@ export async function readFleetEvents(response: Response, dispatch: (event: Mess
     if (carriageReturn) processLine();
     // EOF without a blank line discards pending data, per SSE semantics.
   } catch (cause) {
-    try { await reader.cancel(); } catch { /* Keep the original failure. */ }
+    try {
+      await reader.cancel();
+    } catch {
+      /* Keep the original failure. */
+    }
     throw cause;
-  } finally { reader.releaseLock(); }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export interface FleetEventStream {
@@ -95,7 +129,10 @@ export class FleetEventConnection extends EventTarget {
   private timer?: ReturnType<typeof setTimeout>;
   private retryMilliseconds = 2000n;
   private closed = false;
-  constructor(private readonly appliedCursor: () => string, private readonly authorize: (response: Response) => void = () => undefined) {
+  constructor(
+    private readonly appliedCursor: () => string,
+    private readonly authorize: (response: Response) => void = () => undefined,
+  ) {
     super();
     void this.connect();
   }
@@ -123,20 +160,36 @@ export class FleetEventConnection extends EventTarget {
     this.controller = controller;
     let readingCanonicalEvents = false;
     try {
-      const headers = new Headers({Accept: "text/event-stream"});
+      const headers = new Headers({ Accept: "text/event-stream" });
       const cursor = this.appliedCursor();
       if (cursor) headers.set("Last-Event-ID", cursor);
-      const response = await fetch(this.url, {headers, credentials: "same-origin", cache: "no-store", signal: controller.signal});
-      if (this.closed || controller.signal.aborted) { await response.body?.cancel(); return; }
+      const response = await fetch(this.url, {
+        headers,
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (this.closed || controller.signal.aborted) {
+        await response.body?.cancel();
+        return;
+      }
       if (response.status === 401) {
         await response.body?.cancel();
         this.closed = true;
       }
       this.authorize(response);
-      if (response.status === 204) { this.close(); this.dispatchEvent(new Event("error")); return; }
-      if (response.status !== 200 || response.headers.get("Content-Type")?.split(";")[0].trim() !== "text/event-stream") {
+      if (response.status === 204) {
+        this.close();
+        this.dispatchEvent(new Event("error"));
+        return;
+      }
+      if (
+        response.status !== 200 ||
+        response.headers.get("Content-Type")?.split(";")[0].trim() !== "text/event-stream"
+      ) {
         const retryAfter = retryAfterMilliseconds(response.headers.get("Retry-After"));
-        if (retryAfter !== undefined && retryAfter > this.retryMilliseconds) this.retryMilliseconds = retryAfter;
+        if (retryAfter !== undefined && retryAfter > this.retryMilliseconds)
+          this.retryMilliseconds = retryAfter;
         await response.body?.cancel();
         // Proxy/server outages and a temporarily wrong media response can
         // recover on the same owner. Explicit refusal/unsupported 4xx cannot.
@@ -145,19 +198,33 @@ export class FleetEventConnection extends EventTarget {
       }
       readingCanonicalEvents = true;
       this.dispatchEvent(new Event("open"));
-      await readFleetEvents(response, event => {
-        const owner = contractRoutes.find(route => route.method === "GET" && route.route === this.url)?.sseEvents?.[event.type];
-        if (!owner) throw new ContractViolation("GET", this.url, response.status);
-        const payload = validateComponent(owner, event.data) as components["schemas"]["FleetStreamEvent"];
-        if (!matchesFleetCursor(event.lastEventId, payload.event_cursor)
-            || ("sample" in payload && payload.sample.node_id !== payload.node_id)) {
-          throw new ContractViolation("GET", this.url, response.status);
-        }
-        if (!this.closed) this.dispatchEvent(event);
-      }, milliseconds => { this.retryMilliseconds = milliseconds; });
+      await readFleetEvents(
+        response,
+        (event) => {
+          const owner = contractRoutes.find(
+            (route) => route.method === "GET" && route.route === this.url,
+          )?.sseEvents?.[event.type];
+          if (!owner) throw new ContractViolation("GET", this.url, response.status);
+          const payload = validateComponent(
+            owner,
+            event.data,
+          ) as components["schemas"]["FleetStreamEvent"];
+          if (
+            !matchesFleetCursor(event.lastEventId, payload.event_cursor) ||
+            ("sample" in payload && payload.sample.node_id !== payload.node_id)
+          ) {
+            throw new ContractViolation("GET", this.url, response.status);
+          }
+          if (!this.closed) this.dispatchEvent(event);
+        },
+        (milliseconds) => {
+          this.retryMilliseconds = milliseconds;
+        },
+      );
     } catch (cause) {
       if (controller.signal.aborted) return;
-      if (readingCanonicalEvents && cause instanceof ContractViolation) this.dispatchEvent(new Event("unavailable"));
+      if (readingCanonicalEvents && cause instanceof ContractViolation)
+        this.dispatchEvent(new Event("unavailable"));
     } finally {
       this.controller = undefined;
     }
