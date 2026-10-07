@@ -1757,6 +1757,7 @@ def test_corrupt_stored_evidence_decoration_preserves_readable_identity(
                 payload={},
                 authority_revision=COMMIT,
                 state="running",
+                status_reason="Agent is probing readiness",
                 current_attempt=1,
                 created_at=now,
                 updated_at=now,
@@ -1792,7 +1793,7 @@ def test_corrupt_stored_evidence_decoration_preserves_readable_identity(
         assert item["kind"] == "node.probe"
         assert item["state"] == "running"
         assert item.get("progress") is None
-        assert "progress evidence is unreadable" in item["status_reason"]
+        assert item["status_reason"] == "Agent is probing readiness"
     with sessions.begin() as session:
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
@@ -1811,7 +1812,7 @@ def test_corrupt_stored_evidence_decoration_preserves_readable_identity(
     assert repaired.json()["id"] == identifier
     assert repaired.json()["state"] == "running"
     assert repaired.json()["progress"]["completed_bytes"] == 12
-    assert repaired.json().get("status_reason") is None
+    assert repaired.json()["status_reason"] == "Agent is probing readiness"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
