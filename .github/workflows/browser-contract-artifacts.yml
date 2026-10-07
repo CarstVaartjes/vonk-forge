@@ -74,8 +74,6 @@ jobs:
           ref: 5b0ee1613e45fcc2bddac00e07c19cd49b00d8a8
           path: artifacts/json-schema-suite
           persist-credentials: false
-      - name: Compile real browser consumers
-        run: npm run build --prefix control/web
       - name: Compile pinned official schemas with the production compiler
         run: python3 scripts/tests/prepare_official_schema_consumers.py --suite artifacts/json-schema-suite
       - name: Exercise both browser HTTP consumers and exact numbers
@@ -83,3 +81,5 @@ jobs:
           VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
         run: npm exec -- vitest run src/api/contract-json.test.ts src/api/client.test.ts src/api/consumer-corpus.test.ts src/api/official-schema.generated.test.ts src/hooks/fleet-stream-state.test.ts src/hooks/use-fleet-stream.test.tsx
         working-directory: control/web
+      - name: Compile real browser consumers
+        run: npm run build --prefix control/web
