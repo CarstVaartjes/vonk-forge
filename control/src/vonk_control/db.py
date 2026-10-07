@@ -80,7 +80,18 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
             pool_timeout=budgets.pool_timeout_seconds,
             connect_args=connect_args,
         )
-    return create_engine(database_url, pool_pre_ping=True, connect_args={})
+    engine = create_engine(database_url, pool_pre_ping=True, connect_args={})
+    if engine.dialect.name == "sqlite":
+        # The engine has not escaped to a service or worker. Adopt historical
+        # owning projections on one exclusive checkout before any mapped read.
+        from .exact_integer_adoption import reconcile_exact_integer_schema
+
+        try:
+            reconcile_exact_integer_schema(engine)
+        except BaseException:
+            engine.dispose()
+            raise
+    return engine
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:
@@ -487,8 +498,10 @@ def reconcile_schema(connection: Connection) -> None:
     from alembic.operations import Operations
     from sqlalchemy import inspect
 
+    from .exact_integer_adoption import adopt_exact_integer_columns
     from .models import Base
 
+    adopt_exact_integer_columns(connection)
     ops = Operations(MigrationContext.configure(connection))
     differences = [
         difference
