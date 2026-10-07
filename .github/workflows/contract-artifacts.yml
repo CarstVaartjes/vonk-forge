@@ -13,6 +13,7 @@ on:
       - scripts/generate-agent-wire
       - Cargo.lock
       - Cargo.toml
+      - scripts/refresh-protocol-wheel-lock
   workflow_dispatch:
 
 permissions:
@@ -33,6 +34,15 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prepare pinned candidate packaging tool
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+      - name: Refresh candidate wheel pin from exact authored source
+        run: |
+          uv build --project agent_protocol --wheel --out-dir inventory/wheels
+          python3 scripts/refresh-protocol-wheel-lock
       - name: Prepare locked Python environment
         uses: ./.github/actions/python-env
       - name: Install pinned Rust toolchain
@@ -59,6 +69,7 @@ jobs:
               "rust/crates/vonk-agent-protocol/schema/wire.json",
               "rust/crates/vonk-agent-protocol/src/generated.rs",
               "schemas/install-release-manifest.schema.json",
+              "control/uv.lock",
           ]
           root = pathlib.Path("artifacts/canonical-contracts")
           records = {}
