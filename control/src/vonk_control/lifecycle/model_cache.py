@@ -285,7 +285,11 @@ class ModelCacheAdapter:
         if state is State.SUCCEEDED:
             effect = Effect.ESTABLISHED
         elif state is State.CANCELLED:
-            effect = Effect.STOPPED
+            # The stored ending fences the intent, not the physical writer.
+            # Cancellation can expire with an unconfirmed stop. This row has
+            # no persisted stop observation, so its state cannot prove absence.
+            # Exact writer locks and managed receipts still govern fresh work.
+            effect = Effect.UNKNOWN
         elif state is State.RUNNING:
             effect = Effect.ISSUED
         else:

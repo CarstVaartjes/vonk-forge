@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from sqlalchemy import Engine, select
@@ -138,10 +139,67 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
             original.id, original.artifact_set_sha256, object_digest
         )
         assert restarted._object_path(object_digest).read_bytes() == content
+
+        # The conservative read must also leave a normal, confirmed cancellation
+        # recoverable. It cannot turn UNKNOWN into a permanent admission blocker.
+        confirmed_preview = restarted.download_preview(
+            model_content_sha256=model_digest, artifacts=[artifact]
+        )
+        confirmed = restarted.start_download(
+            actor="operator",
+            request_key=str(uuid4()),
+            plan_digest=str(confirmed_preview["plan_digest"]),
+            model_content_sha256=model_digest,
+            artifacts=[artifact],
+        )
+        cancelled = restarted.cancel_operation(
+            confirmed.id,
+            actor="operator",
+            request_key=str(uuid4()),
+            reason="confirmed before any writer started",
+        )
+        assert cancelled.state == "cancelled"
+        with sessions() as session:
+            ended = session.get(ModelCacheOperation, confirmed.id)
+            assert ended is not None and ended.last_error is None
+            assert_no_orphaned_holds(session)
+        restarted.close()
+        restarted = ModelCacheService(
+            sessions, root, reserve_bytes=0, fixture_sources=True, clock=lambda: now[0]
+        )
+        with sessions() as session:
+            ended = session.get(ModelCacheOperation, confirmed.id)
+            assert ended is not None
+            assert (
+                restarted._lifecycle.lifecycle(ended, now[0]).effect is Effect.UNKNOWN
+            )
+        # Verified storage, not a terminal word, proves reusable exact bytes.
+        Path(unquote(urlsplit(str(artifact["source"])).path)).unlink()
+        reusable_preview = restarted.download_preview(
+            model_content_sha256=model_digest, artifacts=[artifact]
+        )
+        reusable = restarted.start_download(
+            actor="operator",
+            request_key=str(uuid4()),
+            plan_digest=str(reusable_preview["plan_digest"]),
+            model_content_sha256=model_digest,
+            artifacts=[artifact],
+        )
+        assert reusable.artifact_set_sha256 == original.artifact_set_sha256
+        assert restarted._claim_operations(limit=1, respect_backoff=False) == [
+            (reusable.id, "download")
+        ]
+        restarted._run_download(reusable.id, force=False)
+        assert restarted.get_operation(reusable.id).state == "succeeded"
+        assert restarted.get_operation(confirmed.id).state == "cancelled"
+        assert restarted.get_operation(original.id).state == "cancelled"
+        assert restarted._object_path(object_digest).read_bytes() == content
         with sessions() as session:
             assert set(session.scalars(select(ModelCacheOperation.id))) == {
                 original.id,
                 fresh.id,
+                confirmed.id,
+                reusable.id,
             }
             assert_no_orphaned_holds(session)
     finally:
