@@ -25,6 +25,10 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_plan,
     _persisted_profile_progress,
 )
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -121,6 +125,26 @@ def _pending_stop(
         )
         assert revision is not None
         selector = f"{revision.publisher}/{revision.slug}"
+    # The healthy lane has real Controller inventory facts for admission.
+    # Creating only AgentNode is not evidence of available memory or disk.
+    # Its physical load remains simulated; the offline Stop lane is not given
+    # fresh inventory or an absence report to release its retained claims.
+    InventoryRepository(sessions, clock=lambda: clock[0]).record(
+        InventorySnapshotInput(
+            _node_id(2),
+            clock[0],
+            10_000,
+            8_000,
+            10_000,
+            8_000,
+            10_000,
+            8_000,
+            1,
+            False,
+            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
+            memory_pool="shared",
+        )
+    )
     profiles = FleetProfileService(
         sessions,
         clock=lambda: clock[0],
