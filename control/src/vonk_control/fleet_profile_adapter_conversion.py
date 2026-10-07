@@ -65,8 +65,12 @@ class _AcceptedRequestBinding(StrictModel):
     retry_of_application_id: UuidId | None
 
 
-class _UnprovenJournal(ValueError):
-    pass
+class _UnprovenJournal(Exception):
+    """Unwind only to try_convert_application's typed, per-row deferral.
+
+    This is not an admission refusal: the sole catch preserves the retained
+    journal and schedules another observation without interpreting its effects.
+    """
 
 
 def _aware(value: datetime) -> datetime:

@@ -21,6 +21,7 @@ from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     _persisted_profile_progress,
 )
+from vonk_control.lifecycle.evidence import BookkeepingReason
 from vonk_control.models import (
     AgentOperation,
     FleetProfileApplication,
@@ -247,7 +248,7 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
     tmp_path, damage
 ):
     """Catches inventing a queue binding, accepting a stale fence or retiring evidence."""
-    sessions, _lifecycle, _switches, application, _run, stop_id, original, _claims = (
+    sessions, _lifecycle, _switches, application, _run, stop_id, original, claims = (
         _retained_stop(tmp_path)
     )
     with sessions.begin() as session:
@@ -300,11 +301,28 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
         session.flush()
         result = try_convert_application(session, row, NOW)
         assert result.state == "deferred"
+        assert result.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
         assert result.next_attempt_at is not None and result.next_attempt_at > NOW
         assert row.progress == original
         assert row.id == application.id and row.state == application.state
         assert needs_conversion(row)
         assert conversion_observation(row) == result
+        assert {
+            claim.id
+            for claim in session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == application.id
+                )
+            )
+        } == claims
+
+        retried = try_convert_application(session, row, NOW + timedelta(seconds=31))
+        assert retried.state == "deferred"
+        assert retried.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
+        assert retried.next_attempt_at is not None
+        assert retried.next_attempt_at > NOW + timedelta(seconds=31)
+        assert row.progress == original
+        assert row.id == application.id
 
 
 def test_postgres_startup_converts_real_stop_and_continuation_is_idempotent(
