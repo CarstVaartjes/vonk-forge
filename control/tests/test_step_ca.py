@@ -981,39 +981,113 @@ step crypto jwk thumbprint < agent-ca-public.jwk
     database.mkdir(mode=0o777)
     database.chmod(0o777)
     container = f"vonk-step-ca-test-{uuid.uuid4().hex}"
+    # The current private endpoint must refuse a stock CA during a Compose
+    # replacement. Exercise the actual old image before opening its same DB
+    # with the journal service, and retain the original exact request.
+    real_getaddrinfo = socket.getaddrinfo
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, *args, **kwargs: real_getaddrinfo(
+            "127.0.0.1" if host == "step-ca" else host, *args, **kwargs
+        ),
+    )
+
+    def authority(mapped_port: str) -> StepCertificateAuthority:
+        return StepCertificateAuthority(
+            ca_url=f"https://step-ca:{mapped_port}",
+            root_certificate_path=root,
+            intermediate_certificate_path=intermediate,
+            provisioner_name="vonk-forge-agent",
+            provisioner_kid=kid,
+            credential_path=private_jwk,
+            provisioner_public_jwk_path=public_jwk,
+            timeout_seconds=2.0,
+        )
+
+    container_args = [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        container,
+        "-p",
+        "127.0.0.1::9000",
+        "-v",
+        f"{generated_config}:/home/step/config/ca.json:ro",
+        "-v",
+        f"{root}:/run/vonk-normalized-secrets/step-ca/root-certificate:ro",
+        "-v",
+        f"{intermediate}:/run/vonk-normalized-secrets/step-ca/intermediate-certificate:ro",
+        "-v",
+        f"{intermediate_key}:/run/vonk-normalized-secrets/step-ca/intermediate-key:ro",
+        "-v",
+        f"{intermediate_password}:/run/vonk-normalized-secrets/step-ca/password:ro",
+        "-v",
+        f"{database}:/home/step/db",
+        "--entrypoint",
+        "vonk-step-ca",
+        journal_image,
+        "--config",
+        "/home/step/config/ca.json",
+        "--password-file",
+        "/run/vonk-normalized-secrets/step-ca/password",
+    ]
+    stock_container = f"vonk-step-ca-stock-test-{uuid.uuid4().hex}"
+    stock_args = list(container_args)
+    stock_args[stock_args.index("--name") + 1] = stock_container
+    entrypoint = stock_args.index("--entrypoint")
+    stock_args[entrypoint + 1] = "step-ca"
+    stock_args[entrypoint + 2] = STEP_CA_IMAGE
+    stock_args.remove("--config")
+    subprocess.run(stock_args, check=True, capture_output=True, text=True, timeout=30)
+    try:
+        stock_port = (
+            subprocess.run(
+                ["docker", "port", stock_container, "9000/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            .stdout.strip()
+            .rsplit(":", 1)[1]
+        )
+        stock_provider = authority(stock_port)
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                stock_provider.check_health()
+                break
+            except StepCAError:
+                if time.monotonic() >= deadline:
+                    pytest.fail("stock CA did not become healthy for rollout proof")
+                time.sleep(0.1)
+        retained_csr = _csr()
+        accepted = stock_provider.prepare_request(
+            NODE_ID,
+            retained_csr,
+            datetime.now(UTC).replace(microsecond=0),
+            purpose="enrollment",
+            source_serial=None,
+            generation=1,
+        )
+        with pytest.raises(StepCAError, match="status 404"):
+            stock_provider.issue_node(
+                NODE_ID,
+                retained_csr,
+                datetime.now(UTC).replace(microsecond=0),
+                request=accepted,
+            )
+    finally:
+        subprocess.run(
+            ["docker", "rm", "--force", stock_container],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
     subprocess.run(
-        [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            container,
-            "-p",
-            "127.0.0.1::9000",
-            "-v",
-            f"{generated_config}:/home/step/config/ca.json:ro",
-            "-v",
-            f"{root}:/run/vonk-normalized-secrets/step-ca/root-certificate:ro",
-            "-v",
-            f"{intermediate}:/run/vonk-normalized-secrets/step-ca/intermediate-certificate:ro",
-            "-v",
-            f"{intermediate_key}:/run/vonk-normalized-secrets/step-ca/intermediate-key:ro",
-            "-v",
-            f"{intermediate_password}:/run/vonk-normalized-secrets/step-ca/password:ro",
-            "-v",
-            f"{database}:/home/step/db",
-            "--entrypoint",
-            "vonk-step-ca",
-            journal_image,
-            "--config",
-            "/home/step/config/ca.json",
-            "--password-file",
-            "/run/vonk-normalized-secrets/step-ca/password",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
+        container_args, check=True, capture_output=True, text=True, timeout=30
     )
     try:
         port_output = subprocess.run(
@@ -1024,27 +1098,6 @@ step crypto jwk thumbprint < agent-ca-public.jwk
             timeout=10,
         ).stdout.strip()
         port = port_output.rsplit(":", 1)[1]
-        real_getaddrinfo = socket.getaddrinfo
-        monkeypatch.setattr(
-            socket,
-            "getaddrinfo",
-            lambda host, *args, **kwargs: real_getaddrinfo(
-                "127.0.0.1" if host == "step-ca" else host, *args, **kwargs
-            ),
-        )
-
-        def authority(mapped_port: str) -> StepCertificateAuthority:
-            return StepCertificateAuthority(
-                ca_url=f"https://step-ca:{mapped_port}",
-                root_certificate_path=root,
-                intermediate_certificate_path=intermediate,
-                provisioner_name="vonk-forge-agent",
-                provisioner_kid=kid,
-                credential_path=private_jwk,
-                provisioner_public_jwk_path=public_jwk,
-                timeout_seconds=2.0,
-            )
-
         provider = authority(port)
         deadline = time.monotonic() + 15
         while True:
@@ -1062,7 +1115,8 @@ step crypto jwk thumbprint < agent-ca-public.jwk
                     pytest.fail(f"pinned step-ca did not become healthy: {logs}")
                 time.sleep(0.1)
         now = datetime.now(UTC).replace(microsecond=0)
-        issued = _issue(provider, NODE_ID, _csr(), now)
+        assert provider.observe_node(retained_csr, now, request=accepted) is None
+        issued = provider.issue_node(NODE_ID, retained_csr, now, request=accepted)
         certificate = x509.load_pem_x509_certificate(issued.certificate_pem)
         extensions = {extension.oid: extension for extension in certificate.extensions}
         assert ExtensionOID.BASIC_CONSTRAINTS not in extensions
@@ -1071,15 +1125,28 @@ step crypto jwk thumbprint < agent-ca-public.jwk
         assert extensions[
             ExtensionOID.EXTENDED_KEY_USAGE
         ].value == x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH])
-        renewed = _renew(
-            provider,
+        renewal_csr = _csr()
+        renewal_now = datetime.now(UTC).replace(microsecond=0)
+        renewal_request = provider.prepare_request(
             NODE_ID,
-            _csr(),
-            datetime.now(UTC).replace(microsecond=0),
-            request_id="r" * 43,
+            renewal_csr,
+            renewal_now,
+            purpose="rotation",
+            source_serial=issued.serial,
+            generation=2,
+        )
+        renewed = provider.renew_node(
+            NODE_ID, renewal_csr, renewal_now, request=renewal_request
         )
         assert renewed.serial != issued.serial
         provider.revoke_node(issued.serial, datetime.now(UTC).replace(microsecond=0))
+        recovered = provider.observe_node(
+            renewal_csr,
+            datetime.now(UTC).replace(microsecond=0),
+            request=renewal_request,
+        )
+        assert recovered is not None
+        assert recovered.certificate_pem == renewed.certificate_pem
         crl = x509.load_pem_x509_crl(
             provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))
         )
