@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 dfbe87285e279c0d21670f33516f21fab4b63a4668bdf853393753e89de7cd40. Do not edit.
+// Generated from canonical OpenAPI SHA256 674e6241b55b21bf2631a194e33adf8539fc65463f2ee66e61c76caec87ef9d7. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -2587,6 +2587,44 @@ export interface components {
          * @enum {string}
          */
         CatalogSyncState: "syncing" | "current" | "partial" | "failed";
+        /**
+         * CertificateCode
+         * @description Owned certificate issuance admission refusals.
+         * @enum {string}
+         */
+        CertificateCode: "certificate.response_unrepresentable";
+        /** CertificateIssuanceBinding */
+        CertificateIssuanceBinding: {
+            /** Csr Sha256 */
+            csr_sha256: string;
+            /** Generation */
+            generation: number | ExactNumber;
+            /** Issuer Fingerprint */
+            issuer_fingerprint: string;
+            /** Node Id */
+            node_id: string;
+            /** Not After */
+            not_after: string;
+            /** Not Before */
+            not_before: string;
+            /** Policy Sha256 */
+            policy_sha256: string;
+            /** Provisioner Kid */
+            provisioner_kid: string;
+            /** Provisioner Name */
+            provisioner_name: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "enrollment" | "rotation";
+            /** Request Id */
+            request_id: string;
+            /** Serial */
+            serial: string;
+            /** Source Serial */
+            source_serial: string | null;
+        };
         /**
          * CertificateState
          * @description The standing of a node's client certificate, as the fleet projection shows it.
@@ -7599,7 +7637,7 @@ export interface components {
          * @description Warnings and attention items of the fleet and library projections.
          * @enum {string}
          */
-        ProjectionCode: "cpu.low-clock" | "install.partial" | "inventory.missing" | "inventory.stale" | "network.nas-route-wifi-no-wired-port" | "network.nas-route-wifi-wired-port-down" | "network.nas-route-wifi-wired-port-unused" | "node.offline" | "profile.retrying" | "recipe.update_available" | "run.degraded" | "telemetry.delayed" | "telemetry.missing" | "telemetry.stale";
+        ProjectionCode: "cpu.low-clock" | "fleet.frame_budget_exceeded" | "fleet.frame_encoding_unavailable" | "fleet.stored_event_payload_unavailable" | "observation.transfer_unavailable" | "install.partial" | "inventory.missing" | "inventory.stale" | "network.nas-route-wifi-no-wired-port" | "network.nas-route-wifi-wired-port-down" | "network.nas-route-wifi-wired-port-unused" | "node.offline" | "profile.retrying" | "recipe.update_available" | "run.degraded" | "telemetry.delayed" | "telemetry.missing" | "telemetry.stale";
         /** ProjectionReason */
         ProjectionReason: {
             code: components["schemas"]["ProjectionCode"];
@@ -7629,6 +7667,7 @@ export interface components {
             cache_reference_reason: components["schemas"]["CacheReferenceReason"];
             catalog_code: components["schemas"]["CatalogCode"];
             catalog_sync_code: components["schemas"]["CatalogSyncCode"];
+            certificate_code: components["schemas"]["CertificateCode"];
             cluster_mapping_code: components["schemas"]["ClusterMappingCode"];
             controller_error_code: components["schemas"]["ControllerErrorCode"];
             distribution_code: components["schemas"]["DistributionCode"];
