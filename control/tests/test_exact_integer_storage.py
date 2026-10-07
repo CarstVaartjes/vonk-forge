@@ -1291,3 +1291,99 @@ def test_sqlite_interrupted_adoption_retries_without_poisoning_fresh_request(
     _adopt(engine)
     assert _schema(engine) == before
     assert calls == interruptions + 1
+
+
+@pytest.mark.parametrize(
+    "code", [sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_INTERRUPT]
+)
+def test_sqlite_adoption_transient_error_retries_with_shared_deadline(
+    monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    """Catches losing contention recovery or giving each attempt a new budget."""
+    engine = create_engine("sqlite://")
+    clock = [100.0]
+    deadlines: list[adoption_module._SQLiteAdoptionDeadline] = []
+    original = sqlite3.OperationalError("transient contention")
+    monkeypatch.setattr(original, "sqlite_errorcode", code, raising=False)
+    failure = DBAPIError("BEGIN IMMEDIATE", {}, original)
+    sleeps: list[float] = []
+
+    def sleep(delay: float) -> None:
+        sleeps.append(delay)
+        clock[0] += delay
+
+    def attempt(
+        checked_engine: Engine, deadline: adoption_module._SQLiteAdoptionDeadline
+    ) -> None:
+        assert checked_engine is engine
+        deadlines.append(deadline)
+        if len(deadlines) <= 2:
+            raise failure
+
+    monkeypatch.setattr(adoption_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(adoption_module.time, "sleep", sleep)
+    monkeypatch.setattr(
+        adoption_module, "_reconcile_exact_integer_schema_once", attempt
+    )
+    try:
+        reconcile_exact_integer_schema(engine)
+        assert len(deadlines) == 3
+        assert all(deadline is deadlines[0] for deadline in deadlines)
+        assert sleeps == [0.1, 0.2]
+        reconcile_exact_integer_schema(engine)
+        assert len(deadlines) == 4
+        assert deadlines[3] is not deadlines[0]
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("cause", ["elapsed", "progress-handler", "backoff"])
+def test_sqlite_adoption_deadline_interrupt_propagates_and_fresh_request_is_admitted(
+    monkeypatch: pytest.MonkeyPatch, cause: str
+) -> None:
+    """Catches swallowing our interrupt or dispatching after backoff expires."""
+    engine = create_engine("sqlite://")
+    clock = [100.0]
+    calls = 0
+    original = sqlite3.OperationalError("interrupted")
+    monkeypatch.setattr(
+        original, "sqlite_errorcode", sqlite3.SQLITE_INTERRUPT, raising=False
+    )
+    failure = DBAPIError("SELECT 1", {}, original)
+    sleeps: list[float] = []
+
+    def sleep(delay: float) -> None:
+        sleeps.append(delay)
+        clock[0] += delay + 0.001  # Include scheduling past the deadline.
+
+    def attempt(
+        checked_engine: Engine, deadline: adoption_module._SQLiteAdoptionDeadline
+    ) -> None:
+        nonlocal calls
+        assert checked_engine is engine
+        calls += 1
+        if calls != 1:
+            return
+        clock[0] = deadline.expires_at - (0.05 if cause == "backoff" else 0)
+        if cause == "progress-handler":
+            assert deadline.progress() == 1
+            # The fired callback remains authoritative even if a subsequent
+            # clock observation reports time before expiry.
+            clock[0] -= 0.05
+        raise failure
+
+    monkeypatch.setattr(adoption_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(adoption_module.time, "sleep", sleep)
+    monkeypatch.setattr(
+        adoption_module, "_reconcile_exact_integer_schema_once", attempt
+    )
+    try:
+        with pytest.raises(DBAPIError) as caught:
+            reconcile_exact_integer_schema(engine)
+        assert caught.value is failure
+        assert calls == 1
+        assert sleeps == (pytest.approx([0.05]) if cause == "backoff" else [])
+        reconcile_exact_integer_schema(engine)
+        assert calls == 2
+    finally:
+        engine.dispose()

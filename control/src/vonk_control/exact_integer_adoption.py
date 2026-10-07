@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 import uuid
+from dataclasses import dataclass
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -456,21 +457,37 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
             raise ValueError("exact integer adoption would damage SQLite foreign keys")
 
 
-def reconcile_exact_integer_schema(engine: Engine) -> None:
-    """Retry transient SQLite adoption failures after releasing the checkout.
+@dataclass
+class _SQLiteAdoptionDeadline:
+    expires_at: float
+    interrupted: bool = False
 
-    Three transaction budgets and two short backoffs bound the whole request.
+    def progress(self) -> int:
+        self.interrupted = self.interrupted or time.monotonic() >= self.expires_at
+        return int(self.interrupted)
+
+
+def reconcile_exact_integer_schema(engine: Engine) -> None:
+    """Retry transient SQLite contention within one execution deadline.
+
     Each failed attempt rolls back and removes its progress callback before a
-    fresh checkout; integrity and contract refusals are never retried.
+    fresh checkout. Our deadline interruption, integrity and contract refusals
+    propagate; only contention or an unrelated native interrupt can retry.
     """
+    deadline = _SQLiteAdoptionDeadline(
+        time.monotonic() + DATABASE_WAIT_BUDGETS.transaction_timeout_ms / 1000
+    )
     for attempt in range(3):
         try:
-            _reconcile_exact_integer_schema_once(engine)
+            _reconcile_exact_integer_schema_once(engine, deadline)
             return
         except DBAPIError as error:
             code = getattr(error.orig, "sqlite_errorcode", None)
+            remaining = deadline.expires_at - time.monotonic()
             if (
-                not isinstance(error.orig, sqlite3.OperationalError)
+                deadline.interrupted
+                or remaining <= 0
+                or not isinstance(error.orig, sqlite3.OperationalError)
                 or not isinstance(code, int)
                 or code & 0xFF
                 not in {
@@ -481,10 +498,16 @@ def reconcile_exact_integer_schema(engine: Engine) -> None:
                 or attempt == 2
             ):
                 raise
-        time.sleep(0.1 * (attempt + 1))
+            time.sleep(min(0.1 * (attempt + 1), remaining))
+            # Sleep/scheduling can consume the last of the budget. Preserve
+            # the original failure instead of starting an expired attempt.
+            if time.monotonic() >= deadline.expires_at:
+                raise
 
 
-def _reconcile_exact_integer_schema_once(engine: Engine) -> None:
+def _reconcile_exact_integer_schema_once(
+    engine: Engine, deadline: _SQLiteAdoptionDeadline
+) -> None:
     """SQLite-only isolated startup entry; never nest in an active service tx.
 
     Foreign-key settings belong to this checked-out connection and are restored
@@ -511,16 +534,13 @@ def _reconcile_exact_integer_schema_once(engine: Engine) -> None:
         try:
             connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
             connection.exec_driver_sql("PRAGMA legacy_alter_table=ON")
-            connection.exec_driver_sql(
-                f"PRAGMA busy_timeout={DATABASE_WAIT_BUDGETS.lock_timeout_ms}"
-            )
+            remaining_ms = max(0, int((deadline.expires_at - time.monotonic()) * 1000))
+            lock_timeout_ms = min(DATABASE_WAIT_BUDGETS.lock_timeout_ms, remaining_ms)
+            connection.exec_driver_sql(f"PRAGMA busy_timeout={lock_timeout_ms}")
             connection.commit()
             # An exclusive startup checkout owns this callback. The interval
             # is polling cadence; the bound comes from the transaction budget.
-            deadline = time.monotonic() + (
-                DATABASE_WAIT_BUDGETS.transaction_timeout_ms / 1000
-            )
-            driver.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+            driver.set_progress_handler(deadline.progress, 1000)
             connection.exec_driver_sql("BEGIN IMMEDIATE")
             if (
                 connection.exec_driver_sql("PRAGMA foreign_key_check").first()
