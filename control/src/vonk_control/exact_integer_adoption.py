@@ -468,7 +468,7 @@ class _SQLiteAdoptionDeadline:
 
 
 def reconcile_exact_integer_schema(engine: Engine) -> None:
-    """Retry transient SQLite contention within one execution deadline.
+    """The platform retries transient SQLite contention within one deadline.
 
     Each failed attempt rolls back and removes its progress callback before a
     fresh checkout. Our deadline interruption, integrity and contract refusals
