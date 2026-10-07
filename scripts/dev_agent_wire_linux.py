@@ -31,6 +31,8 @@ import uuid
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
+# The sibling helper, however this file is loaded.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from check_environment import ensure_catalog
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
