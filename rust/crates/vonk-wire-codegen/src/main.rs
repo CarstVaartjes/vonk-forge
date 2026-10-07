@@ -93,18 +93,16 @@ fn prepare(value: &mut Value) {
                     "vonk-integer"
                 } else if object.get("format").and_then(Value::as_str) == Some("int64") {
                     "int64"
-                } else if object.get("format").and_then(Value::as_str) == Some("uint8")
+                } else if (object.get("format").and_then(Value::as_str) == Some("uint8")
                     && object.get("minimum").and_then(Value::as_u64).is_some()
                     && object
                         .get("maximum")
                         .and_then(Value::as_u64)
-                        .is_some_and(|maximum| maximum <= u8::MAX as u64)
-                {
-                    "uint8"
-                } else if object
-                    .get("const")
-                    .and_then(Value::as_u64)
-                    .is_some_and(|v| v <= 255)
+                        .is_some_and(|maximum| maximum <= u8::MAX as u64))
+                    || object
+                        .get("const")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|v| v <= 255)
                 {
                     "uint8"
                 } else if unsigned && object.get("maximum").and_then(Value::as_u64) == Some(65535) {
