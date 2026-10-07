@@ -44,8 +44,9 @@ from cluster_profiles.control_client import (
     source_schema_validator,
 )
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from tests.observation_transfer_peer import ObservationHTTPPeer, ObservationHTTPResponse
-from tests.test_platform_observation import Jobs
+
+from .observation_transfer_peer import ObservationHTTPPeer, ObservationHTTPResponse
+from .test_platform_observation import Jobs
 
 NOW = datetime(2026, 10, 7, tzinfo=UTC)
 NODE = "spk_" + "1" * 32
