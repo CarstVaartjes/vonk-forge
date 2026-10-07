@@ -986,12 +986,16 @@ def create_app(
                 "model": FleetStreamEvent,
                 "description": (
                     "Durable Fleet event stream. The schema describes the JSON "
-                    "data in each snapshot, telemetry, or change SSE frame."
+                    "data in each refresh notice, telemetry, or change SSE frame. "
+                    "A refresh notice requires a verified complete Fleet read."
                 ),
             },
             **bounded_error_responses(400, 401, 503),
         },
-        openapi_extra={"x-vonk-streaming-transport": True},
+        openapi_extra={
+            "x-vonk-streaming-transport": True,
+            "x-vonk-response-frame-max-bytes": MAX_CONTROL_DOCUMENT_BYTES,
+        },
         operation_id="streamFleetEvents",
     )
     async def fleet_event_stream(
