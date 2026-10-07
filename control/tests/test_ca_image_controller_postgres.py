@@ -7,6 +7,7 @@ or HTTP transport is replaced. The CA and Controller both restart before retry.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
@@ -243,6 +244,11 @@ def _run_child(payload):
                 "mode": body["mode"],
                 "binding": body["request"],
                 "jti": claims["jti"],
+                "csr_sha256": hashlib.sha256(
+                    x509.load_pem_x509_csr(body["csr"].encode()).public_bytes(
+                        serialization.Encoding.DER
+                    )
+                ).hexdigest(),
                 "status": response.status_code,
             }
         )
@@ -380,14 +386,22 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
         all_exchanges = failed["exchanges"] + recovered["exchanges"]
         assert sum(entry["mode"] == "issue" for entry in all_exchanges) == 1
         assert recovered["exchanges"] and all(
-            entry["mode"] == "observe" for entry in recovered["exchanges"]
+            entry["mode"] == "observe" and entry["status"] == 201
+            for entry in recovered["exchanges"]
         )
         assert all(entry["binding"] == binding for entry in all_exchanges)
+        assert all(
+            entry["csr_sha256"] == binding["csr_sha256"] for entry in all_exchanges
+        )
         jtis = [entry["jti"] for entry in all_exchanges]
         assert len(jtis) == len(set(jtis)) and binding["request_id"] not in jtis
         with sessions() as session:
             stored = session.get(AgentCertificate, recovered["serial"])
             assert stored.certificate_pem == recovered["certificate_pem"]
+            assert (
+                stored.chain_pem
+                == issuer.public_bytes(serialization.Encoding.PEM).decode()
+            )
             assert stored.generation == binding["generation"]
             if source:
                 old = session.get(AgentCertificate, source.serial)
