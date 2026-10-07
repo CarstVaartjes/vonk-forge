@@ -134,6 +134,12 @@ export class ApiClient implements ControlApi {
   constructor() {
     this.generated.use({
       onRequest: async ({request, params, schemaPath}) => {
+        if (import.meta.env.MODE === "test") console.info("VONK_AUTH_DISPATCH", {
+          step: "middleware-enter", method: request.method,
+          lexicalRequestIsGlobal: Request === globalThis.Request,
+          inputIsLexicalRequest: request instanceof Request,
+          inputIsGlobalRequest: request instanceof globalThis.Request,
+        });
         validateControlParameters(request.method, schemaPath, params);
         const url = new URL(request.url);
         url.pathname = schemaPath.replace(/\{([^}]+)\}/g, (_, key: string) => {
@@ -142,7 +148,12 @@ export class ApiClient implements ControlApi {
           if (typeof value !== "string" && typeof value !== "boolean") throw new Error("Unsupported API path parameter");
           return encodeURIComponent(String(value));
         });
+        const methodBeforeRebuild = request.method;
         request = new Request(url, request);
+        if (import.meta.env.MODE === "test") console.info("VONK_AUTH_DISPATCH", {
+          step: "url-rebuild", methodBeforeRebuild, methodAfterRebuild: request.method,
+          skipsMutationCsrf: ["GET", "HEAD"].includes(request.method),
+        });
         if (request.headers.get("content-type")?.startsWith("application/json") && request.body !== null) {
           const text = await request.clone().text();
           serializeControlBody(request.method, request.url, parseContractJson(text));
@@ -184,6 +195,7 @@ export class ApiClient implements ControlApi {
   }
 
   private async requiredCsrfToken(): Promise<string> {
+    if (import.meta.env.MODE === "test") console.info("VONK_AUTH_DISPATCH", {step: "csrf-owner-enter"});
     const token = csrfToken();
     if (token) return token;
     // Expiry removes both cookies. Let the existing session owner distinguish
