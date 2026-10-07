@@ -4,8 +4,11 @@ import (
  "bytes"
  "context"
  "crypto"
+ "crypto/ecdsa"
+ "crypto/elliptic"
  "crypto/tls"
  "crypto/x509"
+ "encoding/base64"
  "errors"
  "flag"
  "log"
@@ -33,6 +36,10 @@ func configuredProvisioner(cfg *config.Config) (*provisioner.JWK,error) {
  if cfg.AuthorityConfig.Claims!=nil || cfg.AuthorityConfig.Policy!=nil || (cfg.AuthorityConfig.Template!=nil && *cfg.AuthorityConfig.Template!=(config.ASN1DN{})) {return nil,errors.New("CA authority policy differs from fixed node profile")}
  p,ok:=cfg.AuthorityConfig.Provisioners[0].(*provisioner.JWK)
  if !ok || p.Name!="vonk-forge-agent" || p.Key==nil || p.Key.KeyID=="" || !p.Key.IsPublic() || p.Key.Algorithm!="ES256" || p.EncryptedKey!="" || p.Claims==nil || p.Claims.MinTLSDur==nil || p.Claims.MaxTLSDur==nil || p.Claims.DefaultTLSDur==nil || p.Claims.MinTLSDur.Duration!=certificateLifetime || p.Claims.MaxTLSDur.Duration!=certificateLifetime || p.Claims.DefaultTLSDur.Duration!=certificateLifetime || p.Claims.DisableRenewal==nil || !*p.Claims.DisableRenewal || p.Claims.DisableSmallstepExtensions==nil || !*p.Claims.DisableSmallstepExtensions {return nil,errors.New("CA provisioner differs from fixed node policy")}
+ public,ok:=p.Key.Key.(*ecdsa.PublicKey)
+ if !ok || public.Curve!=elliptic.P256(){return nil,errors.New("CA provisioner key must use EC P-256")}
+ thumbprint,err:=p.Key.Thumbprint(crypto.SHA256)
+ if err!=nil || base64.RawURLEncoding.EncodeToString(thumbprint)!=p.Key.KeyID {return nil,errors.New("CA provisioner key differs from bound KID")}
  if p.Options==nil || p.Options.X509==nil || p.Options.X509.Template!=nodeTemplate || p.Options.X509.TemplateFile!="" || len(p.Options.X509.TemplateData)!=0 || p.Options.SSH!=nil || p.Options.Wire!=nil || len(p.Options.Webhooks)!=0 {return nil,errors.New("CA certificate profile differs from fixed node policy")}
  return p,nil
 }
@@ -55,6 +62,17 @@ func openAuthority(cfg *config.Config,password []byte) (*authority.Authority,*Se
  return auth,NewService(auth,cas,journal,policy),nil
 }
 
+func serverTLS(auth *authority.Authority,cfg *config.Config,renewer *ca.TLSRenewer) *tls.Config {
+ tlsConfig:=&tls.Config{MinVersion:tls.VersionTLS12}
+ if cfg.TLS!=nil{tlsConfig=cfg.TLS.TLSConfig();if tlsConfig.MinVersion<tls.VersionTLS12{tlsConfig.MinVersion=tls.VersionTLS12}}
+ tlsConfig.Certificates=nil;tlsConfig.GetCertificate=renewer.GetCertificateForCA
+ pool:=x509.NewCertPool()
+ for _,root:=range auth.GetRootCertificates(){pool.AddCert(root)}
+ for _,issuer:=range auth.GetIntermediateCertificates(){pool.AddCert(issuer)}
+ tlsConfig.ClientAuth=tls.VerifyClientCertIfGiven;tlsConfig.ClientCAs=pool
+ return tlsConfig
+}
+
 func run() error {
  configPath:=flag.String("config","","existing Smallstep CA configuration")
  passwordFile:=flag.String("password-file","","existing issuer key password file")
@@ -70,9 +88,7 @@ func run() error {
  renewer,err:=ca.NewTLSRenewer(initial,auth.GetTLSCertificate);if err!=nil{return err}
  ctx,stop:=signal.NotifyContext(context.Background(),syscall.SIGTERM,syscall.SIGINT);defer stop()
  renewer.RunContext(ctx);defer renewer.Stop()
- tlsConfig:=&tls.Config{MinVersion:tls.VersionTLS12}
- if cfg.TLS!=nil{tlsConfig=cfg.TLS.TLSConfig();if tlsConfig.MinVersion<tls.VersionTLS12{tlsConfig.MinVersion=tls.VersionTLS12}}
- tlsConfig.Certificates=nil;tlsConfig.GetCertificate=renewer.GetCertificateForCA
+ tlsConfig:=serverTLS(auth,cfg,renewer)
  server:=&http.Server{Addr:cfg.Address,Handler:service,TLSConfig:tlsConfig,ReadHeaderTimeout:10*time.Second,ReadTimeout:15*time.Second,WriteTimeout:45*time.Second,IdleTimeout:60*time.Second,MaxHeaderBytes:16*1024}
  go func(){<-ctx.Done();shutdown,cancel:=context.WithTimeout(context.Background(),10*time.Second);defer cancel();_ = server.Shutdown(shutdown)}()
  err=server.ListenAndServeTLS("","")
