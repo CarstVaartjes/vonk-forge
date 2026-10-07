@@ -1,6 +1,7 @@
 import {act, render, screen, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {vi} from "vitest";
+import {LosslessNumber} from "lossless-json";
 import {ApiError} from "../api/client";
 import type {ControlApi, FleetProfile, FleetProfileApplicationView, FleetProfilePreview} from "../api/types";
 import {forgetUnsavedProfileDrafts, LibraryProfilesView} from "./library-profiles-view";
@@ -244,4 +245,43 @@ test("an unreadable saved definition stays visible without becoming an editable 
   expect(screen.queryByRole("button", {name: /Profile 1/})).not.toBeInTheDocument();
   expect((await screen.findAllByText("Profile 2 · Coding"))[0]).toBeVisible();
   expect(api.autosaveProfile).not.toHaveBeenCalled();
+});
+
+
+test("selects a URL profile exactly among adjacent large identities and loads that identity", async () => {
+  const user = userEvent.setup();
+  const lower = new LosslessNumber("9007199254740992");
+  const upper = new LosslessNumber("9007199254740993");
+  const originalUrl = location.href;
+  history.replaceState(null, "", "?profile=9007199254740993");
+  try {
+    const api = apiFor({profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [{...profile, number: upper, name: "Upper"}, {...profile, number: lower, name: "Lower"}]}))});
+    render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+    const selected = await screen.findByRole("region", {name: "Profile 9007199254740993 saved profile"});
+    const list = screen.getByRole("complementary", {name: "Saved profiles"});
+    const buttons = within(list).getAllByRole("button");
+    expect(buttons[0]).toHaveTextContent("Profile 9007199254740992 · Lower");
+    expect(buttons[1]).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(selected).getByRole("button", {name: "Apply profile"}));
+    expect(api.previewProfile).toHaveBeenCalledWith(upper, expect.any(AbortSignal));
+    expect(api.loadProfile).toHaveBeenCalledWith(upper, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  } finally {
+    history.replaceState(null, "", originalUrl);
+  }
+});
+
+test("editing a large profile preserves its exact identity and expected revision", async () => {
+  const user = userEvent.setup();
+  const number = new LosslessNumber("9007199254740993");
+  const revision = new LosslessNumber("9007199254740995");
+  const exact = {...profile, number, revision};
+  const autosaveProfile = vi.fn(async () => exact);
+  const api = apiFor({profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [exact]})), autosaveProfile});
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+  const saved = await screen.findByRole("region", {name: "Profile 9007199254740993 saved profile"});
+  await user.click(within(saved).getByRole("button", {name: "Edit profile"}));
+  await user.clear(screen.getByLabelText("Profile name"));
+  await user.type(screen.getByLabelText("Profile name"), "Exact saved");
+  await user.click(screen.getByRole("button", {name: "Save profile"}));
+  expect(autosaveProfile).toHaveBeenCalledWith(number, expect.objectContaining({expected_revision: revision, name: "Exact saved"}));
 });
