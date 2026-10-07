@@ -3278,7 +3278,7 @@ mod tests {
             fs::write(&lifecycle_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
             assert!(matches!(
                 restarted.read_run_lifecycle(&lifecycle_path),
-                Err(OciError::Artifact)
+                Err(OciError::Json(_))
             ));
         }
     }
