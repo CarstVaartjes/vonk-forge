@@ -648,6 +648,30 @@ def _set_bundle_environment(bundle: Path, values: dict[str, str]) -> None:
     environment.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _acceptance_caddy_entrypoint(value: object) -> list[str]:
+    """Honor the fixture command through the release's native startup path.
+
+    Historical signed bundles did not forward arguments through this shell
+    wrapper. Preserve their exact wait script and secret-validating native
+    entrypoint; change only final argv forwarding and the shell $0 sentinel.
+    """
+    if not isinstance(value, list) or not all(isinstance(part, str) for part in value):
+        raise LifecycleError("Caddy acceptance startup wrapper is invalid")
+    entrypoint = [part for part in value if isinstance(part, str)]
+    native = "exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh"
+    if len(entrypoint) not in {3, 4} or entrypoint[:2] != ["/bin/sh", "-c"]:
+        raise LifecycleError("Caddy acceptance startup wrapper is invalid")
+    if len(entrypoint) == 3 and entrypoint[2].endswith(native):
+        return [*entrypoint[:2], entrypoint[2] + ' "$$@"', "vonk-caddy-entrypoint"]
+    if (
+        len(entrypoint) == 4
+        and entrypoint[2].endswith(native + ' "$$@"')
+        and entrypoint[3] == "vonk-caddy-entrypoint"
+    ):
+        return entrypoint
+    raise LifecycleError("Caddy acceptance startup wrapper is invalid")
+
+
 def _configure_acceptance_renewal(
     bundle: Path,
     *,
@@ -732,6 +756,9 @@ def _configure_acceptance_renewal(
     )
     os.chmod(caddy_path, 0o644)
     caddy_volumes.append("./acceptance-Caddyfile:/etc/caddy/Caddyfile:ro")
+    caddy_service["entrypoint"] = _acceptance_caddy_entrypoint(
+        caddy_service.get("entrypoint")
+    )
     caddy_service["command"] = [
         "caddy",
         "run",
@@ -1118,6 +1145,7 @@ class SparkLifecycle:
         self.firewall_environment: dict[str, str] = {}
         self.agent_installed = False
         self.lost_start_proof: LostStartProof | None = None
+        self._lost_start_placement: tuple[str, int] | None = None
         self.synthetic_fixture_sha256: str | None = None
         # The release whose Controller this lane runs. The upgrade-carry lane
         # starts on the previous release and moves to the candidate.
@@ -1453,7 +1481,7 @@ class SparkLifecycle:
     def _controller_site_values(self) -> dict[str, str]:
         """Synthetic Spark networks, set in .env where an operator would."""
         return {
-            "VONK_MANAGEMENT_CIDRS": "172.16.0.0/12",
+            "VONK_MANAGEMENT_CIDRS": f"172.31.{self.synthetic_fabric_octet}.0/30",
             "VONK_DIRECT_FABRIC_CIDRS": f"198.19.{self.synthetic_fabric_octet}.0/24",
         }
 
@@ -1628,12 +1656,21 @@ class SparkLifecycle:
         """Probe from the authorized NAS namespace before route publication."""
         assert self.bundle is not None
         bundle = self.bundle
-        parsed = urlsplit(endpoint)
+        try:
+            parsed = urlsplit(endpoint)
+            parsed_port = parsed.port
+        except ValueError as error:
+            raise LifecycleError(
+                "lost Start receipt endpoint URL is invalid"
+            ) from error
+        placement = self._lost_start_placement
         if (
             parsed.scheme != "http"
             or parsed.hostname != f"172.31.{self.synthetic_fabric_octet}.1"
-            or parsed.port is None
-            or not 1 <= parsed.port <= 65535
+            or placement is None
+            or (parsed.hostname, parsed_port) != placement
+            or parsed_port is None
+            or not 1 <= parsed_port <= 65535
             or parsed.username is not None
             or parsed.password is not None
             or parsed.path not in {"", "/"}
@@ -1641,7 +1678,8 @@ class SparkLifecycle:
             or parsed.fragment
         ):
             raise LifecycleError(
-                "lost Start receipt endpoint is outside the disposable Spark"
+                "lost Start receipt endpoint is outside the disposable Spark; "
+                "see failed-start-topology.json for bounded placement evidence"
             )
 
         def transport(
@@ -1688,6 +1726,75 @@ class SparkLifecycle:
             inference, fixture.serving_check, fixture.slug
         )
 
+    def _observe_start_topology(
+        self,
+        endpoint: str,
+        address: str,
+        port: str,
+        operation_id: str,
+        run_id: str,
+        node_id: str,
+        fence: str,
+    ) -> None:
+        """Retain only safe receipt/placement fields before disposable cleanup."""
+        assert self.temporary_root is not None
+        interface = self.synthetic_interfaces[0]
+        observed = self._run_command(
+            ["/usr/sbin/ip", "-j", "-4", "address", "show", "dev", interface],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        interfaces = json.loads(observed.stdout)
+        addresses = sorted(
+            {
+                str(ipaddress.IPv4Address(item["local"]))
+                for row in interfaces
+                if row.get("ifname") == interface
+                for item in row.get("addr_info", [])
+                if item.get("family") == "inet"
+            }
+        )
+        structural: dict[str, object] = {"invalid_url": True}
+        try:
+            parsed = urlsplit(endpoint)
+            structural = {
+                "scheme": parsed.scheme
+                if parsed.scheme in {"http", "https"}
+                else "other",
+                "has_credentials": parsed.username is not None
+                or parsed.password is not None,
+                "has_path": parsed.path not in {"", "/"},
+                "has_query": bool(parsed.query),
+                "has_fragment": bool(parsed.fragment),
+            }
+            receipt_address = str(ipaddress.ip_address(parsed.hostname or ""))
+            receipt_port = parsed.port
+        except ValueError:
+            receipt_address, receipt_port = None, None
+        evidence = {
+            "url_structure": structural,
+            "operation_id": operation_id,
+            "run_id": run_id,
+            "node_id": node_id,
+            "fence": fence,
+            "interface": interface,
+            "interface_addresses": addresses,
+            "accepted_address": address,
+            "accepted_port": port,
+            "receipt_address": receipt_address,
+            "receipt_port": receipt_port,
+        }
+        _atomic_write(
+            self.arguments.output.with_name("failed-start-topology.json"), evidence
+        )
+        expected = f"172.31.{self.synthetic_fabric_octet}.1"
+        if address != expected or address not in addresses or not port.isdigit():
+            raise LifecycleError(
+                "accepted Start placement does not match the disposable Spark interface; "
+                "see failed-start-topology.json"
+            )
+        self._lost_start_placement = (address, int(port))
+
     def _recover_lost_start_receipt(self, node_id: str) -> None:
         if getattr(self, "lost_start_proof", None) is not None:
             return
@@ -1711,15 +1818,26 @@ class SparkLifecycle:
         ):
             raise LifecycleError("lost Start receipt identity is invalid")
         rows = self._psql(
-            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state,COALESCE(o.payload->>'phase','single') "
+            "SELECT o.id,o.payload_digest,o.payload->>'run_id',a.attempt,o.kind,o.node_id,a.state,COALESCE(o.payload->>'phase','single'),"
+            "o.payload#>>'{compiled_execution_plan,runtime,placement,endpoint_address}',"
+            "o.payload#>>'{compiled_execution_plan,runtime,placement,port}' "
             "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
             f"WHERE a.fence='{fence}'"
         )
-        if len(rows) != 1 or len(rows[0]) != 8:
+        if len(rows) != 1 or len(rows[0]) != 10:
             raise LifecycleError("lost Start receipt has no accepted Controller claim")
-        operation_id, payload_digest, run_id, attempt, kind, owner, state, phase = rows[
-            0
-        ]
+        (
+            operation_id,
+            payload_digest,
+            run_id,
+            attempt,
+            kind,
+            owner,
+            state,
+            phase,
+            accepted_address,
+            accepted_port,
+        ) = rows[0]
         if (
             UUID.fullmatch(operation_id) is None
             or SHA256.fullmatch(payload_digest) is None
@@ -1733,6 +1851,15 @@ class SparkLifecycle:
             raise LifecycleError(
                 "lost Start receipt is not the live exact canary Start"
             )
+        self._observe_start_topology(
+            endpoint,
+            accepted_address,
+            accepted_port,
+            operation_id,
+            run_id,
+            node_id,
+            fence,
+        )
         before_container = self._container_for_replay(run_id)
         before_managed = self._managed_for_replay()
         before_response = self._direct_canary_inference(endpoint)
@@ -2146,6 +2273,173 @@ class SparkLifecycle:
         except LifecycleError as error:
             raise LifecycleError("native Docker CDI support is unavailable") from error
 
+    def _synthetic_management_namespace(self) -> tuple[str, str]:
+        assert self.bundle is not None
+        litellm_container = self._run_command(
+            self._compose("ps", "--quiet", "litellm"), cwd=self.bundle
+        ).stdout.strip()
+        if re.fullmatch(r"[0-9a-f]{64}", litellm_container) is None:
+            raise LifecycleError("synthetic firewall source container is invalid")
+        litellm_pid = self._run_command(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.State.Pid}}",
+                litellm_container,
+            ],
+            cwd=self.bundle,
+        ).stdout.strip()
+        if re.fullmatch(r"[1-9][0-9]{1,9}", litellm_pid) is None:
+            raise LifecycleError("synthetic firewall source namespace is invalid")
+        return litellm_container, litellm_pid
+
+    def _synthetic_management_address(
+        self, interface: str, *, namespace_pid: str | None = None
+    ) -> str:
+        assert self.temporary_root is not None
+        prefix = (
+            ["sudo", "/usr/bin/nsenter", "--target", namespace_pid, "--net"]
+            if namespace_pid is not None
+            else []
+        )
+        observed = self._run_command(
+            [*prefix, "/usr/sbin/ip", "-j", "-4", "address", "show", "dev", interface],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        try:
+            rows = json.loads(observed.stdout)
+            addresses = {
+                (str(ipaddress.IPv4Address(item["local"])), item["prefixlen"])
+                for row in rows
+                if row["ifname"] == interface
+                for item in row["addr_info"]
+                if item["family"] == "inet"
+            }
+        except (ValueError, KeyError, TypeError) as error:
+            raise LifecycleError(
+                "synthetic management interface evidence is invalid"
+            ) from error
+        if len(addresses) != 1:
+            raise LifecycleError("synthetic management interface evidence is invalid")
+        address, prefix = next(iter(addresses))
+        if prefix != 30:
+            raise LifecycleError("synthetic management interface evidence is invalid")
+        return address
+
+    def _detach_synthetic_management_peer(self) -> None:
+        """Keep the accepted host address alive while its gateway is replaced.
+
+        A veth pair belongs to both network namespaces. Moving the exact owned
+        peer back first prevents old-container teardown deleting the host peer
+        and the address captured in the already accepted Start placement.
+        """
+        assert self.temporary_root is not None
+        owner = self._synthetic_management_namespace()
+        if owner != self.synthetic_management_owner:
+            raise LifecycleError("synthetic management namespace owner changed")
+        interface = self.synthetic_interfaces[0]
+        peer = f"vnas{os.getpid() % 100000}"
+        host_address = self._synthetic_management_address(interface)
+        peer_address = self._synthetic_management_address(peer, namespace_pid=owner[1])
+        if (
+            host_address != f"172.31.{self.synthetic_fabric_octet}.1"
+            or peer_address != f"172.31.{self.synthetic_fabric_octet}.2"
+        ):
+            raise LifecycleError("synthetic management address owner changed")
+        self._run_command(
+            [
+                "sudo",
+                "/usr/bin/nsenter",
+                "--target",
+                owner[1],
+                "--net",
+                "/usr/sbin/ip",
+                "link",
+                "set",
+                peer,
+                "netns",
+                str(os.getpid()),
+            ],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        print(
+            "upgrade-carry management topology: "
+            + json.dumps(
+                {
+                    "phase": "detached",
+                    "container": owner[0],
+                    "namespace_pid": owner[1],
+                    "interface": interface,
+                    "peer": peer,
+                    "host_address": host_address,
+                    "peer_address": peer_address,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
+    def _attach_synthetic_management_peer(self) -> None:
+        assert self.temporary_root is not None
+        owner = self._synthetic_management_namespace()
+        interface = self.synthetic_interfaces[0]
+        peer = f"vnas{os.getpid() % 100000}"
+        self._run_command(
+            ["sudo", "/usr/sbin/ip", "link", "set", peer, "netns", owner[1]],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        for command in (
+            [
+                "address",
+                "replace",
+                f"172.31.{self.synthetic_fabric_octet}.2/30",
+                "dev",
+                peer,
+            ],
+            ["link", "set", peer, "up"],
+        ):
+            self._run_command(
+                [
+                    "sudo",
+                    "/usr/bin/nsenter",
+                    "--target",
+                    owner[1],
+                    "--net",
+                    "/usr/sbin/ip",
+                    *command,
+                ],
+                cwd=self.temporary_root,
+                timeout=30,
+            )
+        host_address = self._synthetic_management_address(interface)
+        peer_address = self._synthetic_management_address(peer, namespace_pid=owner[1])
+        if (
+            host_address != f"172.31.{self.synthetic_fabric_octet}.1"
+            or peer_address != f"172.31.{self.synthetic_fabric_octet}.2"
+        ):
+            raise LifecycleError("synthetic management address owner changed")
+        self.synthetic_management_owner = owner
+        print(
+            "upgrade-carry management topology: "
+            + json.dumps(
+                {
+                    "phase": "attached",
+                    "container": owner[0],
+                    "namespace_pid": owner[1],
+                    "interface": interface,
+                    "peer": peer,
+                    "host_address": host_address,
+                    "peer_address": peer_address,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
     def _prepare_synthetic_firewall_environment(self) -> None:
         assert self.bundle is not None and self.temporary_root is not None
         suffix = self.synthetic_fabric_octet
@@ -2165,23 +2459,7 @@ class SparkLifecycle:
             )
         ):
             raise LifecycleError("synthetic firewall interface identity is invalid")
-        litellm_container = self._run_command(
-            self._compose("ps", "--quiet", "litellm"), cwd=self.bundle
-        ).stdout.strip()
-        if re.fullmatch(r"[0-9a-f]{64}", litellm_container) is None:
-            raise LifecycleError("synthetic firewall source container is invalid")
-        litellm_pid = self._run_command(
-            [
-                "docker",
-                "inspect",
-                "--format",
-                "{{.State.Pid}}",
-                litellm_container,
-            ],
-            cwd=self.bundle,
-        ).stdout.strip()
-        if re.fullmatch(r"[1-9][0-9]{1,9}", litellm_pid) is None:
-            raise LifecycleError("synthetic firewall source namespace is invalid")
+        litellm_container, litellm_pid = self._synthetic_management_namespace()
         if any(
             re.fullmatch(r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}", value) is None
             for value in (node_management_ip, nas_management_ip)
@@ -2287,6 +2565,7 @@ class SparkLifecycle:
             ["sudo", "/usr/sbin/ip", "link", "set", fabric_interface, "up"],
             cwd=self.temporary_root,
         )
+        self.synthetic_management_owner = (litellm_container, litellm_pid)
         self.firewall_environment = {
             "VONK_NAS_MANAGEMENT_IP": nas_management_ip,
             "VONK_NODE_MANAGEMENT_IP": node_management_ip,
