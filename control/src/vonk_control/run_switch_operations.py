@@ -10114,16 +10114,19 @@ def _merge_progress_evidence(
         ),
         None,
     )
+    # Native install/build measurements belong to their phase's OperationProgress.
+    # Only transfer evidence can advance the accepted distribution byte budget.
     if reported_completed is not None:
-        model_download, _, _ = _planned_transfer_parts(plan)
-        offset = (
-            model_download
-            if phase.subphase == "target-copy" and model_download is not None
-            else 0
-        )
-        progress.completed_bytes = max(
-            progress.completed_bytes, offset + reported_completed
-        )
+        if phase.kind == "transfer":
+            model_download, _, _ = _planned_transfer_parts(plan)
+            offset = (
+                model_download
+                if phase.subphase == "target-copy" and model_download is not None
+                else 0
+            )
+            progress.completed_bytes = max(
+                progress.completed_bytes, offset + reported_completed
+            )
         if now is not None and payload.progress is None and payload.operation is None:
             prior = progress.operation
             completed = (
@@ -10139,7 +10142,11 @@ def _merge_progress_evidence(
             )
             progress.operation = _observe_progress(prior, current, now)
             progress.operation_phase_index = phase.index
-    if payload.total_bytes is not None and progress.total_bytes is None:
+    if (
+        phase.kind == "transfer"
+        and payload.total_bytes is not None
+        and progress.total_bytes is None
+    ):
         model_download, _, _ = _planned_transfer_parts(plan)
         if phase.subphase == "target-copy" and model_download is not None:
             progress.total_bytes = model_download + payload.total_bytes
