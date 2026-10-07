@@ -648,6 +648,30 @@ def _set_bundle_environment(bundle: Path, values: dict[str, str]) -> None:
     environment.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _acceptance_caddy_entrypoint(value: object) -> list[str]:
+    """Honor the fixture command through the release's native startup path.
+
+    Historical signed bundles did not forward arguments through this shell
+    wrapper. Preserve their exact wait script and secret-validating native
+    entrypoint; change only final argv forwarding and the shell $0 sentinel.
+    """
+    if not isinstance(value, list) or not all(isinstance(part, str) for part in value):
+        raise LifecycleError("Caddy acceptance startup wrapper is invalid")
+    entrypoint = [part for part in value if isinstance(part, str)]
+    native = "exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh"
+    if len(entrypoint) not in {3, 4} or entrypoint[:2] != ["/bin/sh", "-c"]:
+        raise LifecycleError("Caddy acceptance startup wrapper is invalid")
+    if len(entrypoint) == 3 and entrypoint[2].endswith(native):
+        return [*entrypoint[:2], entrypoint[2] + ' "$$@"', "vonk-caddy-entrypoint"]
+    if (
+        len(entrypoint) == 4
+        and entrypoint[2].endswith(native + ' "$$@"')
+        and entrypoint[3] == "vonk-caddy-entrypoint"
+    ):
+        return entrypoint
+    raise LifecycleError("Caddy acceptance startup wrapper is invalid")
+
+
 def _configure_acceptance_renewal(
     bundle: Path,
     *,
@@ -732,6 +756,9 @@ def _configure_acceptance_renewal(
     )
     os.chmod(caddy_path, 0o644)
     caddy_volumes.append("./acceptance-Caddyfile:/etc/caddy/Caddyfile:ro")
+    caddy_service["entrypoint"] = _acceptance_caddy_entrypoint(
+        caddy_service.get("entrypoint")
+    )
     caddy_service["command"] = [
         "caddy",
         "run",

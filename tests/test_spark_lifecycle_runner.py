@@ -238,6 +238,32 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         old_selected[old_selected.index("--config") + 1]
         == "/run/vonk-runtime-assets/caddy/Caddyfile"
     )
+    # A previous signed bundle uses the same native startup boundary without
+    # argv forwarding. Its fixture adaptation preserves the entire release's
+    # wait script and applies only the reviewed final-argv correction.
+    historical = published["services"]["caddy"]["entrypoint"][:3]
+    historical[2] = historical[2].removesuffix(' "$$@"')
+    adapted = lifecycle._acceptance_caddy_entrypoint(historical)
+    assert adapted[:2] == historical[:2]
+    assert adapted[2] == historical[2] + ' "$$@"'
+    historical_wrapper = [
+        argument.replace("$$", "$").replace(
+            "/run/vonk-runtime-assets/caddy/entrypoint.sh", str(native)
+        )
+        for argument in adapted
+    ]
+    subprocess.run(
+        [*historical_wrapper, *service["command"]],
+        check=True,
+        timeout=2,
+        env=environment,
+    )
+    assert captured.read_text().splitlines() == service["command"][1:]
+    assert service["entrypoint"] == published["services"]["caddy"]["entrypoint"]
+    with pytest.raises(lifecycle.LifecycleError, match="startup wrapper"):
+        lifecycle._acceptance_caddy_entrypoint(
+            ["/bin/sh", "-c", "exec foreign-startup"]
+        )
     subprocess.run(
         [*wrapper, *service["command"]],
         check=True,
