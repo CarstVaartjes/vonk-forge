@@ -420,9 +420,15 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
             "restart must observe the exact accepted Stop and load"
         ),
     )
+    lifecycle.reconcile_offline_stops()
+    restarted_coordinator.tick()
     restarted.advance(app.id)
     after = _stored(sessions, app.id)
-    assert after.pending_children == before.pending_children
+    assert {item.operation_id for item in after.pending_children} == {_uuid(18603)}
+    assert any(
+        item.operation_id == stop_id and item.state == "succeeded"
+        for item in after.children
+    )
     assert after.queue == before.queue
     assert after.request_id == before.request_id
     assert _claims(sessions, app.id) == claims

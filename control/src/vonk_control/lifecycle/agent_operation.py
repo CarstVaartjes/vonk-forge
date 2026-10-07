@@ -86,6 +86,7 @@ from ..agent_operation_facts import (
 from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
+from ..offline_stops import is_deferred_stop
 from ..operation_progress import progress_document
 from .adapter import Dispatch
 from .core import OBSERVE_BUDGET, transition
@@ -321,6 +322,7 @@ class AgentOperationAdapter:
             requested_at is None
             and parent is not None
             and parent.state in ENDED_PARENT_STATES
+            and not is_deferred_stop(parent, operation)
         ):
             # Its job ended without it: nothing can claim, resume or retire it, so
             # it is cancelled like any other order whose owner no longer wants it.

@@ -47,12 +47,14 @@ from .models import (
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
+    Job,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from .offline_stops import deferred_stop_nodes
 from .platform_ports import RENDEZVOUS_PORT, service_host_port_candidates
 from .profile_capacity import (
     inherited_profile_memory,
@@ -553,6 +555,22 @@ class RunAdmissionService:
                     .order_by(ClusterMappingNode.rank)
                 )
             )
+            # A planned Stop never discounts an offline rank's unreconciled
+            # effects, even after foreground completion released its other ranks.
+            deferred_ranks = {
+                (job.payload.get("owner_id"), node_id)
+                for job in session.scalars(
+                    select(Job).where(
+                        Job.kind == "recipe.stop",
+                        Job.payload["owner_id"]
+                        .as_string()
+                        .in_(
+                            select(RecipeRun.id).where(RecipeRun.state == RunState.LOST)
+                        ),
+                    )
+                )
+                for node_id in deferred_stop_nodes(job)
+            }
             unreconciled_lost_ranks: dict[str, list[tuple[str, str]]] = {}
             for node_id, run_id, run_alias in session.execute(
                 select(RunNode.node_id, RecipeRun.id, RecipeRun.alias)
@@ -563,11 +581,14 @@ class RunAdmissionService:
                     ),
                     RunNode.state != RunState.STOPPED,
                     RecipeRun.state == RunState.LOST,
-                    # A reviewed plan that stops the lost run reconciles it.
-                    RecipeRun.id.not_in(tuple(released_run_ids)),
                 )
                 .order_by(RunNode.node_id, RecipeRun.id)
             ):
+                if (
+                    run_id in released_run_ids
+                    and (run_id, node_id) not in deferred_ranks
+                ):
+                    continue
                 unreconciled_lost_ranks.setdefault(node_id, []).append(
                     (run_id, run_alias)
                 )

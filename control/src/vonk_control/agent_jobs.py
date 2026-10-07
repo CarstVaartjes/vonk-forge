@@ -146,6 +146,7 @@ from .models import (
     RunNode,
 )
 from .models import AgentOperation as StoredOperation
+from .offline_stops import is_deferred_stop, pending_run_stop_nodes
 from .operation_contract import sanitize_failure_evidence, validate_progress_update
 from .operation_progress import (
     progress_document,
@@ -2514,6 +2515,14 @@ class AgentJobService:
         )
         pending = []
         for operation in candidates:
+            run_id = operation.payload.get("run_id")
+            if isinstance(run_id, str) and operation.node_id in pending_run_stop_nodes(
+                session, run_id
+            ):
+                # The exact offline Stop owns this remaining effect. Observing
+                # its old cancellation cannot hold healthy foreground work;
+                # the run's physical reservations remain charged until receipt.
+                continue
             if _exact_service_stop_receipt_covers_start(
                 session, operation, current_ordinal
             ):
@@ -4050,7 +4059,9 @@ class AgentJobService:
         ):
             set_parent_state(job, "queued", None, now)
             return True
-        if job.state in _TERMINAL_PARENT_STATES:
+        if job.state in _TERMINAL_PARENT_STATES and not is_deferred_stop(
+            job, current_operation
+        ):
             self._record_claim_refusal(
                 session,
                 operation=current_operation,
@@ -4570,7 +4581,9 @@ class AgentJobService:
                     adapter = AgentOperationAdapter(
                         session, resume_candidates=operator_resume_candidates_in_session
                     )
-                    if parent.state in _ENDED_PARENT_STATES:
+                    if parent.state in _ENDED_PARENT_STATES and not is_deferred_stop(
+                        parent, operation
+                    ):
                         # The job already ended, so nothing can claim or resume
                         # this order: it ends with it instead of waiting.
                         adapter.settle(
@@ -4871,21 +4884,24 @@ class AgentJobService:
         parent = session.scalar(
             select(Job).where(Job.id == parent_job_id).with_for_update(of=Job)
         )
-        if (
-            parent is None
-            or parent.state not in {"queued", "running"}
-            or node.node_id not in parent.targets
-        ):
-            raise StaleAgentFence(
-                "agent operation lease, certificate, or fence is stale",
-                reason=SecurityRefusalReason.STALE_FENCE,
-            )
         operation = session.scalar(
             select(StoredOperation)
             .where(StoredOperation.id == operation_id)
             .with_for_update(of=StoredOperation)
             .execution_options(populate_existing=True)
         )
+        if (
+            parent is None
+            or (
+                parent.state not in {"queued", "running"}
+                and (operation is None or not is_deferred_stop(parent, operation))
+            )
+            or node.node_id not in parent.targets
+        ):
+            raise StaleAgentFence(
+                "agent operation lease, certificate, or fence is stale",
+                reason=SecurityRefusalReason.STALE_FENCE,
+            )
         if operation is None:
             raise StaleAgentFence(
                 "agent operation lease, certificate, or fence is stale",
@@ -5158,6 +5174,14 @@ class AgentJobService:
                 .order_by(StoredOperation.created_at, StoredOperation.id)
             )
         )
+        has_deferred = any(is_deferred_stop(job, operation) for operation in operations)
+        operations = [
+            operation
+            for operation in operations
+            if not is_deferred_stop(job, operation)
+        ]
+        if not operations and job.kind == "recipe.stop":
+            return
         retrying = [
             operation
             for operation in operations
@@ -5188,7 +5212,8 @@ class AgentJobService:
         state = verdict
         set_parent_state(job, state, None, self._clock(), keep_reason=True)
         if state == "succeeded":
-            job.status_reason = None
+            if not has_deferred:
+                job.status_reason = None
             return
         if state == "failed":
             # A failed job grants no further claims, so a sibling still parked

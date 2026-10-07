@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
     canonical_message,
 )
+from vonk_agent_protocol.enrollment import NodeId
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
@@ -43,6 +44,13 @@ from .strict_json import StrictJSONModel, read_stored_model
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _NODE_ID = re.compile(r"^spk_[0-9a-f]{32}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+class OfflineStopIntent(StrictJSONModel):
+    """Exact Stop orders retained for reconciliation after node contact returns."""
+
+    code: Literal["node.offline"] = "node.offline"
+    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
 
 
 class ProfileJobRunStopTarget(StrictJSONModel):
@@ -153,6 +161,7 @@ class ProfileJobRunStopJob(StrictJSONModel):
     owner_id: str = Field(min_length=36, max_length=36, pattern=_UUID.pattern)
     plan_digest: str = Field(min_length=64, max_length=64, pattern=_SHA256.pattern)
     workload_intent_ordinal: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
+    offline_stop_intent: OfflineStopIntent | None = None
     execution_mode: Literal["profile-jobrun-stop"]
     profile_application_id: str = Field(
         min_length=36, max_length=36, pattern=_UUID.pattern
