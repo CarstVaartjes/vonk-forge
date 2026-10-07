@@ -20,6 +20,7 @@
           },
           "generation": {
             "exclusiveMinimum": 0,
+            "maximum": 9223372036854775807,
             "title": "Generation",
             "type": "integer"
           },
@@ -379,6 +380,7 @@
         "additionalProperties": false,
         "properties": {
           "attempt": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Attempt",
             "type": "integer"
@@ -999,6 +1001,41 @@
           "retry_queued"
         ],
         "title": "AgentUpgradeTargetDiagnosticsResponse",
+        "type": "object"
+      },
+      "ApiRuntimeObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "control_contract_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Control Contract Sha256"
+          },
+          "source_sha": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{40}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sha"
+          }
+        },
+        "required": [
+          "source_sha",
+          "control_contract_sha256"
+        ],
+        "title": "ApiRuntimeObservation",
         "type": "object"
       },
       "ArtifactDistributionPayload": {
@@ -5300,6 +5337,7 @@
             "type": "string"
           },
           "failed_rank": {
+            "maximum": 2147483647,
             "minimum": 0,
             "title": "Failed Rank",
             "type": "integer"
@@ -5431,6 +5469,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -5717,6 +5756,7 @@
             "type": "string"
           },
           "generation": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 1.0,
             "title": "Generation",
             "type": "integer"
@@ -6135,6 +6175,7 @@
         "additionalProperties": false,
         "properties": {
           "attempt": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Attempt",
             "type": "integer"
@@ -6162,6 +6203,7 @@
           "rank": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6389,6 +6431,7 @@
           "dropped_bytes": {
             "anyOf": [
               {
+                "maximum": 1.8446744073709552e+19,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6401,6 +6444,7 @@
           "dropped_lines": {
             "anyOf": [
               {
+                "maximum": 1.8446744073709552e+19,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -7398,7 +7442,6 @@
               "type": "string"
             },
             "maxItems": 64,
-            "minItems": 1,
             "title": "Assignment Ids",
             "type": "array"
           },
@@ -7417,7 +7460,15 @@
             "title": "Plan Digest",
             "type": "string"
           },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAdoptedStopEffect"
+            },
+            "title": "Stops",
+            "type": "array"
+          },
           "workload_intent_ordinal": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Workload Intent Ordinal",
             "type": "integer"
@@ -7427,16 +7478,48 @@
           "application_id",
           "plan_digest",
           "workload_intent_ordinal",
-          "node_ids",
-          "assignment_ids"
+          "node_ids"
         ],
         "title": "FleetProfileAdoptedApplicationEffect",
+        "type": "object"
+      },
+      "FleetProfileAdoptedStopEffect": {
+        "additionalProperties": false,
+        "description": "Exact original cleanup, retained by a newer whole-fleet decision.",
+        "properties": {
+          "effect": {
+            "$ref": "#/components/schemas/FleetProfileRunEffect"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "queue_index": {
+            "minimum": 0.0,
+            "title": "Queue Index",
+            "type": "integer"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "effect",
+          "queue_index",
+          "operation_id",
+          "request_key"
+        ],
+        "title": "FleetProfileAdoptedStopEffect",
         "type": "object"
       },
       "FleetProfileApplicationCancelRequest": {
         "additionalProperties": false,
         "properties": {
           "profile_number": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Profile Number",
             "type": "integer"
@@ -7539,6 +7622,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -7822,6 +7906,13 @@
             ],
             "title": "Current Label"
           },
+          "effects": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileEffectProgress"
+            },
+            "title": "Effects",
+            "type": "array"
+          },
           "intended_profile": {
             "anyOf": [
               {
@@ -7929,6 +8020,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -7940,6 +8032,35 @@
           }
         },
         "title": "FleetProfileApplicationProgress",
+        "type": "object"
+      },
+      "FleetProfileApplicationProjectionIssue": {
+        "additionalProperties": false,
+        "description": "Historical state is retained while its metadata cannot be verified.",
+        "properties": {
+          "code": {
+            "const": "profile.application_intent.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "observation": {
+            "const": "unknown",
+            "default": "unknown",
+            "title": "Observation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "FleetProfileApplicationProjectionIssue",
         "type": "object"
       },
       "FleetProfileApplicationResult": {
@@ -8048,6 +8169,16 @@
           },
           "progress": {
             "$ref": "#/components/schemas/FleetProfileApplicationProgress"
+          },
+          "projection_issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileApplicationProjectionIssue"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reason_code": {
             "anyOf": [
@@ -8298,6 +8429,18 @@
               }
             ],
             "title": "Operation Id"
+          },
+          "queue_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Index"
           },
           "reason": {
             "maxLength": 512,
@@ -8863,6 +9006,7 @@
             "title": "Id"
           },
           "number": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Number",
             "type": "integer"
@@ -8878,6 +9022,7 @@
             ]
           },
           "revision": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Revision",
             "type": "integer"
@@ -8890,6 +9035,134 @@
           "definition"
         ],
         "title": "FleetProfileDefinitionView",
+        "type": "object"
+      },
+      "FleetProfileEffectProgress": {
+        "additionalProperties": false,
+        "description": "Observational receipt for one immutable accepted queue effect.",
+        "properties": {
+          "application_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Application Id",
+            "type": "string"
+          },
+          "effect_id": {
+            "title": "Effect Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "install",
+              "run",
+              "stop",
+              "cleanup"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "original_operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Operation Id"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "queue_index": {
+            "minimum": 0.0,
+            "title": "Queue Index",
+            "type": "integer"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileSwitchChildResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "not-issued",
+              "pending",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "stop_effect": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileRunEffect"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "workload_intent_ordinal": {
+            "minimum": 1.0,
+            "title": "Workload Intent Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "effect_id",
+          "application_id",
+          "plan_digest",
+          "workload_intent_ordinal",
+          "queue_index",
+          "kind",
+          "target_id",
+          "node_ids",
+          "request_key",
+          "state"
+        ],
+        "title": "FleetProfileEffectProgress",
         "type": "object"
       },
       "FleetProfileEffects": {
@@ -9062,6 +9335,7 @@
             "title": "Assignments"
           },
           "number": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Number",
             "type": "integer"
@@ -9121,6 +9395,7 @@
           },
           "expected_revision": {
             "default": 0,
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Expected Revision",
             "type": "integer"
@@ -9678,6 +9953,7 @@
           "profile_revision": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -10078,35 +10354,6 @@
         "additionalProperties": false,
         "description": "Persisted state used to resume a profile switch after restart.",
         "properties": {
-          "active_kind": {
-            "anyOf": [
-              {
-                "enum": [
-                  "install",
-                  "run",
-                  "stop",
-                  "cleanup"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active Kind"
-          },
-          "active_operation_id": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active Operation Id"
-          },
           "actor": {
             "maxLength": 200,
             "minLength": 1,
@@ -10185,6 +10432,13 @@
             ],
             "title": "Observation Due At"
           },
+          "pending_children": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileSwitchPendingChild"
+            },
+            "title": "Pending Children",
+            "type": "array"
+          },
           "pending_operation_ids": {
             "items": {
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -10237,6 +10491,13 @@
             },
             "maxItems": 32,
             "title": "Scope Node Ids",
+            "type": "array"
+          },
+          "skipped_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Skipped Indices",
             "type": "array"
           },
           "state": {
@@ -10324,6 +10585,23 @@
             "title": "Operation Id",
             "type": "string"
           },
+          "original_operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Operation Id"
+          },
+          "queue_index": {
+            "minimum": 0.0,
+            "title": "Queue Index",
+            "type": "integer"
+          },
           "result": {
             "anyOf": [
               {
@@ -10345,11 +10623,57 @@
           }
         },
         "required": [
+          "queue_index",
           "operation_id",
           "kind",
           "state"
         ],
         "title": "FleetProfileSwitchChildState",
+        "type": "object"
+      },
+      "FleetProfileSwitchPendingChild": {
+        "additionalProperties": false,
+        "description": "An issued queue child whose exact outcome remains to be observed.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "install",
+              "run",
+              "stop",
+              "cleanup"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "original_operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Operation Id"
+          },
+          "queue_index": {
+            "minimum": 0.0,
+            "title": "Queue Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queue_index",
+          "operation_id",
+          "kind"
+        ],
+        "title": "FleetProfileSwitchPendingChild",
         "type": "object"
       },
       "FleetProfileSwitchQueueItem": {
@@ -10478,6 +10802,7 @@
           "loaded_revision": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -10502,6 +10827,7 @@
             "type": "array"
           },
           "number": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Number",
             "type": "integer"
@@ -10512,6 +10838,7 @@
             "type": "string"
           },
           "revision": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Revision",
             "type": "integer"
@@ -11516,6 +11843,7 @@
             "type": "string"
           },
           "rank": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Rank",
             "type": "integer"
@@ -12001,6 +12329,7 @@
             "type": "string"
           },
           "current_attempt": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Current Attempt",
             "type": "integer"
@@ -12153,6 +12482,7 @@
         "additionalProperties": false,
         "properties": {
           "attempt": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Attempt",
             "type": "integer"
@@ -12695,7 +13025,6 @@
         "properties": {
           "completed_bytes": {
             "default": 0,
-            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Completed Bytes",
             "type": "integer"
@@ -12741,7 +13070,6 @@
           "total_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -13150,7 +13478,6 @@
           "disk_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -13163,7 +13490,6 @@
           "image_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -13176,7 +13502,6 @@
           "memory_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -13189,7 +13514,6 @@
           "runtime_memory_bytes": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -13986,6 +14310,7 @@
           "mapping_generation": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -16575,6 +16900,7 @@
             "type": "string"
           },
           "generation": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Generation",
             "type": "integer"
@@ -16867,6 +17193,7 @@
         "additionalProperties": false,
         "properties": {
           "attempt": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Attempt",
             "type": "integer"
@@ -17059,7 +17386,8 @@
         "description": "Error codes of a stored operation failure evidence record.",
         "enum": [
           "fleet_profile_application_failed",
-          "artifact_process_failed"
+          "artifact_process_failed",
+          "stored_operation_result_unreadable"
         ],
         "title": "OperationFailureCode",
         "type": "string"
@@ -18225,6 +18553,56 @@
         "title": "PlacementLoadState",
         "type": "string"
       },
+      "PlatformObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "api": {
+            "$ref": "#/components/schemas/ApiRuntimeObservation"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "worker_issue": {
+            "anyOf": [
+              {
+                "enum": [
+                  "worker-observation-unavailable",
+                  "worker-provenance-unavailable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Issue"
+          },
+          "workers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkerRuntimeObservation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workers"
+          }
+        },
+        "required": [
+          "observed_at",
+          "api",
+          "workers",
+          "worker_issue"
+        ],
+        "title": "PlatformObservation",
+        "type": "object"
+      },
       "PrebuiltImage": {
         "additionalProperties": false,
         "description": "One catalog-pinned prebuilt runtime image for a recipe revision.",
@@ -18311,6 +18689,7 @@
             "type": "string"
           },
           "mapping_generation": {
+            "maximum": 2147483647,
             "minimum": 1,
             "title": "Mapping Generation",
             "type": "integer"
@@ -18387,6 +18766,7 @@
             "type": "string"
           },
           "run_generation": {
+            "maximum": 9223372036854775807,
             "minimum": 1,
             "title": "Run Generation",
             "type": "integer"
@@ -18434,6 +18814,7 @@
             "type": "array"
           },
           "workload_intent_ordinal": {
+            "maximum": 2147483647,
             "minimum": 1,
             "title": "Workload Intent Ordinal",
             "type": "integer"
@@ -18522,6 +18903,7 @@
             "type": "integer"
           },
           "workload_intent_ordinal": {
+            "maximum": 2147483647,
             "minimum": 1,
             "title": "Workload Intent Ordinal",
             "type": "integer"
@@ -19244,6 +19626,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -19407,8 +19790,6 @@
                 "type": "string"
               },
               {
-                "maximum": 9223372036854775807,
-                "minimum": -9223372036854775808,
                 "type": "integer"
               },
               {
@@ -19913,6 +20294,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -21134,6 +21516,7 @@
             "type": "array"
           },
           "attempt": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Attempt",
             "type": "integer"
@@ -21633,6 +22016,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -21736,6 +22120,7 @@
             "type": "string"
           },
           "mapping_generation": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Mapping Generation",
             "type": "integer"
@@ -21838,6 +22223,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -22274,6 +22660,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -22358,7 +22745,7 @@
             "type": "string"
           },
           "run_generation": {
-            "maximum": 2147483647,
+            "maximum": 9223372036854775807,
             "minimum": 1,
             "title": "Run Generation",
             "type": "integer"
@@ -24038,6 +24425,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -24593,6 +24981,7 @@
             "type": "string"
           },
           "mapping_generation": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Mapping Generation",
             "type": "integer"
@@ -24950,6 +25339,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -25014,7 +25404,7 @@
             "type": "string"
           },
           "run_generation": {
-            "maximum": 2147483647,
+            "maximum": 9223372036854775807,
             "minimum": 1,
             "title": "Run Generation",
             "type": "integer"
@@ -25154,6 +25544,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -25219,7 +25610,7 @@
             "type": "string"
           },
           "run_generation": {
-            "maximum": 2147483647,
+            "maximum": 9223372036854775807,
             "minimum": 1,
             "title": "Run Generation",
             "type": "integer"
@@ -25405,6 +25796,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -25835,6 +26227,7 @@
             "type": "string"
           },
           "attempt": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Attempt",
             "type": "integer"
@@ -26718,6 +27111,7 @@
             "title": "Observed Memory Bytes"
           },
           "rank": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Rank",
             "type": "integer"
@@ -28330,6 +28724,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -29351,6 +29746,7 @@
           "workload_intent_ordinal": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -30178,6 +30574,7 @@
             "type": "string"
           },
           "mapping_generation": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Mapping Generation",
             "type": "integer"
@@ -30431,6 +30828,7 @@
             "type": "integer"
           },
           "workload_intent_ordinal": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Workload Intent Ordinal",
             "type": "integer"
@@ -31469,6 +31867,7 @@
         "description": "Exact SQL coordination identity for an image archive publication.\n\nThis intent protects an archive while the existing availability owner is\npublishing it. It is not evidence that managed bytes or a receipt exist;\nthose facts remain owned by ``RuntimeImageStorage``.",
         "properties": {
           "attempt": {
+            "maximum": 2147483647,
             "minimum": 1,
             "title": "Attempt",
             "type": "integer"
@@ -32850,6 +33249,7 @@
             "type": "string"
           },
           "rank": {
+            "maximum": 2147483647,
             "minimum": 0,
             "title": "Rank",
             "type": "integer"
@@ -32937,6 +33337,7 @@
             "type": "string"
           },
           "mapping_generation": {
+            "maximum": 2147483647,
             "minimum": 1,
             "title": "Mapping Generation",
             "type": "integer"
@@ -33192,6 +33593,7 @@
             "type": "integer"
           },
           "rank": {
+            "maximum": 2147483647,
             "minimum": 0,
             "title": "Rank",
             "type": "integer"
@@ -33199,6 +33601,8 @@
           "rendezvous_port": {
             "anyOf": [
               {
+                "maximum": 65535,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -33277,6 +33681,7 @@
             "type": "string"
           },
           "mapping_generation": {
+            "maximum": 2147483647,
             "minimum": 1,
             "title": "Mapping Generation",
             "type": "integer"
@@ -33309,6 +33714,7 @@
             "type": "string"
           },
           "run_generation": {
+            "maximum": 9223372036854775807,
             "minimum": 1,
             "title": "Run Generation",
             "type": "integer"
@@ -33745,6 +34151,7 @@
             "type": "string"
           },
           "number": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Number",
             "type": "integer"
@@ -33753,6 +34160,7 @@
             "$ref": "#/components/schemas/SavedProfileProjectionIssue"
           },
           "revision": {
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Revision",
             "type": "integer"
@@ -34397,6 +34805,59 @@
         ],
         "title": "WaitVerdict",
         "type": "string"
+      },
+      "WorkerRuntimeObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "loop_sequence": {
+            "minimum": 1.0,
+            "title": "Loop Sequence",
+            "type": "integer"
+          },
+          "process_instance_id": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Process Instance Id",
+            "type": "string"
+          },
+          "source_sha": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{40}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sha"
+          },
+          "worker_contract_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Contract Sha256"
+          }
+        },
+        "required": [
+          "process_instance_id",
+          "source_sha",
+          "worker_contract_sha256",
+          "loop_sequence",
+          "completed_at"
+        ],
+        "title": "WorkerRuntimeObservation",
+        "type": "object"
       },
       "WritablePath": {
         "additionalProperties": false,
@@ -38174,6 +38635,7 @@
             "name": "attempt",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
               "minimum": 0,
               "title": "Attempt",
               "type": "integer"
@@ -38241,6 +38703,62 @@
           }
         ],
         "summary": "Evidence"
+      }
+    },
+    "/api/platform": {
+      "get": {
+        "operationId": "getPlatformObservation",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformObservation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Platform Observation"
       }
     },
     "/api/profile": {
@@ -38602,6 +39120,7 @@
             "name": "number",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
               "minimum": 1,
               "title": "Number",
               "type": "integer"
@@ -38676,6 +39195,7 @@
             "name": "number",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
               "minimum": 1,
               "title": "Number",
               "type": "integer"
@@ -38774,6 +39294,7 @@
             "name": "number",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
               "minimum": 1,
               "title": "Number",
               "type": "integer"
@@ -38842,6 +39363,7 @@
             "name": "number",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
               "minimum": 1,
               "title": "Number",
               "type": "integer"
@@ -38938,6 +39460,7 @@
             "name": "number",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
               "minimum": 1,
               "title": "Number",
               "type": "integer"
@@ -39046,6 +39569,7 @@
             "name": "number",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
               "minimum": 1,
               "title": "Number",
               "type": "integer"
@@ -39134,6 +39658,7 @@
             "name": "number",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
               "minimum": 1,
               "title": "Number",
               "type": "integer"
@@ -39212,6 +39737,7 @@
             "name": "number",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
               "minimum": 1,
               "title": "Number",
               "type": "integer"
@@ -40049,6 +40575,114 @@
           }
         ],
         "summary": "Cancel Operation"
+      }
+    },
+    "/api/recipe/operations/{operation_id}/retry": {
+      "post": {
+        "operationId": "retryRecipeOperation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeDownloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeImageAvailabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Retry Operation"
       }
     },
     "/api/recipe/requests/{request_key}": {
