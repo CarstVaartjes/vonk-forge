@@ -135,7 +135,7 @@ def _pending_adoption(connection: Connection) -> dict[str, tuple[str, ...]]:
         if connection.dialect.name == "sqlite":
             # SQLite preserves the declared expression spelling. Compare only
             # our owned canonical expressions, never normalize unknown checks.
-            normalize = lambda value: "".join(str(value).split()).casefold()
+            normalize = lambda value: str(value).strip()
             for constraint in Base.metadata.tables[table_name].constraints:
                 if (
                     isinstance(constraint, CheckConstraint)
@@ -180,6 +180,12 @@ def _sqlite_extensions(
             f"exact integer adoption deferred: {table_name} has column collation "
             "not preserved by reflection; review its native DDL before retrying"
         )
+    if re.search(r"\bAUTOINCREMENT\b", table_sql, flags=re.IGNORECASE):
+        raise ValueError(
+            f"exact integer adoption deferred: {table_name} has AUTOINCREMENT "
+            "high-water state not preserved by reflection; review its native "
+            "DDL and sequence before retrying"
+        )
     indexes = []
     triggers = []
     rows = connection.exec_driver_sql(
@@ -202,7 +208,11 @@ def _sqlite_extensions(
             is None
         ):
             continue
-        if any(
+        # Wildcard reads can consume the changed columns without naming them.
+        # Direct owner views are checked before any alteration; refusing an
+        # unproved direct wildcard also protects views layered above it.
+        wildcard_read = kind in {"view", "trigger"} and "*" in definition
+        if wildcard_read or any(
             re.search(
                 rf"(?<![A-Za-z0-9_]){name}(?![A-Za-z0-9_])", definition, re.IGNORECASE
             )
@@ -218,6 +228,65 @@ def _sqlite_extensions(
         elif kind == "trigger":
             triggers.append(definition)
     return tuple(indexes), tuple(triggers)
+
+
+def _postgres_extensions(
+    connection: Connection, table_name: str, names: tuple[str, ...]
+) -> None:
+    """Defer unproved numeric extensions before PostgreSQL changes a type.
+
+    Native dependency records include expression/partial indexes and expanded
+    view wildcards. Procedural trigger bodies have no reliable column dependency
+    records, so unexpected user triggers require explicit semantic review.
+    """
+    columns = {
+        column["name"]: column for column in inspect(connection).get_columns(table_name)
+    }
+    changed = tuple(
+        name for name in names if not isinstance(columns[name]["type"], Text)
+    )
+    if not changed:
+        return
+    for name in changed:
+        if columns[name]["default"] is not None:
+            raise ValueError(
+                f"exact integer adoption deferred: {table_name}.{name} has an "
+                "unreviewed server default; review its decimal TEXT semantics "
+                "before retrying schema adoption"
+            )
+    dependencies = connection.exec_driver_sql(
+        "SELECT DISTINCT CASE WHEN d.classid='pg_rewrite'::regclass THEN 'view' "
+        "ELSE 'index' END, c.relname "
+        "FROM pg_depend d JOIN pg_attribute a "
+        "ON a.attrelid=d.refobjid AND a.attnum=d.refobjsubid "
+        "LEFT JOIN pg_rewrite r ON d.classid='pg_rewrite'::regclass AND r.oid=d.objid "
+        "JOIN pg_class c ON c.oid=CASE WHEN d.classid='pg_rewrite'::regclass "
+        "THEN r.ev_class ELSE d.objid END "
+        "WHERE d.refclassid='pg_class'::regclass AND d.refobjid=to_regclass(%s) "
+        "AND a.attname=ANY(%s) "
+        "AND (d.classid='pg_rewrite'::regclass OR "
+        "(d.classid='pg_class'::regclass AND c.relkind IN ('i','I'))) "
+        "ORDER BY 1,2",
+        (table_name, list(changed)),
+    ).first()
+    if dependencies is not None:
+        kind, identity = dependencies
+        raise ValueError(
+            f"exact integer adoption deferred: {table_name}.{identity} has an "
+            f"unreviewed numeric {kind}; review its decimal TEXT semantics "
+            "before retrying schema adoption"
+        )
+    trigger = connection.exec_driver_sql(
+        "SELECT tgname FROM pg_trigger WHERE tgrelid=to_regclass(%s) "
+        "AND NOT tgisinternal ORDER BY tgname LIMIT 1",
+        (table_name,),
+    ).scalar()
+    if trigger is not None:
+        raise ValueError(
+            f"exact integer adoption deferred: {table_name}.{trigger} has an "
+            "unreviewed procedural trigger; review its decimal TEXT semantics "
+            "before retrying schema adoption"
+        )
 
 
 def adopt_exact_integer_columns(connection: Connection) -> None:
@@ -257,6 +326,8 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
                 extensions[table_name] = _sqlite_extensions(
                     connection, table_name, names
                 )
+            else:
+                _postgres_extensions(connection, table_name, names)
             for check in inspect(connection).get_check_constraints(table_name):
                 if check["name"] in _OWNED_CHECKS[table_name]:
                     continue
