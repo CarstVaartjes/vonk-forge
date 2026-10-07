@@ -219,25 +219,56 @@ func TestAuthorityHTTPReplaysCannotChangeCSRSerialOrValidity(t *testing.T) {
 }
 
 func TestCommittedRotationRemainsObservableAfterSourceRevocation(t *testing.T) {
- f:=newAuthorityFixture(t)
- initial:=issuedLeaf(t,f.call(t,f.binding,f.token(t,f.binding,nil),"issue"))
- source:=initial.SerialNumber.String()
- _,key,err:=ed25519.GenerateKey(rand.Reader);if err!=nil{t.Fatal(err)}
- der,err:=x509.CreateCertificateRequest(rand.Reader,&x509.CertificateRequest{Subject:f.csr.Subject,URIs:f.csr.URIs},key);if err!=nil{t.Fatal(err)}
- f.csr,err=x509.ParseCertificateRequest(der);if err!=nil{t.Fatal(err)}
- rotated:=f.binding;rotated.RequestID=strings.Repeat("r",43);rotated.Serial="234567891";rotated.CSRSHA256=digest(der);rotated.Purpose="rotation";rotated.SourceSerial=&source;rotated.Generation++
- replacement:=issuedLeaf(t,f.call(t,rotated,f.token(t,rotated,nil),"issue"))
- token:=f.token(t,rotated,func(claims map[string]any){claims["sub"]=source;claims["aud"]="https://step-ca/1.0/revoke";delete(claims,"vonk");delete(claims,"cnf");delete(claims,"sans")})
- raw,_:=json.Marshal(map[string]any{"serial":source,"ott":token,"passive":true,"reasonCode":0})
- response:=httptest.NewRecorder();f.handler.ServeHTTP(response,httptest.NewRequest(http.MethodPost,"https://step-ca/1.0/revoke",bytes.NewReader(raw)))
- if response.Code!=200{t.Fatalf("source revoke failed: %s",response.Body.String())}
- signerCalled:=false;f.c.BeforeSign=func(){signerCalled=true}
- observed:=issuedLeaf(t,f.call(t,rotated,f.token(t,rotated,nil),"observe"))
- replayed:=issuedLeaf(t,f.call(t,rotated,f.token(t,rotated,nil),"issue"))
- if signerCalled || !bytes.Equal(replacement.Raw,observed.Raw) || !bytes.Equal(replacement.Raw,replayed.Raw){t.Fatal("source revocation hid or recomputed committed valid replacement")}
- pending:=rotated;pending.RequestID=strings.Repeat("p",43);pending.Serial="234567892"
- refused:=f.call(t,pending,f.token(t,pending,nil),"issue")
- if refused.Code!=403 || strings.Contains(refused.Body.String(),"BEGIN CERTIFICATE"){t.Fatal("revoked source admitted new issuance")}
+	f := newAuthorityFixture(t)
+	initial := issuedLeaf(t, f.call(t, f.binding, f.token(t, f.binding, nil), "issue"))
+	source := initial.SerialNumber.String()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: f.csr.Subject, URIs: f.csr.URIs}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.csr, err = x509.ParseCertificateRequest(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated := f.binding
+	rotated.RequestID = strings.Repeat("r", 43)
+	rotated.Serial = "234567891"
+	rotated.CSRSHA256 = digest(der)
+	rotated.Purpose = "rotation"
+	rotated.SourceSerial = &source
+	rotated.Generation++
+	replacement := issuedLeaf(t, f.call(t, rotated, f.token(t, rotated, nil), "issue"))
+	token := f.token(t, rotated, func(claims map[string]any) {
+		claims["sub"] = source
+		claims["aud"] = "https://step-ca/1.0/revoke"
+		delete(claims, "vonk")
+		delete(claims, "cnf")
+		delete(claims, "sans")
+	})
+	raw, _ := json.Marshal(map[string]any{"serial": source, "ott": token, "passive": true, "reasonCode": 0})
+	response := httptest.NewRecorder()
+	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://step-ca/1.0/revoke", bytes.NewReader(raw)))
+	if response.Code != 200 {
+		t.Fatalf("source revoke failed: %s", response.Body.String())
+	}
+	signerCalled := false
+	f.c.BeforeSign = func() { signerCalled = true }
+	observed := issuedLeaf(t, f.call(t, rotated, f.token(t, rotated, nil), "observe"))
+	replayed := issuedLeaf(t, f.call(t, rotated, f.token(t, rotated, nil), "issue"))
+	if signerCalled || !bytes.Equal(replacement.Raw, observed.Raw) || !bytes.Equal(replacement.Raw, replayed.Raw) {
+		t.Fatal("source revocation hid or recomputed committed valid replacement")
+	}
+	pending := rotated
+	pending.RequestID = strings.Repeat("p", 43)
+	pending.Serial = "234567892"
+	refused := f.call(t, pending, f.token(t, pending, nil), "issue")
+	if refused.Code != 403 || strings.Contains(refused.Body.String(), "BEGIN CERTIFICATE") {
+		t.Fatal("revoked source admitted new issuance")
+	}
 }
 
 func TestAuthorityNativeRevocationRemainsEffectiveForJournalObservation(t *testing.T) {
