@@ -1452,6 +1452,12 @@ class RunSwitchFleetProfileAdapter:
                     request_key=request_key,
                     reason="Profile application cancellation",
                 )
+            except UnknownOutcomeError:
+                # Cancellation intent is already durable. The worker retries
+                # these exact children on the next due observation, outside this
+                # reading session; the lifecycle cancellation budget ends an
+                # unconfirmed stop without parking the application.
+                continue
             except (KeyError, RunSwitchOperationConflict):
                 continue
 

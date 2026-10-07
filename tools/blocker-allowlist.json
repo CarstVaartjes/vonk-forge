@@ -555,6 +555,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles.py",
+      "function": "RunSwitchFleetProfileAdapter.request_cancellation",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Cancellation intent is committed before child cancellation. The worker _observe_pending_cancellation repeats the exact pending child requests at the persisted observation due time, outside SQL transactions; FleetProfileAdapter.tick_cancel bounds observation with CANCEL_BUDGET and ends unconfirmed cancellation without parking the application or changing child identity."
     }
   ],
   "call_edges": [
