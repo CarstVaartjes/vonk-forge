@@ -283,7 +283,10 @@ its float token fails a strict integer field; use an exact integer value instead
 
 Canonical float branches use finite IEEE materialization, including permitted
 underflow and signed zero, before checking their float bounds. The successful
-compiled union branch also owns normalization. A mathematical JSON Schema
+compiled union branch also owns normalization. When a canonical scalar union
+distinguishes integers from floats, an integral float keeps its float token
+through export and request serialization using the same numeric wrapper;
+`1000.0` cannot silently become the integer `1000`. A mathematical JSON Schema
 integer is a different rule from the production strict integer token rule;
 the pinned official semantics corpus exercises that distinction explicitly.
 Neither path permits non-finite float materialization. Numeric token wrappers
