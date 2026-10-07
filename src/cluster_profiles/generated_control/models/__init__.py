@@ -325,6 +325,7 @@ from .job_resume_request import JobResumeRequest
 from .job_resume_request_disposition import JobResumeRequestDisposition
 from .job_resume_response import JobResumeResponse
 from .job_run_phase_operation import JobRunPhaseOperation
+from .job_run_stop_scope import JobRunStopScope
 from .library_assessment_code import LibraryAssessmentCode
 from .library_facet_values import LibraryFacetValues
 from .library_filter_values import LibraryFilterValues
@@ -1158,6 +1159,7 @@ __all__ = (
     "JobResumeRequestDisposition",
     "JobResumeResponse",
     "JobRunPhaseOperation",
+    "JobRunStopScope",
     "LibraryAssessmentCode",
     "LibraryFacetValues",
     "LibraryFilterValues",

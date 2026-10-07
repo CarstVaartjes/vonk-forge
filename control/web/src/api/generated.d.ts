@@ -5068,6 +5068,45 @@ export interface components {
             payload: components["schemas"]["RecipeJobRunRequest"];
         };
         /**
+         * JobRunStopScope
+         * @description The immutable run, node membership and exact issued targets being stopped.
+         */
+        JobRunStopScope: {
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Missing Node Ids */
+            missing_node_ids?: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Reachable Node Ids */
+            reachable_node_ids: string[];
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /** Run Id */
+            run_id: string;
+            /** Run Node Ids */
+            run_node_ids: string[];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Stop Plan Digest */
+            stop_plan_digest: string;
+            /** Targets */
+            targets?: components["schemas"]["ProfileJobRunStopTarget"][];
+            /** Unissued Artifact Job Ids */
+            unissued_artifact_job_ids?: string[];
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal: number;
+        };
+        /**
          * LibraryAssessmentCode
          * @description Why a library entry is not assessed runnable on the current fleet.
          * @enum {string}
@@ -6977,7 +7016,7 @@ export interface components {
         };
         /**
          * ProfileJobRunStopAuthorization
-         * @description Current accepted profile Stop and exact older one-shot effect.
+         * @description Current accepted profile Stop owns this immutable JobRun scope.
          */
         ProfileJobRunStopAuthorization: {
             /** Installation Id */
@@ -9151,6 +9190,8 @@ export interface components {
              * @default null
              */
             execution_mode: "one-shot-jobs" | null;
+            /** @default null */
+            job_run_stop_authorization: components["schemas"]["JobRunStopScope"] | null;
             /** Owner Id */
             owner_id: string;
             /**

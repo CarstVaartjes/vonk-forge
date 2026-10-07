@@ -19,24 +19,19 @@ if TYPE_CHECKING:
 
 
 
-T = TypeVar("T", bound="ProfileJobRunStopAuthorization")
+T = TypeVar("T", bound="JobRunStopScope")
 
 
 
 @_attrs_define
-class ProfileJobRunStopAuthorization:
-    """ Current accepted profile Stop owns this immutable JobRun scope.
+class JobRunStopScope:
+    """ The immutable run, node membership and exact issued targets being stopped.
 
         Attributes:
             installation_id (str):
             mapping_generation (int):
             mapping_id (str):
             plan_digest (str):
-            profile_application_id (str):
-            profile_digest (str):
-            profile_operation_id (str):
-            profile_plan_digest (str):
-            profile_step (int):
             reachable_node_ids (list[str]):
             recipe_revision_id (str):
             run_generation (int):
@@ -54,11 +49,6 @@ class ProfileJobRunStopAuthorization:
     mapping_generation: int
     mapping_id: str
     plan_digest: str
-    profile_application_id: str
-    profile_digest: str
-    profile_operation_id: str
-    profile_plan_digest: str
-    profile_step: int
     reachable_node_ids: list[str]
     recipe_revision_id: str
     run_generation: int
@@ -85,16 +75,6 @@ class ProfileJobRunStopAuthorization:
         mapping_id = self.mapping_id
 
         plan_digest = self.plan_digest
-
-        profile_application_id = self.profile_application_id
-
-        profile_digest = self.profile_digest
-
-        profile_operation_id = self.profile_operation_id
-
-        profile_plan_digest = self.profile_plan_digest
-
-        profile_step = self.profile_step
 
         reachable_node_ids = self.reachable_node_ids
 
@@ -145,11 +125,6 @@ class ProfileJobRunStopAuthorization:
             "mapping_generation": mapping_generation,
             "mapping_id": mapping_id,
             "plan_digest": plan_digest,
-            "profile_application_id": profile_application_id,
-            "profile_digest": profile_digest,
-            "profile_operation_id": profile_operation_id,
-            "profile_plan_digest": profile_plan_digest,
-            "profile_step": profile_step,
             "reachable_node_ids": reachable_node_ids,
             "recipe_revision_id": recipe_revision_id,
             "run_generation": run_generation,
@@ -181,16 +156,6 @@ class ProfileJobRunStopAuthorization:
         mapping_id = d.pop("mapping_id")
 
         plan_digest = d.pop("plan_digest")
-
-        profile_application_id = d.pop("profile_application_id")
-
-        profile_digest = d.pop("profile_digest")
-
-        profile_operation_id = d.pop("profile_operation_id")
-
-        profile_plan_digest = d.pop("profile_plan_digest")
-
-        profile_step = d.pop("profile_step")
 
         reachable_node_ids = cast(list[str], d.pop("reachable_node_ids"))
 
@@ -230,16 +195,11 @@ class ProfileJobRunStopAuthorization:
         unissued_artifact_job_ids = cast(list[str], d.pop("unissued_artifact_job_ids", UNSET))
 
 
-        profile_job_run_stop_authorization = cls(
+        job_run_stop_scope = cls(
             installation_id=installation_id,
             mapping_generation=mapping_generation,
             mapping_id=mapping_id,
             plan_digest=plan_digest,
-            profile_application_id=profile_application_id,
-            profile_digest=profile_digest,
-            profile_operation_id=profile_operation_id,
-            profile_plan_digest=profile_plan_digest,
-            profile_step=profile_step,
             reachable_node_ids=reachable_node_ids,
             recipe_revision_id=recipe_revision_id,
             run_generation=run_generation,
@@ -254,8 +214,8 @@ class ProfileJobRunStopAuthorization:
         )
 
 
-        profile_job_run_stop_authorization.additional_properties = d
-        return profile_job_run_stop_authorization
+        job_run_stop_scope.additional_properties = d
+        return job_run_stop_scope
 
     @property
     def additional_keys(self) -> list[str]:

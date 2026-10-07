@@ -12387,6 +12387,129 @@
         "title": "JobRunPhaseOperation",
         "type": "object"
       },
+      "JobRunStopScope": {
+        "description": "The immutable run, node membership and exact issued targets being stopped.",
+        "properties": {
+          "installation_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_generation": {
+            "minimum": 1,
+            "title": "Mapping Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "missing_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 31,
+            "title": "Missing Node Ids",
+            "type": "array"
+          },
+          "plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "reachable_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Reachable Node Ids",
+            "type": "array"
+          },
+          "recipe_revision_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "run_generation": {
+            "minimum": 1,
+            "title": "Run Generation",
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Run Node Ids",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "stop_plan_digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Stop Plan Digest",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileJobRunStopTarget"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "unissued_artifact_job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unissued Artifact Job Ids",
+            "type": "array"
+          },
+          "workload_intent_ordinal": {
+            "minimum": 1,
+            "title": "Workload Intent Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "run_id",
+          "installation_id",
+          "recipe_revision_id",
+          "mapping_id",
+          "mapping_generation",
+          "run_generation",
+          "plan_digest",
+          "workload_intent_ordinal",
+          "run_node_ids",
+          "reachable_node_ids",
+          "stop_plan_digest"
+        ],
+        "title": "JobRunStopScope",
+        "type": "object"
+      },
       "LibraryAssessmentCode": {
         "description": "Why a library entry is not assessed runnable on the current fleet.",
         "enum": [
@@ -18291,7 +18414,7 @@
         "type": "object"
       },
       "ProfileJobRunStopAuthorization": {
-        "description": "Current accepted profile Stop and exact older one-shot effect.",
+        "description": "Current accepted profile Stop owns this immutable JobRun scope.",
         "properties": {
           "installation_id": {
             "maxLength": 36,
@@ -18431,11 +18554,6 @@
         },
         "required": [
           "schema_version",
-          "profile_application_id",
-          "profile_operation_id",
-          "profile_digest",
-          "profile_plan_digest",
-          "profile_step",
           "run_id",
           "installation_id",
           "recipe_revision_id",
@@ -18446,7 +18564,12 @@
           "workload_intent_ordinal",
           "run_node_ids",
           "reachable_node_ids",
-          "stop_plan_digest"
+          "stop_plan_digest",
+          "profile_application_id",
+          "profile_operation_id",
+          "profile_digest",
+          "profile_plan_digest",
+          "profile_step"
         ],
         "title": "ProfileJobRunStopAuthorization",
         "type": "object"
@@ -25035,6 +25158,17 @@
             ],
             "default": null,
             "title": "Execution Mode"
+          },
+          "job_run_stop_authorization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRunStopScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "owner_id": {
             "maxLength": 128,
