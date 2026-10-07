@@ -2101,6 +2101,9 @@ class RunSwitchFleetProfileAdapter:
                 preceding.append(set(nodes))
                 continue
             self._write_state(session, application, state)
+            # Observation of issued children continues under retained authority;
+            # each new effect still requires the author's current mutation role.
+            FleetProfileService._authorize(session, state.actor, mutation=False)
             operation = self._start_child(
                 application_id,
                 item,
@@ -8988,6 +8991,11 @@ class FleetProfileService:
                     child = self._switch_adapter.advance(
                         row.current_operation_id, session=session
                     )
+                except FleetProfilePermissionDenied as error:
+                    self._defer_exact_step(
+                        row, _persisted_profile_progress(row), str(error), now
+                    )
+                    return True
                 except UnknownOutcomeError as error:
                     if retry_disposition_of(error) == RETRY_WAIT:
                         self._defer_exact_step(
@@ -9256,6 +9264,7 @@ class FleetProfileService:
             KeyError,
             RecipeOperationConflict,
             FleetProfileConflict,
+            FleetProfilePermissionDenied,
             RuntimeError,
             ValueError,
         ) as error:
@@ -9278,7 +9287,7 @@ class FleetProfileService:
                             "Cancellation is reconciling the profile child: "
                             + (str(error)[:360] or "child start was interrupted")
                         )[:512]
-                    elif (
+                    elif isinstance(error, FleetProfilePermissionDenied) or (
                         isinstance(error, UnknownOutcomeError)
                         and retry_disposition_of(error) == RETRY_WAIT
                     ):
