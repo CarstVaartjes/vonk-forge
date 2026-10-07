@@ -39,6 +39,7 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from . import agent_operation_states
 from .fleet_profile_contract import FleetProfileApplicationCancellationView
 from .integer_domains import MAX_DATABASE_INTEGER
+from .model_cache_contract import ModelCacheCancellation
 from .operation_blockers import OperationBlocker, read_blockers
 from .operation_contract import (
     AvailabilityOperationFailure,
@@ -213,6 +214,7 @@ class OperationItem(BaseModel):
     #: The failure the family itself recorded, by its own contract.
     failure: AvailabilityOperationFailure | OperationFailureEvidence | None = None
     cancellation: FleetProfileApplicationCancellationView | None = None
+    model_cache_cancellation: ModelCacheCancellation | None = None
     evidence_download: OperationEvidenceDownload | None = None
     #: The failure facts of the family's stored result.
     result: OperationResultFacts | None = None

@@ -518,6 +518,7 @@ function CanonicalOperationDetails({api, detail, onUpdate}: {
   const availability = detail.failure && "code" in detail.failure
     ? availabilityFailure(detail.failure) : undefined;
   return <div className="activity-job-reason" style={{gap: ".5rem"}}>
+    {detail.model_cache_cancellation && <p style={{margin: 0}}>{detail.model_cache_cancellation.observation?.detail ?? "Cancellation ended; stopping the writer remains unconfirmed."}</p>}
     {availability
       ? <LibraryAvailabilityFeedback failure={availability}/>
       : detail.failure && <><strong>{failureSummary(detail.failure)}</strong>{"detail" in detail.failure && detail.failure.detail && <p style={{margin: 0}}>{detail.failure.detail}</p>}</>}

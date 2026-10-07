@@ -216,7 +216,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
     </button>
     {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
     {(busy || state === "preparing") && <WaitingFor blockers={waiting.blockers} nextAttemptAt={waiting.next_attempt_at}/>}
-    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." command={`vonkctl model cancel ${operationId}`} cancel={key => api.cancelModelOperation(operationId, key)}/>}
+    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." command={`vonkctl model cancel ${operationId}`} cancel={key => api.cancelModelOperation(operationId, key)} cancellationEvidence={result => result.cancellation?.observation?.detail ?? "Cancellation ended; stopping the writer remains unconfirmed."}/>}
     {error && <span className="library-cache-error" role="alert">{error}</span>}
   </div>;
 }

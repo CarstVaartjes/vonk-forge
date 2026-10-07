@@ -3,23 +3,29 @@
 from __future__ import annotations
 
 import fcntl
+import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
+from pytest import CaptureFixture
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.lifecycle import STOP_BUDGET, Effect, Outcome, Reported, State
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, ModelCacheOperation
 
+from cluster_profiles.cli_render import render_payload
+
 from .non_blocking import assert_no_orphaned_holds
 from .test_model_cache import _artifact
+from .test_model_cache_cancel_recovery import _api
 
 
 def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_old_owner(
-    tmp_path: Path, postgres_engine: Engine
+    tmp_path: Path, postgres_engine: Engine, capsys: CaptureFixture[str]
 ) -> None:
     """Catch a terminal cancel retaining claims or accepting its late executor."""
     Base.metadata.create_all(postgres_engine)
@@ -84,6 +90,16 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
                     service._lifecycle.lifecycle(ended, now[0]).effect is Effect.UNKNOWN
                 )
                 assert_no_orphaned_holds(session)
+            with _api(service) as api:
+                response = api.get(f"/api/model/operations/{original.id}")
+                assert response.status_code == 200
+                observation = response.json()["cancellation"]["observation"]
+                assert observation["effect"] == "unknown"
+                assert observation["observed_at"] == now[0].isoformat()
+                assert "unconfirmed" in observation["detail"]
+                unknown_response = response.json()
+                render_payload(unknown_response, "model", action="progress")
+                assert "unconfirmed" in capsys.readouterr().out
             assert not service._publication_allowed(
                 original.id, original.artifact_set_sha256, object_digest
             )
@@ -170,8 +186,23 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
         with sessions() as session:
             ended = session.get(ModelCacheOperation, confirmed.id)
             assert ended is not None
-            assert (
-                restarted._lifecycle.lifecycle(ended, now[0]).effect is Effect.UNKNOWN
+            assert restarted._lifecycle.lifecycle(ended, now[0]).effect is Effect.NONE
+        with _api(restarted) as api:
+            response = api.get(f"/api/model/operations/{confirmed.id}")
+            assert response.status_code == 200
+            confirmed_response = response.json()
+            assert confirmed_response["cancellation"]["observation"]["effect"] == "none"
+            render_payload(confirmed_response, "model", action="progress")
+            rendered = capsys.readouterr().out
+            assert "no writer effect was observed" in rendered
+            assert "unconfirmed" not in rendered
+        exported = os.environ.get("VONK_CACHE_CANCEL_RESPONSE_OUTPUT")
+        if exported:
+            Path(exported).write_text(
+                json.dumps(
+                    {"unknown": unknown_response, "confirmed": confirmed_response}
+                )
+                + "\n"
             )
         # Verified storage, not a terminal word, proves reusable exact bytes.
         Path(unquote(urlsplit(str(artifact["source"])).path)).unlink()

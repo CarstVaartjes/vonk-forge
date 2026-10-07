@@ -63,6 +63,7 @@ from .integer_domains import MAX_DATABASE_INTEGER
 from .lifecycle.agent_operation import retry_scheduled
 from .lifecycle.job import JobAdapter
 from .logging import redact_text
+from .model_cache_contract import ModelCacheCancellation
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -306,6 +307,7 @@ class OperationDetailResponse(StrictModel):
     failure: OperationFailure | None = None
     evidence_download: OperationEvidenceDownload | None = None
     cancellation: FleetProfileApplicationCancellationView | None = None
+    model_cache_cancellation: ModelCacheCancellation | None = None
     recovery: OperationRecovery | None = None
     owner: OperationOwnerReference | None = None
     #: Why this operation is not currently progressing.  A refused claim
@@ -324,6 +326,7 @@ class OperationDetailResponse(StrictModel):
             "failure",
             "evidence_download",
             "cancellation",
+            "model_cache_cancellation",
             "recovery",
             "owner",
             "status_reason",
@@ -1156,6 +1159,7 @@ def operation_detail_response(
         failure=failure,
         evidence_download=item.evidence_download,
         cancellation=item.cancellation,
+        model_cache_cancellation=item.model_cache_cancellation,
         status_reason=item.status_reason,
         recovery=recovery_for_operation(
             item.state,

@@ -1354,6 +1354,18 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
         else payload.get("request_key"),
     )
     _field("State", payload.get("state"))
+    if noun == "model" and payload.get("cancellation") is not None:
+        cancellation = _object(payload["cancellation"], "model cancellation")
+        observation = _optional(
+            cancellation.get("observation"), "cancellation observation"
+        )
+        _field("Cancellation effect", observation.get("effect", "unknown"))
+        _field(
+            "Cancellation evidence",
+            observation.get("detail", "Stopping the writer remains unconfirmed."),
+        )
+        if observation.get("observed_at") is not None:
+            _field("Observed", _time(observation["observed_at"]))
     _field("Progress", _measured_progress(payload))
     _waiting(payload)
     if payload.get("selector") is not None:

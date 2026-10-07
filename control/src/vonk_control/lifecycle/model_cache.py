@@ -66,6 +66,7 @@ from sqlalchemy.orm import Session
 from .. import model_cache_states
 from ..agent_operation_facts import aware
 from ..model_cache_contract import (
+    ModelCacheCancellationObservation,
     ModelCacheOperationPayload,
     StoredCacheClocks,
 )
@@ -280,10 +281,16 @@ class ModelCacheAdapter:
             effect = Effect.ESTABLISHED
         elif state is State.CANCELLED:
             # The stored ending fences the intent, not the physical writer.
-            # Cancellation can expire with an unconfirmed stop. This row has
-            # no persisted stop observation, so its state cannot prove absence.
-            # Exact writer locks and managed receipts still govern fresh work.
-            effect = Effect.UNKNOWN
+            # Only the actual owner's persisted observation proves stop;
+            # missing evidence remains unknown. Exact locks govern fresh work.
+            payload = self._payload(operation)
+            effect = (
+                payload.cancellation.observation.effect
+                if payload is not None
+                and payload.cancellation is not None
+                and payload.cancellation.observation is not None
+                else Effect.UNKNOWN
+            )
         elif state is State.RUNNING:
             effect = Effect.ISSUED
         else:
@@ -481,6 +488,30 @@ class ModelCacheAdapter:
         changed |= self._tidy_payload(
             operation, after, consume_retry=consume_retry and not ended
         )
+        if after.state is State.CANCELLED and before.state not in TERMINAL_STATES:
+            payload = self._payload(operation)
+            if payload is not None and payload.cancellation is not None:
+                details = {
+                    Effect.UNKNOWN: "Cancellation ended; stopping the writer remains unconfirmed.",
+                    Effect.NONE: "Cancellation ended; no writer effect was observed.",
+                    Effect.STOPPED: "Cancellation ended after the writer was confirmed stopped.",
+                }
+                observation = ModelCacheCancellationObservation(
+                    effect=after.effect,
+                    observed_at=now.isoformat(),
+                    detail=details[after.effect],
+                )
+                self._store_payload(
+                    operation,
+                    payload.model_copy(
+                        update={
+                            "cancellation": payload.cancellation.model_copy(
+                                update={"observation": observation}
+                            )
+                        }
+                    ),
+                )
+                changed = True
         if changed:
             operation.updated_at = now
         if ended and before.state not in TERMINAL_STATES and self._on_end is not None:
