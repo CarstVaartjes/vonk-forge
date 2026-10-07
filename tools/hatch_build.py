@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -23,12 +24,30 @@ class CustomBuildHook(BuildHookInterface):
             is None
         ):
             raise ValueError("VONK_BUILD_RELEASE_VERSION is invalid")
+        root = Path(self.root)
+
+        def fingerprint(path: Path) -> str:
+            document = json.loads(path.read_text())
+            return hashlib.sha256(
+                json.dumps(
+                    document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                ).encode()
+            ).hexdigest()
+
+        control_fingerprint = fingerprint(
+            root / "src/cluster_profiles/schemas/control-openapi.json"
+        )
+        worker_fingerprint = fingerprint(
+            root / "rust/crates/vonk-agent-protocol/schema/wire.json"
+        )
         directory = Path(tempfile.mkdtemp(prefix="vonkctl-build-"))
         identity = directory / "build-identity.json"
         identity.write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
+                    "control_contract_sha256": control_fingerprint,
+                    "worker_contract_sha256": worker_fingerprint,
                     "source_sha": source_sha,
                     "release_version": release_version,
                 },
