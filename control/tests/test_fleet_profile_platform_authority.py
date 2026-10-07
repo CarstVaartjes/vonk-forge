@@ -37,10 +37,18 @@ def test_maintenance_cannot_add_an_original_author_permission_gate(
     # Catches a new requester-permission gate in a worker, adapter or projection.
     # Only the named request boundaries may consult current user authority;
     # behavioral tests cover their accepted-intent branches.
-    source = Path(__file__).parents[1] / "src" / "vonk_control" / f"{module}.py"
-    tree = ast.parse(source.read_text())
+    root = Path(__file__).parents[1] / "src" / "vonk_control"
+    package = root / module
+    sources = (
+        sorted(package.rglob("*.py")) if package.is_dir() else [root / f"{module}.py"]
+    )
     violations = []
-    for function in ast.walk(tree):
+    functions = (
+        (source, function)
+        for source in sources
+        for function in ast.walk(ast.parse(source.read_text()))
+    )
+    for source, function in functions:
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if function.name in request_boundaries:
@@ -51,7 +59,7 @@ def test_maintenance_cannot_add_an_original_author_permission_gate(
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr in {"_authorize", "_user_has_profile_authority"}
             ):
-                violations.append((function.name, node.lineno))
+                violations.append((source.name, function.name, node.lineno))
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
@@ -65,7 +73,7 @@ def test_maintenance_cannot_add_an_original_author_permission_gate(
                     for keyword in node.keywords
                 )
             ):
-                violations.append((function.name, node.lineno))
+                violations.append((source.name, function.name, node.lineno))
     assert not violations, f"Maintenance depends on the original author: {violations}"
 
 
