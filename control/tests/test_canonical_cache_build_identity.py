@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.catalog_entities import build_policy_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
+from vonk_control.compiled_execution_plan import VerifiedModelObject
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
 from vonk_control.recipe_builds import (
@@ -453,7 +454,7 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
         # The stored row speaks for revision 1 only.
         stored = ModelCacheObjectSource.from_service(service)
         assert {
-            item["model_content_sha256"]
+            item.model_content_sha256
             for item in stored.verified_model_objects_for_set(first.digest)
         } == {first_digest}
     # Revision 2 gets the same verified objects under its own identity.
@@ -461,8 +462,7 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
         service
     ).verified_model_objects_for_set(second.digest, second)
     assert [
-        (item["model_content_sha256"], item["file_id"], item["sha256"])
-        for item in receipts
+        (item.model_content_sha256, item.file_id, item.sha256) for item in receipts
     ] == [(second_digest, "weights", file_digest)]
     # The set is recorded as cached for every consumer, never downloaded.
     assert service.get_entry(second.digest)["coverage"] == "complete"
@@ -472,7 +472,7 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     assert "model-not-cached" not in status.blockers
 
     # Compilation asks for exactly that: capture what it binds.
-    bound: list[tuple[dict[str, object], ...]] = []
+    bound: list[tuple[VerifiedModelObject, ...]] = []
     original = ModelCacheObjectSource.verified_model_objects_for_set
 
     def capture(self, digest, manifest=None):
@@ -496,4 +496,4 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
                 mapping_nodes=(),
                 parameters=None,
             )
-    assert [item["model_content_sha256"] for item in bound[0]] == [second_digest]
+    assert [item.model_content_sha256 for item in bound[0]] == [second_digest]

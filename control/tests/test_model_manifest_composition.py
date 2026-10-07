@@ -17,7 +17,6 @@ from vonk_control.artifact_reference_scan import model_set_objects
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.compiled_execution_plan import (
-    VerifiedModelObject,
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
@@ -227,7 +226,7 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
     assert entry["expected_bytes"] == entry["verified_bytes"] == manifest.expected_bytes
     source = ModelCacheObjectSource.from_service(cache)
     receipts = source.verified_model_objects_for_set(manifest.digest, manifest)
-    assert {(item["model_content_sha256"], item["file_id"]) for item in receipts} == {
+    assert {(item.model_content_sha256, item.file_id) for item in receipts} == {
         (spec.model_content_sha256, spec.artifact_id) for spec in manifest.artifacts
     }
     model_documents = {
@@ -248,10 +247,7 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
     plan = compile_verified_execution_plan(
         runtime,
         model_artifact_set_sha256=manifest.digest,
-        model_objects=[
-            VerifiedModelObject.model_validate_json(canonical_message(item))
-            for item in receipts
-        ],
+        model_objects=receipts,
         runtime_image=VerifiedRuntimeImage(
             image_digest="sha256:" + "e" * 64,
             oci_layout_sha256="f" * 64,

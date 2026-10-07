@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 from vonk_control.compiled_execution_plan import VerifiedRuntimeImage
-from vonk_control.execution_plan_service import _runtime_receipt_mapping
-from vonk_control.oci_image_store import StoredImage
+from vonk_control.execution_plan_service import _runtime_image_receipt
+from vonk_control.oci_image_store import OciImageStore, StoredImage
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImageReceipt,
@@ -31,11 +31,13 @@ RUNTIME = {"architecture": "linux/arm64", "interface": "vonk.runtime.v1"}
 def image_generations(
     tmp_path: Path,
 ) -> tuple[FilesystemRuntimeImageStorage, RuntimeImageReceipt, RuntimeImageReceipt]:
-    if shutil.which("skopeo") is None:
+    skopeo = shutil.which("skopeo")
+    if skopeo is None:
         if os.environ.get("VONK_CI_RUNTIME_CACHE_PROOF") == "1":
             pytest.fail("the runtime cache proof lane must provide skopeo")
         pytest.skip("requires the Controller image ingress tool skopeo")
     storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
+    storage.layout = OciImageStore(tmp_path / "artifacts", skopeo=skopeo)
     recipe = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-source-build.json")
@@ -88,8 +90,8 @@ def test_new_image_generation_preserves_the_exact_older_plan(
     ],
 ) -> None:
     storage, older, newer = image_generations
-    old_plan = VerifiedRuntimeImage.model_validate(_runtime_receipt_mapping(older))
-    new_plan = VerifiedRuntimeImage.model_validate(_runtime_receipt_mapping(newer))
+    old_plan = _runtime_image_receipt(older)
+    new_plan = _runtime_image_receipt(newer)
 
     assert _bound_lookup(storage, old_plan) == older
     assert _bound_lookup(storage, new_plan) == newer
@@ -102,8 +104,8 @@ def test_missing_new_generation_reuses_old_bytes_without_rebinding_accepted_plan
     ],
 ) -> None:
     storage, older, newer = image_generations
-    old_plan = VerifiedRuntimeImage.model_validate(_runtime_receipt_mapping(older))
-    new_plan = VerifiedRuntimeImage.model_validate(_runtime_receipt_mapping(newer))
+    old_plan = _runtime_image_receipt(older)
+    new_plan = _runtime_image_receipt(newer)
     old_identity = old_plan.model_dump(mode="json")
     new_identity = new_plan.model_dump(mode="json")
     image = storage.layout.read(newer.image_digest)
