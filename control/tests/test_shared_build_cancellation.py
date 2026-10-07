@@ -2,6 +2,7 @@
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -9,13 +10,13 @@ from sqlalchemy import select
 from vonk_control import recipe_operations as operations_module
 from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
 from vonk_control.recipe_build_cancellation import current_build_consumers
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_operations import RunSwitchOperationConflict
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
+from .non_blocking import assert_ended_without_blocking
 from .test_build_cancellation_recovery import _active_claims, _issue, _settle_cleanup
-from .test_build_consumer_ownership import _availability
+from .test_build_consumer_ownership import _assert_observation_failure, _availability
 from .test_run_switch_build_fencing import _direct_parent, _snapshot
 
 
@@ -262,17 +263,17 @@ def test_new_consumer_cannot_join_across_last_consumer_cleanup(
         cleaning = pool.submit(lifecycle.reconcile_cancelled_builds)
         try:
             assert reached.wait(10), "cleanup did not reach its ownership boundary"
-            with pytest.raises(RecipeImageAvailabilityError) as caught:
-                availability.start(revision.id, actor="admin", request_id=key)
-            assert caught.value.code == "build.consumer_busy"
+            ended = availability.start(revision.id, actor="admin", request_id=key)
+            assert ended.failure_evidence is not None
+            assert ended.failure_evidence.code == "build.consumer_busy"
         finally:
             resume.set()
         assert cleaning.result(timeout=10)
     monkeypatch.setattr(operations_module, "current_build_consumers", original)
     if executor_id is not None:
-        with pytest.raises(RecipeImageAvailabilityError) as caught:
-            availability.start(revision.id, actor="admin", request_id=key)
-        assert caught.value.code == "build.cancellation_pending"
+        ended = availability.start(revision.id, actor="admin", request_id=key)
+        assert ended.failure_evidence is not None
+        assert ended.failure_evidence.code == "build.cancellation_pending"
         _settle_cleanup(
             sessions,
             lifecycle,
@@ -282,8 +283,15 @@ def test_new_consumer_cannot_join_across_last_consumer_cleanup(
         )
     with sessions() as session:
         assert session.scalar(select(Job.id).where(Job.request_id == key)) is None
-    accepted = availability.start(revision.id, actor="admin", request_id=key)
-    assert accepted.state == "queued"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        ended,
+        end=lambda receipt: receipt,
+        assert_reason=_assert_observation_failure,
+        fresh=lambda _: availability.start(
+            revision.id, actor="admin", request_id=str(uuid4())
+        ),
+    )
     assert lifecycle.get(child_id).state == "cancelled"
 
 

@@ -11,7 +11,7 @@ from typing import cast
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import LifecycleState, OperationProgress
 from vonk_control.job_documents import AvailabilityJobPayload
 from vonk_control.model_cache_contract import ModelCacheCancellation
 from vonk_control.models import Base, Job, ModelCacheOperation, User
@@ -19,6 +19,10 @@ from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     _removal_retry_is_due,
+)
+from vonk_control.recipe_image_availability_view_contract import (
+    RecipeCacheRemovalStatus,
+    RecipeImageAvailabilityView,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.stored_json import Residue, read_row_column
@@ -50,6 +54,15 @@ def _started(tmp_path: Path):
         "bookkeeping-revision", actor="operator", request_id="bookkeeping"
     )
     return engine, sessions, service, operation
+
+
+def test_availability_concerns_cannot_be_recombined_into_an_oversized_module() -> None:
+    """Catch moving split implementations back into one monolithic facade."""
+    import vonk_control.recipe_image_availability as package
+
+    assert package.__file__ is not None
+    for source in Path(package.__file__).parent.glob("*.py"):
+        assert len(source.read_text().splitlines()) < 1000, source.name
 
 
 def test_a_malformed_stored_retry_time_makes_the_removal_due_instead_of_failing(
@@ -118,6 +131,16 @@ def test_damaged_cancellation_evidence_reads_as_none_and_a_fresh_cancel_heals_it
     observed = service.get(operation.id)
     assert observed.cancellation == cancelled.cancellation
     assert observed.state == "cancelled" and service.run_pending() == 0
+    from .non_blocking import assert_ended_without_blocking
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        observed,
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "bookkeeping-revision", actor="operator", request_id="after-damaged-cancel"
+        ),
+    )
     engine.dispose()
 
 
@@ -175,9 +198,13 @@ def test_stored_damage_is_not_raised_as_an_invalid_operation_outside_the_removal
     import vonk_control.recipe_image_availability as module
 
     allowed = {"_read_removal_owner", "_read_removal_result"}
-    tree = ast.parse(Path(module.__file__).read_text())
+    assert module.__file__ is not None
+    trees = [
+        ast.parse(path.read_text())
+        for path in Path(module.__file__).parent.glob("*.py")
+    ]
     offenders: set[str] = set()
-    for function in ast.walk(tree):
+    for function in (node for tree in trees for node in ast.walk(tree)):
         if not isinstance(function, ast.FunctionDef) or function.name in allowed:
             continue
         for node in ast.walk(function):
@@ -185,8 +212,13 @@ def test_stored_damage_is_not_raised_as_an_invalid_operation_outside_the_removal
                 isinstance(node, ast.Raise)
                 and isinstance(node.exc, ast.Call)
                 and node.exc.args
-                and isinstance(node.exc.args[0], ast.Constant)
-                and node.exc.args[0].value == "recipe_image.operation_invalid"
+                and (
+                    isinstance(node.exc.args[0], ast.Constant)
+                    and node.exc.args[0].value == "recipe_image.operation_invalid"
+                    or isinstance(node.exc.args[0], ast.Attribute)
+                    and ast.unparse(node.exc.args[0])
+                    == "RecipeImageCode.OPERATION_INVALID"
+                )
             ):
                 offenders.add(function.name)
     assert not offenders, offenders
@@ -302,7 +334,9 @@ def test_lost_terminal_evidence_is_residue_and_a_new_request_still_runs(
     engine.dispose()
 
 
-def test_model_child_cancel_intent_survives_unrelated_payload_damage() -> None:
+def test_model_child_cancel_intent_survives_unrelated_payload_damage(
+    tmp_path: Path,
+) -> None:
     """A damaged download envelope must not forget its accepted cancellation."""
     from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
 
@@ -324,3 +358,305 @@ def test_model_child_cancel_intent_survives_unrelated_payload_damage() -> None:
     assert RecipeImageAvailabilityService._model_child_has_cancel_intent(row)
     row.payload = {"cancellation": {"request_key": "damaged"}}
     assert not RecipeImageAvailabilityService._model_child_has_cancel_intent(row)
+    from .non_blocking import assert_ended_without_blocking
+
+    engine, sessions, service, parent = _started(tmp_path)
+
+    def end_parent(receipt):
+        cancelled = service.cancel(
+            receipt.id,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000a04",
+            reason="end the parent",
+        )
+        assert isinstance(cancelled, RecipeImageAvailabilityView)
+        return cancelled
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        parent,
+        end=end_parent,
+        fresh=lambda _: service.start(
+            "bookkeeping-revision", actor="operator", request_id="after-child-cancel"
+        ),
+    )
+    engine.dispose()
+
+
+def test_metadata_observation_retries_before_admission_and_then_accepts(
+    tmp_path: Path,
+) -> None:
+    """A single metadata fault must not require another operator request."""
+    engine, sessions, service, _ = _started(tmp_path)
+    authority = service._authority
+    attempts = 0
+
+    def observe(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("metadata peer disconnected")
+        return authority(*args, **kwargs)
+
+    service._authority = observe
+    accepted = service.start(
+        "bookkeeping-revision", actor="operator", request_id="metadata-recovery"
+    )
+    assert accepted.state == "queued"
+    assert attempts == 2
+    with sessions() as session:
+        assert session.get(Job, accepted.id) is not None
+    engine.dispose()
+
+
+def test_exhausted_metadata_observation_ends_without_holds_and_fresh_request_works(
+    tmp_path: Path,
+) -> None:
+    """Permanent observation damage must not strand a request or synthesize a plan."""
+    from .non_blocking import assert_ended_without_blocking
+
+    engine, sessions, service, _ = _started(tmp_path)
+    authority = service._authority
+
+    def unavailable(*args, **kwargs):
+        raise OSError("metadata peer unavailable")
+
+    service._authority = unavailable
+    observed = service.start(
+        "bookkeeping-revision", actor="operator", request_id="metadata-unavailable"
+    )
+    assert observed.failure_evidence is not None
+    assert observed.failure_evidence.code == "recipe_image.metadata_refresh_failed"
+    assert observed.residue is not None
+    assert observed.build_input_sha256 is None
+    # This is a failed pre-admission observation, not a fabricated accepted Job.
+    with sessions() as session:
+        assert session.get(Job, observed.id) is None
+    service._authority = authority
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        observed,
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "bookkeeping-revision", actor="operator", request_id="metadata-restored"
+        ),
+        assert_reason=_assert_typed_failure,
+    )
+    engine.dispose()
+
+
+def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
+    tmp_path: Path,
+) -> None:
+    """A vanished exact child must not keep its parent's execution claim retrying."""
+    from vonk_control.job_documents import AvailabilityModelChild
+    from vonk_control.model_cache import ModelCacheNotFound
+    from vonk_control.strict_json import serialize_json_value
+
+    from .non_blocking import assert_ended_without_blocking
+
+    engine, sessions, service, operation = _started(tmp_path)
+    with sessions.begin() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        payload = read_row_column(row, "payload")
+        assert isinstance(payload, AvailabilityJobPayload)
+        row.payload = serialize_json_value(
+            payload.model_copy(
+                update={
+                    "model_child": AvailabilityModelChild(
+                        id="00000000-0000-4000-8000-000000000201",
+                        state=LifecycleState.QUEUED,
+                    )
+                }
+            )
+        )
+
+    def missing(operation_id: str):
+        raise ModelCacheNotFound("model_cache.operation_missing", operation_id)
+
+    service._model_cache = SimpleNamespace(get_operation=missing)
+
+    def end(receipt):
+        assert service.run_pending() == 1
+        return service.get(receipt.id)
+
+    ended, _ = assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=end,
+        fresh=lambda _: service.start(
+            "bookkeeping-revision", actor="operator", request_id="after-child-loss"
+        ),
+        assert_reason=_assert_typed_failure,
+    )
+    assert ended.failure_evidence is not None
+    assert ended.failure_evidence.code == "recipe_image.model_child_missing"
+    with sessions() as session:
+        row = session.get(Job, ended.id)
+        assert row is not None
+        payload = read_row_column(row, "payload")
+        assert isinstance(payload, AvailabilityJobPayload)
+        assert payload.claim_owner is None and payload.claim_until is None
+    engine.dispose()
+
+
+def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
+    tmp_path: Path,
+) -> None:
+    """A terminal child failure must release the image gate in the same worker pass."""
+    import json
+
+    from vonk_control.models import ArtifactLifecycleGate
+
+    from .non_blocking import assert_ended_without_blocking
+    from .recipe_removal_review_support import remove_after_review
+    from .runtime_image_fixtures import place_test_image
+    from .test_recipe_image_availability import (
+        ARCHIVE,
+        ARCHIVE_SHA,
+        _add_head,
+        _reference_receipt,
+    )
+
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine(f"sqlite:///{tmp_path / 'terminal-removal.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_head(session, _add_revision(session, "terminal-removal", recipe))
+        session.add(User(subject="operator", role="operator"))
+    storage = FilesystemRuntimeImageStorage(tmp_path / "image-cache")
+    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
+    (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(
+        json.dumps(_reference_receipt().model_dump(mode="json"))
+    )
+    service = _service(
+        sessions,
+        storage=storage,
+        authority=lambda *args, **kwargs: (recipe, _runtime()),
+        clock=lambda: datetime.now(UTC),
+    )
+    accepted = remove_after_review(
+        service,
+        "vonk-forge/synthetic-tiny-build",
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000a02",
+    )
+    operation_id = str(accepted["operation_id"])
+    with sessions() as session:
+        gate = session.get(ArtifactLifecycleGate, ("runtime-image", ARCHIVE_SHA))
+        assert gate is not None and gate.removal_owner_id == operation_id
+    operation = service.get_operator_operation(operation_id)
+
+    def end(receipt):
+        assert service._record_recipe_removal_failure(
+            operation_id,
+            code="model_cache.removal_child_missing",
+            detail="the exact child is gone",
+            retryable=False,
+        )
+        return service.get_operator_operation(operation_id)
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=end,
+        fresh=lambda _: service.start(
+            "terminal-removal", actor="operator", request_id="after-terminal-removal"
+        ),
+        assert_reason=_assert_typed_failure,
+    )
+    engine.dispose()
+
+
+def _assert_typed_failure(receipt: object) -> None:
+    if isinstance(receipt, RecipeImageAvailabilityView):
+        failure = receipt.failure_evidence
+    else:
+        assert isinstance(receipt, RecipeCacheRemovalStatus)
+        failure = receipt.failure
+    assert failure is not None and failure.code
+    assert failure.recovery_actions == []
+
+
+def test_metadata_security_refusal_is_preserved_without_an_admission_retry(
+    tmp_path: Path,
+) -> None:
+    """A denied authority must never become a retryable metadata observation."""
+    from vonk_agent_protocol import SecurityRefusalError, SecurityRefusalReason
+
+    engine, _sessions, service, _ = _started(tmp_path)
+    denied = SecurityRefusalError(
+        "catalog authentication required",
+        reason=SecurityRefusalReason.CATALOG_AUTHENTICATION_REQUIRED,
+    )
+    calls = 0
+
+    def refuse(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise denied
+
+    service._authority = refuse
+    with pytest.raises(SecurityRefusalError) as observed:
+        service.start(
+            "bookkeeping-revision", actor="operator", request_id="denied-metadata"
+        )
+    assert observed.value is denied and calls == 1
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "fault", ["cache-bookkeeping", "database", "malformed-document"]
+)
+def test_child_observation_fault_does_not_refuse_read_or_discard_verified_image(
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    """A read fault must not turn verified image availability into a refusal."""
+    from sqlalchemy.exc import SQLAlchemyError
+    from vonk_control.job_documents import AvailabilityModelChild
+    from vonk_control.model_cache import ModelCacheError
+    from vonk_control.strict_json import serialize_json_value
+
+    engine, sessions, service, operation = _started(tmp_path)
+    assert service.run_pending() == 1
+    verified = service.get(operation.id).artifact
+    assert verified is not None
+    with sessions.begin() as session:
+        row = session.get(Job, operation.id)
+        assert row is not None
+        payload = read_row_column(row, "payload")
+        assert isinstance(payload, AvailabilityJobPayload)
+        row.payload = serialize_json_value(
+            payload.model_copy(
+                update={
+                    "model_child": AvailabilityModelChild(
+                        id="00000000-0000-4000-8000-000000000201",
+                        state=LifecycleState.SUCCEEDED,
+                    ),
+                }
+            )
+        )
+    failure = (
+        ModelCacheError(
+            "model_cache.operation_invalid", "cache bookkeeping unavailable"
+        )
+        if fault == "cache-bookkeeping"
+        else SQLAlchemyError("read interrupted")
+        if fault == "database"
+        else ValueError("stored child document malformed")
+    )
+
+    def observe(operation_id: str):
+        raise failure
+
+    service._model_cache = SimpleNamespace(get_operation=observe)
+    observed = service.get(operation.id)
+    assert observed.state == "succeeded"
+    assert observed.artifact == verified
+    assert observed.residue is not None
+    page, _, _ = service.list_page()
+    assert page[0].artifact == verified and page[0].residue is not None
+    engine.dispose()

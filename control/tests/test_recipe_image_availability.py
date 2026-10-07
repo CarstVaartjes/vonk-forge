@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -83,6 +84,7 @@ from vonk_control.recipe_image_availability_api import (
 )
 from vonk_control.recipe_image_availability_view_contract import (
     RecipeCacheRemovalStatus,
+    RecipeImageAvailabilityView,
 )
 from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
@@ -98,6 +100,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .non_blocking import assert_ended_without_blocking
 from .recipe_removal_review_support import remove_after_review
 from .runtime_image_fixtures import place_test_image, remove_test_image
 
@@ -1304,6 +1307,20 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
     with sessions() as session:
         build = session.get(RecipeBuild, "00000000-0000-4000-8000-000000000901")
         assert build is not None and build.state == "building"
+    assert service.advance_removals(limit=1) == 1
+    with sessions() as session:
+        ended = session.scalar(select(Job).where(Job.id == str(result["operation_id"])))
+        assert ended is not None and ended.state == "succeeded"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cast(Job | RecipeImageAvailabilityView, ended),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "revision-remove-build",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -1475,6 +1492,19 @@ def test_oversized_removal_owner_does_not_hold_up_later_request(
         good = session.scalar(select(Job).where(Job.request_id == good_key))
         assert bad is not None
         assert good is not None and good.state == "succeeded"
+    with sessions() as session:
+        ended = session.scalar(select(Job).where(Job.request_id == good_key))
+        assert ended is not None and ended.state == "succeeded"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cast(Job | RecipeImageAvailabilityView, ended),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "revision-image",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
 
 
 def _empty_recipe_removal_owner(
@@ -1535,7 +1565,7 @@ def test_recipe_removal_request_key_rejects_changed_intent(
     cannot remove real or test artifact bytes.
     """
 
-    _sessions, storage, service, original_selector = _empty_recipe_removal_owner(
+    sessions, storage, service, original_selector = _empty_recipe_removal_owner(
         tmp_path
     )
     request_id = "00000000-0000-4000-8000-000000000016"
@@ -1563,6 +1593,19 @@ def test_recipe_removal_request_key_rejects_changed_intent(
             with_model=replay_with_model,
         )
     assert refused.value.code == "recipe_image.request_key_reused"
+    with sessions() as session:
+        ended = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert ended is not None and ended.state == "succeeded"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cast(Job | RecipeImageAvailabilityView, ended),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "revision-image",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
 
 
 def test_recipe_removal_request_key_replays_before_resolving_current_head(
@@ -1598,6 +1641,19 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
 
     assert replay == original
     assert replay["with_model"] is False
+    with sessions() as session:
+        ended = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert ended is not None and ended.state == "succeeded"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cast(Job | RecipeImageAvailabilityView, ended),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "revision-image",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
 
 
 def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
@@ -1675,6 +1731,12 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
     )
     assert replay.operation_id == accepted.operation_id
     assert replay.review_digest == before.review_digest
+    fresh = service.start(
+        "revision-active-review",
+        actor="operator",
+        request_id="prepare-during-removal",
+    )
+    assert fresh.state == "queued"
 
 
 def test_postgres_recipe_removal_persists_owner_before_first_unlink(
@@ -1750,6 +1812,27 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
     # Only the receipt is retired; the blobs wait for garbage collection.
     assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
     assert not receipt_file.exists()
+    # Each worker tick has a wall-clock budget; resume its durable checkpoint
+    # when PostgreSQL observation consumed the first tick's budget.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        with sessions() as session:
+            ended = session.scalar(select(Job).where(Job.request_id == request_id))
+            assert ended is not None
+            if ended.state == "succeeded":
+                break
+        service.advance_removals(limit=1)
+    assert ended is not None and ended.state == "succeeded"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cast(Job | RecipeImageAvailabilityView, ended),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "revision-removal-pre-effect",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
 
 
 def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and_checkpoint(
@@ -1932,6 +2015,19 @@ def test_recipe_removal_replay_rejects_malformed_stored_intent(
         )
 
     assert refused.value.code == "recipe_image.operation_invalid"
+    with sessions() as session:
+        ended = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert ended is not None and ended.state == "succeeded"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cast(Job | RecipeImageAvailabilityView, ended),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "revision-image",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
 
 
 def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
@@ -1958,6 +2054,19 @@ def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
         )
 
     assert refused.value.code == "recipe_image.operation_invalid"
+    with sessions() as session:
+        ended = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert ended is not None and ended.state == "succeeded"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cast(Job | RecipeImageAvailabilityView, ended),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "revision-image",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
 
 
 def test_recipe_removal_replay_rebuilds_a_damaged_stored_result_from_its_checkpoint(
@@ -1997,6 +2106,19 @@ def test_recipe_removal_replay_rebuilds_a_damaged_stored_result_from_its_checkpo
     assert replayed["state"] == "succeeded"
     assert replayed["with_model"] is False
     assert replayed["operation_id"] == operation.id
+    with sessions() as session:
+        ended = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert ended is not None and ended.state == "succeeded"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cast(Job | RecipeImageAvailabilityView, ended),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "revision-image",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
 
 
 @pytest.mark.parametrize(
@@ -2923,6 +3045,16 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
     assert completed.state == "succeeded", completed.failure
     # The removed archive is built again rather than reused.
     assert builds == [False]
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        completed,
+        end=lambda receipt: receipt,
+        fresh=lambda _: restarted.start(
+            "revision-overlap",
+            actor="operator",
+            request_id="prepare-after-rehydration",
+        ),
+    )
 
 
 def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
@@ -3232,6 +3364,16 @@ def test_accepted_cancellation_is_idempotent_and_prevents_queued_dispatch(
     assert service.run_pending() == 0
     assert service.get(operation.id).state == "cancelled"
     assert transport.calls == 0
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        service.get(operation.id),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "cancel-queued-revision",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
     engine.dispose()
 
 
@@ -3299,6 +3441,16 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
         assert row is not None and row.state == "cancelled"
         assert "image_result" not in row.payload
         assert "image_reference_intent" not in row.payload
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        service.get(operation.id),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "cancel-late-revision",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
     engine.dispose()
 
 
@@ -3421,6 +3573,16 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
     assert service._release_cancelled_claim(claim)
     assert service._reconcile_availability_cancellation(operation.id)
     assert service.get(operation.id).state == "cancelled"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        service.get(operation.id),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            revision_id,
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
     engine.dispose()
 
 
@@ -3480,6 +3642,21 @@ def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
         row = session.get(Job, operation.id)
         assert row is not None
         assert "image_reference_intent" not in row.payload
+    from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
+
+    elapsed = service._clock() + CANCEL_BUDGET + timedelta(seconds=1)
+    service._clock = lambda: elapsed
+    service.reconcile_cancellations()
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        service.get(operation.id),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            revision_id,
+            actor="operator",
+            request_id=f"fresh-fenced-cancel-{mutation}",
+        ),
+    )
     engine.dispose()
 
 
@@ -3574,6 +3751,16 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     still_shared = cache.get_operation(child.id)
     assert still_shared.state == LifecycleState.BACKOFF
     assert still_shared.progress["downloaded_bytes"] == before_bytes
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        service.get(first.id),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            revision_id,
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
     cache.close()
     engine.dispose()
 
