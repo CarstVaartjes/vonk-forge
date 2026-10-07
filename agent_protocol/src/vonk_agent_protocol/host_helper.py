@@ -88,11 +88,10 @@ class HostRuntimeRequest(WireModel):
     stop_plan: "RecipeStopPayload | None" = Field(  # noqa: F821, UP037
         default=None, exclude_if=lambda value: value is None
     )
-    run_generation: int | None = Field(
+    run_generation: (
+        Annotated[int, Field(ge=1, le=MAX_RUN_GENERATION, strict=True)] | None
+    ) = Field(
         default=None,
-        ge=1,
-        le=MAX_RUN_GENERATION,
-        strict=True,
         exclude_if=lambda value: value is None,
     )
     installation_id: Uuid4Text | None = Field(
@@ -217,11 +216,10 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     stop_plan_sha256: Digest | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    run_generation: int | None = Field(
+    run_generation: (
+        Annotated[int, Field(ge=1, le=MAX_RUN_GENERATION, strict=True)] | None
+    ) = Field(
         default=None,
-        ge=1,
-        le=MAX_RUN_GENERATION,
-        strict=True,
         exclude_if=lambda value: value is None,
     )
     runtime_run_id: Uuid4Text | None = Field(
