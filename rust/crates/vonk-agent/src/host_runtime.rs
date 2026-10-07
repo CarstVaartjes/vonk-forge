@@ -2,7 +2,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -819,8 +819,10 @@ pub fn finding_word(code: RuntimePreflightFindingCode) -> String {
 }
 
 fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, HostRuntimeError> {
-    match fs::create_dir(root) {
-        Ok(()) => fs::set_permissions(root, fs::Permissions::from_mode(0o700))?,
+    // Publish the directory with its owner-only mode in the mkdir itself.
+    // Parallel callers must never observe an intermediate permissive root.
+    match fs::DirBuilder::new().mode(0o700).create(root) {
+        Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
     }
@@ -939,6 +941,71 @@ mod tests {
     use uuid::Uuid;
     use vonk_agent_protocol::{HostRuntimeAction, RecipeStartRequest};
 
+    #[test]
+    fn request_root_publication_has_no_permissive_intermediate_state() {
+        const CHILD: &str = "VONK_REQUEST_ROOT_PUBLICATION_COUNTERPROOF";
+        if std::env::var_os(CHILD).is_none() {
+            // Umask is process-wide. Give only this isolated child the old
+            // publisher's ordinary 022 umask; parallel tests remain untouched.
+            let mut child = std::process::Command::new("sh")
+                .args(["-c", "umask 022; exec \"$@\"", "request-root-counterproof"])
+                .arg(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "host_runtime::tests::request_root_publication_has_no_permissive_intermediate_state",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .spawn()
+                .unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    assert!(
+                        status.success(),
+                        "request root publication counterproof failed"
+                    );
+                    return;
+                }
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!("request root publication counterproof exceeded its elapsed budget");
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let old_root = temp.path().join("two-phase");
+        // Pause the old real two-phase publisher after mkdir, before chmod.
+        // Another actual writer must refuse the published unsafe root.
+        fs::create_dir(&old_root).unwrap();
+        assert_eq!(
+            fs::metadata(&old_root).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        let old_error = std::thread::scope(|scope| {
+            scope
+                .spawn(|| write_request(&old_root, &"a".repeat(64), b"{}"))
+                .join()
+                .unwrap()
+                .expect_err("another writer must refuse the unsafe intermediate directory")
+        });
+        assert_eq!(old_error.preflight_code(), "helper_request_storage_invalid");
+        fs::set_permissions(&old_root, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(write_request(&old_root, &"a".repeat(64), b"{}").is_ok());
+
+        let atomic_root = temp.path().join("atomic");
+        let path = write_request(&atomic_root, &"b".repeat(64), b"{}").unwrap();
+        assert_eq!(
+            fs::metadata(&atomic_root).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(fs::read(path).unwrap(), b"{}");
+        // The cancellation proof below starts all eight native calls against
+        // one absent root, and keeps their actual files through cancellation.
+    }
+
     /// Real Unix framing and the production spawn_blocking boundary prove
     /// ownership survives abandoned logical pages. Only native process-running
     /// evidence is a fixture response; permits/socket/request cleanup are real.
@@ -950,12 +1017,71 @@ mod tests {
         struct Gate {
             release: Arc<(Mutex<bool>, Condvar)>,
             stop: Arc<AtomicBool>,
+            server: Option<std::thread::JoinHandle<()>>,
+            tasks: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
+            deadline: std::time::Instant,
+            fixture: Option<tempfile::TempDir>,
         }
         impl Drop for Gate {
             fn drop(&mut self) {
-                *self.release.0.lock().unwrap() = true;
+                let mut cleanup_complete = true;
+                let tasks = self.tasks.lock().unwrap_or_else(|error| error.into_inner());
+                for task in tasks.iter() {
+                    task.abort();
+                }
+                *self
+                    .release
+                    .0
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = true;
                 self.release.1.notify_all();
                 self.stop.store(true, Ordering::SeqCst);
+                if let Some(server) = self.server.take() {
+                    while !server.is_finished() && std::time::Instant::now() < self.deadline {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    // Never turn a bounded cleanup into an unbounded join.
+                    // A still-running server keeps the fixture below intact.
+                    if server.is_finished() {
+                        cleanup_complete &= server.join().is_ok();
+                    } else {
+                        cleanup_complete = false;
+                    }
+                }
+                while tasks.iter().any(|task| !task.is_finished())
+                    && std::time::Instant::now() < self.deadline
+                {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                cleanup_complete &= tasks.iter().all(|task| task.is_finished());
+                // An aborted async task can leave real spawn_blocking work
+                // alive. Returning all permits fences its request cleanup.
+                let slots = super::background_inspection_slots();
+                loop {
+                    if let Ok(permits) = slots
+                        .clone()
+                        .try_acquire_many_owned(BACKGROUND_RUN_INSPECTION_CONCURRENCY as u32)
+                    {
+                        drop(permits);
+                        break;
+                    }
+                    if std::time::Instant::now() >= self.deadline {
+                        cleanup_complete = false;
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                if !cleanup_complete {
+                    // Files remain owned by unresolved native calls. Do not
+                    // turn a deadline or a failed reaper into false absence.
+                    if let Some(fixture) = self.fixture.take() {
+                        let _retained = fixture.keep();
+                    }
+                    eprintln!("inspection fixture cleanup unresolved; owned files retained");
+                    if !std::thread::panicking() {
+                        panic!("inspection fixture cleanup exceeded its elapsed budget or failed");
+                    }
+                }
             }
         }
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
@@ -969,9 +1095,14 @@ mod tests {
         let started = Arc::new(AtomicUsize::new(0));
         let release = Arc::new((Mutex::new(false), Condvar::new()));
         let stop = Arc::new(AtomicBool::new(false));
-        let gate = Gate {
+        let tasks = Arc::new(Mutex::new(Vec::new()));
+        let mut gate = Gate {
             release: release.clone(),
             stop: stop.clone(),
+            server: None,
+            tasks: tasks.clone(),
+            deadline,
+            fixture: Some(temp),
         };
         let native_active = active.clone();
         let native_maximum = maximum.clone();
@@ -1000,6 +1131,9 @@ mod tests {
                 workers.push(std::thread::spawn(move || {
                     stream
                         .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(2)))
                         .unwrap();
                     let mut prefix = [0; 4];
                     stream.read_exact(&mut prefix).unwrap();
@@ -1055,6 +1189,7 @@ mod tests {
                     stream.write_all(&body).unwrap();
                 }));
             }
+            let mut worker_failed = false;
             for worker in workers {
                 while !worker.is_finished() {
                     assert!(
@@ -1063,13 +1198,15 @@ mod tests {
                     );
                     std::thread::sleep(Duration::from_millis(1));
                 }
-                std::thread::JoinHandle::join(worker).unwrap();
+                worker_failed |= std::thread::JoinHandle::join(worker).is_err();
             }
+            assert!(!worker_failed, "inspection fixture worker failed");
         });
+        gate.server = Some(server);
         let spawn = |background: bool| {
             let socket = socket.clone();
             let requests = requests.clone();
-            tokio::spawn(async move {
+            let task = tokio::spawn(async move {
                 let client = crate::client::AgentHttpClient::for_http_test(
                     "http://127.0.0.1:9/",
                     "spk_0123456789abcdef0123456789abcdef",
@@ -1088,13 +1225,29 @@ mod tests {
                         .await
                         .map(|report| report.running)
                 }
-            })
+            });
+            tasks.lock().unwrap().push(task.abort_handle());
+            task
         };
-        let first: Vec<_> = (0..BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+        let mut first: Vec<_> = (0..BACKGROUND_RUN_INSPECTION_CONCURRENCY)
             .map(|_| spawn(true))
             .collect();
         tokio::time::timeout(Duration::from_secs(3), async {
             while active.load(Ordering::SeqCst) != BACKGROUND_RUN_INSPECTION_CONCURRENCY {
+                for task in &mut first {
+                    if task.is_finished() {
+                        match task.await {
+                            Ok(Err(error)) => panic!(
+                                "inspection fixture startup refused request: {}",
+                                error.preflight_code()
+                            ),
+                            Ok(Ok(_)) => {
+                                panic!("inspection fixture unexpectedly completed before release")
+                            }
+                            Err(_) => panic!("inspection fixture startup task failed to join"),
+                        }
+                    }
+                }
                 assert!(
                     std::time::Instant::now() < deadline,
                     "inspection fixture startup exceeded its elapsed budget"
@@ -1169,17 +1322,20 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        drop(gate);
-        while !server.is_finished() {
+        *gate.release.0.lock().unwrap() = true;
+        gate.release.1.notify_all();
+        gate.stop.store(true, Ordering::SeqCst);
+        while !gate.server.as_ref().unwrap().is_finished() {
             assert!(
                 std::time::Instant::now() < deadline,
                 "inspection fixture server shutdown exceeded its elapsed budget"
             );
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
-        std::thread::JoinHandle::join(server).unwrap();
+        std::thread::JoinHandle::join(gate.server.take().unwrap()).unwrap();
         assert!(fs::read_dir(requests).unwrap().next().is_none());
         drop(permits);
+        drop(gate);
     }
 
     #[test]
