@@ -24,7 +24,9 @@ from vonk_control.fleet_projection import (
 from vonk_control.models import AgentNode, Base
 from vonk_control.observation_transfer import (
     ObservationTransferChunk,
+    ObservationTransferComplete,
     ObservationTransferRecord,
+    ObservationTransferStart,
     observation_response,
 )
 from vonk_control.strict_json import serialize_json_value
@@ -204,3 +206,60 @@ def test_base64_lexical_and_padding_constraints_are_canonical_schema_rules(data)
             record
         )
     )
+
+
+def test_transfer_identity_and_hash_owner_and_export_reject_terminal_newline():
+    start = {
+        "type": "start",
+        "transfer_id": "11111111-1111-4111-8111-111111111111\n",
+        "resource": "fleet",
+        "encoding": "base64-canonical-json-utf8-v1",
+    }
+    complete = {
+        "type": "complete",
+        "transfer_id": "11111111-1111-4111-8111-111111111111",
+        "chunks": 1,
+        "bytes": 1,
+        "sha256": "0" * 64 + "\n",
+    }
+    for model, record in [
+        (ObservationTransferStart, start),
+        (ObservationTransferComplete, complete),
+    ]:
+        with pytest.raises(ValidationError):
+            model.model_validate(record, strict=True)
+        assert list(Draft202012Validator(model.model_json_schema()).iter_errors(record))
+
+
+def test_whole_membership_has_no_observation_only_512_group_cap(tmp_path):
+    from vonk_control.fleet_projection import UnavailableRunPresence
+
+    snapshot = _large_snapshot(tmp_path)
+    node = snapshot.nodes[0]
+    node.installed = [
+        UnavailableRecipePresence(
+            installation_id=f"installation-{index}",
+            projection_issue="Stored installation evidence is temporarily unreadable",
+            member_node_ids=[node.id],
+            expected_rank_count=1,
+            present_ranks=[0],
+            complete=None,
+        )
+        for index in range(513)
+    ]
+    node.loaded = [
+        UnavailableRunPresence(
+            run_id=f"run-{index}",
+            projection_issue="Stored run evidence is temporarily unreadable",
+            member_node_ids=[node.id],
+            expected_rank_count=1,
+            present_ranks=[0],
+            healthy=None,
+        )
+        for index in range(513)
+    ]
+    response = _peer(snapshot).get("/api/fleet")
+    assert response.status_code == 200
+    assert _client(tmp_path, response).request(
+        "GET", "/api/fleet"
+    ) == serialize_json_value(snapshot)
