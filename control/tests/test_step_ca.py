@@ -383,7 +383,7 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     assert issued.node_id == NODE_ID
     assert len(seen) == 1
     request = seen[0]["request"]
-    assert request.url == f"{CA_URL}/1.0/sign"
+    assert request.url == f"{CA_URL}/1.0/vonk/sign"
     assert request.headers["content-type"] == "application/json"
     assert seen[0]["body"]["mode"] == "issue"
     assert seen[0]["body"]["csr"] == request_pem.decode()

@@ -387,7 +387,7 @@ class StepCertificateAuthority(CertificateAuthority):
             raise ValueError("CA request no longer matches exact issuer policy or CSR")
         raw_response = self._json_request(
             "POST",
-            "/1.0/sign",
+            "/1.0/vonk/sign",
             CertificateSignRequest.model_validate(
                 {
                     "csr": csr.public_bytes(serialization.Encoding.PEM).decode("ascii"),
@@ -657,7 +657,7 @@ class StepCertificateAuthority(CertificateAuthority):
                         raise StepCAError("step-ca response is too large")
                     output.extend(chunk)
                 if not response.is_success:
-                    if path == "/1.0/sign":
+                    if path == "/1.0/vonk/sign" and response.status_code != 404:
                         try:
                             refusal = CertificateRefusalReply.model_validate_json(
                                 bytes(output)
