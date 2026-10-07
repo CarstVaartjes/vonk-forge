@@ -91,13 +91,23 @@ jobs:
           uv run --project control --frozen pytest -q -n 0 \
             control/tests/test_observation_capture_postgres.py --tb=short \
             --junitxml=/tmp/observation-capture.xml 2>&1 | tee /tmp/observation-capture-positive.log
-      - name: Require five real executed positive cases
+      - name: Require every named real positive capture case
         shell: bash
         run: |
           python - <<'PYTHON'
           import xml.etree.ElementTree as ET
           cases = ET.parse("/tmp/observation-capture.xml").findall(".//testcase")
-          assert len(cases) == 5, "all five capture cases must execute"
+          node = "spk_" + "1" * 32
+          expected = {
+              "test_fleet_cursor_and_membership_are_one_real_sql_snapshot",
+              "test_slow_stream_releases_sql_and_keeps_original_observation[fleet-agent_nodes]",
+              "test_slow_stream_releases_sql_and_keeps_original_observation[platform-control_process_heartbeats]",
+              "test_real_sql_capture_timeout_is_retryable_and_same_read_repairs[fleet-agent_nodes]",
+              f"test_real_sql_capture_timeout_is_retryable_and_same_read_repairs[fleet/{node}-agent_nodes]",
+              "test_real_sql_capture_timeout_is_retryable_and_same_read_repairs[platform-control_process_heartbeats]",
+              "test_real_sql_capture_timeout_is_retryable_and_same_read_repairs[cli/contract-control_process_heartbeats]",
+          }
+          assert len(cases) == len(expected) and {case.get("name") for case in cases} == expected, "every named capture and repair case must execute exactly once"
           assert all(case.find("skipped") is None and case.find("failure") is None and case.find("error") is None for case in cases), "no skipped or failed capture evidence"
           PYTHON
       - name: Retain exact-source capture evidence
