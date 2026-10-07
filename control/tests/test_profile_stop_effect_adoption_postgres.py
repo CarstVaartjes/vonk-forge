@@ -209,7 +209,12 @@ def _pending_stop(
             )
         )
         if issue_grant:
-            assert len(native) == 1
+            assert len(native) == 1, {
+                job.id: (job.state, job.status_reason, job.result)
+                for job in session.scalars(
+                    select(Job).where(Job.kind.in_(["recipe.stop.v2", "recipe.stop"]))
+                )
+            }
             assert native[0].payload["run_id"] == run.owner_id
             native_id = native[0].id
         else:

@@ -13,6 +13,7 @@ from vonk_control.models import (
     Job,
     RecipeRun,
     ResourceReservation,
+    RunNode,
 )
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
@@ -524,3 +525,139 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     )
     complete_started_recipe(sessions, restarted, fresh_run.id)
     assert restarted.get(fresh_run.id).state == "succeeded"
+
+
+def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
+    published_service_run, monkeypatch
+):
+    from vonk_agent_protocol import (
+        AgentResult,
+        AgentResultState,
+        OutcomeDone,
+        OutcomeKind,
+        RecipeStopResult,
+    )
+    from vonk_control.agent_jobs import AgentJobService
+
+    from .agent_fences import fenced_operation
+    from .test_recipe_operations import _issue_exact_stop_grant, complete_started_recipe
+
+    sessions, service, _jobs, routes, publisher, run_id, nodes = published_service_run
+    before_claims = claims(sessions, run_id)
+    assert any(state == "active" for _id, _node, state, _bytes in before_claims)
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        installation_id = run.installation_id
+        accepted_run_digest = run.plan_digest
+        accepted_generation = run.run_generation
+        history = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_id"].as_string() == run_id,
+            )
+        )
+        assert history is not None and history.state == "succeeded"
+        lost_start_id = history.id
+        session.delete(history)
+        for member in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            # Lost observation is neither a process absence nor released memory.
+            member.observed_run_generation = None
+            member.observation_process_running = None
+            member.observation_endpoint_ready = None
+            member.observation_observed_at = None
+    generations = len(publisher.aliases)
+    routes.maintain()
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.route_state == "published"
+        assert session.get(Job, lost_start_id) is None
+    assert len(publisher.aliases) == generations
+    assert claims(sessions, run_id) == before_claims
+    # Real allocator admission still accounts for this uncertain service run.
+    assert not service.preview_run(installation_id, "before-exact-cleanup").allowed
+    preview = service.preview_stop(run_id)
+    assert preview.allowed
+    request = str(uuid4())
+
+    def process_lost(*args, **kwargs):
+        raise RuntimeError("lost service Stop process after accepted withdrawal")
+
+    monkeypatch.setattr(service, "_dispatch_stop_after_withdrawal", process_lost)
+    with pytest.raises(RuntimeError, match="lost service Stop"):
+        service.stop(
+            run_id, plan_digest=preview.plan_digest, actor="admin", request_id=request
+        )
+    with sessions() as session:
+        accepted = session.scalar(select(Job).where(Job.request_id == request))
+        assert accepted is not None and accepted.state == "running"
+        accepted_id = accepted.id
+        exact_payloads = canonical_message(
+            accepted.payload["service_stop_review"]["exact_payloads"]
+        )
+        assert accepted.payload.get("phases") is None
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.route_state == "withdrawn"
+    assert claims(sessions, run_id) == before_claims
+    clock = NOW + timedelta(seconds=6)
+    jobs = AgentJobService(sessions, clock=lambda: clock)
+    restarted = RecipeOperationService(
+        sessions,
+        install_admission=service._install_admission,
+        run_admission=service._run_admission,
+        agent_jobs=jobs,
+        route_publications=routes,
+        clock=lambda: clock,
+    )
+    jobs.set_result_consumer(restarted.consume_agent_result)
+    RecipeOperationWorker(
+        sessions,
+        routes,
+        clock=lambda: clock,
+        stop_admission_cleanup=restarted.reconcile_pending_service_stops,
+    ).tick()
+    assert (
+        restarted.stop(
+            run_id, plan_digest=preview.plan_digest, actor="admin", request_id=request
+        ).id
+        == accepted_id
+    )
+    with sessions() as session:
+        accepted = session.get(Job, accepted_id)
+        assert accepted is not None
+        assert (
+            canonical_message(accepted.payload["service_stop_review"]["exact_payloads"])
+            == exact_payloads
+        )
+    assert claims(sessions, run_id) == before_claims
+    claim, stop, _grant = _issue_exact_stop_grant(
+        sessions, node_id=nodes[0], certificate_serial="serial-0", grant_now=clock
+    )
+    assert stop.run_id == run_id and stop.run_generation == accepted_generation
+    assert stop.plan_digest == accepted_run_digest
+    assert fenced_operation(sessions, claim).parent_job_id == accepted_id
+    jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.SUCCEEDED,
+            result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
+        )
+    )
+    assert restarted.get(accepted_id).state == "succeeded"
+    assert not any(
+        state == "active" for _id, _node, state, _bytes in claims(sessions, run_id)
+    )
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "stopped"
+    fresh_plan = restarted.preview_run(installation_id, "after-lost-service-cleanup")
+    assert fresh_plan.allowed
+    fresh = restarted.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid4()),
+    )
+    assert fresh.owner_id != run_id
+    complete_started_recipe(sessions, restarted, fresh.id)
+    assert restarted.get(fresh.id).state == "succeeded"

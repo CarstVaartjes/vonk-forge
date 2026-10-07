@@ -2793,6 +2793,14 @@
       "count": 1,
       "reason": "security-edge",
       "justification": "The withdrawal is an explicitly reviewed Stop effect, not a reaction to observation uncertainty. Fresh exact observations and expired grace must not republish that run while its same accepted destructive owner awaits native dispatch."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_lost_service_start_history_exact_stop_restart_releases_fresh_run",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Unknown observations and deleted Start history preserve the healthy route and active claims until an explicitly reviewed exact Stop is accepted. Withdrawal is that accepted command effect; restart then records a fenced Stop receipt before releasing claims and completing a real fresh Start."
     }
   ]
 }

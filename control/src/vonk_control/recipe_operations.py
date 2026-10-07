@@ -3324,6 +3324,7 @@ class RecipeOperationService:
         ordinal: int | None,
     ) -> ProfileStopOwnerBinding:
         from .fleet_profiles import _persisted_profile_progress
+        from .run_switch_contract import RunSwitchOperationResult
         from .run_switch_operations import _phase_request_key, _stop_child_request_key
 
         application = session.get(FleetProfileApplication, profile_application_id)
@@ -3358,11 +3359,18 @@ class RecipeOperationService:
             root = RunSwitchJobPayload.model_validate_json(
                 canonical_message(parent.payload), strict=True
             )
-            progress = root.progress
+            # Immutable payload progress is the acceptance snapshot. The
+            # current phase and retry identity belong to the canonical result.
+            progress = RunSwitchOperationResult.model_validate_json(
+                canonical_message(parent.result), strict=True
+            )
             phase_index = progress.phase_index
             item_index = progress.item_index
             if (
-                phase_index is None
+                progress.profile_application_id != application.id
+                or progress.workload_intent_ordinal != ordinal
+                or progress.cancellation is not None
+                or phase_index is None
                 or item_index is None
                 or phase_index >= len(root.plan.phases)
                 or item_index >= len(root.plan.stops)
@@ -3382,6 +3390,8 @@ class RecipeOperationService:
             )
             if (
                 phase.kind != "stop"
+                or progress.phase != phase.kind
+                or progress.subphase != phase.subphase
                 or impact.run_id != run.id
                 or request_id
                 != _stop_child_request_key(phase_key, run.id, application.id)
