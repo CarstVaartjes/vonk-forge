@@ -2932,7 +2932,8 @@ mod tests {
                     let mut request = Vec::new();
                     let mut buffer = [0_u8; 4096];
                     let header_end = loop {
-                        let size = stream.read(&mut buffer).await.unwrap();
+                        let size = tokio::time::timeout_at(deadline, stream.read(&mut buffer))
+                            .await.expect("rotation request read deadline").unwrap();
                         assert_ne!(size, 0, "rotation request ended before its body");
                         request.extend_from_slice(&buffer[..size]);
                         if let Some(end) = request.windows(4).position(|v| v == b"\r\n\r\n") {
@@ -3011,7 +3012,9 @@ mod tests {
             let rotation = client.activate_replacement(&replacement, 2);
             tokio::pin!(rotation);
             tokio::select! {
-                _ = activation_received.notified() => (),
+                received = tokio::time::timeout_at(deadline, activation_received.notified()) => {
+                    received.expect("activation peer acceptance deadline");
+                },
                 result = &mut rotation => panic!("activation ended before silent peer: {result:?}"),
             }
             assert!(
