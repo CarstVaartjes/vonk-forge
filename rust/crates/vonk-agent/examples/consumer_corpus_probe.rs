@@ -55,6 +55,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             value.validate()?;
             canonical_json(&value)?
         }
+        Some("RecipeStartPayload") => canonical_json(&parse_strict::<
+            vonk_agent_protocol::generated::RecipeStartPayload,
+        >(&raw)?)?,
         Some("RecipeBuildEnvironmentArgument") => canonical_json(&parse_strict::<
             vonk_agent_protocol::generated::RecipeBuildEnvironmentArgument,
         >(&raw)?)?,
