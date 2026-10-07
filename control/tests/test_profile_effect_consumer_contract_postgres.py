@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 from zipfile import ZipFile
@@ -29,13 +30,16 @@ from vonk_agent_protocol import (
     OutcomeKind,
     RecipeStopResult,
 )
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profiles import RunSwitchFleetProfileAdapter
 from vonk_control.models import AgentOperation, Job
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .subprocess_environment import install_cli_wheel, isolated_environment
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 from .test_profile_stop_effect_adoption_postgres import _claims
+from .test_recipe_operations import _issue_exact_stop_grant
 from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 pytest_plugins = ("tests.test_profile_stop_effect_adoption_postgres",)
@@ -145,7 +149,7 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         clock,
         original,
         lifecycle,
-        jobs,
+        _jobs,
         nodes,
         stop_id,
         request_key,
@@ -324,10 +328,50 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         corrupt_projection[0] = False
         assert _claims(sessions, nodes[0]) == before_claims
 
-        # The real fenced receipt establishes Stop. Neither absence nor a
-        # successful unrelated load is sufficient for the consumer decision.
-        receipt = AgentResult(
+        # Reconnect the offline lane through transport reconciliation and the
+        # exact-plan signer. The retained request/native operation stay fixed;
+        # an expired receipt cannot release their original capacity claims.
+        clock[0] += timedelta(hours=1)
+        jobs = AgentJobService(sessions, clock=lambda: clock[0])
+        jobs.set_result_consumer(lifecycle.consume_agent_result)
+        jobs.reconcile_orders()
+        with sessions() as session:
+            native = session.get(AgentOperation, native_id)
+            assert native is not None
+            if native.next_action_at is not None:
+                clock[0] = max(clock[0], native.next_action_at)
+        fresh, exact_stop, _grant = _issue_exact_stop_grant(
+            sessions,
+            node_id=nodes[0],
+            certificate_serial="serial-0",
+            grant_now=clock[0],
+        )
+        assert fresh.fence != claim.fence
+        assert fresh.payload == claim.payload
+        assert fenced_operation(sessions, fresh).id == native_id
+        assert (
+            fenced_attempt(sessions, fresh).attempt
+            > fenced_attempt(sessions, claim).attempt
+        )
+        assert exact_stop.run_id == pending["stop_effect"]["run_id"]
+        stale_receipt = AgentResult(
             fence=claim.fence,
+            state=AgentResultState.SUCCEEDED,
+            result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
+        )
+        assert jobs.record_late_result(
+            AgentResult.model_validate_json(stale_receipt.model_dump_json())
+        )
+        assert fenced_operation(sessions, fresh).state == "running"
+        assert _claims(sessions, nodes[0]) == before_claims
+        still_pending = cleanup.stop_effects(observe())
+        assert still_pending is not None and len(still_pending) == 1
+        assert cleanup.same_effect(pending, still_pending[0])
+        assert not cleanup.stopped(still_pending[0])
+
+        # Only the fresh canonical receipt establishes Stop.
+        receipt = AgentResult(
+            fence=fresh.fence,
             state=AgentResultState.SUCCEEDED,
             result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
         )

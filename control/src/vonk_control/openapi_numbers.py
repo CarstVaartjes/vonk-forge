@@ -14,14 +14,16 @@ from copy import deepcopy
 from typing import Any
 
 from fastapi import FastAPI, routing
+from fastapi._compat import (
+    get_definitions,
+    get_flat_models_from_fields,
+    get_model_name_map,
+)
 from fastapi.encoders import jsonable_encoder
 from fastapi.openapi.models import OpenAPI
 from fastapi.openapi.utils import (
     _get_api_route_for_openapi,
-    get_definitions,
     get_fields_from_routes,
-    get_flat_models_from_fields,
-    get_model_name_map,
     get_openapi_path,
 )
 from pydantic.json_schema import models_json_schema

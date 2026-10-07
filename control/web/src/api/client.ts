@@ -143,15 +143,28 @@ export class ApiClient implements ControlApi {
           if (typeof value !== "string" && typeof value !== "boolean") throw new Error("Unsupported API path parameter");
           return encodeURIComponent(String(value));
         });
-        request = new Request(url, request);
+        // Request is not a portable WebIDL dictionary: some browser/test
+        // runtimes discard its accessor-backed method when used as init.
+        // This owner constructs a new URL while preserving every request option.
+        const init = {
+          method: request.method, headers: request.headers, body: request.body,
+          credentials: request.credentials, signal: request.signal,
+          redirect: request.redirect, mode: request.mode, cache: request.cache,
+          referrer: request.referrer, referrerPolicy: request.referrerPolicy,
+          integrity: request.integrity, keepalive: request.keepalive,
+          // Node's native fetch requires this for a ReadableStream body;
+          // browsers ignore unknown dictionary members.
+          duplex: "half",
+        };
+        request = new Request(url, init);
         if (request.headers.get("content-type")?.startsWith("application/json") && request.body !== null) {
           const text = await request.clone().text();
           serializeControlBody(request.method, request.url, parseContractJson(text));
         }
-        if (["GET", "HEAD"].includes(request.method)) return;
-        const headers = new Headers(request.headers);
-        headers.set("X-CSRF-Token", await this.requiredCsrfToken());
-        return new Request(request, {headers});
+        if (!["GET", "HEAD"].includes(request.method)) {
+          request.headers.set("X-CSRF-Token", await this.requiredCsrfToken());
+        }
+        return request;
       },
       onResponse: async ({request, response}) => {
         const text = await response.text();

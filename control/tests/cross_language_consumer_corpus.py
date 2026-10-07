@@ -207,16 +207,19 @@ def corpus() -> dict:
                 ),
                 consumers=["python", "browser"],
             )
-    for component, document in (
-        ("FailureDiagnostics", diagnostic()),
-        ("OperationProgress", {"phase": "transfer"}),
-    ):
-        spoof = {"$serde_json::private::Number": "2"}
-        if component == "FailureDiagnostics":
-            document["stdout"]["dropped_bytes"] = spoof
-        else:
-            document["completed_bytes"] = spoof
-        add(f"private-number-object-{component}", component, json.dumps(document))
+    spoof = {"$serde_json::private::Number": "2"}
+    diagnostic_spoof = diagnostic()
+    diagnostic_spoof["stdout"]["dropped_bytes"] = spoof
+    add(
+        "private-number-object-FailureDiagnostics",
+        "FailureDiagnostics",
+        json.dumps(diagnostic_spoof),
+    )
+    add(
+        "private-number-object-OperationProgress",
+        "OperationProgress",
+        json.dumps({"phase": "transfer", "completed_bytes": spoof}),
+    )
 
     base = diagnostic()
     add("diagnostics-producer", "FailureDiagnostics", json.dumps(base))
@@ -304,6 +307,7 @@ def corpus() -> dict:
     )
     for token in (
         "0",
+        "-0",
         "-1",
         "9007199254740993",
         "18446744073709551616",
@@ -422,6 +426,15 @@ def corpus() -> dict:
             "RequestValidationProblem",
             json.dumps(document).replace('"__NUMBER__"', token),
         )
+    rejected_location = json.loads(
+        next(case["text"] for case in cases if case["id"] == "error-422")
+    )
+    rejected_location["issues"][0]["loc"][2] = {"$serde_json::private::Number": "2"}
+    add(
+        "error-422-loc-private-number-object",
+        "RequestValidationProblem",
+        json.dumps(rejected_location),
+    )
     for case in cases:
         if case["component"] == "JobDetailResponse":
             case["http"] = {
