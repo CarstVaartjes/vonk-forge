@@ -17,6 +17,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from .parsed_sources import parse_file
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -410,6 +412,47 @@ def scan_shell(source: str, *, path: str) -> list[Site]:
     ]
 
 
+def scan_compose_shell(source: str, *, path: str) -> list[Site]:
+    """Inspect actual shell entrypoints, not arbitrary YAML or command strings."""
+    document = yaml.safe_load(source)
+    if not isinstance(document, dict):
+        return []
+    services = document.get("services", {})
+    if not isinstance(services, dict):
+        return []
+    sites: list[Site] = []
+    for service_name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        for field in ("entrypoint", "command"):
+            command = service.get(field)
+            if (
+                isinstance(command, list)
+                and len(command) >= 3
+                and command[0] in {"sh", "/bin/sh", "bash", "/bin/bash"}
+                and command[1] == "-c"
+                and isinstance(command[2], str)
+            ):
+                body = command[2]
+                has_loop = re.search(r"\b(?:while\s+(?:true|:)|until\s+)", body)
+                has_exit_bound = re.search(
+                    r"if\s+\[[^\]]*(?:attempt|deadline|remaining|SECONDS)[^\]]*\]"
+                    r"\s*;\s*then\b.*?\b(?:exit|break|return)\b",
+                    body,
+                    re.DOTALL,
+                )
+                if has_loop and not has_exit_bound:
+                    sites.append(
+                        Site(
+                            path,
+                            f"{service_name}.{field}",
+                            "shell-loop-without-deadline",
+                            1,
+                        )
+                    )
+    return sites
+
+
 def scan_rust_remedies(source: str, *, path: str) -> list[Site]:
     sites = []
     for match in re.finditer(r'"(?:\\.|[^"\\])*"', source):
@@ -552,6 +595,8 @@ def source_files(mode: str) -> list[Path]:
                 not path.suffix and path.read_bytes().startswith(b"#!")
             ):
                 files.append(path)
+    if mode == "waits":
+        files.extend((ROOT / "deploy/compose").rglob("compose.yaml"))
     return sorted(files)
 
 
@@ -561,6 +606,9 @@ def scan_sites(mode: str) -> list[Site]:
     for path in source_files(mode):
         relative = path.relative_to(ROOT).as_posix()
         source = path.read_text()
+        if path.suffix == ".yaml":
+            sites.extend(scan_compose_shell(source, path=relative))
+            continue
         if path.suffix == ".rs":
             if mode == "waits":
                 sites.extend(scan_rust(source, path=relative))

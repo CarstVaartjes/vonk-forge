@@ -17,9 +17,11 @@ the container exited zero without the wire suites actually passing.
 from __future__ import annotations
 
 import argparse
+import codecs
 import hashlib
 import os
 import re
+import selectors
 import shutil
 import subprocess
 import sys
@@ -224,23 +226,42 @@ def check_lane_consistency(root: Path) -> list[str]:
 # --- Host and container plumbing -------------------------------------------
 
 
-def stream(command: list[str]) -> tuple[int, str]:
-    """Run a command, echo its output, and return (returncode, text)."""
+def stream(command: list[str], *, timeout: float = 20 * 60) -> tuple[int, str]:
+    """Stream output within the hosted wire lane's twenty-minute time budget."""
     process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     )
     assert process.stdout is not None
-    lines: list[str] = []
-    for line in process.stdout:
-        lines.append(line)
-        sys.stdout.write(line)
-        sys.stdout.flush()
-    return process.wait(), "".join(lines)
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    chunks: list[str] = []
+    deadline = time.monotonic() + timeout
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                for key, _events in selector.select(timeout=remaining):
+                    raw = os.read(key.fd, 65536)
+                    if not raw:
+                        selector.unregister(key.fileobj)
+                        continue
+                    text = decoder.decode(raw)
+                    chunks.append(text)
+                    sys.stdout.write(text)
+                    sys.stdout.flush()
+        tail = decoder.decode(b"", final=True)
+        chunks.append(tail)
+        sys.stdout.write(tail)
+        code = process.wait(timeout=max(0, deadline - time.monotonic()))
+        return code, "".join(chunks)
+    except BaseException:
+        process.kill()
+        process.wait(timeout=5)
+        raise
+    finally:
+        process.stdout.close()
 
 
 def capture(command: list[str]) -> tuple[int, str]:
