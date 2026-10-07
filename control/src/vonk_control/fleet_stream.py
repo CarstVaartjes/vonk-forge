@@ -11,12 +11,15 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
 from .fleet_event_contract import NodeTelemetryPayload, validate_fleet_event_payload
 from .fleet_events import FleetEvent, FleetEventRepository, FleetReplayBatch
 from .fleet_projection import telemetry_point
 from .fleet_stream_contract import (
     FleetChangeAdapter,
     FleetChangeEvent,
+    FleetFrameIssue,
     FleetRefreshEvent,
     FleetTelemetryEvent,
 )
@@ -51,16 +54,6 @@ def _iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _json(value: BaseModel) -> str:
-    return json.dumps(
-        serialize_json_value(value),
-        allow_nan=False,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-
-
 def _event_frame(
     identifier: int,
     event_type: str,
@@ -68,11 +61,49 @@ def _event_frame(
     *,
     retry: bool,
 ) -> str:
-    lines = []
-    if retry:
-        lines.append(f"retry: {RETRY_MILLISECONDS}")
-    lines.extend((f"id: {identifier}", f"event: {event_type}", f"data: {_json(data)}"))
-    return "\n".join(lines) + "\n\n"
+    prefix = (
+        f"retry: {RETRY_MILLISECONDS}\n" if retry else ""
+    ) + f"id: {identifier}\nevent: {event_type}\ndata: "
+    parts = [prefix]
+    measured = len(prefix.encode("utf-8")) + 2  # terminating blank line
+    issue: FleetFrameIssue | None = None
+    try:
+        encoder = json.JSONEncoder(
+            allow_nan=False, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        )
+        for fragment in encoder.iterencode(serialize_json_value(data)):
+            # The application output buffer never accumulates beyond its frame
+            # owner. Existing source models / JSON scalar encoder temporaries
+            # remain a separate process-memory concern, not a claimed heap cap.
+            for offset in range(0, len(fragment), 4096):
+                piece = fragment[offset : offset + 4096]
+                measured += len(piece.encode("utf-8"))
+                if measured > MAX_CONTROL_DOCUMENT_BYTES:
+                    issue = FleetFrameIssue(
+                        reason_code="fleet.frame_budget_exceeded",
+                        observed_bytes_at_least=measured,
+                        budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+                    )
+                    break
+                parts.append(piece)
+            if issue is not None:
+                break
+    except (ValueError, OverflowError, UnicodeError):
+        issue = FleetFrameIssue(
+            reason_code="fleet.frame_encoding_unavailable",
+            observed_bytes_at_least=None,
+            budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+        )
+    if issue is not None:
+        return _event_frame(
+            identifier,
+            "fleet-refresh",
+            FleetRefreshEvent(
+                reset_reason="frame-unavailable", event_cursor=identifier, issue=issue
+            ),
+            retry=retry,
+        )
+    return "".join(parts) + "\n\n"
 
 
 def _keepalive_frame(now: datetime, *, retry: bool) -> str:

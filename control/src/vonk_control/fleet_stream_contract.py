@@ -31,11 +31,38 @@ class _FleetStreamModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
+class FleetFrameIssue(_FleetStreamModel):
+    reason_code: Literal[
+        "fleet.frame_budget_exceeded", "fleet.frame_encoding_unavailable"
+    ]
+    observed_bytes_at_least: Annotated[int, Field(ge=1)] | None
+    budget_bytes: Annotated[int, Field(ge=1)]
+
+    @model_validator(mode="after")
+    def truthful_measurement(self) -> FleetFrameIssue:
+        if self.reason_code == "fleet.frame_encoding_unavailable":
+            if self.observed_bytes_at_least is not None:
+                raise ValueError("unencodable frame has no byte measurement")
+        elif (
+            self.observed_bytes_at_least is None
+            or self.observed_bytes_at_least <= self.budget_bytes
+        ):
+            raise ValueError(
+                "oversized frame requires a measured lower bound above budget"
+            )
+        return self
+
+
 class FleetRefreshEvent(_FleetStreamModel):
     reset_reason: Literal[
-        "initial", "cursor-ahead", "retention-gap", "missing-telemetry-sample"
+        "initial",
+        "cursor-ahead",
+        "retention-gap",
+        "missing-telemetry-sample",
+        "frame-unavailable",
     ]
     event_cursor: Annotated[int, Field(ge=0, le=9_223_372_036_854_775_807)]
+    issue: FleetFrameIssue | None = None
 
 
 class FleetTelemetryEvent(_FleetStreamModel):
@@ -138,6 +165,7 @@ __all__ = [
     "FleetChange",
     "FleetChangeAdapter",
     "FleetChangeEvent",
+    "FleetFrameIssue",
     "FleetRefreshEvent",
     "FleetStreamEvent",
     "FleetTelemetryEvent",

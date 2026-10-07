@@ -179,6 +179,7 @@ export function useFleetStream(api: ControlApi) {
       const cursor = cursorFrom(event);
       const data = eventData(event, "FleetRefreshEvent") as FleetRefreshEvent | null;
       if (cursor === null || !data || compareWire(data.event_cursor, cursor) !== 0) return;
+      if (data.issue) setRefreshError(`${data.issue.reason_code}: Fleet event unavailable; capturing complete state`);
       // Notices carry no roster authority. Only a completed capture can replace
       // the last model, including a lower cursor after a database timeline reset.
       timelineGeneration += 1;

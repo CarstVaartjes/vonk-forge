@@ -1150,3 +1150,61 @@ def test_sse_route_accepts_shared_auth_and_sets_exact_headers() -> None:
     assert bearer_response.status_code == 200
     assert bearer_response.text == response.text
     assert stream.calls == [0, 0]
+
+
+def test_oversized_saved_sparse_frame_becomes_bounded_truthful_refresh_notice() -> None:
+    """Healthy outbox writes cap at 8KiB; damaged saved bookkeeping is not ingress."""
+    from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
+    engine, sessions, repository = _production_stream_store()
+    try:
+        with sessions.begin() as session:
+            event_value = repository.append_in_session(session, _operation_draft(1))
+            # Corrupt the optional saved event decoration after a normal write;
+            # preserve the real durable event identity/cursor and operation state.
+            payload = _operation_draft(1).payload.model_dump(mode="json")
+            payload["kind"] = "x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)
+            session.execute(
+                update(FleetStreamEvent)
+                .where(FleetStreamEvent.id == event_value.id)
+                .values(payload=payload)
+            )
+        stream = FleetStream(repository, Telemetry({}))
+
+        async def read() -> str:
+            generator = _events(stream, 0)
+            try:
+                return await anext(generator)
+            finally:
+                await generator.aclose()
+
+        frame = asyncio.run(read())
+        fields, data = _parsed_frame(frame)
+        assert fields["event"] == "fleet-refresh"
+        assert fields["id"] == str(event_value.id)
+        assert len(frame.encode("utf-8")) <= MAX_CONTROL_DOCUMENT_BYTES
+        refresh = FleetRefreshEvent.model_validate(data)
+        assert refresh.event_cursor == event_value.id
+        assert refresh.reset_reason == "frame-unavailable"
+        assert refresh.issue is not None
+        assert refresh.issue.reason_code == "fleet.frame_budget_exceeded"
+        assert refresh.issue.observed_bytes_at_least is not None
+        assert refresh.issue.observed_bytes_at_least > refresh.issue.budget_bytes
+        # The row is preserved. A repaired decoration resumes the original
+        # cursor and actual change, rather than inventing an empty replacement.
+        with sessions.begin() as session:
+            session.execute(
+                update(FleetStreamEvent)
+                .where(FleetStreamEvent.id == event_value.id)
+                .values(payload=_operation_draft(1).payload.model_dump(mode="json"))
+            )
+        repaired = asyncio.run(read())
+        repaired_fields, repaired_data = _parsed_frame(repaired)
+        assert repaired_fields["event"] == "operation-state"
+        assert repaired_fields["id"] == str(event_value.id)
+        assert (
+            FleetChangeEvent.model_validate(repaired_data).change.fields.kind
+            == "deploy"
+        )
+    finally:
+        engine.dispose()

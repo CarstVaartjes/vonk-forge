@@ -70,7 +70,7 @@ jobs:
         run: uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
       - name: Emit actual immutable observation producer transfers
         env:
-          PYTHONPATH: control/src:agent_protocol/src:src
+          PYTHONPATH: control:control/src:agent_protocol/src:src
         run: uv run --project control --frozen python control/tests/export_observation_transfer_fixtures.py --output artifacts/observation-transfers
       - name: Check out pinned official JSON Schema semantics
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
