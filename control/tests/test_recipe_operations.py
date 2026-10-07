@@ -61,6 +61,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
+from vonk_control.job_documents import RecipeStopParent
 from vonk_control.litellm import LiteLlmGeneration
 from vonk_control.models import (
     AgentCertificate,
@@ -2880,7 +2881,11 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
         accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "c"))
         assert accepted is not None and accepted.state == "running"
         assert accepted.payload["plan_digest"] == plan.plan_digest
-        assert accepted.payload["service_stop_review"]["stage"] == "withdrawal-claimed"
+        stop_parent = RecipeStopParent.model_validate_json(
+            canonical_message(accepted.payload), strict=True
+        )
+        assert stop_parent.service_stop_review is not None
+        assert stop_parent.service_stop_review.stage == "withdrawal-claimed"
         assert accepted.payload.get("phases") is None
         assert (
             session.scalar(
@@ -2939,7 +2944,11 @@ def test_stop_withdrawal_failure_retains_accepted_job_and_run_state(
         accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "f"))
         assert accepted is not None and accepted.state == "running"
         assert accepted.payload["plan_digest"] == plan.plan_digest
-        assert accepted.payload["service_stop_review"]["stage"] == "withdrawal-claimed"
+        stop_parent = RecipeStopParent.model_validate_json(
+            canonical_message(accepted.payload), strict=True
+        )
+        assert stop_parent.service_stop_review is not None
+        assert stop_parent.service_stop_review.stage == "withdrawal-claimed"
         assert accepted.payload.get("phases") is None
         assert (
             session.scalar(
