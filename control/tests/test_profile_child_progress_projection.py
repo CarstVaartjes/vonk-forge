@@ -16,6 +16,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfileInput,
 )
+from vonk_control.fleet_profiles import _persisted_profile_progress
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -29,10 +30,12 @@ from vonk_control.models import (
     AgentOperationAttempt,
     AgentPresence,
     CatalogDocumentRevision,
+    FleetProfileApplication,
     Job,
 )
 from vonk_control.operation_progress import aggregate_progress, member_progress
 from vonk_control.recipe_operations import RecipeOperationService, _stored_phases
+from vonk_control.run_switch_operations import _stored_result
 from vonk_control.stored_json import write_guard_mode
 
 from cluster_profiles.control_client import validate_control_document
@@ -42,11 +45,79 @@ from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_installed_execution import (
     _apply,
-    _drive_to_job,
     _installed_profile,
     _profile_service,
 )
 from .test_recipe_operations import NOW, installed_recipe, setup_services
+
+
+def _follow_saved_due(sessions, service, application_id, clock):
+    """Follow only the owning journals' due times, preserving early observations."""
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application_id)
+        assert row is not None
+        progress = _persisted_profile_progress(row)
+        journal = progress.switch_adapter
+        identity = (row.id, row.request_key, row.plan_digest, row.current_operation_id)
+        pending = list(journal.pending_children) if journal else []
+        closed = list(journal.children) if journal else []
+        samples = {
+            attempt.id: copy.deepcopy(attempt.progress)
+            for attempt in session.scalars(select(AgentOperationAttempt))
+        }
+        issued = set(session.scalars(select(AgentOperation.id)))
+        profile_due = progress.retry_due_at
+        dues = (
+            [profile_due] if profile_due is not None and profile_due > clock[0] else []
+        )
+        for child in pending:
+            job = session.get(Job, child.operation_id)
+            assert job is not None
+            result = _stored_result(job.result)
+            assert not isinstance(result, Residue)
+            if (
+                result is not None
+                and result.observation_due_at is not None
+                and result.observation_due_at > clock[0]
+            ):
+                dues.append(result.observation_due_at)
+    if profile_due is not None and profile_due > clock[0]:
+        service.tick()
+        with sessions() as session:
+            row = session.get(FleetProfileApplication, application_id)
+            assert row is not None
+            assert (
+                row.id,
+                row.request_key,
+                row.plan_digest,
+                row.current_operation_id,
+            ) == identity
+            progress = _persisted_profile_progress(row)
+            journal = progress.switch_adapter
+            assert progress.retry_due_at == profile_due
+            assert (list(journal.pending_children) if journal else []) == pending
+            assert (list(journal.children) if journal else []) == closed
+            assert set(session.scalars(select(AgentOperation.id))) == issued
+            assert {
+                attempt.id: attempt.progress
+                for attempt in session.scalars(select(AgentOperationAttempt))
+            } == samples
+    if dues:
+        clock[0] = min(dues)
+
+
+def _drive_install(sessions, service, planner, application_id, clock, count):
+    for _ in range(24):
+        _follow_saved_due(sessions, service, application_id, clock)
+        planner.tick()
+        service.tick()
+        with sessions() as session:
+            identities = tuple(
+                session.scalars(select(Job.id).where(Job.kind == "recipe.install"))
+            )
+        if len(identities) == count:
+            return identities
+    raise AssertionError(f"Expected {count} exact native installs, found {identities}")
 
 
 def test_wide_measurements_roundtrip_without_losing_integer_precision() -> None:
@@ -80,13 +151,15 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
         tmp_path, nodes=2, engine=postgres_engine
     )
     # Canonical fixture inventory advertises recipe.operations.v1 already.
-    jobs = AgentJobService(sessions, clock=lifecycle._clock)
+    clock = [lifecycle._clock()]
+    lifecycle._clock = lambda: clock[0]
+    jobs = AgentJobService(sessions, clock=lambda: clock[0])
     lifecycle._agent_jobs = jobs
-    base_now = lifecycle._clock()
     service, planner = _profile_service(sessions, lifecycle)
     profile = _installed_profile(service, sessions, nodes)
     application = _apply(service, profile)
-    install_id = _drive_to_job(service, planner, sessions, "recipe.install")
+    (install_id,) = _drive_install(sessions, service, planner, application.id, clock, 1)
+    base_now = clock[0]
 
     claim = claim_agent(
         jobs,
@@ -126,7 +199,7 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
         ),
         60,
     )
-    jobs._clock = lambda: base_now + timedelta(seconds=2)
+    clock[0] = base_now + timedelta(seconds=2)
     jobs.heartbeat(
         claim,
         OperationProgress.model_validate_json(
@@ -153,7 +226,7 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     )
 
     observed_at = (base_now + timedelta(seconds=2)).isoformat()
-    lifecycle._clock = lambda: base_now + timedelta(seconds=2)
+    clock[0] = base_now + timedelta(seconds=2)
     fresh = lifecycle.get(install_id)
     assert fresh.progress is not None
     assert fresh.progress.members[0].bytes_per_second is not None
@@ -167,14 +240,14 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
         assert sample is not None and sample.progress is not None
         persisted_progress = copy.deepcopy(sample.progress)
 
-    lifecycle._clock = lambda: base_now + timedelta(seconds=60)
+    clock[0] = base_now + timedelta(seconds=60)
     # A new service reconnects only from the same durable rows.
     lifecycle = RecipeOperationService(
         sessions,
         install_admission=lifecycle._install_admission,
         run_admission=lifecycle._run_admission,
         agent_jobs=jobs,
-        clock=lambda: base_now + timedelta(seconds=60),
+        clock=lambda: clock[0],
     )
     recipe = lifecycle.get(install_id)
     assert recipe.progress is not None
@@ -203,25 +276,17 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
         )
         assert sample is not None and sample.progress == persisted_progress
 
-    # The switch worker has its own clock; restore the lifecycle clock to that
-    # test epoch before exercising the downstream read path.
-    lifecycle._clock = lambda: base_now
-
+    # A restarted lifecycle and both coordinators share the saved-due clock.
+    planner._lifecycle = lifecycle
     with sessions() as session:
         switch_job = session.scalar(
             select(Job).where(Job.kind == "recipe.run-switch.v2")
         )
         assert switch_job is not None
         switch_id = switch_job.id
-    with sessions.begin() as session:
-        switch_job = session.get(Job, switch_id)
-        assert switch_job is not None and isinstance(switch_job.result, dict)
-        switch_job.result = {
-            **switch_job.result,
-            "observation_due_at": lifecycle._clock().isoformat(),
-        }
+    _follow_saved_due(sessions, service, application.id, clock)
     assert planner.tick()
-    switch = planner.get(switch_job.id)
+    switch = planner.get(switch_id)
     assert switch.progress is not None and switch.progress.operation is not None
     assert switch.progress.operation.completed_bytes == 48
     assert [member.member_id for member in switch.progress.operation.members] == list(
@@ -356,16 +421,7 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
         actor="admin",
     )
     application = _apply(service, profile)
-    install_ids: tuple[str, ...] = ()
-    for _ in range(24):
-        planner.tick()
-        service.tick()
-        with sessions() as session:
-            install_ids = tuple(
-                session.scalars(select(Job.id).where(Job.kind == "recipe.install"))
-            )
-        if len(install_ids) == 2:
-            break
+    install_ids = _drive_install(sessions, service, planner, application.id, now, 2)
     assert len(install_ids) == 2
     measured = {all_nodes[0]: (32, 64), second: (16, 128)}
     claims = []
@@ -409,7 +465,7 @@ def test_disjoint_child_samples_remain_distinct_after_restart(
         sessions, recovered_lifecycle
     )
     for _ in range(4):
-        now[0] += timedelta(seconds=10)
+        _follow_saved_due(sessions, recovered_service, application.id, now)
         recovered_planner.tick()
         recovered_service.tick()
     with sessions() as session:
