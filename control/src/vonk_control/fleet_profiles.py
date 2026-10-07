@@ -11445,6 +11445,34 @@ class FleetProfileService:
                     )
                 ):
                     effect_state = "unknown"
+                record = closed or active
+                child_progress = None
+                if record is not None:
+                    child_job = session.get(Job, record.operation_id)
+                    expected_kind = (
+                        "recipe.stop.v2"
+                        if item.kind == "stop"
+                        else "recipe.cleanup.v2"
+                        if item.kind == "cleanup"
+                        else "recipe.run-switch.v2"
+                    )
+                    if (
+                        child_job is not None
+                        and child_job.kind == expected_kind
+                        and child_job.request_id
+                        == profile_switch_child_request_key(
+                            owner.id, index, item.kind, item.id
+                        )
+                        and sorted(child_job.targets) == sorted(nodes)
+                    ):
+                        try:
+                            child_progress = RunSwitchOperationService._operation_view(
+                                child_job
+                            ).progress
+                        except (TypeError, ValueError):
+                            # Damaged measurement is unavailable; queue identity,
+                            # exact effects, receipts and claims remain visible.
+                            child_progress = None
                 effects.append(
                     FleetProfileEffectProgress(
                         effect_id=f"{owner.id}:queue:{index}:{item.kind}:{item.id}",
@@ -11465,6 +11493,7 @@ class FleetProfileService:
                         else None,
                         state=effect_state,
                         result=closed.result if closed else None,
+                        progress=child_progress,
                         stop_effect=stop,
                         original_operation_id=closed.original_operation_id
                         if closed

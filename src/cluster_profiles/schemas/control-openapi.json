@@ -9207,6 +9207,16 @@
             "title": "Plan Digest",
             "type": "string"
           },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "queue_index": {
             "minimum": 0,
             "title": "Queue Index",

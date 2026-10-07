@@ -25,6 +25,8 @@ from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
+    OperationMemberProgress,
+    OperationProgress,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeBuildCode,
@@ -150,6 +152,12 @@ from .models import (
     RecipeRun,
     ResourceReservation,
     RunNode,
+)
+from .operation_progress import (
+    aggregate_progress,
+    member_progress,
+    project_progress_for_state,
+    stored_progress,
 )
 from .prebuilt_images import policy_prebuilt_reference, prebuilt_reference
 from .profile_stop_authority import (
@@ -687,6 +695,7 @@ class RecipeOperationView:
     lifecycle_result: RecipeLifecycleResult | None
     retry_due_at: datetime | None = None
     status_reason: str | None = None
+    progress: OperationProgress | None = None
 
     @property
     def result(self) -> dict[str, object] | None:
@@ -8529,6 +8538,7 @@ class RecipeOperationService:
         return job
 
     def _view(self, job: Job, *, session: Session | None = None) -> RecipeOperationView:
+        session = session or object_session(job)
         try:
             validate_recipe_lifecycle_terminal(job.kind, job.state, job.result)
         except (TypeError, ValueError) as error:
@@ -8582,6 +8592,11 @@ class RecipeOperationService:
             lifecycle_result=_recorded_result(job.kind, job.result, subject=job.id),
             retry_due_at=retry_due_at,
             status_reason=child_reason or job.status_reason,
+            progress=(
+                _project_recipe_operation_progress(session, job, now=self._clock())
+                if session is not None
+                else None
+            ),
         )
 
     @staticmethod
@@ -8940,6 +8955,155 @@ def _current_phase_index(
         if phase_operations <= child_operations:
             return index
     return None
+
+
+def _project_recipe_operation_progress(
+    session: Session, job: Job, *, now: datetime
+) -> OperationProgress | None:
+    """Read exact current-attempt samples without advancing a child or its parent."""
+    with session.no_autoflush:
+        rows = tuple(
+            session.execute(
+                select(AgentOperation, AgentOperationAttempt)
+                .outerjoin(
+                    AgentOperationAttempt,
+                    (AgentOperationAttempt.operation_id == AgentOperation.id)
+                    & (AgentOperationAttempt.attempt == AgentOperation.current_attempt),
+                )
+                .where(AgentOperation.parent_job_id == job.id)
+                .order_by(AgentOperation.node_id, AgentOperation.id)
+            )
+        )
+    if not rows:
+        return None
+    children = tuple(child for child, _attempt in rows)
+    attempts = {child.id: attempt for child, attempt in rows}
+    phases = _stored_phases(job)
+    if isinstance(phases, Residue):
+        return None
+    targets = set(job.targets)
+    phase_nodes = {
+        operation_id: node_id
+        for group in phases
+        for operation_id, node_id, _payload in group
+    }
+    if (
+        len(targets) != len(job.targets)
+        or any(child.node_id not in targets for child in children)
+        or (
+            phases
+            and (
+                set(phase_nodes.values()) != targets
+                or any(phase_nodes.get(child.id) != child.node_id for child in children)
+            )
+        )
+    ):
+        # Unreadable ownership does not authorize showing another member's
+        # measurements, and never blocks the operation's normal recovery.
+        return None
+    phase_indices = {
+        operation_id: index
+        for index, group in enumerate(phases)
+        for operation_id, _node_id, _payload in group
+    }
+    if phases:
+        payloads = {
+            identity: payload for group in phases for identity, _node, payload in group
+        }
+        for child in children:
+            expected = payloads[child.id]
+            if child.kind != job.kind:
+                return None
+            try:
+                observed = read_stored_model(
+                    type(expected), canonical_message(child.payload), from_json=True
+                )
+            except (TypeError, ValueError):
+                return None
+            if (
+                canonical_message(observed) != canonical_message(expected)
+                or child.payload_digest
+                != hashlib.sha256(canonical_message(child.payload)).hexdigest()
+            ):
+                return None
+    current_index = _current_phase_index(children, phases) if phases else None
+    if phases and current_index is None:
+        return None
+    if current_index is not None and any(
+        phase_indices[child.id] > current_index for child in children
+    ):
+        # A partially issued later group is not a complete current phase.
+        return None
+    current_group = phases[current_index] if current_index is not None else ()
+    current_ids = {identity for identity, _node, _payload in current_group}
+    current_payloads = {node: payload for _identity, node, payload in current_group}
+    if len(current_payloads) != len(current_group):
+        return None
+    terminal = job.state in _TERMINAL_JOB_STATES
+    future_payloads: dict[str, RecipeWirePayload] = {}
+    if phases and not terminal:
+        for group in phases[(current_index or 0) + 1 :]:
+            for _identity, node, payload in group:
+                future_payloads.setdefault(node, payload)
+    by_node: dict[str, list[AgentOperation]] = {}
+    for child in children:
+        by_node.setdefault(child.node_id, []).append(child)
+    members: list[OperationMemberProgress] = []
+    summary: list[OperationMemberProgress] = []
+    for node in sorted(targets):
+        node_children = by_node.get(node, [])
+        candidates = (
+            [child for child in node_children if child.id in current_ids]
+            if phases and not terminal
+            else node_children
+        )
+        if phases and terminal and candidates:
+            last = max(phase_indices[child.id] for child in candidates)
+            candidates = [
+                child for child in candidates if phase_indices[child.id] == last
+            ]
+        if len(candidates) > 1:
+            return None
+        child = candidates[0] if candidates else None
+        payload = current_payloads.get(node) or future_payloads.get(node)
+        phase = (
+            payload.phase
+            if isinstance(payload, RecipeStartPayload) and payload.phase is not None
+            else job.kind
+        )
+        current = child is not None and (not phases or child.id in current_ids)
+        attempt = attempts.get(child.id) if child is not None else None
+        measured = (
+            stored_progress(attempt)
+            if attempt is not None and (current or terminal)
+            else None
+        )
+        if measured is not None and child is not None:
+            measured = project_progress_for_state(measured, child.state, now)
+        state = child.state if child is not None else "queued" if payload else "unknown"
+        member = member_progress(
+            measured,
+            member_id=node,
+            state=state,
+            phase=phase,
+            kind=child.kind if child is not None else job.kind,
+        )
+        members.append(member)
+        # Preserve older terminal samples for inspection, without summing
+        # sequential phases or carrying their rates into the latest phase.
+        summary.append(
+            member
+            if current or not phases
+            else member_progress(
+                None,
+                member_id=node,
+                state=state,
+                phase="unknown",
+                kind=member.kind,
+            )
+        )
+    projected = aggregate_progress(summary)
+    return projected.model_copy(update={"members": members})
 
 
 def record_build_evidence(

@@ -28,7 +28,6 @@ from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
     OperationFailureCode,
-    OperationMemberProgress,
     OperationProgress,
     canonical_message,
 )
@@ -91,7 +90,11 @@ from .operation_item_contract import (
     agent_receipt_for,
     operation_item,
 )
-from .operation_progress import aggregate_progress, project_progress
+from .operation_progress import (
+    aggregate_progress,
+    member_progress,
+    project_progress_for_state,
+)
 from .route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
 from .route_runtime import recipe_route_run_id, verify_active_route_bundle
 from .state_filters import state_filter
@@ -1019,28 +1022,12 @@ def _progress_projection(
 ) -> JobOperationProgress | None:
     if value is None:
         return None
-    projected = project_progress(
+    return project_progress_for_state(
         value
         if isinstance(value, JobOperationProgress)
-        else read_stored_model(JobOperationProgress, value, strict=True)
+        else read_stored_model(JobOperationProgress, value, strict=True),
+        state,
     )
-    if state in {
-        "succeeded",
-        "accepted",
-        "compensated",
-        "failed",
-        "cancelled",
-        *agent_operation_states.PARKED,
-    }:
-        return projected.model_copy(
-            update={
-                "activity": None,
-                "bytes_per_second": None,
-                "smoothed_bytes_per_second": None,
-                "eta_seconds": None,
-            }
-        )
-    return projected
 
 
 def _failure_projection(
@@ -1672,23 +1659,15 @@ class _DurableOperationProjection:
                 .order_by(AgentOperation.created_at, AgentOperation.id)
             ):
                 projected = _progress_projection(progress, operation.state)
-                document = (
-                    {}
-                    if projected is None
-                    else projected.model_dump(mode="json", exclude_none=True)
-                )
-                # A member is one independent node operation. Its identity is
-                # the durable operation ID, since a node can have several steps.
-                for key in ("checkpoint", "members", "total_bytes_known"):
-                    document.pop(key, None)
-                document.update(
-                    member_id=operation.id,
-                    kind=operation.kind,
-                    phase=document.get("phase", operation.state),
-                    state=operation.state,
-                )
+                # A node can own several steps: retain the exact operation ID.
                 aggregate_members.append(
-                    read_stored_model(OperationMemberProgress, document)
+                    member_progress(
+                        projected,
+                        member_id=operation.id,
+                        kind=operation.kind,
+                        phase=operation.state,
+                        state=operation.state,
+                    )
                 )
             aggregate = (
                 aggregate_progress(aggregate_members) if aggregate_members else None
