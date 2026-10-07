@@ -1,3 +1,4 @@
+import {FleetEventConnection} from "../api/fleet-event-connection";
 import {formatWire, parseContractJson, stringifyContractJson} from "../api/contract-numeric";
 import {act, render, screen} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -540,4 +541,32 @@ test("malformed sparse authority fences later telemetry until a new complete cap
   act(() => vi.advanceTimersByTime(1000));
   await flush();
   expect(visualFleet).toHaveBeenCalledTimes(2);
+});
+
+
+test("proxy outage preserves roster until the same connection receives a notice and complete repair", async () => {
+  vi.useFakeTimers();
+  const requests: RequestInit[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_path: string, init: RequestInit) => {
+    requests.push(init);
+    if (requests.length === 1) return new Response("Bad Gateway", {status: 502, headers: {"Retry-After": "5"}});
+    const body = new TextEncoder().encode(`id: 7\nevent: fleet-refresh\ndata: ${stringifyContractJson({reset_reason: "retention-gap", event_cursor: 7})}\n\n`);
+    return new Response(new ReadableStream({start(controller) { controller.enqueue(body); }}),
+      {headers: {"Content-Type": "text/event-stream"}});
+  }));
+  const visualFleet = vi.fn().mockResolvedValueOnce(snapshot(5)).mockResolvedValueOnce(snapshot(7, 70));
+  const control: Pick<ControlApi, "visualFleet" | "fleetEvents"> = {visualFleet, fleetEvents: cursor => new FleetEventConnection(cursor)};
+  render(<Probe control={control}/>);
+  await flush();
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("10");
+  act(() => vi.advanceTimersByTime(5000)); await flush();
+  expect(requests).toHaveLength(2);
+  expect(new Headers(requests[1].headers).get("Last-Event-ID")).toBe("5");
+  // A received notice is not roster authority.
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("10");
+  act(() => vi.advanceTimersByTime(100)); await flush();
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("gpu")).toHaveTextContent("70");
 });

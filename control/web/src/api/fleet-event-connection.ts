@@ -7,6 +7,15 @@ export function matchesFleetCursor(identifier: string, canonicalCursor: WireNumb
   return /^[0-9]+$/.test(identifier) && identifier.replace(/^0+(?=[0-9])/, "") === formatWire(canonicalCursor);
 }
 
+function retryAfterMilliseconds(value: string | null): bigint | undefined {
+  if (value === null) return undefined;
+  if (/^[0-9]+$/.test(value)) return BigInt(value) * 1000n;
+  // Retry-After also permits an HTTP-date. Date milliseconds are native
+  // transport scheduling values, never canonical Controller counters.
+  const deadline = Date.parse(value);
+  return Number.isFinite(deadline) ? BigInt(Math.max(0, deadline - Date.now())) : undefined;
+}
+
 /** WHATWG SSE fields and delimiters, with the canonical route's byte owner.
  * https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream
  * Invalid UTF-8 is refused by the Control contract rather than repaired.
@@ -126,8 +135,12 @@ export class FleetEventConnection extends EventTarget {
       this.authorize(response);
       if (response.status === 204) { this.close(); this.dispatchEvent(new Event("error")); return; }
       if (response.status !== 200 || response.headers.get("Content-Type")?.split(";")[0].trim() !== "text/event-stream") {
+        const retryAfter = retryAfterMilliseconds(response.headers.get("Retry-After"));
+        if (retryAfter !== undefined && retryAfter > this.retryMilliseconds) this.retryMilliseconds = retryAfter;
         await response.body?.cancel();
-        if (response.status !== 503) this.closed = true;
+        // Proxy/server outages and a temporarily wrong media response can
+        // recover on the same owner. Explicit refusal/unsupported 4xx cannot.
+        if (response.status >= 400 && response.status < 500) this.closed = true;
         throw new ContractViolation("GET", this.url, response.status);
       }
       readingCanonicalEvents = true;

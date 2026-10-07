@@ -143,3 +143,48 @@ test("retries service unavailable without claiming malformed event authority", a
   expect(fetcher).toHaveBeenCalledTimes(2);
   connection.close();
 });
+
+
+test("502 repair resumes the same connection from applied cursor without adopting a notice", async () => {
+  vi.useFakeTimers();
+  const requests: RequestInit[] = [];
+  const fetcher = vi.fn(async (_path: string, init: RequestInit) => {
+    requests.push(init);
+    if (requests.length === 1) return new Response("Bad Gateway", {status: 502, headers: {"Content-Type": "text/plain", "Retry-After": "5"}});
+    const bytes = new TextEncoder().encode(`id: 7\nevent: fleet-refresh\ndata: ${stringifyContractJson({reset_reason: "retention-gap", event_cursor: 7})}\n\n`);
+    return new Response(new ReadableStream({start(controller) { controller.enqueue(bytes); }}),
+      {headers: {"Content-Type": "text/event-stream"}});
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const connection = new FleetEventConnection(() => "5");
+  const received = vi.fn(), unavailable = vi.fn(), error = vi.fn();
+  connection.addEventListener("fleet-refresh", received);
+  connection.addEventListener("unavailable", unavailable);
+  connection.addEventListener("error", error);
+  await flush();
+  expect(error).toHaveBeenCalledTimes(1);
+  expect(unavailable).not.toHaveBeenCalled();
+  expect(received).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(4999); await flush();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(1); await flush();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(received).toHaveBeenCalledTimes(1);
+  expect(new Headers(requests[1].headers).get("Last-Event-ID")).toBe("5");
+  expect(requests[1].credentials).toBe("same-origin");
+  connection.close();
+  expect(requests[1].signal?.aborted).toBe(true);
+});
+
+test.each([403, 404])("explicit HTTP%s refusal stops rather than retrying", async status => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, {status}));
+  vi.stubGlobal("fetch", fetcher);
+  const connection = new FleetEventConnection(() => "5");
+  const error = vi.fn(); connection.addEventListener("error", error);
+  await flush();
+  expect(error).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(10000); await flush();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  connection.close();
+});
