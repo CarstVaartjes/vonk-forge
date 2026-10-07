@@ -11,7 +11,7 @@ import stat
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -26,6 +26,8 @@ from vonk_agent_protocol.route_activation import (
     SupervisorAcknowledgement,
 )
 
+from .litellm import LiteLlmConfig
+from .route_bundle_contract import RouteBundleDocument
 from .strict_json import read_stored_model
 
 # A publication claim is a short critical section, so a bounded nonblocking
@@ -69,8 +71,10 @@ class VerifiedRouteBundle:
     """One canonical, checksum-bound active route bundle."""
 
     marker: ActivationMarker
-    routes: Mapping[str, object]
-    litellm: Mapping[str, object]
+    #: The bundle's own documents; ``None`` where the read verified only the
+    #: marker and the checksums of the files it names.
+    routes: RouteBundleDocument | None
+    litellm: LiteLlmConfig | None
 
 
 def recipe_route_run_id(operation_id: object) -> str | None:
@@ -180,7 +184,7 @@ class AtomicRouteBundlePublisher:
         generations.chmod(0o750)
         self._root = root
         self._generations = generations
-        self._validate_routes = validate_routes or self._valid_json_mapping
+        self._validate_routes = validate_routes or self._valid_routes
         self._validate_litellm = validate_litellm or self._valid_litellm
         self._await_supervisor_ack = await_supervisor_ack
 
@@ -197,21 +201,20 @@ class AtomicRouteBundlePublisher:
             ) from error
 
     @staticmethod
-    def _valid_json_mapping(content: bytes) -> bool:
+    def _valid_routes(content: bytes) -> bool:
         try:
-            return isinstance(json.loads(content), dict)
-        except (TypeError, json.JSONDecodeError):
+            RouteBundleDocument.model_validate_json(content)
+        except (TypeError, ValueError):
             return False
+        return True
 
     @staticmethod
     def _valid_litellm(content: bytes) -> bool:
         try:
-            document = json.loads(content)
-        except (TypeError, json.JSONDecodeError):
+            LiteLlmConfig.model_validate_json(content)
+        except (TypeError, ValueError):
             return False
-        return isinstance(document, dict) and isinstance(
-            document.get("model_list"), list
-        )
+        return True
 
     @staticmethod
     def _identity(authority_id: str, plan_digest: str, evidence_digest: str) -> None:
@@ -400,8 +403,6 @@ class AtomicRouteBundlePublisher:
             optional=optional,
             verify_files=verify_files,
             validate_documents=False,
-            validate_routes=self._validate_routes,
-            validate_litellm=self._validate_litellm,
         )
         return None if bundle is None else bundle.marker
 
@@ -427,8 +428,6 @@ def verify_active_route_bundle(root: Path) -> VerifiedRouteBundle:
         optional=False,
         verify_files=True,
         validate_documents=True,
-        validate_routes=AtomicRouteBundlePublisher._valid_json_mapping,
-        validate_litellm=AtomicRouteBundlePublisher._valid_litellm,
     )
     assert bundle is not None
     return bundle
@@ -441,8 +440,6 @@ def _read_active_route_bundle(
     optional: bool,
     verify_files: bool,
     validate_documents: bool,
-    validate_routes: Callable[[bytes], bool],
-    validate_litellm: Callable[[bytes], bool],
 ) -> VerifiedRouteBundle | None:
     active = root / "activation.json"
     if not active.exists():
@@ -464,7 +461,8 @@ def _read_active_route_bundle(
     if marker_content != marker.canonical_bytes():
         raise RouteRuntimeError("route activation marker is not canonical")
 
-    documents: dict[str, Mapping[str, object]] = {}
+    routes_document: RouteBundleDocument | None = None
+    litellm_document: LiteLlmConfig | None = None
     if verify_files:
         directory = generations / marker.directory
         if directory.is_symlink() or not directory.is_dir():
@@ -490,28 +488,21 @@ def _read_active_route_bundle(
                 ) from error
             if _sha256(content) != digest or (exact is not None and content != exact):
                 raise RouteRuntimeError("active route generation checksum mismatch")
-            if name in {"routes.json", "litellm.json"}:
-                validator = (
-                    validate_routes if name == "routes.json" else validate_litellm
-                )
+            if validate_documents and name in {"routes.json", "litellm.json"}:
                 try:
-                    document = json.loads(content)
-                except json.JSONDecodeError as error:
+                    if name == "routes.json":
+                        routes_document = RouteBundleDocument.model_validate_json(
+                            content
+                        )
+                    else:
+                        litellm_document = LiteLlmConfig.model_validate_json(content)
+                except ValueError as error:
                     raise RouteRuntimeError(
                         "active route generation document is invalid"
                     ) from error
-                if (
-                    not isinstance(document, Mapping)
-                    or validate_documents
-                    and not validator(content)
-                ):
-                    raise RouteRuntimeError(
-                        "active route generation document is invalid"
-                    )
-                documents[name] = document
 
     return VerifiedRouteBundle(
         marker=marker,
-        routes=documents.get("routes.json", {}),
-        litellm=documents.get("litellm.json", {}),
+        routes=routes_document,
+        litellm=litellm_document,
     )

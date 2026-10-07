@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Refresh a candidate artifact pin; ordinary build verification stays strict."""
+
+from __future__ import annotations
+
+import hashlib
+import tomllib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main() -> None:
+    lock = ROOT / "control/uv.lock"
+    text = lock.read_text(encoding="utf-8")
+    packages = [
+        package
+        for package in tomllib.loads(text)["package"]
+        if package["name"] == "vonk-agent-protocol"
+    ]
+    if len(packages) != 1:
+        raise SystemExit("Expected one canonical protocol package")
+    wheel = (lock.parent / packages[0]["source"]["path"]).resolve()
+    pins = [pin for pin in packages[0]["wheels"] if pin["filename"] == wheel.name]
+    if len(pins) != 1 or not wheel.is_file():
+        raise SystemExit("Build the canonical protocol wheel before refreshing its pin")
+    previous = pins[0]["hash"]
+    if text.count(previous) != 1:
+        raise SystemExit("The canonical protocol wheel pin must be unique")
+    actual = "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest()
+    lock.write_text(text.replace(previous, actual), encoding="utf-8", newline="\n")
+
+
+if __name__ == "__main__":
+    main()

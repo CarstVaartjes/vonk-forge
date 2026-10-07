@@ -539,7 +539,7 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
 
             def crash_after_child(session, row, state):
                 nonlocal crashed
-                if state.get("active_operation_id") is not None and not crashed:
+                if state.pending_children and not crashed:
                     crashed = True
                     raise SystemExit("crash after child commit")
                 return write_state(session, row, state)

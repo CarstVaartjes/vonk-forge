@@ -120,6 +120,14 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/agent_job_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/agent_upgrade_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/artifact_blob_store.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
@@ -165,6 +173,11 @@
     {
       "module": "control/src/vonk_control/catalog_sync_contract.py",
       "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/cluster_mappings.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
       "module": "control/src/vonk_control/compiled_artifact_contract.py",
@@ -234,6 +247,11 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/litellm.py",
+      "kind": "declared",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
       "module": "control/src/vonk_control/model_cache.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
@@ -257,9 +275,18 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/operation_item_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/operator_projection_api.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/platform_observation.py",
+      "kind": "controller-contract",
+      "reason": "Canonical authenticated API and process-bound worker package provenance observations; nullable unavailable facts remain owned by their deployed producers."
     },
     {
       "module": "control/src/vonk_control/preparation_contract.py",
@@ -290,6 +317,26 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/recipe_image_availability_clocks_contract.py",
+      "kind": "controller-contract",
+      "reason": "Tolerant typed lifecycle clock projection independent of job-document imports."
+    },
+    {
+      "module": "control/src/vonk_control/recipe_image_availability_contract.py",
+      "kind": "controller-contract",
+      "reason": "Shared recipe-image state, artifact and builder receipt identity."
+    },
+    {
+      "module": "control/src/vonk_control/recipe_image_availability_reader_contract.py",
+      "kind": "controller-contract",
+      "reason": "Typed adoption and exact-catalog recovery of damaged availability bookkeeping."
+    },
+    {
+      "module": "control/src/vonk_control/recipe_image_availability_view_contract.py",
+      "kind": "controller-contract",
+      "reason": "Typed availability and removal read projections with canonical JSON egress."
+    },
+    {
       "module": "control/src/vonk_control/recipe_image_removal_contract.py",
       "kind": "controller-contract"
     },
@@ -312,8 +359,22 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/resource_planning_contract.py",
+      "kind": "controller-contract",
+      "reason": "Canonical recipe resource read surface using shared settings, topology, and model selection."
+    },
+    {
+      "module": "control/src/vonk_control/route_bundle_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/run_switch_contract.py",
       "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/run_switch_observation_contract.py",
+      "kind": "controller-contract",
+      "reason": "Canonical observations and retained identities for restart-safe run-switch recovery."
     },
     {
       "module": "control/src/vonk_control/runtime_image_preparation.py",

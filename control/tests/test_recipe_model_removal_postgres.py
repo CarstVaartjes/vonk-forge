@@ -28,6 +28,9 @@ from vonk_control.models import (
     ModelCacheSetArtifact,
 )
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
+from vonk_control.recipe_image_availability_view_contract import (
+    RecipeCacheRemovalStatus,
+)
 from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,
@@ -207,7 +210,8 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     assert not receipt_path.exists()
     assert recipe_service.advance_removals(limit=1) == 1
     pending = recipe_service.get_operator_request(request_id, actor="operator")
-    assert isinstance(pending, dict)
+    assert isinstance(pending, RecipeCacheRemovalStatus)
+    pending = pending.model_dump(mode="json", exclude_none=True)
     assert pending["operation_id"] == parent_id
     assert pending["state"] == "backoff"
     with sessions() as session:
@@ -304,7 +308,8 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         final = restarted_recipe_service.get_operator_request(
             request_id, actor="operator"
         )
-        assert isinstance(final, dict)
+        assert isinstance(final, RecipeCacheRemovalStatus)
+        final = final.model_dump(mode="json", exclude_none=True)
         if final["state"] == "succeeded":
             break
     assert final["operation_id"] == parent_id

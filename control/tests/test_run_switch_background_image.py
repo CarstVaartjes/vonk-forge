@@ -44,6 +44,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
     _lock_phase_owner,
     _phase_request_key,
+    _phase_result,
 )
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
@@ -91,23 +92,28 @@ class _WorkerArtifactExecutor:
         if phase.subphase == "model-download":
             missing = plan.storage.missing_nas_bytes
             return PhaseExecution(
-                result={
-                    "schema_version": 2,
-                    "artifact_set_sha256": plan.preparation.model.artifact_set_sha256,
-                    "coverage": "complete",
-                    "downloaded_bytes": missing,
-                    "total_bytes": missing,
-                    "progress": {
-                        "phase": "model-download",
-                        "completed_bytes": missing,
+                result=_phase_result(
+                    {
+                        "schema_version": 2,
+                        "artifact_set_sha256": plan.preparation.model.artifact_set_sha256,
+                        "coverage": "complete",
+                        "downloaded_bytes": missing,
                         "total_bytes": missing,
-                        "total_bytes_known": True,
+                        "progress": {
+                            "phase": "model-download",
+                            "completed_bytes": missing,
+                            "total_bytes": missing,
+                            "total_bytes_known": True,
+                        },
                     },
-                }
+                    phase=phase,
+                )
             )
         if self.copy_failures:
             raise self.copy_failures.pop(0)
-        return PhaseExecution(result=_target_copy_evidence(plan, phase))
+        return PhaseExecution(
+            result=_phase_result(_target_copy_evidence(plan, phase), phase=phase)
+        )
 
     def get(self, operation_id: str):
         raise KeyError(operation_id)

@@ -52,7 +52,7 @@ fn persist_binding(
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let spec: CompiledExecutionPlan = input.request.compiled_execution_plan.clone();
     let placement = spec.runtime.placement.clone();
-    let run_generation = u64::from(input.request.run_generation);
+    let run_generation = input.request.run_generation;
     fs::create_dir_all(&input.data_root)?;
     let installation = input
         .data_root

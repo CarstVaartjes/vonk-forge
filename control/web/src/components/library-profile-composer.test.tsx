@@ -68,3 +68,36 @@ test("a chosen recipe option is saved with the assignment", async () => {
   await user.click(screen.getByRole("button", {name: "Create Fleet Profile"}));
   expect(autosaveProfile).toHaveBeenCalledWith(1, expect.objectContaining({assignments: [expect.objectContaining({option_choices: {verification: "adaptive-k", projections: "stock"}})]}));
 });
+
+
+test("selects the largest canonical profile identity and preserves its revision", async () => {
+  const user = userEvent.setup();
+  const lower = 2147483646;
+  const upper = 2147483647;
+  const revision = 2147483647;
+  const definition = {name: "Exact", description: "", favorite: false, installation_policy: "exact", labels: {}, assignments: []};
+  const existing = {number: upper, revision, name: "Exact", definition, assignments: []} as unknown as FleetProfile;
+  const autosaveProfile = vi.fn(async () => existing);
+  const api = {profiles: vi.fn(async () => ({profiles: [{...existing, number: lower, name: "Lower"}, existing]})), autosaveProfile} as unknown as ControlApi;
+  render(<LibraryProfileComposer api={api} detail={detail}/>);
+  await user.click(screen.getByRole("button", {name: "Add to Fleet Profile"}));
+  await screen.findByRole("option", {name: "Profile 2147483647 · Exact · 0 workloads"});
+  await waitFor(() => expect(screen.getByLabelText("Destination")).toBeEnabled());
+  await user.selectOptions(screen.getByLabelText("Destination"), "2147483647");
+  await user.click(screen.getByRole("button", {name: "Add workload"}));
+  expect(autosaveProfile).toHaveBeenCalledWith(upper, expect.objectContaining({expected_revision: revision}));
+  expect(await screen.findByRole("link", {name: "Review and apply profile 2147483647"})).toHaveAttribute("href", "/library/profiles?profile=2147483647");
+});
+
+test("refuses a new profile beyond the canonical maximum before autosave", async () => {
+  const user = userEvent.setup();
+  const largest = 2147483647;
+  const autosaveProfile = vi.fn(async () => saved);
+  const api = {profiles: vi.fn(async () => ({profiles: [{number: largest, name: "Existing", definition: {}, assignments: []}]})), autosaveProfile} as unknown as ControlApi;
+  render(<LibraryProfileComposer api={api} detail={detail}/>);
+  await user.click(screen.getByRole("button", {name: "Add to Fleet Profile"}));
+  await waitFor(() => expect(screen.getByLabelText("Destination")).toBeEnabled());
+  await user.click(screen.getByRole("button", {name: "Create Fleet Profile"}));
+  expect(await screen.findByRole("alert")).toBeVisible();
+  expect(autosaveProfile).not.toHaveBeenCalled();
+});

@@ -33,7 +33,7 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.operator_projection_api import FleetOperatorServices
 
 from .agent_fences import fenced_attempt, fenced_operation
-from .test_agent_upgrades import NODE_A, OLD_IDENTITY, PACKAGE, SOURCE
+from .test_agent_upgrades import NODE_A, OLD_IDENTITY, PACKAGE_MODEL, SOURCE
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
@@ -82,7 +82,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
     operations = AgentJobService(sessions, clock=clock)
     upgrades = AgentUpgradeService(sessions, operations, clock=clock)
     # Package publication is outside this route and installed-CLI acceptance.
-    monkeypatch.setattr(upgrades, "current_package", lambda: dict(PACKAGE))
+    monkeypatch.setattr(upgrades, "current_package", lambda: PACKAGE_MODEL)
     operations.set_result_consumer(upgrades.consume_agent_result)
     tokens = TokenCodec(b"installed-fleet-resume-test-key-32")
     projected = durable_operation_services(

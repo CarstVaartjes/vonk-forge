@@ -1,0 +1,85 @@
+name: Browser canonical contract artifacts
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/browser-contract-artifacts.yml
+      - control/src/**
+      - control/web/**
+      - agent_protocol/**
+      - scripts/generate-control-clients
+      - tools/openapi-client/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: browser-contracts-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prepare pinned packaging tool for candidate artifacts
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+      - name: Refresh candidate protocol wheel lock from exact authored source
+        run: |
+          uv build --project agent_protocol --wheel --out-dir inventory/wheels
+          python3 scripts/refresh-protocol-wheel-lock
+      - uses: ./.github/actions/python-env
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "26"
+      - run: scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client
+      - run: scripts/generate-control-clients
+      - name: Preserve exact generated outputs before verification
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, shutil, subprocess
+          root = pathlib.Path("artifacts/browser-contracts")
+          paths = ["control/uv.lock", "control/openapi.json", "control/web/src/api/generated.d.ts", "control/web/src/api/runtime.generated.js", "control/web/src/api/runtime.generated.d.ts", "src/cluster_profiles/schemas/control-openapi.json", "src/cluster_profiles/generated_control"]
+          records = {}
+          for name in paths:
+              source = pathlib.Path(name)
+              files = sorted(source.rglob("*.py")) if source.is_dir() else [source]
+              for file in files:
+                  destination = root / file
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(file, destination)
+                  records[str(file)] = hashlib.sha256(file.read_bytes()).hexdigest()
+          (root / "manifest.json").write_text(json.dumps({"source_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "sha256": records}, indent=2, sort_keys=True) + "\n")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-contracts-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/browser-contracts
+          if-no-files-found: error
+          retention-days: 7
+      - run: scripts/retry-dependency-fetch npm ci --prefix control/web
+      - name: Emit actual producer and consumer envelopes
+        env:
+          PYTHONPATH: control/src:agent_protocol/src:src
+        run: uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
+      - name: Check out pinned official JSON Schema semantics
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: json-schema-org/JSON-Schema-Test-Suite
+          ref: 5b0ee1613e45fcc2bddac00e07c19cd49b00d8a8
+          path: artifacts/json-schema-suite
+          persist-credentials: false
+      - name: Compile pinned official schemas with the production compiler
+        run: python3 scripts/tests/prepare_official_schema_consumers.py --suite artifacts/json-schema-suite
+      - name: Exercise both browser HTTP consumers and exact numbers
+        env:
+          VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
+        run: npm exec -- vitest run src/api/contract-json.test.ts src/api/client.test.ts src/api/consumer-corpus.test.ts src/api/official-schema.generated.test.ts src/hooks/fleet-stream-state.test.ts src/hooks/use-fleet-stream.test.tsx
+        working-directory: control/web
+      - name: Compile real browser consumers
+        run: npm run build --prefix control/web

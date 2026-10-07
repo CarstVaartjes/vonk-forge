@@ -1,6 +1,8 @@
 import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {ArtifactJob, LibraryApi, LibraryViewRecipeDetail, RecipeDefinition} from "../api/types";
+import {LosslessNumber} from "lossless-json";
+import {formatWire, isWireNumber, stringifyContractJson} from "../api/contract-numeric";
 import {ArtifactJobWorkspace} from "./artifact-job-workspace";
 import {hashArtifactBlob} from "./artifact-hash";
 
@@ -747,4 +749,66 @@ test("keeps the declared native form visible while controller capacity is loadin
   expect(screen.getByRole("button", {name: "Checking controller capacity…"})).toBeDisabled();
   resolveCapabilities(capability);
   expect(await screen.findByRole("button", {name: "Submit artifact job"})).toBeDisabled();
+});
+
+
+test("keeps a wide integer recipe setting exact through editing and durable request creation", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  const recipe = detail();
+  if (recipe.definition.settings.kind !== "job" || !recipe.definition.settings.knobs) throw new Error("job fixture required");
+  recipe.definition.settings.knobs.steps.value = new LosslessNumber("9007199254740993");
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={recipe}/>);
+  await screen.findByText("No artifact jobs yet");
+  const setting = screen.getByRole("spinbutton", {name: "Steps"});
+  expect(setting).toHaveAttribute("value", "9007199254740993");
+  await user.clear(setting);
+  await user.type(setting, "9007199254740995");
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Keep the exact integer");
+  await user.click(screen.getByRole("button", {name: "Submit artifact job"}));
+  await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalled());
+  const body = client.createArtifactJob.mock.calls[0][1];
+  const steps = body.parameters.steps;
+  if (!isWireNumber(steps)) throw new Error("numeric setting was lost");
+  expect(formatWire(steps)).toBe("9007199254740995");
+  expect(stringifyContractJson(body)).toContain('"steps":9007199254740995');
+  expect(stringifyContractJson(body)).not.toContain('"steps":9007199254740996');
+});
+
+test("recognizes an uploaded byte receipt by exact numeric value", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.uploadArtifactJobInput.mockImplementationOnce((_jobId: string, file) => Promise.resolve(job({
+    operation_id: null, submit_request_id: null, state: "draft", input_declarations: [file],
+    input_files: [{...file, size_bytes: new LosslessNumber(String(file.size_bytes))}],
+  })));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+  await screen.findByText("No artifact jobs yet");
+  await user.type(screen.getByRole("textbox", {name: "Prompt"}), "Exact receipt");
+  await user.click(screen.getByRole("button", {name: "Submit artifact job"}));
+  await waitFor(() => expect(client.submitArtifactJob).toHaveBeenCalled());
+  expect(client.uploadArtifactJobInput).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText("Succeeded")).toBeInTheDocument();
+});
+
+test("checks browser input bytes against the Controller's exact declared transport limit", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  const capabilities = await client.artifactJobCapabilities();
+  client.artifactJobCapabilities.mockResolvedValue({...capabilities,
+    transport: {...capabilities.transport, max_input_file_bytes: new LosslessNumber("2")},
+  });
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+  await screen.findByText("No artifact jobs yet");
+  const prompt = screen.getByRole("textbox", {name: "Prompt"});
+  await user.type(prompt, "abc");
+  expect(screen.getByRole("button", {name: "Submit artifact job"})).toBeDisabled();
+  expect(client.createArtifactJob).not.toHaveBeenCalled();
+  await user.clear(prompt);
+  await user.type(prompt, "a");
+  await user.click(screen.getByRole("button", {name: "Submit artifact job"}));
+  await waitFor(() => expect(client.submitArtifactJob).toHaveBeenCalled());
+  const inputs = client.createArtifactJob.mock.calls[0][1].inputs;
+  if (!inputs?.[0]) throw new Error("accepted input declaration required");
+  expect(inputs[0].size_bytes).toBe(1);
 });

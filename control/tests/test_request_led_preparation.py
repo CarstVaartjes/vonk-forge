@@ -53,8 +53,12 @@ def test_exhausted_chain_is_typed_and_scoped_to_one_application(monkeypatch) -> 
     from datetime import UTC, datetime, timedelta
     from uuid import NAMESPACE_URL, uuid5
 
-    from vonk_agent_protocol import RecipeImageCode
+    from vonk_agent_protocol import OperationProgress, RecipeImageCode
     from vonk_control import recipe_image_availability as ria
+    from vonk_control.operation_contract import AvailabilityOperationFailure
+    from vonk_control.recipe_image_availability_view_contract import (
+        RecipeImageAvailabilityView,
+    )
 
     now = datetime(2026, 10, 6, tzinfo=UTC)
     old = (now - timedelta(days=1)).isoformat()
@@ -71,13 +75,31 @@ def test_exhausted_chain_is_typed_and_scoped_to_one_application(monkeypatch) -> 
             == str(uuid5(NAMESPACE_URL, "vonk-forge:profile-preparation:r1:new"))
             else "failed"
         )
-        return SimpleNamespace(
+        return RecipeImageAvailabilityView(
             id=request_id,
+            request_id=request_id,
+            request=None,
+            kind="recipe.image.ensure",
             state=state,
+            attempt=1,
+            recipe_revision_id=revision,
+            recipe_content_sha256=None,
+            model_digest=None,
+            build_input_sha256=None,
+            progress=OperationProgress(phase="queued") if state == "queued" else None,
+            image_progress=None,
+            result=None,
+            failure=AvailabilityOperationFailure(
+                code=RecipeImageCode.PREPARATION_FAILED,
+                detail="The prior preparation attempt failed.",
+                retryable=True,
+            )
+            if state == "failed"
+            else None,
+            supported_actions=(),
+            created_at=old,
             updated_at=old,
-            failure={},
             blockers=(),
-            progress={},
         )
 
     monkeypatch.setattr(service, "start", start)

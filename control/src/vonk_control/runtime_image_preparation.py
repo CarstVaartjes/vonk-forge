@@ -41,6 +41,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 from .categorized_errors import InvalidValue
 from .categorized_faults import security_reason
 from .content_identity import ImageContent, differing_image_fields, same_image
+from .integer_domains import MAX_DATABASE_INTEGER
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .models import RecipeBuild
 from .oci_image_store import (
@@ -284,7 +285,7 @@ class RuntimeImageReferenceIntent(WireModel):
     schema_version: Literal[2]
     operation_id: str = Field(min_length=1, max_length=128)
     recipe_revision_id: str = Field(min_length=1, max_length=128)
-    attempt: int = Field(strict=True, ge=1)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, strict=True, ge=1)
     claim_owner: str = Field(min_length=1, max_length=200)
     oci_archive_sha256: Digest
     image_digest: ImageDigest

@@ -13,7 +13,18 @@ from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import CursorError
-from .fleet_event_contract import validate_fleet_event_payload
+from .fleet_event_contract import (
+    AgentOperationPayload,
+    FleetEventPayload,
+    InstallationNodePayload,
+    JobPayload,
+    NodeProfilePayload,
+    NodeTelemetryPayload,
+    RecipeInstallationPayload,
+    RecipeRunPayload,
+    RunNodePayload,
+    validate_fleet_event_payload,
+)
 from .models import (
     AgentNodeProfile,
     AgentOperation,
@@ -67,7 +78,7 @@ class FleetEventDraft:
     node_id: str | None
     entity_kind: str
     entity_id: str
-    payload: Mapping[str, object]
+    payload: FleetEventPayload
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +88,7 @@ class FleetEvent:
     node_id: str | None
     entity_kind: str
     entity_id: str
-    payload: dict[str, object]
+    payload: FleetEventPayload
     occurred_at: datetime
     expires_at: datetime
 
@@ -127,7 +138,11 @@ def _walk_payload(value: object) -> None:
             _walk_payload(nested)
 
 
-def _validated_payload(draft: FleetEventDraft) -> dict[str, object]:
+def _stored_payload(
+    draft: FleetEventDraft,
+) -> dict[str, str | int | bool | None]:
+    """The JSON document of a draft's typed payload, checked before it is stored."""
+
     if draft.event_type not in EVENT_TYPES:
         raise ValueError("Fleet event type is not in the public vocabulary")
     if draft.node_id is not None and not 1 <= len(draft.node_id) <= 36:
@@ -136,17 +151,15 @@ def _validated_payload(draft: FleetEventDraft) -> dict[str, object]:
         raise ValueError("Fleet event entity_kind must be at most 32 characters")
     if not 1 <= len(draft.entity_id) <= 128:
         raise ValueError("Fleet event entity_id must be at most 128 characters")
-    if not isinstance(draft.payload, Mapping):
-        raise TypeError("Fleet event payload must be an object")
-    _walk_payload(draft.payload)
-    payload = dict(draft.payload)
     validate_fleet_event_payload(
         draft.event_type,
         draft.entity_kind,
         draft.entity_id,
         draft.node_id,
-        payload,
+        draft.payload,
     )
+    payload = draft.payload.model_dump(mode="json", exclude_unset=True)
+    _walk_payload(payload)
     try:
         encoded = json.dumps(
             payload,
@@ -167,7 +180,9 @@ def _as_value(row: Any) -> FleetEvent:
         node_id=row.node_id,
         entity_kind=row.entity_kind,
         entity_id=row.entity_id,
-        payload=dict(row.payload),
+        payload=validate_fleet_event_payload(
+            row.event_type, row.entity_kind, row.entity_id, row.node_id, row.payload
+        ),
         occurred_at=_database_utc(row.occurred_at),
         expires_at=_database_utc(row.expires_at),
     )
@@ -207,7 +222,7 @@ class FleetEventRepository:
         self._clock = clock
 
     def append_in_session(self, session: Session, draft: FleetEventDraft) -> FleetEvent:
-        payload = _validated_payload(draft)
+        payload = _stored_payload(draft)
         occurred_at = self._clock()
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("Fleet event clock must return a timezone-aware value")
@@ -241,7 +256,7 @@ class FleetEventRepository:
             "expires_at": expires_at,
         }
         connection.execute(insert(FleetStreamEvent).values(**values))
-        return FleetEvent(**values)
+        return FleetEvent(**{**values, "payload": draft.payload})
 
     def high_watermark(self) -> int:
         with self._sessions() as session:
@@ -350,7 +365,9 @@ class FleetEventRepository:
                 node_id=row[4],
                 entity_kind=row[5],
                 entity_id=row[6],
-                payload=dict(row[7]),
+                payload=validate_fleet_event_payload(
+                    row[3], row[5], row[6], row[4], row[7]
+                ),
                 occurred_at=_database_utc(row[8]),
                 expires_at=_database_utc(row[9]),
             )
@@ -468,10 +485,7 @@ class FleetEventRecorder:
                 node_id=value.node_id,
                 entity_kind="node-profile",
                 entity_id=value.node_id,
-                payload={
-                    "node_id": value.node_id,
-                    "profile_changed": True,
-                },
+                payload=NodeProfilePayload(node_id=value.node_id, profile_changed=True),
             )
         if isinstance(value, NodeTelemetryLatest):
             return FleetEventDraft(
@@ -479,90 +493,89 @@ class FleetEventRecorder:
                 node_id=value.node_id,
                 entity_kind="node-telemetry-latest",
                 entity_id=value.node_id,
-                payload={
-                    "node_id": value.node_id,
-                    "sample_id": value.sample_id,
-                },
+                payload=NodeTelemetryPayload(
+                    node_id=value.node_id, sample_id=value.sample_id
+                ),
             )
         if isinstance(value, RecipeInstallation):
             entity_kind = "recipe-installation"
-            payload = {
-                "entity_kind": entity_kind,
-                "entity_id": value.id,
-                "recipe_revision_id": value.recipe_revision_id,
-                "mapping_id": value.mapping_id,
-                "mapping_generation": value.mapping_generation,
-                "state": value.state,
-            }
+            payload = RecipeInstallationPayload(
+                entity_kind="recipe-installation",
+                entity_id=value.id,
+                recipe_revision_id=value.recipe_revision_id,
+                mapping_id=value.mapping_id,
+                mapping_generation=value.mapping_generation,
+                state=value.state,
+            )
             return FleetEventDraft("recipe-state", None, entity_kind, value.id, payload)
         if isinstance(value, InstallationNode):
             entity_kind = "installation-node"
-            payload = {
-                "entity_kind": entity_kind,
-                "entity_id": value.id,
-                "installation_id": value.installation_id,
-                "node_id": value.node_id,
-                "rank": value.rank,
-                "role": value.role,
-                "state": value.state,
-                "installed_bytes": value.installed_bytes,
-                "required_bytes": value.required_bytes,
-            }
+            payload = InstallationNodePayload(
+                entity_kind="installation-node",
+                entity_id=value.id,
+                installation_id=value.installation_id,
+                node_id=value.node_id,
+                rank=value.rank,
+                role=value.role,
+                state=value.state,
+                installed_bytes=value.installed_bytes,
+                required_bytes=value.required_bytes,
+            )
             return FleetEventDraft(
                 "recipe-state", value.node_id, entity_kind, value.id, payload
             )
         if isinstance(value, RecipeRun):
             entity_kind = "recipe-run"
-            payload = {
-                "entity_kind": entity_kind,
-                "entity_id": value.id,
-                "installation_id": value.installation_id,
-                "mapping_id": value.mapping_id,
-                "mapping_generation": value.mapping_generation,
-                "alias": value.alias,
-                "state": value.state,
-                "route_state": value.route_state,
-            }
+            payload = RecipeRunPayload(
+                entity_kind="recipe-run",
+                entity_id=value.id,
+                installation_id=value.installation_id,
+                mapping_id=value.mapping_id,
+                mapping_generation=value.mapping_generation,
+                alias=value.alias,
+                state=value.state,
+                route_state=value.route_state,
+            )
             return FleetEventDraft("recipe-state", None, entity_kind, value.id, payload)
         if isinstance(value, RunNode):
             entity_kind = "run-node"
-            payload = {
-                "entity_kind": entity_kind,
-                "entity_id": value.id,
-                "run_id": value.run_id,
-                "node_id": value.node_id,
-                "rank": value.rank,
-                "role": value.role,
-                "state": value.state,
-                "reserved_memory_bytes": value.reserved_memory_bytes,
-                "observed_memory_bytes": value.observed_memory_bytes,
-            }
+            payload = RunNodePayload(
+                entity_kind="run-node",
+                entity_id=value.id,
+                run_id=value.run_id,
+                node_id=value.node_id,
+                rank=value.rank,
+                role=value.role,
+                state=value.state,
+                reserved_memory_bytes=value.reserved_memory_bytes,
+                observed_memory_bytes=value.observed_memory_bytes,
+            )
             return FleetEventDraft(
                 "recipe-state", value.node_id, entity_kind, value.id, payload
             )
         if isinstance(value, Job):
             entity_kind = "job"
-            payload = {
-                "entity_kind": entity_kind,
-                "entity_id": value.id,
-                "kind": value.kind,
-                "state": value.state,
-                "target_count": len(value.targets),
-            }
+            payload = JobPayload(
+                entity_kind="job",
+                entity_id=value.id,
+                kind=value.kind,
+                state=value.state,
+                target_count=len(value.targets),
+            )
             return FleetEventDraft(
                 "operation-state", None, entity_kind, value.id, payload
             )
         if isinstance(value, AgentOperation):
             entity_kind = "agent-operation"
-            payload = {
-                "entity_kind": entity_kind,
-                "entity_id": value.id,
-                "parent_job_id": value.parent_job_id,
-                "node_id": value.node_id,
-                "kind": value.kind,
-                "state": value.state,
-                "attempt": value.current_attempt,
-            }
+            payload = AgentOperationPayload(
+                entity_kind="agent-operation",
+                entity_id=value.id,
+                parent_job_id=value.parent_job_id,
+                node_id=value.node_id,
+                kind=value.kind,
+                state=value.state,
+                attempt=value.current_attempt,
+            )
             return FleetEventDraft(
                 "operation-state", value.node_id, entity_kind, value.id, payload
             )

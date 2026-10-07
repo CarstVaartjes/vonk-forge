@@ -147,12 +147,13 @@ def _validate_options(options: RecipeBuildOptions) -> None:
         raise ValueError("build unset labels are invalid")
 
 
-# The Rust producer accepts JSON strings, booleans, and integral numbers for
-# build environment values.  Keeping this union strict prevents Pydantic from
-# turning JSON floats/nulls into an accepted value.
+# Build environment integers become decimal argument text, not machine
+# arithmetic. Preserve their exact value through the wire; the request/argv
+# resource bounds remain enforced by the consuming build path. Keeping this
+# union strict prevents floats/nulls from becoming accepted integers.
 JsonScalar = (
     Annotated[str, StringConstraints(max_length=1024)]
-    | Annotated[int, Field(strict=True, ge=-(2**63), le=2**63 - 1)]
+    | Annotated[int, Field(strict=True)]
     | bool
 )
 

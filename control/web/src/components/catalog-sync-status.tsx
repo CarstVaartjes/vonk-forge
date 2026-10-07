@@ -1,3 +1,4 @@
+import {formatWire} from "../api/contract-numeric";
 import {useEffect, useState} from "react";
 import type {CatalogSyncStatus, LibraryApi} from "../api/types";
 import {Time} from "./time";
@@ -29,7 +30,7 @@ export function CatalogSyncStatusLine({api}: {api: Pick<LibraryApi, "catalogSync
       {status.commit && <> · commit <code>{status.commit.slice(0, 12)}</code></>}
       {status.expected_commit && status.expected_commit !== status.commit && <> · expected commit <code>{status.expected_commit.slice(0, 12)}</code></>}
     </p>
-    <p>{status.imported_count} imported · {status.updated_count} updated · {status.unchanged_count} unchanged · {status.skipped_count} skipped · {status.withdrawn_count} withdrawn of {status.total_count}</p>
+    <p>{formatWire(status.imported_count)} imported · {formatWire(status.updated_count)} updated · {formatWire(status.unchanged_count)} unchanged · {formatWire(status.skipped_count)} skipped · {formatWire(status.withdrawn_count)} withdrawn of {formatWire(status.total_count)}</p>
     {(problems.length > 0 || status.stale_recipes.length > 0) && <details open={status.state !== "current"}><summary>{problems.length} problem{problems.length === 1 ? "" : "s"}{status.stale_recipes.length > 0 && ` · ${status.stale_recipes.length} recipe${status.stale_recipes.length === 1 ? "" : "s"} with stale installations or runs`}</summary><ul>{problems.map(item => <li key={item}>{item}</li>)}</ul></details>}
   </div>;
 }

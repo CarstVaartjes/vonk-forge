@@ -1,0 +1,75 @@
+name: Real consumer contract corpus
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/consumer-contract-corpus.yml
+      - agent_protocol/**
+      - control/src/vonk_control/**
+      - control/tests/cross_language_consumer_corpus.py
+      - control/tests/test_consumer_corpus_boundaries.py
+      - src/cluster_profiles/**
+      - rust/crates/vonk-agent/**
+      - rust/crates/vonk-agent-protocol/**
+      - Cargo.lock
+      - Cargo.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vonk-consumer-corpus-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  consumers:
+    name: Actual Python, installed CLI, HTTP and Rust consumers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: "1"
+      PYTHONPATH: control/src:agent_protocol/src:src
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prepare locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Install pinned Rust toolchain
+        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
+      - name: Restore read-only Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Build the actual parser, HTTP client and state probe
+        run: |
+          scripts/retry-dependency-fetch cargo fetch --locked
+          uv run --project control --frozen python scripts/generate-agent-wire
+          cargo build --locked --package vonk-agent --example consumer_corpus_probe
+      - name: Exercise bounded enrollment response recovery over real TCP
+        run: cargo test --locked -p vonk-agent --lib pair::tests
+      - name: Exercise original numeric object shape at the native wire boundary
+        run: cargo test --locked -p vonk-agent-protocol --lib generated_tail_rejects_private_number_objects_at_raw_json_boundary
+      - name: Emit canonical corpus and source provenance
+        run: |
+          uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
+          git rev-parse HEAD > artifacts/consumer-corpus/source-sha.txt
+          sha256sum artifacts/consumer-corpus/*.json > artifacts/consumer-corpus/sha256.txt
+      - name: Exercise actual consumer boundaries
+        env:
+          VONK_CONSUMER_CORPUS_PROBE: ${{ github.workspace }}/target/debug/examples/consumer_corpus_probe
+        run: uv run --project control --frozen python -m pytest control/tests/test_consumer_corpus_boundaries.py -q -n 0
+      - name: Upload exact corpus and provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: consumer-corpus-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/consumer-corpus
+          if-no-files-found: error
+          retention-days: 7
