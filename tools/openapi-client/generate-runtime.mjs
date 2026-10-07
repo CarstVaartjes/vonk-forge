@@ -42,6 +42,15 @@ function transform(value) {
     else if (key === "enum") result.vonkEnum = item.map(entry => stringify(entry));
     else if (!["discriminator", "example", "examples", "xml", "externalDocs"].includes(key)) result[key] = transform(item);
   }
+  // Ajv 8.20 intentionally omits __proto__ from its properties compiler.
+  // Retain the original schema entry and compile that same owner's rule as
+  // an exact-name pattern too, so named-property validation remains complete.
+  if (result.properties && Object.hasOwn(result.properties, "__proto__")) {
+    const patterns = result.patternProperties ??= Object.create(null);
+    const property = result.properties.__proto__;
+    patterns["^__proto__$"] = Object.hasOwn(patterns, "^__proto__$")
+      ? {allOf: [patterns["^__proto__$"], property]} : property;
+  }
   // JSON Schema object keywords ignore numbers. Ajv sees the lossless token
   // class as an object, so apply these keywords only to actual JSON objects.
   const objectKeywords = ["properties", "patternProperties", "additionalProperties", "propertyNames", "required", "minProperties", "maxProperties", "dependentRequired", "dependentSchemas", "dependencies", "unevaluatedProperties"];
@@ -142,10 +151,21 @@ else for (const [name, schema] of Object.entries(document.components?.schemas ??
   shapes[name] = shape(schema); normalization[`component${name}`] = {ref: name};
 }
 const imports = 'import {fullFormats} from "ajv-formats/dist/formats";\nimport {contractType, contractEnum, numericBound, numericMultiple, normalizeValidated} from "./contract-numeric";\n';
-const code = standalone(ajv, exports);
+// Ajv standalone ESM still emits CommonJS references for runtime helpers.
+// Translate discovered default imports to browser-loadable static ESM imports;
+// keep the pinned package implementation rather than duplicating its helper.
+const runtimeImports = new Map();
+const code = standalone(ajv, exports).replace(/require\("([^"]+)"\)\.default/g, (expression, module) => {
+  if (!module.startsWith("ajv/dist/runtime/")) throw new Error(`Unsupported compiled runtime dependency: ${module}`);
+  if (!runtimeImports.has(module)) runtimeImports.set(module, `ajvRuntime${runtimeImports.size}`);
+  return runtimeImports.get(module);
+});
+if (/\brequire\(/.test(code)) throw new Error("Compiled validators contain an unresolved CommonJS runtime dependency");
+const runtimeCode = [...runtimeImports].map(([module, name]) => `import ${name} from ${JSON.stringify(module)};\n`).join("");
 const provenance = `// Generated from canonical OpenAPI SHA256 ${crypto.createHash("sha256").update(raw).digest("hex")}. Do not edit.\n`;
 if (schemaOnly) {
-  fs.writeFileSync(process.argv[4], provenance + imports + code + "\nexport {componentSuite as validateSchema};\n");
+  fs.writeFileSync(process.argv[4], provenance + imports + runtimeCode + code + "\nexport {componentSuite as validateSchema};\n");
+  fs.writeFileSync(process.argv[4].replace(/\.js$/, ".d.ts"), "export declare function validateSchema(value: unknown): boolean;\n");
   process.exit(0);
 }
 // Ajv's generated code is JavaScript. Keep it JavaScript instead of inventing
@@ -161,7 +181,7 @@ const descriptor = (value, key = "") => {
   return JSON.stringify(value);
 };
 const normalizers = `\nconst shapes = ${descriptor(shapes)};\n` + Object.entries(normalization).map(([name, node]) => `Object.assign(${name}, {normalize: value => normalizeValidated(value, ${descriptor(node)}, shapes)});`).join("\n");
-fs.writeFileSync(destination, provenance + imports + code + normalizers + `\nexport const contractRoutes = ${routeCode};\n`);
+fs.writeFileSync(destination, provenance + imports + runtimeCode + code + normalizers + `\nexport const contractRoutes = ${routeCode};\n`);
 const node = ts.factory;
 const ast = await openapiTS(JSON.parse(raw), {transform(schema) {
   if (schema.type !== "integer" && schema.type !== "number") return;

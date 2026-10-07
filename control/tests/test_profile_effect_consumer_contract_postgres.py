@@ -15,14 +15,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
 from uuid import uuid4
 from zipfile import ZipFile
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.testclient import TestClient
 from sqlalchemy import select
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -176,30 +175,67 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
     path = f"/api/profile/applications/{original.id}"
     corrupt_projection = [False]
 
-    @cast(FastAPI, api.app).middleware("http")
-    async def schema_fault(request: Request, call_next):
-        response = await call_next(request)
-        if corrupt_projection[0] and request.url.path == path:
-            assert isinstance(response, StreamingResponse)
-            body = b"".join([chunk async for chunk in response.body_iterator])
-            document = json.loads(body)
-            effect = next(
-                item
-                for item in document["progress"]["effects"]
-                if item["kind"] == "stop"
-            )
-            del effect["request_key"]
-            altered = json.dumps(document).encode()
-            response_headers = dict(response.headers)
-            response_headers.pop("content-length", None)
-            response_headers["X-Content-SHA256"] = hashlib.sha256(altered).hexdigest()
-            return Response(
-                altered,
-                status_code=response.status_code,
-                headers=response_headers,
-                media_type="application/json",
-            )
-        return response
+    injected_responses: list[tuple[int, bytes]] = []
+
+    class SchemaFaultPeer:
+        """Alter complete ASGI bytes, independent of middleware response classes."""
+
+        def __init__(self, app: ASGIApp) -> None:
+            self.app = app
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if not (
+                corrupt_projection[0]
+                and scope["type"] == "http"
+                and scope["path"] == path
+            ):
+                await self.app(scope, receive, send)
+                return
+            starts: list[Message] = []
+            body = bytearray()
+
+            async def fault_send(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    starts.append(message)
+                elif message["type"] == "http.response.body":
+                    body.extend(message.get("body", b""))
+                    assert len(body) <= 1_048_576
+                    if message.get("more_body", False):
+                        return
+                    [start] = starts
+                    assert start["status"] == 200
+                    document = json.loads(body)
+                    effect = next(
+                        item
+                        for item in document["progress"]["effects"]
+                        if item["kind"] == "stop"
+                    )
+                    assert effect["request_key"] == request_key
+                    del effect["request_key"]
+                    altered = json.dumps(document).encode()
+                    headers = [
+                        (name, value)
+                        for name, value in start["headers"]
+                        if name.lower() not in {b"content-length", b"x-content-sha256"}
+                    ]
+                    headers.extend(
+                        [
+                            (b"content-length", str(len(altered)).encode()),
+                            (
+                                b"x-content-sha256",
+                                hashlib.sha256(altered).hexdigest().encode(),
+                            ),
+                        ]
+                    )
+                    injected_responses.append((start["status"], altered))
+                    await send({**start, "headers": headers})
+                    await send({"type": "http.response.body", "body": altered})
+                else:
+                    await send(message)
+
+            await self.app(scope, receive, fault_send)
+
+    api = TestClient(SchemaFaultPeer(api.app))
 
     with _https_api_peer(tmp_path, api, headers) as (url, certificate, peer):
         environment = _process_environment(tmp_path, url, certificate, headers)
@@ -267,8 +303,23 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         corrupt_projection[0] = True
         malformed = run("profile", "progress", "--application", original.id, "--json")
         assert malformed.returncode != 0
-        assert not malformed.stdout.strip()
-        assert "schema" in malformed.stderr.lower()
+        [injected] = injected_responses
+        assert injected[0] == 200
+        bad_document = json.loads(injected[1])
+        bad_effect = next(
+            item
+            for item in bad_document["progress"]["effects"]
+            if item["kind"] == "stop"
+        )
+        assert "request_key" not in bad_effect
+        problem = json.loads(malformed.stdout)
+        assert problem["code"] == "controller.protocol_invalid"
+        assert problem["source"] == "protocol"
+        assert problem["decision"] == "exit"
+        assert "OpenAPI schema" in problem["detail"]
+        assert "request_key" in problem["detail"]
+        assert "progress" not in problem and "id" not in problem
+        assert cleanup.stop_effects(problem) is None
         corrupt_projection[0] = False
         assert _claims(sessions, nodes[0]) == before_claims
 

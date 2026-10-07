@@ -79,6 +79,7 @@ describe("canonical numeric boundary", () => {
     const text = await source.text(), value = parseContractJson(text);
     const response = new ContractResponse(source, value, text), clone = response.clone(), secondClone = clone.clone();
     expect(response.headers.get("x-request-id")).toBe("example");
+    expect(response.headers.get("content-length")).toBe(String(new TextEncoder().encode(text).byteLength));
     expect(stringifyContractJson(await response.json())).toBe(text);
     expect(response.bodyUsed).toBe(true);
     await expect(response.json()).rejects.toThrow();
