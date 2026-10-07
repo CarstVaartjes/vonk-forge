@@ -490,6 +490,13 @@ function canonicalRecord(detail: OperationDetail, names: Map<string, string>): A
   return {request_id: detail.id, actor: "Vonk Forge", action: `operation.${detail.kind}.${detail.state}`, occurred_at: detail.created_at, targets: detail.node_ids, target_names: detail.node_ids.map(id => names.get(id) ?? ""), source: "operation", operation: detail};
 }
 
+export function ModelCacheCancellationEvidence({detail}: {detail: OperationDetail}) {
+  if (!detail.kind.startsWith("model-cache.")) return null;
+  const cancellation = detail.model_cache_cancellation;
+  if (!cancellation) return detail.state === "cancelled" ? <p style={{margin: 0}}>Writer stop evidence unavailable.</p> : null;
+  return <p style={{margin: 0}}>{cancellation.observation?.detail ?? (detail.state === "cancelled" ? "Cancellation ended; stopping the writer remains unconfirmed." : "Cancellation requested; writer stop evidence unavailable.")}</p>;
+}
+
 function CanonicalOperationDetails({api, detail, onUpdate}: {
   api: ActivityApi; detail: OperationDetail; onUpdate: (detail: OperationDetail) => void;
 }) {
@@ -518,7 +525,7 @@ function CanonicalOperationDetails({api, detail, onUpdate}: {
   const availability = detail.failure && "code" in detail.failure
     ? availabilityFailure(detail.failure) : undefined;
   return <div className="activity-job-reason" style={{gap: ".5rem"}}>
-    {detail.model_cache_cancellation && <p style={{margin: 0}}>{detail.model_cache_cancellation.observation?.detail ?? "Cancellation ended; stopping the writer remains unconfirmed."}</p>}
+    <ModelCacheCancellationEvidence detail={detail}/>
     {availability
       ? <LibraryAvailabilityFeedback failure={availability}/>
       : detail.failure && <><strong>{failureSummary(detail.failure)}</strong>{"detail" in detail.failure && detail.failure.detail && <p style={{margin: 0}}>{detail.failure.detail}</p>}</>}

@@ -15,7 +15,9 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.lifecycle import STOP_BUDGET, Effect, Outcome, Reported, State
 from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache_api import model_cache_operation_provider
 from vonk_control.models import Base, ModelCacheOperation
+from vonk_control.operation_api import operation_detail_response
 
 from cluster_profiles.cli_render import render_payload
 
@@ -200,11 +202,49 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
             rendered = capsys.readouterr().out
             assert "confirmed stopped" in rendered
             assert "unconfirmed" not in rendered
+        # Damage only the retained cancellation bookkeeping. The immutable
+        # operation identity and ending remain; missing evidence proves no stop.
+        with sessions.begin() as session:
+            ended = session.get(ModelCacheOperation, confirmed.id)
+            assert ended is not None
+            retained_payload = ended.payload
+            ended.payload = {**retained_payload, "cancellation": None}
+        with sessions() as session:
+            ended = session.get(ModelCacheOperation, confirmed.id)
+            assert ended is not None
+            assert (
+                restarted._lifecycle.lifecycle(ended, now[0]).effect is Effect.UNKNOWN
+            )
+        with _api(restarted) as api:
+            response = api.get(f"/api/model/operations/{confirmed.id}")
+            assert response.status_code == 200
+            missing_response = response.json()
+            assert missing_response["operation_id"] == confirmed.id
+            assert missing_response["cancellation"] is None
+            render_payload(missing_response, "model", action="progress")
+            rendered = capsys.readouterr().out
+            assert "Writer stop evidence unavailable" in rendered
+            assert "confirmed stopped" not in rendered
+        missing_activity = operation_detail_response(
+            model_cache_operation_provider(restarted).get_operation(confirmed.id)
+        ).model_dump(mode="json")
+        assert missing_activity["id"] == confirmed.id
+        assert missing_activity["state"] == "cancelled"
+        assert "model_cache_cancellation" not in missing_activity
+        with sessions.begin() as session:
+            ended = session.get(ModelCacheOperation, confirmed.id)
+            assert ended is not None
+            ended.payload = retained_payload
         exported = os.environ.get("VONK_CACHE_CANCEL_RESPONSE_OUTPUT")
         if exported:
             Path(exported).write_text(
                 json.dumps(
-                    {"unknown": unknown_response, "confirmed": confirmed_response}
+                    {
+                        "unknown": unknown_response,
+                        "confirmed": confirmed_response,
+                        "missing": missing_response,
+                        "missing_activity": missing_activity,
+                    }
                 )
                 + "\n"
             )

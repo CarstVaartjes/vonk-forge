@@ -6,6 +6,7 @@ import {ApiClient} from "../api/client";
 import {ContractViolation} from "../api/contract-json";
 import {CancelOperation} from "./cancel-operation";
 import {ToastProvider} from "./toast";
+import {ModelCacheCancellationEvidence} from "../pages/activity";
 
 // The focused hosted lane supplies responses emitted by the real PostgreSQL
 // owner/API recovery journey, after generating consumers from the same source.
@@ -37,4 +38,14 @@ test.skipIf(!responsesPath)("actual model cancellation responses preserve unknow
     expect(transport).toHaveBeenCalledTimes(2);
     vi.unstubAllGlobals();
   }
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(responses.missing_activity), {status: 200, headers: {"content-type": "application/json"}})));
+  const missing = await new ApiClient().operation(responses.missing_activity.id);
+  render(<ModelCacheCancellationEvidence detail={missing}/>);
+  expect(screen.getByText("Writer stop evidence unavailable.")).toBeVisible();
+  expect(screen.queryByText(/confirmed stopped/)).toBeNull();
+  cleanup();
+  render(<ModelCacheCancellationEvidence detail={{...missing, kind: "recipe.image.availability.v2"}}/>);
+  expect(screen.queryByText("Writer stop evidence unavailable.")).toBeNull();
+  cleanup();
+  vi.unstubAllGlobals();
 });
