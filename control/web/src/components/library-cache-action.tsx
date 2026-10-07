@@ -113,7 +113,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
         onPrepared();
         return;
       }
-      const failed = current.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : failureText(current);
+      const failed = current.state === "cancelled" ? `${current.cancellation?.observation?.detail ?? "Cancellation ended; stopping the writer remains unconfirmed."} Partial files are kept; download again to resume.` : failureText(current);
       setError(failed);
       if (current.state !== "cancelled") toast.error(failureNotice(failed, requestKey));
     } catch (value) {
