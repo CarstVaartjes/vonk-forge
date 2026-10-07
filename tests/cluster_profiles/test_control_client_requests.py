@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 import io
 import json
@@ -13,6 +15,15 @@ from typing import Self
 
 import httpx2
 import pytest
+from vonk_control.fleet_projection import FleetSnapshot as OwnedFleetSnapshot
+from vonk_control.observation_transfer import (
+    OBSERVATION_MEDIA_TYPE,
+    ObservationTransferChunk,
+    ObservationTransferComplete,
+    ObservationTransferStart,
+    _record,
+    observation_response,
+)
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import (
@@ -37,6 +48,7 @@ from cluster_profiles.generated_control.models.fleet_profile_preview import (
 from cluster_profiles.generated_control.models.fleet_profile_scope_preview import (
     FleetProfileScopePreview,
 )
+from control.tests.observation_transfer_peer import ObservationHTTPPeer
 
 
 class _Response:
@@ -603,6 +615,63 @@ def test_request_rejects_json_body_on_binary_route(tmp_path: Path) -> None:
         )
 
 
+def _fleet_transfer_peer(payload: dict[str, object]) -> ObservationHTTPPeer:
+    """Real producer envelope; corruption changes only its encoded document."""
+    valid = {
+        "authority_revision": "a" * 64,
+        "event_cursor": 0,
+        "generated_at": "2026-09-07T00:00:00+00:00",
+        "nodes": [],
+    }
+    response = observation_response(
+        OwnedFleetSnapshot.model_validate_json(json.dumps(valid), strict=True),
+        resource="fleet",
+    )
+
+    async def collect() -> bytes:
+        parts: list[bytes] = []
+        async for part in response.body_iterator:
+            parts.append(part.encode() if isinstance(part, str) else bytes(part))
+        return b"".join(parts)
+
+    body = asyncio.run(collect())
+    if payload != valid:
+        # Preserve a canonical valid transfer identity, ordering, encoding and
+        # complete receipt so malformed Fleet data reaches the domain validator.
+        start = ObservationTransferStart.model_validate_json(
+            body.splitlines()[0], strict=True
+        )
+        raw = json.dumps(
+            payload,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        chunk = ObservationTransferChunk(
+            type="chunk",
+            transfer_id=start.transfer_id,
+            ordinal=0,
+            data=base64.b64encode(raw).decode("ascii"),
+        )
+        complete = ObservationTransferComplete(
+            type="complete",
+            transfer_id=start.transfer_id,
+            chunks=1,
+            bytes=len(raw),
+            sha256=hashlib.sha256(raw).hexdigest(),
+        )
+        body = b"".join(_record(record) for record in (start, chunk, complete))
+    return ObservationHTTPPeer(
+        httpx2.Response(
+            200,
+            content=body,
+            headers={"Content-Type": OBSERVATION_MEDIA_TYPE},
+            request=httpx2.Request("GET", "https://forge.example.test/api/fleet"),
+        )
+    )
+
+
 def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
     tmp_path: Path,
 ) -> None:
@@ -615,7 +684,7 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
     client = ControlClient(
         "https://forge.example.test",
         _token(tmp_path),
-        opener=lambda *_args, **_kwargs: _Response(200, valid),
+        opener=lambda *_args, **_kwargs: _fleet_transfer_peer(valid),
     )
 
     result = client.fleet()
@@ -647,10 +716,12 @@ def test_generated_transport_rejects_malformed_raw_response(
     client = ControlClient(
         "https://forge.example.test",
         _token(tmp_path),
-        opener=lambda *_args, **_kwargs: _Response(200, payload),
+        opener=lambda *_args, **_kwargs: _fleet_transfer_peer(payload),
     )
 
-    with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
+    with pytest.raises(
+        ControlMalformedResponse, match="canonical FleetSnapshot contract"
+    ):
         client.fleet()
 
 

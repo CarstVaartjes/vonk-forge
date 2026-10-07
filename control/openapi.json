@@ -19656,6 +19656,10 @@
         "description": "Warnings and attention items of the fleet and library projections.",
         "enum": [
           "cpu.low-clock",
+          "fleet.frame_budget_exceeded",
+          "fleet.frame_encoding_unavailable",
+          "fleet.stored_event_payload_unavailable",
+          "observation.transfer_unavailable",
           "install.partial",
           "inventory.missing",
           "inventory.stale",

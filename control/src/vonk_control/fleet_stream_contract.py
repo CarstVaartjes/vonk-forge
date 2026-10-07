@@ -13,6 +13,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from vonk_agent_protocol.reason_codes import ProjectionCode
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -42,8 +43,8 @@ class FleetFrameIssue(_FleetStreamModel):
                         "properties": {
                             "reason_code": {
                                 "enum": [
-                                    "fleet.frame_encoding_unavailable",
-                                    "fleet.stored_event_payload_unavailable",
+                                    ProjectionCode.FLEET_FRAME_ENCODING_UNAVAILABLE,
+                                    ProjectionCode.FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE,
                                 ]
                             }
                         },
@@ -56,7 +57,9 @@ class FleetFrameIssue(_FleetStreamModel):
                 {
                     "if": {
                         "properties": {
-                            "reason_code": {"const": "fleet.frame_budget_exceeded"}
+                            "reason_code": {
+                                "const": ProjectionCode.FLEET_FRAME_BUDGET_EXCEEDED
+                            }
                         },
                         "required": ["reason_code"],
                     },
@@ -73,9 +76,9 @@ class FleetFrameIssue(_FleetStreamModel):
         }
     )
     reason_code: Literal[
-        "fleet.frame_budget_exceeded",
-        "fleet.frame_encoding_unavailable",
-        "fleet.stored_event_payload_unavailable",
+        ProjectionCode.FLEET_FRAME_BUDGET_EXCEEDED,
+        ProjectionCode.FLEET_FRAME_ENCODING_UNAVAILABLE,
+        ProjectionCode.FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE,
     ]
     observed_bytes_at_least: (
         Annotated[int, Field(ge=MAX_CONTROL_DOCUMENT_BYTES + 1)] | None
@@ -87,8 +90,8 @@ class FleetFrameIssue(_FleetStreamModel):
     @model_validator(mode="after")
     def truthful_measurement(self) -> FleetFrameIssue:
         if self.reason_code in {
-            "fleet.frame_encoding_unavailable",
-            "fleet.stored_event_payload_unavailable",
+            ProjectionCode.FLEET_FRAME_ENCODING_UNAVAILABLE,
+            ProjectionCode.FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE,
         }:
             if self.observed_bytes_at_least is not None:
                 raise ValueError("unavailable frame has no byte measurement")

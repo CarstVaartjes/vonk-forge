@@ -308,6 +308,14 @@ jobs:
                 control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
                 control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
                 --api-response-witness="$RUNNER_TEMP/api-response-witnesses.json"
+      - name: Attribute catalog wire validation cost with the actual compiled probe
+        env:
+          VONK_WIRE_PROBE_TIMINGS: "1"
+        run: |
+          set -euo pipefail
+          export VONK_INSTALL_START_WIRE_PROBE="${CARGO_TARGET_DIR:-$PWD/target}/debug/examples/install_start_wire_probe"
+          uv run --project control --frozen pytest -s -q -n 0 \
+            agent_protocol/tests/test_schema2_recipe_rust_compat.py::test_catalog_launch_payloads_are_accepted_by_python_and_rust
       - name: Exercise Controller requests and Spark results together
         run: >-
           uv run --project control --frozen
@@ -880,6 +888,13 @@ jobs:
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Pull the pinned test images once
         run: scripts/pull-test-images postgres step-ca python
+      - name: Attribute fresh PostgreSQL catalog phase costs
+        if: matrix.shard.index == 2
+        env:
+          VONK_CATALOG_TIMINGS: "1"
+        run: >-
+          uv run --project control --frozen pytest -s -q -n 0
+          control/tests/test_fresh_launch_catalog_postgres_acceptance.py::test_fresh_postgres_imports_typed_canonical_model_recipe_api
       - name: Run complete control suite
         shell: bash
         env:
@@ -1029,8 +1044,13 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
-      - name: Run fixture-backed browser acceptance
-        run: npm run test:e2e --prefix control/web -- --project=chromium
+      - name: Run fixture-backed Admin browser acceptance
+        # Native contract consumers run with their Python-produced corpus and
+        # development server in browser-contract-artifacts.yml.
+        run: >-
+          npm run test:e2e --prefix control/web --
+          e2e/admin.spec.ts e2e/feedback.spec.ts e2e/operation-progress.spec.ts
+          --project=chromium
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

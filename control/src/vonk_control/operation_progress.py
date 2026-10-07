@@ -202,11 +202,11 @@ def project_progress_for_state(
     """One advisory freshness policy for every retained attempt consumer."""
     projected = project_progress(value, now)
     if state in {
-        "succeeded",
+        LifecycleState.SUCCEEDED,
         "accepted",
         "compensated",
-        "failed",
-        "cancelled",
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
         *agent_operation_states.PARKED,
     }:
         return projected.model_copy(
@@ -235,7 +235,7 @@ def member_progress(
             state=state,
             phase=phase,
             kind=kind,
-            activity="waiting" if state == "queued" else None,
+            activity="waiting" if state == LifecycleState.QUEUED else None,
         )
     return OperationMemberProgress(
         member_id=member_id,
