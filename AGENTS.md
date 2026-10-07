@@ -100,8 +100,10 @@ Classify a rule by what it protects, not by the word "budget":
 Count each physical resource once. Keep observations, reservations, future
 promises, and estimates distinct; inherited parent/child claims must not compete
 with themselves. A planned stop or terminal row does not prove capacity free.
-Release claims only after reconciling exact effects. Retain recipe-declared
-system reserves and account for unified memory as one physical pool.
+Release claims only after reconciling exact effects. Retain the installed
+platform memory floor and account for unified memory as one physical pool.
+The recipe's `reserve_bytes` is informational; never add it to `peak_bytes`
+or create an additional reservation from it.
 
 Derive bounds from bytes, time, disk, memory, or another protected resource.
 Avoid arbitrary structural counts; report the limit and observed value. All
