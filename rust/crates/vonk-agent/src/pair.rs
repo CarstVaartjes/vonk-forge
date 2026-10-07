@@ -389,6 +389,7 @@ mod tests {
         let recovered = bounded_pairing_body(response).await.unwrap();
         peer.abort();
         assert_eq!(recovered, body);
+        assert!(recovered.capacity() <= MAX_RESPONSE_BYTES);
         assert_eq!(
             validate_enrollment_response(200, &recovered, node)
                 .unwrap()
