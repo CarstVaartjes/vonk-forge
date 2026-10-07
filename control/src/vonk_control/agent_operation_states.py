@@ -47,6 +47,13 @@ WIRE_UNKNOWN = AgentResultState.OBSERVING.value
 LEGACY_UNKNOWN = StateAlias.WAITING_FOR_OPERATOR.value
 LEGACY_LAPSED = StateAlias.EXPIRED.value
 
+#: Immutable outcome carried by historical aggregate/member reads only.
+#: Current normal lifecycle writers do not emit it; it is neither a core state
+#: nor an adopted alias, and its terminal display meaning proves no effect.
+#: The underlying retained SQL columns still accept strings.
+RETAINED_COMPENSATED = "compensated"
+
+
 # -- orders ------------------------------------------------------------------
 
 QUEUED = LifecycleState.QUEUED.value
