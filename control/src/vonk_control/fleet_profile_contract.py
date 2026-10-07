@@ -926,7 +926,9 @@ class FleetProfileSwitchChildState(StrictModel):
     operation_id: UuidId
     original_operation_id: UuidId | None = None
     kind: FleetProfileSwitchChildKind
-    state: Literal["succeeded", "failed", "cancelled"]
+    state: Literal[
+        LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+    ]
     result: FleetProfileSwitchChildResult | None = None
 
 
