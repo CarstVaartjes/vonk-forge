@@ -12,6 +12,7 @@ on:
       - control/src/vonk_control/enrollment.py
       - control/tests/test_ca_claims_postgres.py
       - control/tests/test_ca_image_controller_postgres.py
+      - rust/crates/vonk-agent/src/client.rs
   workflow_dispatch:
     inputs:
       bootstrap_lock:
@@ -203,3 +204,79 @@ jobs:
         run: |
           echo 'Dependency bootstrap is evidence only. Adopt reviewed Go locks and formatted sources in a signed commit, then rerun the locked proof.' >&2
           exit 1
+  rotation-recovery:
+    name: Native transport activation timeout and same-generation recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Install pinned Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          scripts/retry-dependency-fetch rustup toolchain install 1.98.1
+      - name: Restore locked Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Prove native timeout, writer release and same-generation repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/rotation-proof
+          git rev-parse HEAD > artifacts/rotation-proof/source-sha.txt
+          git rev-parse HEAD:rust/crates/vonk-agent/src/client.rs > artifacts/rotation-proof/client-blob.txt
+          sha256sum rust/crates/vonk-agent/src/client.rs > artifacts/rotation-proof/client-before.sha256
+          cd rust
+          cargo test --locked -p vonk-agent --lib \
+            client::tests::rotation_silent_activation_retries_same_generation_and_repairs_heartbeat \
+            -- --exact --test-threads=1 --nocapture 2>&1 | tee ../artifacts/rotation-proof/positive.log
+          grep -F 'test result: ok. 1 passed; 0 failed; 0 ignored;' ../artifacts/rotation-proof/positive.log
+      - name: Reject removing the owning activation deadline
+        shell: bash
+        run: |
+          set -euo pipefail
+          owned_source=rust/crates/vonk-agent/src/client.rs
+          cp "$owned_source" "$RUNNER_TEMP/rotation-client-pristine.rs"
+          restore_source() { cp "$RUNNER_TEMP/rotation-client-pristine.rs" "$owned_source"; }
+          trap restore_source EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          path = Path('rust/crates/vonk-agent/src/client.rs')
+          source = path.read_text()
+          start = source.index('    pub async fn activate(')
+          end = source.index('    /// Read one object', start)
+          block = source[start:end]
+          needle = '            .timeout(ROTATION_REQUEST_TIMEOUT)\n'
+          assert block.count(needle) == 1
+          path.write_text(source[:start] + block.replace(needle, '') + source[end:])
+          PYCODE
+          set +e
+          (cd rust && cargo test --locked -p vonk-agent --lib \
+            client::tests::rotation_silent_activation_retries_same_generation_and_repairs_heartbeat \
+            -- --exact --test-threads=1 --nocapture) 2>&1 | tee artifacts/rotation-proof/counterexample.log
+          result=${PIPESTATUS[0]}
+          set -e
+          test "$result" -ne 0
+          grep -F 'activation deadline consumed the heartbeat request budget' artifacts/rotation-proof/counterexample.log
+          restore_source
+          trap - EXIT
+          sha256sum -c artifacts/rotation-proof/client-before.sha256
+          git diff --exit-code -- rust/crates/vonk-agent/src/client.rs
+          printf 'pristine source restored; deadline counterexample failed as required\n' > artifacts/rotation-proof/restoration.txt
+      - name: Preserve exact source and both outcomes
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rotation-recovery-${{ github.sha }}
+          path: artifacts/rotation-proof
+          if-no-files-found: error
+          retention-days: 7
