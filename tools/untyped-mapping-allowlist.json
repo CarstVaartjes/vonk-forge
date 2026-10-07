@@ -418,10 +418,6 @@
       "count": 6
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability_api.py",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/recipe_lifecycle_contract.py",
       "count": 1
     },
