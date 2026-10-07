@@ -527,9 +527,8 @@ def test_damaged_membership_is_unknown_and_does_not_mutate_execution(
             left, right = first[0].node_id, first[1].node_id
             first[0] = first[0].model_copy(update={"node_id": right})
             first[1] = first[1].model_copy(update={"node_id": left})
-        job.payload = parent.model_copy(update={"phases": phases}).model_dump(
-            mode="json"
-        )
+        damaged = parent.model_copy(update={"phases": phases}).model_dump(mode="json")
+        job.payload = damaged
         original_state = job.state
     observed = service.get(start.id)
     assert observed.progress is None
