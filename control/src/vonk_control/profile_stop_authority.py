@@ -280,7 +280,10 @@ def validate_profile_stop_owner(
         not in job_states.words(
             LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
         )
-        or run.state not in {RunState.RUNNING, RunState.STARTING, RunState.STOPPING}
+        or (
+            run.state not in {RunState.RUNNING, RunState.STARTING, RunState.STOPPING}
+            and not (switch_stop and run.state == RunState.LOST)
+        )
     ):
         raise ProfileStopAuthorityError("current profile Stop identity is stale")
 

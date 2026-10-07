@@ -7,7 +7,14 @@ from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import (
+    AgentResult,
+    AgentResultState,
+    OutcomeDone,
+    OutcomeKind,
+    RecipeStopResult,
+)
+from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import FleetProfileInput
@@ -173,7 +180,16 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             stop_claim is not None
             and fenced_operation(sessions, stop_claim).parent_job_id == stop_job.id
         )
-        agent_jobs.record_result(_result(stop_claim, state="succeeded", evidence={}))
+        assert isinstance(stop_claim.payload, RecipeStopPayload)
+        assert stop_claim.payload.run_id == old_start.owner_id
+        assert stop_claim.fence.node_id == node_id
+        agent_jobs.record_result(
+            AgentResult(
+                fence=stop_claim.fence,
+                state=AgentResultState.SUCCEEDED,
+                result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
+            )
+        )
         with sessions() as session:
             old_run = session.get(RecipeRun, old_start.owner_id)
             assert old_run is not None and old_run.state == "stopped"
