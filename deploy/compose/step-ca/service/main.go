@@ -81,6 +81,13 @@ func openAuthority(cfg *config.Config, password []byte) (*authority.Authority, *
 	if err != nil || !bytes.Equal(issuerPublic, signerPublic) {
 		return nil, nil, errors.New("CA issuer key differs from certificate")
 	}
+	policy := Policy{Issuer: issuer, ProvisionerName: p.Name, ProvisionerKID: p.Key.KeyID, ProvisionerID: p.GetID(), ServerNames: append([]string(nil), cfg.DNSNames...)}
+	// Admission uses the actual issuer/profile encoding with a public sizing
+	// signer. Reject an unrepresentable response before private signing or
+	// opening the durable journal, so repair never requires another identity.
+	if err := validateStartupResponseBudget(policy); err != nil {
+		return nil, nil, err
+	}
 	soft, err := softcas.New(context.Background(), casapi.Options{CertificateChain: []*x509.Certificate{issuer}, Signer: signer})
 	if err != nil {
 		return nil, nil, err
@@ -99,7 +106,6 @@ func openAuthority(cfg *config.Config, password []byte) (*authority.Authority, *
 		_ = authdb.Shutdown()
 		return nil, nil, err
 	}
-	policy := Policy{Issuer: issuer, ProvisionerName: p.Name, ProvisionerKID: p.Key.KeyID, ProvisionerID: p.GetID(), ServerNames: append([]string(nil), cfg.DNSNames...)}
 	cas := &JournalCAS{Journal: journal, Soft: soft, Policy: policy}
 	auth, err := authority.New(cfg, authority.WithDatabase(journal), authority.WithX509CAService(cas), authority.WithX509IntermediateCerts(issuer), authority.WithPassword(password), authority.WithQuietInit())
 	if err != nil {
