@@ -4,9 +4,10 @@ import json
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
-import vonk_control.recipe_image_availability as availability_module
+import vonk_control.recipe_image_availability.cancellation as availability_module
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
 from vonk_control import fleet_profiles as profile_module
@@ -32,9 +33,21 @@ from vonk_control.recipe_operations import RecipeOperationConflict
 from vonk_control.recipe_runtime_specs import RUNTIME_INTERFACE
 from vonk_forge_contracts import RecipeDefinition
 
-from .test_build_cancellation_recovery import _active_claims, _issue, _services
+from .non_blocking import assert_ended_without_blocking
+from .test_build_cancellation_recovery import (
+    _active_claims,
+    _issue,
+    _services,
+    _settle_cleanup,
+)
 from .test_profile_build_memory import _accepted_build_profile, _parent_build_request
 from .test_profile_port_claims import _ready_profile
+
+
+def _assert_observation_failure(receipt):
+    assert receipt.failure_evidence is not None
+    assert not receipt.failure_evidence.retryable
+    assert not receipt.failure_evidence.recovery_actions
 
 
 def _availability(sessions, storage, now, revision, plan):
@@ -405,15 +418,22 @@ def test_availability_acceptance_cannot_pass_a_busy_build_cancellation_boundary(
         blocker.scalar(
             select(RecipeBuild).where(RecipeBuild.id == plan.build_id).with_for_update()
         )
-        with pytest.raises(RecipeImageAvailabilityError) as caught:
-            availability.start(revision.id, actor="operator", request_id=request_id)
-        assert caught.value.code == "build.consumer_busy"
+        ended = availability.start(revision.id, actor="operator", request_id=request_id)
+        assert ended.failure_evidence is not None
+        assert ended.failure_evidence.code == "build.consumer_busy"
     with sessions() as session:
         assert (
             session.scalar(select(Job.id).where(Job.request_id == request_id)) is None
         )
-    accepted = availability.start(revision.id, actor="operator", request_id=request_id)
-    assert accepted.state == "queued"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        ended,
+        end=lambda receipt: receipt,
+        assert_reason=lambda receipt: _assert_observation_failure(receipt),
+        fresh=lambda _: availability.start(
+            revision.id, actor="operator", request_id=str(uuid.uuid4())
+        ),
+    )
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -560,25 +580,25 @@ def test_new_availability_consumer_cannot_join_after_cancellation_fences_shared_
         try:
             assert fenced.wait(10), "last-consumer cancellation did not fence the build"
             blocked_request_id = str(uuid.uuid4())
-            with pytest.raises(RecipeImageAvailabilityError) as busy:
-                availability.start(
-                    revision.id,
-                    actor="operator",
-                    request_id=blocked_request_id,
-                )
-            assert busy.value.code == "build.consumer_busy"
+            busy = availability.start(
+                revision.id,
+                actor="operator",
+                request_id=blocked_request_id,
+            )
+            assert busy.failure_evidence is not None
+            assert busy.failure_evidence.code == "build.consumer_busy"
         finally:
             resume.set()
         reconciliation.result(timeout=10)
 
     retry_request_id = str(uuid.uuid4())
-    with pytest.raises(RecipeImageAvailabilityError) as pending:
-        availability.start(
-            revision.id,
-            actor="operator",
-            request_id=retry_request_id,
-        )
-    assert pending.value.code == "build.cancellation_pending"
+    pending = availability.start(
+        revision.id,
+        actor="operator",
+        request_id=retry_request_id,
+    )
+    assert pending.failure_evidence is not None
+    assert pending.failure_evidence.code == "build.cancellation_pending"
     with sessions() as session:
         child = session.get(Job, build.id)
         assert child is not None and child.result is not None
@@ -590,6 +610,22 @@ def test_new_availability_consumer_cannot_join_after_cancellation_fences_shared_
                 )
             )
             is None
+        )
+
+    # The build owner reconciles its unissued cancellation through its normal path.
+    # Neither bounded admission observation persisted an owner or execution claim.
+    operations.reconcile_cancelled_builds()
+    availability._release_cancelled_claim(claim)
+    availability.reconcile_cancellations()
+    for ended in (busy, pending):
+        assert_ended_without_blocking(
+            SimpleNamespace(sessions=sessions),
+            ended,
+            end=lambda receipt: receipt,
+            assert_reason=lambda receipt: _assert_observation_failure(receipt),
+            fresh=lambda _: availability.start(
+                revision.id, actor="operator", request_id=str(uuid.uuid4())
+            ),
         )
 
 
@@ -615,7 +651,7 @@ def test_existing_build_identity_mismatch_cannot_be_treated_as_an_unbound_consum
 def test_invalid_cleanup_evidence_refuses_consumer_acceptance_with_a_typed_error(
     tmp_path, postgres_engine
 ):
-    sessions, _builds, operations, storage, now, _node, revision, plan = _services(
+    sessions, _builds, operations, storage, now, node, revision, plan = _services(
         tmp_path, postgres_engine
     )
     build = operations.build(
@@ -624,7 +660,7 @@ def test_invalid_cleanup_evidence_refuses_consumer_acceptance_with_a_typed_error
         actor="operator",
         request_id=str(uuid.uuid4()),
     )
-    _issue(sessions, build.id)
+    child_id = _issue(sessions, build.id)
     operations.cancel(
         build.id,
         actor="operator",
@@ -634,16 +670,32 @@ def test_invalid_cleanup_evidence_refuses_consumer_acceptance_with_a_typed_error
     with sessions.begin() as session:
         job = session.get(Job, build.id)
         assert job is not None and job.result is not None
+        original_result = job.result
         job.result = dict(job.result) | {"cancel_request_id": None}
     claims = _active_claims(sessions, plan.build_id)
     availability = _availability(sessions, storage, now, revision, plan)
     request_id = str(uuid.uuid4())
-    with pytest.raises(RecipeImageAvailabilityError) as caught:
-        availability.start(revision.id, actor="operator", request_id=request_id)
-    assert caught.value.code == "build.consumer_invalid"
-    assert not caught.value.retryable
+    ended = availability.start(revision.id, actor="operator", request_id=request_id)
+    assert ended.failure_evidence is not None
+    assert ended.failure_evidence.code == "build.consumer_invalid"
+    assert not ended.failure_evidence.retryable
     assert _active_claims(sessions, plan.build_id) == claims
     with sessions() as session:
         assert (
             session.scalar(select(Job.id).where(Job.request_id == request_id)) is None
         )
+
+    with sessions.begin() as session:
+        job = session.get(Job, build.id)
+        assert job is not None
+        job.result = original_result
+    _settle_cleanup(sessions, operations, plan.build_id, node, child_id)
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        ended,
+        end=lambda receipt: receipt,
+        assert_reason=lambda receipt: _assert_observation_failure(receipt),
+        fresh=lambda _: availability.start(
+            revision.id, actor="operator", request_id=str(uuid.uuid4())
+        ),
+    )
