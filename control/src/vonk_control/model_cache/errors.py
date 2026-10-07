@@ -249,7 +249,7 @@ def _retryable_failure(error: BaseException) -> bool:
 
 
 def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | None:
-    """Parse Retry-After and standard provider rate-limit reset hints."""
+    """Provider retry delays from HTTP headers and rate-limit reset hints."""
 
     values: list[int] = []
     raw_retry = headers.get("retry-after")

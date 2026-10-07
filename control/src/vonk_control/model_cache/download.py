@@ -97,10 +97,13 @@ class DownloadMixin:
                     durable_received = received
 
                 try:
-                    while True:
+                    # Read at most the pinned remaining bytes, then one extra
+                    # byte to reject an oversized source without consuming it.
+                    remaining = spec.expected_bytes - received
+                    while remaining >= 0:
                         observe(received)
                         if isinstance(stream, BufferedReader):
-                            chunk = stream.read(_CHUNK_BYTES)
+                            chunk = stream.read(min(_CHUNK_BYTES, remaining + 1))
                         else:
                             chunk = next(stream, b"")
                         if not chunk:
@@ -117,6 +120,7 @@ class DownloadMixin:
                         output.write(chunk)
                         cache._streams.record_bytes(len(chunk))
                         received = next_received
+                        remaining -= len(chunk)
                         if (
                             interrupt_after_bytes is not None
                             and received >= interrupt_after_bytes

@@ -75,7 +75,7 @@ class HttpMixin:
         """Open a pinned source, authenticating only the HF authority.
 
         Hugging Face commonly redirects a resolve URL to a signed CDN URL.
-        Redirects are followed manually so an Authorization header is never
+        Explicit redirect handling ensures an Authorization header is never
         copied to an arbitrary host. A configured token is sent only on the
         canonical authority request; without a token file, the request stays
         anonymous until the authority reports that access is required.
@@ -157,14 +157,14 @@ class HttpMixin:
                 if authenticated:
                     raise ModelCacheStorageRefused(
                         SecurityRefusalReason.MODEL_CACHE_CREDENTIALS_DENIED.value,
-                        "Hugging Face could not authorize this download; verify account access and token scope at "
+                        "Hugging Face denied the configured account or token scope for "
                         f"{_huggingface_access_url(source)}; the download resumes automatically when the token changes",
                         recovery="access_denied",
                     )
                 raise ModelCacheStorageRefused(
                     ModelCacheCode.CREDENTIALS_MISSING,
-                    "Hugging Face access is required; request access at "
-                    f"{_huggingface_access_url(source)} and configure HF_TOKEN_FILE; the download resumes automatically when the token changes",
+                    "Hugging Face account access is required for "
+                    f"{_huggingface_access_url(source)}; HF_TOKEN_FILE credentials are missing; the download resumes automatically when the token changes",
                     recovery="access_required",
                 )
             if status_code in {301, 302, 303, 307, 308}:

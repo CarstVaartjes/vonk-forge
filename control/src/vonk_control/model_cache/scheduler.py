@@ -140,7 +140,9 @@ class SchedulerMixin:
             # Allocate one transfer to every selected operation first, then
             # round-robin remaining slots. A large Model cannot monopolize the
             # Controller pool while another selected Model waits at zero.
-            while True:
+            # One round can assign at least one slot. Async completions may
+            # free slots during dispatch; leave further work for the next tick.
+            for _round in range(cache._available_transfer_slots()):
                 capacity = cache._available_transfer_slots()
                 if capacity <= 0:
                     break
@@ -209,7 +211,8 @@ class SchedulerMixin:
         if record is None:
             return
         pending = record.pending()
-        while pending < capacity and record.next_index < len(record.specs):
+        remaining = min(capacity - pending, len(record.specs) - record.next_index)
+        for _slot in range(max(0, remaining)):
             spec = record.specs[record.next_index]
             record.next_index += 1
             future = cache._executor.submit(
@@ -222,7 +225,6 @@ class SchedulerMixin:
             )
             record.futures.append(future)
             record.future_specs[future] = spec.key
-            pending += 1
 
     def _advance_background_operations(self) -> int:
         cache = cast("ModelCacheService", self)

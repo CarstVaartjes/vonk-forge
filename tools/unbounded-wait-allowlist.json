@@ -135,48 +135,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/model_cache/split_transfer.py",
-      "function": "SplitTransferMixin._append_part",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache/updates.py",
-      "function": "UpdatesMixin._check_upstream_revisions",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache/download.py",
-      "function": "DownloadMixin._download_sequential",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache/scheduler.py",
-      "function": "SchedulerMixin._fill_background_slots",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache/split_transfer.py",
-      "function": "SplitTransferMixin._sample_transfer",
-      "kind": "wait-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache/split_transfer.py",
-      "function": "SplitTransferMixin._sample_transfer.sample",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache/scheduler.py",
-      "function": "SchedulerMixin.tick",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/model_cache_ranges.py",
       "function": "download_ranges",
       "kind": "loop-without-deadline",

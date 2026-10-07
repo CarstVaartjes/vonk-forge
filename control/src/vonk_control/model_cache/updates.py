@@ -207,7 +207,9 @@ class UpdatesMixin:
         remaining = iter(ordered)
         exhausted = False
         while time.monotonic() < deadline:
-            while not exhausted and len(pending) < _UPSTREAM_CHECK_WORKERS:
+            for _slot in range(_UPSTREAM_CHECK_WORKERS - len(pending)):
+                if exhausted or time.monotonic() >= deadline:
+                    break
                 if not cache._upstream_slots.acquire(blocking=False):
                     break
                 key = next(remaining, None)

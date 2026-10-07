@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -19,8 +20,8 @@ from ..models import ModelCacheOperation
 from ..worker_memory_contract import WorkerMemoryComponent
 from . import constants
 from .artifacts import ArtifactSpec
-from .constants import _CHUNK_BYTES
-from .errors import ModelCacheStorageRefused
+from .constants import _CHUNK_BYTES, _TRANSFER_CLAIM_SECONDS
+from .errors import ModelCacheStorageRefused, ModelCacheStorageUnknown
 from .persistence import _operation_cancellation
 
 if TYPE_CHECKING:
@@ -179,7 +180,12 @@ class SplitTransferMixin:
         stop = cache._transfer_stop(operation_id)
         digest = hashlib.sha256()
         with part.open("rb") as source, assembled.open("ab") as output:
-            while chunk := source.read(_CHUNK_BYTES):
+            remaining = part_spec.expected_bytes
+            while remaining:
+                chunk = source.read(min(_CHUNK_BYTES, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
                 if stop.is_set() or cache._closed.is_set():
                     raise OperationInterrupted(
                         "model download stopped; partial files preserved"
@@ -187,9 +193,10 @@ class SplitTransferMixin:
                 digest.update(chunk)
                 whole.update(chunk)
                 output.write(chunk)
+            oversized = bool(source.read(1))
             output.flush()
             os.fsync(output.fileno())
-        if digest.hexdigest() != part_spec.sha256:
+        if remaining or oversized or digest.hexdigest() != part_spec.sha256:
             # Cut the bad bytes back off; the next attempt recovers the whole
             # file's digest state from the retained prefix and refetches the part.
             with assembled.open("r+b") as retained:
@@ -251,7 +258,24 @@ class SplitTransferMixin:
         cancel = cache._transfer_stop(operation_id)
 
         def sample() -> None:
-            while not stopped.wait(1):
+            # A byte of progress renews the idle budget. The immutable size
+            # bounds total progress; a stalled source returns to durable retry.
+            deadline = time.monotonic() + _TRANSFER_CLAIM_SECONDS
+            observed = initial_bytes
+            while not stopped.wait(timeout=1):
+                if latest[0] > observed:
+                    observed = latest[0]
+                    deadline = time.monotonic() + _TRANSFER_CLAIM_SECONDS
+                if time.monotonic() >= deadline:
+                    errors.append(
+                        ModelCacheStorageUnknown(
+                            ModelCacheCode.SOURCE_UNAVAILABLE,
+                            "artifact transfer progress deadline expired",
+                            recovery="resume",
+                        )
+                    )
+                    cancel.set()
+                    return
                 if cache._closed.is_set():
                     cancel.set()
                     return
@@ -299,7 +323,15 @@ class SplitTransferMixin:
             yield observe
         finally:
             stopped.set()
-            thread.join()
+            thread.join(timeout=_TRANSFER_CLAIM_SECONDS)
+            if thread.is_alive():
+                errors.append(
+                    ModelCacheStorageUnknown(
+                        ModelCacheCode.SOURCE_UNAVAILABLE,
+                        "artifact progress sampler shutdown deadline expired",
+                        recovery="resume",
+                    )
+                )
             if errors:
                 raise errors[0]
 
