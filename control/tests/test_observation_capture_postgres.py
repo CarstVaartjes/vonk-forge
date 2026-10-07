@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message, Scope
+from vonk_agent_protocol import canonical_message
 from vonk_control import db, observation_transfer
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -99,12 +100,16 @@ def _app(sessions):
 def _received(body: bytes, resource: str):
     def validate_payload(value):
         model = FleetSnapshot if resource == "fleet" else PlatformObservation
-        document = serialize_json_value(model.model_validate(value))
+        document = serialize_json_value(
+            model.model_validate_json(canonical_message(value), strict=True)
+        )
         assert isinstance(document, dict)
         return document
 
     def validate_record(value: object) -> None:
-        ObservationTransferRecord.model_validate(value)
+        ObservationTransferRecord.model_validate_json(
+            canonical_message(value), strict=True
+        )
 
     return receive_observation(
         io.BytesIO(body),
@@ -240,13 +245,23 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
             frozen = _received(body, resource)
             if resource == "fleet":
                 assert (
-                    FleetSnapshot.model_validate(frozen).nodes[0].display_name
-                    == FleetSnapshot.model_validate(first).nodes[0].display_name
+                    FleetSnapshot.model_validate_json(
+                        canonical_message(frozen), strict=True
+                    )
+                    .nodes[0]
+                    .display_name
+                    == FleetSnapshot.model_validate_json(
+                        canonical_message(first), strict=True
+                    )
+                    .nodes[0]
+                    .display_name
                     == "before"
                 )
                 assert frozen["event_cursor"] == first["event_cursor"]
             else:
-                workers = PlatformObservation.model_validate(frozen).workers
+                workers = PlatformObservation.model_validate_json(
+                    canonical_message(frozen), strict=True
+                ).workers
                 assert workers is not None
                 assert [worker.process_instance_id for worker in workers] == [
                     first_worker
@@ -257,15 +272,25 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
             current = observation_document(repaired)
             if resource == "fleet":
                 assert (
-                    FleetSnapshot.model_validate(current).nodes[0].display_name
+                    FleetSnapshot.model_validate_json(
+                        canonical_message(current), strict=True
+                    )
+                    .nodes[0]
+                    .display_name
                     == "after"
                 )
                 assert (
-                    FleetSnapshot.model_validate(current).event_cursor
-                    > FleetSnapshot.model_validate(frozen).event_cursor
+                    FleetSnapshot.model_validate_json(
+                        canonical_message(current), strict=True
+                    ).event_cursor
+                    > FleetSnapshot.model_validate_json(
+                        canonical_message(frozen), strict=True
+                    ).event_cursor
                 )
             else:
-                workers = PlatformObservation.model_validate(current).workers
+                workers = PlatformObservation.model_validate_json(
+                    canonical_message(current), strict=True
+                ).workers
                 assert workers is not None
                 assert {worker.process_instance_id for worker in workers} == {
                     first_worker,
@@ -329,9 +354,18 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
         assert repaired.status_code == 200
         document = observation_document(repaired)
         if resource == "fleet":
-            assert FleetSnapshot.model_validate(document).nodes[0].id == NODE
+            assert (
+                FleetSnapshot.model_validate_json(
+                    canonical_message(document), strict=True
+                )
+                .nodes[0]
+                .id
+                == NODE
+            )
         else:
-            workers = PlatformObservation.model_validate(document).workers
+            workers = PlatformObservation.model_validate_json(
+                canonical_message(document), strict=True
+            ).workers
             assert workers is not None
             assert [row.process_instance_id for row in workers] == [worker]
     finally:

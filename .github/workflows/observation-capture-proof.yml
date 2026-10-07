@@ -41,6 +41,19 @@ jobs:
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Pull pinned disposable PostgreSQL
         run: scripts/pull-test-images postgres
+      - name: Record exact source and proof inputs
+        shell: bash
+        env:
+          VONK_PROOF_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python - <<'PYTHON'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          assert head == os.environ["VONK_PROOF_SOURCE_SHA"]
+          paths = ["control/src/vonk_control/observation_capture.py", "control/src/vonk_control/fleet_projection.py", "control/src/vonk_control/platform_observation.py", "control/src/vonk_control/observation_transfer.py", "control/tests/test_observation_capture_postgres.py", ".github/workflows/observation-capture-proof.yml"]
+          Path("/tmp/observation-capture-source.json").write_text(json.dumps({"source_sha": head, "files": {path: hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in paths}}, sort_keys=True, indent=2))
+          PYTHON
       - name: Verify that mixed SQL generations fail at the real boundary
         shell: bash
         run: |
@@ -72,10 +85,12 @@ jobs:
           cp "$saved" "$source"
           cmp "$saved" "$source"
       - name: Prove real capture, release and repaired retry
-        run: >-
-          uv run --project control --frozen pytest -q -n 0
-          control/tests/test_observation_capture_postgres.py --tb=short
-          --junitxml=/tmp/observation-capture.xml
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --project control --frozen pytest -q -n 0 \
+            control/tests/test_observation_capture_postgres.py --tb=short \
+            --junitxml=/tmp/observation-capture.xml 2>&1 | tee /tmp/observation-capture-positive.log
       - name: Require five real executed positive cases
         shell: bash
         run: |
@@ -85,3 +100,15 @@ jobs:
           assert len(cases) == 5, "all five capture cases must execute"
           assert all(case.find("skipped") is None and case.find("failure") is None and case.find("error") is None for case in cases), "no skipped or failed capture evidence"
           PYTHON
+      - name: Retain exact-source capture evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: observation-capture-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            /tmp/observation-capture-source.json
+            /tmp/observation-capture-counterexample.log
+            /tmp/observation-capture-positive.log
+            /tmp/observation-capture.xml
+          if-no-files-found: error
+          retention-days: 14
