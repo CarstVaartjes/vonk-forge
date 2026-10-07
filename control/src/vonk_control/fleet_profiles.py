@@ -1201,7 +1201,7 @@ def _progress_with_blockers(
     progress: FleetProfileApplicationProgress,
     blockers: Sequence[OperationBlocker],
     **changes: object,
-) -> dict[str, object]:
+) -> FleetProfileApplicationProgress:
     """Canonical progress document carrying the application's current blockers."""
 
     data = progress.model_dump(mode="json")
@@ -1214,7 +1214,7 @@ def _progress_with_blockers(
         canonical_message(data),
         strict=True,
         from_json=True,
-    ).model_dump(mode="json")
+    )
 
 
 def _profile_preview_is_waitable(preview: FleetProfilePreview) -> bool:
@@ -2016,6 +2016,7 @@ class RunSwitchFleetProfileAdapter:
             ):
                 state.assignment_failures.append(
                     FleetProfileAssignmentFailure(
+                        queue_index=pending.queue_index,
                         assignment_id=item.id
                         if item.kind in {"run", "install"}
                         else None,
@@ -2055,9 +2056,12 @@ class RunSwitchFleetProfileAdapter:
                 continue
             nodes = self._queue_item_nodes(application, item)
             if not nodes:
-                raise FleetProfileUnavailable(
-                    "Reviewed queue effect has no exact target scope"
+                doc_state(state, "running")
+                state.status_reason = (
+                    "Waiting for the exact reviewed queue target evidence"
                 )
+                self._write_state(session, application, state)
+                return self._view_from_state(application, state)
             if adopted_scope is not None and not set(nodes) <= set(adopted_scope):
                 state.skipped_indices.append(index)
                 occupied.add(index)
@@ -2109,6 +2113,7 @@ class RunSwitchFleetProfileAdapter:
                     continue
                 state.assignment_failures.append(
                     FleetProfileAssignmentFailure(
+                        queue_index=index,
                         assignment_id=item.id
                         if item.kind in {"run", "install"}
                         else None,
@@ -2159,6 +2164,16 @@ class RunSwitchFleetProfileAdapter:
             or set(self._queue_item_nodes(application, state.queue[child.queue_index]))
             <= set(adopted_scope)
         ]
+        relevant_failures = [
+            failure
+            for failure in state.assignment_failures
+            if adopted_scope is None
+            or failure.queue_index is None
+            or set(
+                self._queue_item_nodes(application, state.queue[failure.queue_index])
+            )
+            <= set(adopted_scope)
+        ]
         reviewed = self._child_review(session, application_id)
         incomplete = (
             None
@@ -2175,7 +2190,7 @@ class RunSwitchFleetProfileAdapter:
         doc_state(
             state,
             "failed"
-            if state.assignment_failures or incomplete
+            if relevant_failures or incomplete
             else _stored_state(
                 FleetProfileAdapter.recorded_aggregate(relevant_children)
             ),
@@ -2184,10 +2199,10 @@ class RunSwitchFleetProfileAdapter:
             incomplete.detail
             if incomplete
             else (
-                f"{len(state.assignment_failures)} assignment(s) need reconciliation: {state.assignment_failures[0].reason}"[
+                f"{len(relevant_failures)} assignment(s) need reconciliation: {relevant_failures[0].reason}"[
                     :512
                 ]
-                if state.assignment_failures
+                if relevant_failures
                 else None
             )
         )
@@ -2313,9 +2328,11 @@ class RunSwitchFleetProfileAdapter:
             if dispatch_scope is not None and not set(dispatch_scope) <= set(
                 adopted_scope
             ):
-                raise FleetProfileReviewStale(
-                    "Dispatch is outside the selected exact continuing scope"
+                state.status_reason = (
+                    "Dispatch is waiting for the selected exact continuing scope"
                 )
+                self._write_state(session, application, state)
+                return self._view_from_state(application, state)
             scope = dispatch_scope or adopted_scope
         if before_dispatch:
             with session.no_autoflush:
@@ -2877,7 +2894,9 @@ class RunSwitchFleetProfileAdapter:
         del session
         progress = _persisted_profile_progress(application)
         progress.switch_adapter = state
-        application.progress = progress.model_dump(mode="json")
+        application.progress = _canonical_progress(
+            progress.model_dump(mode="json")
+        ).model_dump(mode="json")
 
     def _failed_in_session(
         self,
@@ -6080,7 +6099,7 @@ class FleetProfileService:
                         admission_pending=False,
                         admission_retry_at=None,
                         storage_wait_since=since.isoformat(),
-                    )
+                    ).model_dump(mode="json")
                     _LOGGER.warning(
                         "profile application %s refused for disk: %s: %s",
                         application_id,
@@ -6112,7 +6131,7 @@ class FleetProfileService:
                 admission_attempt=attempt,
                 admission_retry_at=next_retry.isoformat(),
                 **wait_changes,
-            )
+            ).model_dump(mode="json")
             if {(item.code, tuple(item.node_ids)) for item in current_blockers} != {
                 (item.code, tuple(item.node_ids)) for item in progress.blockers
             }:
@@ -7162,7 +7181,7 @@ class FleetProfileService:
                         _canonical_progress(retry_parent.progress),
                         [],
                         retry_due_at=None,
-                    )
+                    ).model_dump(mode="json")
                     retry_parent.updated_at = now
                 if (
                     selected_generation is None
@@ -7638,7 +7657,7 @@ class FleetProfileService:
             admission_pending=False,
             admission_retry_at=None,
             retry_due_at=None,
-        )
+        ).model_dump(mode="json")
         self._lifecycle.fail(
             row, exhausted.detail, _aware(self._clock()), session=session
         )
@@ -7679,7 +7698,7 @@ class FleetProfileService:
             blockers,
             attempt=progress.attempt + 1,
             retry_due_at=due.isoformat(),
-        )
+        ).model_dump(mode="json")
         lead = (
             f"{blockers[0].code}: {blockers[0].detail}"
             if blockers
@@ -9485,7 +9504,7 @@ class FleetProfileService:
                     }
                 ),
                 [],
-            )
+            ).model_dump(mode="json")
             row.updated_at = _aware(self._clock())
         return fresh
 
@@ -9616,7 +9635,7 @@ class FleetProfileService:
                 admission_pending=True,
                 admission_attempt=0,
                 admission_retry_at=now.isoformat(),
-            )
+            ).model_dump(mode="json")
             self._lifecycle.project(
                 row, now, state=_LifecycleState.QUEUED, reason=reason, session=session
             )
@@ -9793,7 +9812,7 @@ class FleetProfileService:
                 progress.blockers,
                 admission_pending=False,
                 admission_retry_at=None,
-            )
+            ).model_dump(mode="json")
             if state == "superseded":
                 assert code is not None
                 self._lifecycle.supersede(row, reason, now, code=code, session=session)

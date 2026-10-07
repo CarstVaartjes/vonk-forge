@@ -319,7 +319,7 @@
     },
     {
       "path": "control/src/vonk_control/fleet_profiles.py",
-      "count": 25
+      "count": 5
     },
     {
       "path": "control/src/vonk_control/harnesses/canonical.py",
@@ -344,10 +344,6 @@
     {
       "path": "control/src/vonk_control/library_projection.py",
       "count": 13
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/fleet_profile.py",
-      "count": 4
     },
     {
       "path": "control/src/vonk_control/lifecycle/job.py",

@@ -484,23 +484,15 @@ class FleetProfileAdapter:
         """Persist when the cancel is looked at next: the later of the core's
         backoff and an observation an owner already scheduled (an effect's own)."""
 
-        document: Any = application.progress
-        raw: Any = document.get("cancellation") if isinstance(document, dict) else None
-        if not isinstance(raw, dict):
+        progress = _progress(application)
+        if progress is None or progress.cancellation is None:
             return
-        cancellation: dict[str, Any] = dict(raw)
-        stored = cancellation.get("observation_due_at")
-        try:
-            existing = (
-                aware(datetime.fromisoformat(stored))
-                if isinstance(stored, str)
-                else None
-            )
-        except ValueError:
-            existing = None
-        chosen = due if existing is None or existing <= due else existing
-        cancellation["observation_due_at"] = aware(chosen).isoformat()
-        application.progress = {**document, "cancellation": cancellation}
+        cancellation = progress.cancellation
+        existing = cancellation.observation_due_at
+        cancellation.observation_due_at = aware(
+            due if existing is None or aware(existing) <= due else existing
+        )
+        application.progress = progress.model_dump(mode="json")
 
     # ---------------------------------------------------------------- settle
 
@@ -730,7 +722,7 @@ class FleetProfileAdapter:
         reason: str,
         now: datetime,
         *,
-        progress: dict[str, object],
+        progress: FleetProfileApplicationProgress,
         session: Session | None = None,
     ) -> bool:
         """A failed load whose retry was still scheduled ends failed for good.
@@ -745,9 +737,8 @@ class FleetProfileAdapter:
         if application.state != State.FAILED.value:
             return False
         now = aware(now)
-        document = dict(progress)
-        document["retry_due_at"] = None
-        application.progress = document
+        progress.retry_due_at = None
+        application.progress = progress.model_dump(mode="json")
         application.status_reason = reason[:_MAX_REASON]
         application.updated_at = now
         hook_session = session or self._session
