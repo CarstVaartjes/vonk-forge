@@ -177,6 +177,31 @@ fn observation_directory_stamp(path: &Path) -> Result<Option<ObservationDirector
     }
 }
 
+// Only a directory with the captured physical identity can continue this scan.
+// Changes to that directory's timestamps invalidate coverage, not its identity.
+fn open_observation_directory(
+    path: &Path,
+    captured: &ObservationDirectoryStamp,
+) -> Result<File, OciError> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    let opened = stamp_of_metadata(&metadata);
+    if !metadata.is_dir() || !same_observation_directory(captured, &opened) {
+        return Err(OciError::Artifact);
+    }
+    if opened != *captured {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::WouldBlock,
+            "run inspection directory changed between capture and open",
+        )
+        .into());
+    }
+    Ok(file)
+}
+
 const MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES;
 
 #[derive(Debug, Clone)]
@@ -1302,13 +1327,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 scan_restarted: checkpoint.is_some(),
             });
         };
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-            .open(&runs)?;
-        if stamp_of_metadata(&file.metadata()?) != stamp {
-            return Err(OciError::Artifact);
-        }
+        let file = open_observation_directory(&runs, &stamp)?;
         let mut directory = rustix::fs::Dir::new(file).map_err(std::io::Error::from)?;
         let metadata_stamp = observation_directory_stamp(&metadata_root)?;
         let mut scan_restarted = checkpoint.is_some_and(|old| {
@@ -2818,10 +2837,11 @@ mod tests {
     use super::{
         InstallationReconciliationState, OciError, OciRuntime, ensure_runtime_tmp,
         materialize_compiled_models, materialize_compiled_models_observed,
-        materialize_compiled_models_with, read_installation_metadata,
-        read_reconciliation_directory_identity, reconciliation_checkpoint_path,
-        reconciliation_quarantine_path, release_page_cache, unique_plan_artifacts,
-        write_installation_metadata, write_reconciliation_checkpoint,
+        materialize_compiled_models_with, observation_directory_stamp, open_observation_directory,
+        read_installation_metadata, read_reconciliation_directory_identity,
+        reconciliation_checkpoint_path, reconciliation_quarantine_path, release_page_cache,
+        same_observation_directory, unique_plan_artifacts, write_installation_metadata,
+        write_reconciliation_checkpoint,
     };
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
     use serde_json::{Value, json};
@@ -2834,6 +2854,97 @@ mod tests {
     };
     use tempfile::tempdir;
     use uuid::Uuid;
+
+    #[test]
+    fn observation_capture_rename_is_unknown_then_same_directory_reopens() {
+        let root = tempdir().unwrap();
+        let runs = root.path().join("runs");
+        fs::create_dir(&runs).unwrap();
+        let before_name = runs.join(Uuid::new_v4().to_string());
+        let after_name = runs.join(Uuid::new_v4().to_string());
+        fs::create_dir(&before_name).unwrap();
+        // An actual old filesystem mtime makes the subsequent rename's change
+        // observable even when this filesystem's clock has coarse resolution.
+        fs::File::open(&runs)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
+            .unwrap();
+        // Capture the actual root stat, then mutate its real directory entry
+        // before the production guarded open; no injected stamp or hook.
+        let captured = observation_directory_stamp(&runs).unwrap().unwrap();
+        fs::rename(&before_name, &after_name).unwrap();
+        let changed = observation_directory_stamp(&runs).unwrap().unwrap();
+        assert!(same_observation_directory(&captured, &changed));
+        assert_ne!(
+            captured, changed,
+            "real rename must change the captured stamp"
+        );
+        let guarded = open_observation_directory(&runs, &captured);
+        assert!(
+            matches!(&guarded, Err(OciError::Io(error))
+                if error.kind() == std::io::ErrorKind::WouldBlock),
+            "capture-rename coverage must be retryable; category={:?}",
+            guarded
+                .as_ref()
+                .err()
+                .map(|error| error.safe_start_context().1)
+        );
+        let reopened = open_observation_directory(&runs, &changed).unwrap();
+        assert_eq!(
+            reopened.metadata().unwrap().ino(),
+            fs::metadata(&runs).unwrap().ino()
+        );
+        assert!(after_name.is_dir());
+        assert!(!before_name.exists());
+    }
+
+    #[test]
+    fn observation_capture_refuses_replaced_symlink_and_nondirectory_roots() {
+        let root = tempdir().unwrap();
+        let runs = root.path().join("runs");
+        let retained = root.path().join("retained-runs");
+        fs::create_dir(&runs).unwrap();
+        let captured = observation_directory_stamp(&runs).unwrap().unwrap();
+        fs::rename(&runs, &retained).unwrap();
+        fs::create_dir(&runs).unwrap();
+        let replacement = observation_directory_stamp(&runs).unwrap().unwrap();
+        assert!(!same_observation_directory(&captured, &replacement));
+        assert!(matches!(
+            open_observation_directory(&runs, &captured),
+            Err(OciError::Artifact)
+        ));
+        fs::remove_dir(&runs).unwrap();
+        symlink(&retained, &runs).unwrap();
+        assert!(matches!(
+            open_observation_directory(&runs, &captured),
+            Err(OciError::Io(ref error)) if error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error())
+        ));
+        fs::remove_file(&runs).unwrap();
+        fs::write(&runs, b"not a directory").unwrap();
+        assert!(matches!(
+            open_observation_directory(&runs, &captured),
+            Err(OciError::Artifact)
+        ));
+        assert!(retained.is_dir());
+    }
+
+    #[test]
+    fn observation_capture_keeps_actual_permission_denial_explicit() {
+        let root = tempdir().unwrap();
+        let runs = root.path().join("runs");
+        fs::create_dir(&runs).unwrap();
+        let captured = observation_directory_stamp(&runs).unwrap().unwrap();
+        let permissions = fs::metadata(&runs).unwrap().permissions();
+        fs::set_permissions(&runs, fs::Permissions::from_mode(0)).unwrap();
+        let refused = open_observation_directory(&runs, &captured);
+        fs::set_permissions(&runs, permissions).unwrap();
+        assert!(matches!(
+            refused,
+            Err(OciError::Io(ref error)) if error.kind() == std::io::ErrorKind::PermissionDenied
+        ));
+        let restored = observation_directory_stamp(&runs).unwrap().unwrap();
+        assert!(open_observation_directory(&runs, &restored).is_ok());
+    }
 
     fn reconciliation_identity(
         installation_id: Uuid,

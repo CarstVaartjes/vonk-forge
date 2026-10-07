@@ -990,9 +990,22 @@ fn whole_collection_mutation_stays_unknown_then_same_owner_reopens() {
             during > before,
             "the real root changed while collection was in flight"
         );
+        // Retain only bounded outcome facts, never plans, arguments or paths.
+        // Rename overlap alone does not identify the reader's failure phase.
+        let outcome = match &faulted {
+            Ok(plans) => format!("ok positives={}", plans.len()),
+            Err(vonk_agent::oci::OciError::Io(error)) => {
+                format!("io kind={:?}", error.kind())
+            }
+            Err(error) => format!("error category={}", error.safe_start_context().1),
+        };
+        eprintln!(
+            "collection fault outcome: {outcome}; retained_start={retain_start}; renames_before={before}; renames_during={during}"
+        );
         assert!(
             matches!(faulted, Err(vonk_agent::oci::OciError::Io(ref error))
-            if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut))
+            if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)),
+            "collection fault outcome: {outcome}; retained_start={retain_start}; renames_before={before}; renames_during={during}"
         );
         let reopened = OciRuntime {
             runner: &NoProcess,
