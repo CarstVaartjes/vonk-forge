@@ -303,7 +303,12 @@ def run_update(
             )
     except (KeyError, ValueError, zipfile.BadZipFile) as error:
         raise CliUpdateError("CLI wheel identity is invalid") from error
-    from .control_client import ControlClient, ControlClientError
+    from .control_client import (
+        ControlClient,
+        ControlClientError,
+        ControlForbidden,
+        ControlUnauthorized,
+    )
 
     try:
         deployed = (
@@ -311,6 +316,8 @@ def run_update(
             if controller_observation is not None
             else ControlClient.from_environment().get("/api/platform")
         )
+    except (ControlUnauthorized, ControlForbidden):
+        raise
     except (ControlClientError, OSError):
         result["compatibility"] = "controller-observation-unavailable"
         return result
