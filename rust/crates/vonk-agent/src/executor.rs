@@ -476,7 +476,7 @@ impl<R> RecipeExecutor<'_, R> {
             .plans
             .into_iter()
             .map(Ok)
-            .chain(page.failures.into_iter().map(|failure| Err(failure)))
+            .chain(page.failures.into_iter().map(Err))
             .collect();
         let expected = prepared.len();
         // Inspection is read-only. A timed-out page retains unknown evidence

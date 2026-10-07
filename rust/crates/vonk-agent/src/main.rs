@@ -332,11 +332,11 @@ async fn run_control_lane(
             .report_recipe_run_observation_page(checkpoint.as_ref())
             .await;
         let mut empty_snapshot_safe = observation_snapshot_is_empty(&exact_observation_result);
-        if let Ok(sweep) = &exact_observation_result {
-            if let Err(error) = state.save_observation_checkpoint(sweep.checkpoint.as_ref()) {
-                eprintln!("vonk-agent: run scan checkpoint not saved: {error}");
-                empty_snapshot_safe = false;
-            }
+        if let Ok(sweep) = &exact_observation_result
+            && let Err(error) = state.save_observation_checkpoint(sweep.checkpoint.as_ref())
+        {
+            eprintln!("vonk-agent: run scan checkpoint not saved: {error}");
+            empty_snapshot_safe = false;
         }
         if let Err(error) = &exact_observation_result {
             // A failed report must not terminate the claim lane: a
