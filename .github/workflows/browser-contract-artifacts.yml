@@ -68,6 +68,10 @@ jobs:
         env:
           PYTHONPATH: control/src:agent_protocol/src:src
         run: uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
+      - name: Emit actual immutable observation producer transfers
+        env:
+          PYTHONPATH: control/src:agent_protocol/src:src
+        run: uv run --project control --frozen python control/tests/export_observation_transfer_fixtures.py --output artifacts/observation-transfers
       - name: Check out pinned official JSON Schema semantics
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,8 +84,9 @@ jobs:
       - name: Exercise both browser HTTP consumers and exact numbers
         env:
           VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
+          VONK_OBSERVATION_TRANSFERS: ${{ github.workspace }}/artifacts/observation-transfers/observation-transfers.json
           VONK_CONSUMER_OUTPUT: ${{ github.workspace }}/artifacts/consumer-corpus/browser-exports.json
-        run: npm exec -- vitest run src/api/contract-json.test.ts src/api/client.test.ts src/api/consumer-corpus.test.ts src/api/official-schema.generated.test.ts src/hooks/fleet-stream-state.test.ts src/hooks/use-fleet-stream.test.tsx
+        run: npm exec -- vitest run src/api/contract-json.test.ts src/api/observation-transfer.test.ts src/api/client.test.ts src/api/consumer-corpus.test.ts src/api/official-schema.generated.test.ts src/hooks/fleet-stream-state.test.ts src/hooks/use-fleet-stream.test.tsx
         working-directory: control/web
       - name: Verify browser exports through their actual canonical Python owners
         if: ${{ !cancelled() && steps.corpus.outcome == 'success' }}
