@@ -1177,7 +1177,11 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
         assert api_responses[-1] == ("/api/platform", 200, OBSERVATION_MEDIA_TYPE)
         assert client.get("/api/cli/contract")["worker_compatibility"] == "compatible"
         before = identity()
-        assert before == {"version": "0.1.1", "source_sha": prior_source}
+        assert before == {
+            "version": "0.1.1",
+            "source_sha": prior_source,
+            "control_contract_sha256": old_identity.control_contract_sha256,
+        }
         tool_receipt_path = python.parent.parent / "uv-receipt.toml"
         before_tool_receipt = tool_receipt_path.read_bytes()
         boundary = len(api_responses)
@@ -1223,7 +1227,11 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                 after = identity()
                 assert not worker_errors
                 assert worker_thread.is_alive()
-                assert after == {"version": "1.2.3", "source_sha": current_source}
+                assert after == {
+                    "version": "1.2.3",
+                    "source_sha": current_source,
+                    "control_contract_sha256": candidate_identity.control_contract_sha256,
+                }
                 assert (
                     receipt["updated"] is True
                     and receipt["compatibility"] == "compatible"
