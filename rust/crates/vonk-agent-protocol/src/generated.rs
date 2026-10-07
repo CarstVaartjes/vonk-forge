@@ -1424,6 +1424,43 @@ impl ::std::convert::TryFrom<::std::string::String> for CatalogSyncState {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateCode {
+    #[serde(rename = "certificate.response_unrepresentable")]
+    CertificateResponseUnrepresentable,
+}
+impl ::std::fmt::Display for CertificateCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CertificateResponseUnrepresentable => {
+                f.write_str("certificate.response_unrepresentable")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "certificate.response_unrepresentable" => Ok(Self::CertificateResponseUnrepresentable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CertificateState {
     #[serde(rename = "valid")]
     Valid,
@@ -7559,6 +7596,7 @@ pub struct ReasonCodeVocabulary {
     pub cache_reference_reason: CacheReferenceReason,
     pub catalog_code: CatalogCode,
     pub catalog_sync_code: CatalogSyncCode,
+    pub certificate_code: CertificateCode,
     pub cluster_mapping_code: ClusterMappingCode,
     pub controller_error_code: ControllerErrorCode,
     pub distribution_code: DistributionCode,
@@ -15541,6 +15579,57 @@ impl<'de> ::serde::Deserialize<'de> for CatalogSyncState {
         })
     }
 }
+impl CertificateCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CertificateResponseUnrepresentable => "certificate.response_unrepresentable",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("CertificateCode", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "certificate.response_unrepresentable")]
+            CertificateResponseUnrepresentable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CertificateResponseUnrepresentable => Self::CertificateResponseUnrepresentable,
+        })
+    }
+}
 impl CertificateState {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -22973,6 +23062,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             pub cache_reference_reason: CacheReferenceReason,
             pub catalog_code: CatalogCode,
             pub catalog_sync_code: CatalogSyncCode,
+            pub certificate_code: CertificateCode,
             pub cluster_mapping_code: ClusterMappingCode,
             pub controller_error_code: ControllerErrorCode,
             pub distribution_code: DistributionCode,
@@ -23020,6 +23110,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             cache_reference_reason: raw.cache_reference_reason,
             catalog_code: raw.catalog_code,
             catalog_sync_code: raw.catalog_sync_code,
+            certificate_code: raw.certificate_code,
             cluster_mapping_code: raw.cluster_mapping_code,
             controller_error_code: raw.controller_error_code,
             distribution_code: raw.distribution_code,
