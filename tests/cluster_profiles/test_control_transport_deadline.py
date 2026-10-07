@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from contextlib import redirect_stdout
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -93,6 +94,7 @@ def https_peer(tmp_path, monkeypatch):
         "status": 202,
         "calls": [],
         "closed": threading.Event(),
+        "accepted": threading.Event(),
         "started": threading.Event(),
     }
     stop = threading.Event()
@@ -105,6 +107,11 @@ def https_peer(tmp_path, monkeypatch):
                 super().handle()
             except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
                 state["closed"].set()
+            else:
+                # BaseHTTPRequestHandler treats a clean peer EOF before a
+                # request line as a normal return, not a write exception.
+                if self.raw_requestline == b"":
+                    state["closed"].set()
 
         def finish(self):
             try:
@@ -170,8 +177,21 @@ def https_peer(tmp_path, monkeypatch):
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert_path, key_path)
-    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+
+    class Server(ThreadingHTTPServer):
+        def get_request(self):
+            connection, address = super().get_request()
+            # Observe actual TCP admission before TLS can fail or the client
+            # deadline can expire without an HTTP request reaching Handler.
+            state["accepted"].set()
+            return (
+                context.wrap_socket(
+                    connection, server_side=True, do_handshake_on_connect=False
+                ),
+                address,
+            )
+
+    with Server(("127.0.0.1", 0), Handler) as server:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         client = ControlClient(
@@ -210,9 +230,34 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
     assert context.http_status == (status if stage == "body" else None)
     assert context.request_id == ("deadline-fixture" if stage == "body" else None)
     assert failure.value.retry_after_seconds == (120 if stage == "body" else None)
-    assert state["closed"].wait(1), "deadline left its HTTPS connection open"
-    assert len(state["calls"]) == 1
+    closure_deadline = time.monotonic() + 1
+    state["accepted"].wait(1)
+    if state["accepted"].is_set():
+        assert state["closed"].wait(max(0, closure_deadline - time.monotonic())), (
+            "deadline left its admitted HTTPS connection open"
+        )
+    else:
+        # The total attempt includes native setup before a connection exists.
+        # Such an expiry cannot invent admission or a peer closure observation.
+        assert not state["calls"]
+    assert len(state["calls"]) <= 1
+    if stage == "body":
+        assert len(state["calls"]) == 1
     assert "private-test-token" not in str(failure.value)
+
+
+def test_tls_peer_eof_before_request_is_observed_without_write_failure(https_peer):
+    _, state = https_peer
+    origin = urllib.parse.urlsplit(state["url"])
+    assert origin.hostname is not None and origin.port is not None
+    context = ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
+    with (
+        socket.create_connection((origin.hostname, origin.port), timeout=0.25) as raw,
+        context.wrap_socket(raw, server_hostname=origin.hostname),
+    ):
+        assert state["accepted"].wait(1)
+    assert state["closed"].wait(1), "graceful TLS EOF was not actually observed"
+    assert not state["calls"], "EOF fixture unexpectedly delivered an HTTP request"
 
 
 @pytest.mark.parametrize(
