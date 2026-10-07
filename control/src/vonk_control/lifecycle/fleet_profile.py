@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -62,7 +62,13 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
-from ..fleet_profile_contract import FleetProfileApplicationProgress
+from ..fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileCancellationState,
+    FleetProfileOperationState,
+    FleetProfileSwitchAdapterState,
+    FleetProfileSwitchChildState,
+)
 from ..models import FleetProfileApplication, Job
 from .adapter import Dispatch
 from .composite import aggregate
@@ -121,23 +127,26 @@ AfterState = Callable[[Session, FleetProfileApplication], None]
 Finish = Callable[[Session, FleetProfileApplication, bool], None]
 
 
-def doc_state(document: dict[str, object], state: str) -> None:
+def doc_state(
+    document: FleetProfileSwitchAdapterState, state: FleetProfileOperationState
+) -> None:
     """The only writer of the switch-adapter document's ``state``.
 
     The document is the durable copy of the profile's aggregate; the application row
     mirrors it through :meth:`FleetProfileAdapter.apply`.
     """
 
-    document["state"] = state
+    document.state = state
 
 
-def cancellation_state(progress: dict[str, object], state: str) -> None:
+def cancellation_state(
+    progress: FleetProfileApplicationProgress, state: FleetProfileCancellationState
+) -> None:
     """The only writer of a cancellation's ``state`` (a record of the cancel the
     application's own state follows: ``observing`` until it ends, then ``cancelled``)."""
 
-    cancellation = progress.get("cancellation")
-    if isinstance(cancellation, dict):
-        cancellation["state"] = state
+    if progress.cancellation is not None:
+        progress.cancellation.state = state
 
 
 class FleetProfileAdapter:
@@ -248,7 +257,7 @@ class FleetProfileAdapter:
         # have issued something even before its first child exists.
         issued = (
             application.current_operation_id is not None
-            or (document is not None and document.active_operation_id is not None)
+            or (document is not None and bool(document.pending_children))
             or (progress is not None and progress.workload_intent_ordinal is not None)
         )
         if state is State.SUCCEEDED:
@@ -336,19 +345,21 @@ class FleetProfileAdapter:
         rows: list[Lifecycle] = [
             _recorded(child.operation_id, child.state) for child in document.children
         ]
-        remaining = max(len(document.queue) - document.position, 0)
-        active = document.active_operation_id
-        if active is not None:
-            remaining = max(remaining - 1, 0)
-            job = session.get(Job, active)
+        occupied = {
+            child.queue_index
+            for child in (*document.pending_children, *document.children)
+        } | set(document.skipped_indices)
+        for child in document.pending_children:
+            job = session.get(Job, child.operation_id)
             rows.append(
-                _recorded(active, "running")
+                _recorded(child.operation_id, "running")
                 if job is None
                 else RunSwitchAdapter(session, clock=self._clock).adopt(job)
             )
         rows.extend(
             Lifecycle(id=f"{application.id}:queued:{index}", kind=KIND)
-            for index in range(remaining)
+            for index in range(len(document.queue))
+            if index not in occupied
         )
         return tuple(rows)
 
@@ -358,7 +369,9 @@ class FleetProfileAdapter:
         return aggregate(children)
 
     @staticmethod
-    def recorded_aggregate(recorded: Sequence[object]) -> State | None:
+    def recorded_aggregate(
+        recorded: Sequence[FleetProfileSwitchChildState],
+    ) -> State | None:
         """The aggregate of children recorded in the switch-adapter document.
 
         Each is a receipt with a closed state (``succeeded``/``failed``/``cancelled``),
@@ -366,9 +379,8 @@ class FleetProfileAdapter:
         """
 
         rows = [
-            _recorded(f"recorded:{index}", str(item.get("state")))
+            _recorded(f"recorded:{index}", item.state)
             for index, item in enumerate(recorded)
-            if isinstance(item, Mapping)
         ]
         return aggregate(rows)
 
