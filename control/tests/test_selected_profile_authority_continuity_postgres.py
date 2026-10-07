@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import os
 from datetime import timedelta
-from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -452,31 +449,3 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
         "the original accepted cleanup must reach its exact uninstall receipt"
     )
     assert due_checks, "proof must actually reconnect across persisted retry deadlines"
-    if output := os.environ.get("VONK_AUTHOR_CONTINUITY_PROOF_OUTPUT"):
-        directory = Path(output)
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / f"{authority_change}.json").write_text(
-            json.dumps(
-                {
-                    "source_sha": os.environ["VONK_PROOF_SOURCE_SHA"],
-                    "authority_change": authority_change,
-                    "application_id": accepted.id,
-                    "request_key": accepted_identity[1],
-                    "plan_digest": accepted_identity[2],
-                    "stop_fence": stop_claim.fence,
-                    "cleanup_preflight_fences": preflight_receipts,
-                    "uninstall_fences": uninstall_fences,
-                    "selection": selection,
-                    "persisted_due_checks": due_checks,
-                    "same_intent_succeeded": True,
-                    "retained_run_id": run_a.owner_id,
-                    "retained_route_unchanged": True,
-                    "retired_run_id": run_b.owner_id,
-                    "closed_queue_indices": [
-                        c.queue_index for c in _journal(sessions, accepted.id).children
-                    ],
-                },
-                indent=2,
-            )
-            + "\n"
-        )

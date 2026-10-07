@@ -49,7 +49,22 @@ jobs:
           uv run --project control --frozen pytest -q -n 0
           control/tests/test_model_cache_unknown_expiry_recovery.py
           control/tests/test_model_manifest_composition.py
-          --tb=short
+          --tb=short --junitxml=${{ runner.temp }}/model-cache-cancellation.xml
+      - name: Require named SQL and manifest outcomes
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'model-cache-cancellation.xml').findall('.//testcase')
+          assert cases, "no cancellation cases executed"
+          expected = {
+              'test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_old_owner',
+              'test_shared_catalog_files_resume_the_same_parent_after_producer_repair',
+          }
+          assert expected <= {case.get('name').partition('[')[0] for case in cases}
+          assert all(case.find(tag) is None for case in cases for tag in ('skipped', 'failure', 'error'))
+          PY
       - name: Prepare pinned browser consumer toolchain
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -60,5 +75,15 @@ jobs:
           scripts/generate-control-clients
           scripts/retry-dependency-fetch npm ci --prefix control/web
       - name: Consume actual PostgreSQL/API cancellation observations in browser
-        run: npm exec -- vitest run src/components/model-cache-cancellation-consumer.test.tsx
+        run: |
+          npm exec -- vitest run src/components/model-cache-cancellation-consumer.test.tsx --reporter=junit --outputFile="$RUNNER_TEMP/model-cache-browser.xml"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'model-cache-browser.xml').findall('.//testcase')
+          assert cases, "no browser cancellation cases executed"
+          assert {'actual model cancellation responses preserve unknown and confirmed evidence in the browser'} <= {case.get('name') for case in cases}
+          assert all(case.find(tag) is None for case in cases for tag in ('skipped', 'failure', 'error'))
+          PY
         working-directory: control/web

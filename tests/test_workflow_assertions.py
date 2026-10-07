@@ -8,6 +8,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 _PINNED_PASSED_SUMMARY = re.compile(r"\b[0-9]+\s+passed\b")
@@ -174,3 +175,72 @@ def test_guard_rejects_pinned_passed_summary_but_allows_nonempty_pattern() -> No
     assert not _PINNED_PASSED_SUMMARY.search(
         r"grep -E 'test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;'"
     )
+
+
+_PROOF_PROVENANCE = re.compile(
+    r"\bhashlib\b|attest-build-provenance|provenance|git rev-parse HEAD:",
+    re.IGNORECASE,
+)
+
+
+def test_proof_lane_inventory_only_shrinks() -> None:
+    """Another standalone proof must not duplicate the complete CI suites."""
+    workflows = list((ROOT / ".github/workflows").glob("*-proof.y*ml"))
+    assert len(workflows) <= 5, "Use regular CI for tests with shared prerequisites"
+    assert sum(len(yaml.safe_load(path.read_text())["jobs"]) for path in workflows) <= 5
+
+
+def test_proof_workflows_do_not_record_source_provenance() -> None:
+    """Splitting a source module cannot break an unrelated outcome check."""
+    for path in (ROOT / ".github/workflows").glob("*-proof.y*ml"):
+        assert not _PROOF_PROVENANCE.search(path.read_text()), path.name
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "hashlib.sha256(Path(path).read_bytes()).hexdigest()",
+        "uses: actions/attest-build-provenance@revision",
+        "git rev-parse HEAD:rust/crates/vonk-agent/src/client.rs",
+        "(output / 'source-provenance.json').write_text(report)",
+    ],
+)
+def test_guard_rejects_proof_provenance(source: str) -> None:
+    assert _PROOF_PROVENANCE.search(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "assert expected <= {case.get('name') for case in cases}",
+        "uv pip install --require-hashes -r locked-requirements.txt",
+        "assert verified_wheel_sha256 == manifest_sha256",
+    ],
+)
+def test_guard_preserves_outcomes_and_ingress_integrity(source: str) -> None:
+    assert not _PROOF_PROVENANCE.search(source)
+
+
+def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None:
+    """Retiring OCI proof jobs must not silently skip their real ingress tests."""
+    from tools import pytest_prereqs
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    steps = workflow["jobs"]["control-suite"]["steps"]
+    assert any(
+        "skopeo" in step.get("with", {}).get("packages", "").split() for step in steps
+    )
+    [run] = [
+        step for step in steps if "scripts/test control --shard" in step.get("run", "")
+    ]
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("VONK_CI_PREREQUISITES", run["env"]["VONK_CI_PREREQUISITES"])
+    assert pytest_prereqs._required_in_ci("needs_skopeo")
+    assert "needs_skopeo" in pytest_prereqs._CHECKS
+    # Full collection includes prerequisite/lane markers; only image and wire
+    # bridges have their own regular CI jobs.
+    suite = (ROOT / "scripts/test").read_text()
+    assert 'suite_markers="not built_image"' in suite
+    assert "--collect-only" in suite
+    assert "not lane" not in run["run"]
+    assert "--markers" not in run["run"]

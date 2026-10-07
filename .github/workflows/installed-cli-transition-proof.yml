@@ -76,32 +76,19 @@ jobs:
         env:
           VONK_SIGNED_UPDATE_PROOF: '1'
           VONK_SIGNED_UPDATE_CACHE: ${{ runner.temp }}/signed-update-cache
-          VONK_SIGNED_UPDATE_REPORT: ${{ runner.temp }}/cli-transition-report.json
         run: |
           set -euo pipefail
           uv run --project control --frozen pytest -q -n 0 \
             tests/cluster_profiles/test_cli_update.py::test_installed_stable_cli_updates_after_actual_controller_ndjson_transition \
             --junitxml="$RUNNER_TEMP/cli-transition-junit.xml"
           python3 - <<'PY'
-          import json, os, xml.etree.ElementTree as ET
+          import os, xml.etree.ElementTree as ET
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP'])
           cases = ET.parse(root / 'cli-transition-junit.xml').findall('.//testcase')
           assert cases, "no proof cases executed"
           assert {'test_installed_stable_cli_updates_after_actual_controller_ndjson_transition'} <= {case.attrib['name'].partition('[')[0] for case in cases}, 'missing required installed CLI case'
           assert not any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error'))
-          proof = json.loads((root / 'cli-transition-report.json').read_text())
-          assert proof['tampered_wheel_retained_prior_tool_receipt']
-          assert proof['real_uv_tool_receipt_changed']
-          assert proof['real_controller_ndjson_observed']
-          assert proof['actual_complete_fresh_worker_capture']
-          assert proof['manifest_epoch_requires_signed_bootstrap']
-          assert proof['prior_manifest_refusal_retained_tool_receipt']
-          assert proof['actual_installed_ndjson_command']
-          assert proof['bootstrap_source'] == os.environ['VONK_TRANSITION_SOURCE_SHA']
-          assert proof['old_control_fingerprint'] != proof['new_control_fingerprint']
-          assert proof['prior_source'] == os.environ['VONK_PRIOR_STABLE_SOURCE_SHA']
-          assert proof['candidate_source'] == os.environ['VONK_TRANSITION_SOURCE_SHA']
           PY
       - name: Retain scoped signed updater evidence
         if: always()
@@ -109,7 +96,6 @@ jobs:
         with:
           name: installed-cli-controller-transition-${{ github.sha }}
           path: |
-            ${{ runner.temp }}/cli-transition-report.json
             ${{ runner.temp }}/cli-transition-junit.xml
           if-no-files-found: ignore
           retention-days: 7
