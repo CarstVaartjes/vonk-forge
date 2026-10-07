@@ -4131,8 +4131,37 @@ mod tests {
                 .progress
                 .unwrap()
                 .total_bytes,
-            Some(42)
+            Some(42_u64.into())
         );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_preserves_lossless_progress_counters_on_the_network() {
+        for counter in ["18446744073709551616".to_owned(), "9".repeat(200)] {
+            let mut progress = progress();
+            let measured = progress.progress.as_mut().unwrap();
+            measured.completed_bytes = serde_json::from_str(&counter).unwrap();
+            measured.total_bytes = Some(serde_json::from_str(&counter).unwrap());
+            measured.completed_items = Some(serde_json::from_str(&counter).unwrap());
+            measured.total_items = Some(serde_json::from_str(&counter).unwrap());
+            let directive = AgentDirective {
+                cancel_requested: false,
+                deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
+                fence: progress.fence,
+            };
+            let (client, server) = heartbeat_client(directive.clone());
+            assert_eq!(client.heartbeat(&progress).await.unwrap(), directive);
+            let request = server.join().unwrap();
+            let start = request.windows(4).position(|v| v == b"\r\n\r\n").unwrap() + 4;
+            let observed =
+                vonk_agent_protocol::parse_strict::<AgentProgress>(&request[start..]).unwrap();
+            assert_eq!(observed, progress);
+            assert!(
+                std::str::from_utf8(&request[start..])
+                    .unwrap()
+                    .contains(&format!("\"completed_bytes\":{counter}"))
+            );
+        }
     }
 
     #[tokio::test]
@@ -4160,7 +4189,7 @@ mod tests {
             .unwrap();
         assert_eq!(received.phase, "uploading");
         assert_eq!(received.completed_bytes, 512);
-        assert_eq!(received.total_bytes, Some(1024));
+        assert_eq!(received.total_bytes, Some(1024_u64.into()));
     }
 
     #[tokio::test]
