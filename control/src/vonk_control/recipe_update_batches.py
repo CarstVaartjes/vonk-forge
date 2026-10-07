@@ -815,9 +815,10 @@ class RecipeUpdateBatches:
         request_id: str,
         intent: RecipeRevisionIntent,
     ) -> None:
-        # Common order: user authority, parent Job, child request's unique key.
+        # The batch was authorized at acceptance. Platform maintenance keeps
+        # its exact children moving even if the original author is removed.
+        # Common order: parent Job, child request's unique key.
         # The caller's accepting transaction contains no metadata/storage I/O.
-        self._authorize(session, actor)
         job, document = self._owned(session, claim)
         child = next(
             (item for item in document.children if item.request_key == request_id), None

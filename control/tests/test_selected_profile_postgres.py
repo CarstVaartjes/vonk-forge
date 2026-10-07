@@ -120,8 +120,10 @@ def _selected(engine: Engine) -> dict[str, object]:
     return dict(row)
 
 
+@pytest.mark.parametrize("authority_change", ["removed", "disabled", "demoted"])
 def test_selected_running_profile_reconciles_drift_without_roster_change(
     postgres_engine: Engine,
+    authority_change: str,
 ) -> None:
     """A lost/dead run with the same roster reuses the accepted profile intent."""
 
@@ -147,6 +149,16 @@ def test_selected_running_profile_reconciles_drift_without_roster_change(
     initial_generation = initial_selection["generation"]
     assert isinstance(initial_generation, int)
 
+    with sessions.begin() as session:
+        author = session.scalar(select(User).where(User.subject == "admin"))
+        assert author is not None
+        if authority_change == "removed":
+            session.delete(author)
+        elif authority_change == "disabled":
+            author.disabled_at = NOW
+        else:
+            author.role = "viewer"
+
     # The accepted assignment is still desired, but its run/runtime has
     # disappeared. The enrolled roster remains exactly the same.
     assert service.tick() is True
@@ -156,7 +168,17 @@ def test_selected_running_profile_reconciles_drift_without_roster_change(
     assert reconciled_selection["roster_digest"] == initial_selection["roster_digest"]
     assert reconciled_selection["application_id"] != accepted.id
     reconciled = service.application(str(reconciled_selection["application_id"]))
-    assert reconciled.state in {"queued", "running", "succeeded"}
+    for _ in range(8):
+        if service.application(reconciled.id).state == "succeeded":
+            break
+        _tick_selected_when_due(service, reconciled.id)
+    repaired = service.application(reconciled.id)
+    assert repaired.state == "succeeded"
+    assert repaired.progress.intended_profile is not None
+    assert accepted.progress.intended_profile is not None
+    assert repaired.progress.intended_profile.assignments == (
+        accepted.progress.intended_profile.assignments
+    )
 
 
 def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edit(
@@ -305,7 +327,7 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
 def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recovers(
     postgres_engine: Engine, authority_change: str
 ) -> None:
-    """A revoked author blocks only roster effects, not unrelated due work."""
+    """Platform maintenance repairs membership without the original admin."""
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -374,30 +396,19 @@ def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recover
     with sessions() as session:
         due = session.get(Job, due_job_id)
         assert due is not None and due.state == "succeeded"
-        assert len(tuple(session.scalars(select(FleetProfileApplication.id)))) == 1
-    still_selected = _selected(postgres_engine)
-    assert still_selected == original_selection
-
-    blocked_view = service.get(profile.id)
-    assert any(
-        "automatic reconciliation is blocked" in warning.lower()
-        and "restore" in warning.lower()
-        for warning in blocked_view.warnings
-    )
-    assert any("restore" in action.lower() for action in blocked_view.next_actions)
-
-    # Restoring authority lets the same durable selection reconcile the roster
-    # without a new profile revision or a second operator load.
-    with sessions.begin() as session:
-        author = session.scalar(select(User).where(User.subject == "admin"))
-        assert author is not None
-        author.role = "administrator"
-        author.disabled_at = None
-    assert worker.tick() is True
+        assert len(tuple(session.scalars(select(FleetProfileApplication.id)))) == 2
+    view = service.get(profile.id)
+    assert not any("restore" in action.lower() for action in view.next_actions)
+    assert not any("authority" in warning.lower() for warning in view.warnings)
     reconciled_selection = _selected(postgres_engine)
     assert reconciled_selection["generation"] == original_generation + 1
     assert reconciled_selection["profile_id"] == profile.id
-    application = service.application(str(reconciled_selection["application_id"]))
+    application_id = str(reconciled_selection["application_id"])
+    for _ in range(8):
+        if service.application(application_id).state == "succeeded":
+            break
+        _tick_selected_when_due(service, application_id)
+    application = service.application(application_id)
     assert application.state == "succeeded"
     assert application.progress.intended_profile is not None
     assert application.progress.intended_profile.assignments == []
@@ -605,6 +616,13 @@ def test_pending_recipe_head_change_is_followed_before_workload_fencing(
                 created_at=NOW,
             )
         )
+
+    # Acceptance is durable: maintenance still follows the newest recipe
+    # revision when the author disappears before deferred admission resumes.
+    with sessions.begin() as session:
+        author = session.scalar(select(User).where(User.subject == "test"))
+        assert author is not None
+        session.delete(author)
 
     assert service.tick() is True
 
