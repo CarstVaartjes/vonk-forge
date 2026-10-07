@@ -123,13 +123,13 @@ from .operation_api import (
     OperationApiServices,
     OperationDetailResponse,
     OperationOwnerReference,
-    OperationResponseTooLarge,
     OperationsResponse,
     ReadyzResponse,
     RequestValidationIssue,
     RequestValidationProblem,
     _global_get_operation,
     _global_list_operations,
+    _OperationResponseTooLarge,
     bounded_error_responses,
     bounded_operation_detail,
     bounded_operations_response,
@@ -1178,7 +1178,7 @@ def create_app(
                 node_id=node_id,
                 request_id=request_id,
             )
-        except OperationResponseTooLarge as error:
+        except _OperationResponseTooLarge as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
 
     @app.get(
@@ -1208,7 +1208,7 @@ def create_app(
             return bounded_operation_detail(
                 activity_detail(item, tolerate_unreadable=True)
             )
-        except OperationResponseTooLarge as error:
+        except _OperationResponseTooLarge as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except BoundedJSONError as error:
             raise HTTPException(status_code=503, detail=str(error)[:256]) from None

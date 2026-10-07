@@ -295,7 +295,7 @@ def test_builtin_raise_inventory_is_report_only_and_excludes_custom_classes():
 def test_resource_read_refusal_requires_canonical_owner_handler():
     """A resource exception cannot hide a generic damaged-row refusal."""
     source = (
-        "from .operation_api import OperationResponseTooLarge as TooLarge\n"
+        "from .operation_api import _OperationResponseTooLarge as TooLarge\n"
         "@router.get('/operations')\n"
         "def observe():\n"
         "    try:\n        project()\n"

@@ -533,6 +533,30 @@
   ],
   "route_guards": [
     {
+      "path": "control/src/vonk_control/api.py",
+      "function": "create_app.platform_observation",
+      "catches": [
+        "ObservationCaptureUnavailable"
+      ],
+      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "install_operator_projection_routes.fleet_status",
+      "catches": [
+        "ObservationCaptureUnavailable"
+      ],
+      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
+    },
+    {
+      "path": "control/src/vonk_control/cli_update_contract.py",
+      "function": "install_cli_update_contract_routes.cli_update_contract",
+      "catches": [
+        "ObservationCaptureUnavailable"
+      ],
+      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
+    },
+    {
       "path": "control/src/vonk_control/strict_json.py",
       "function": "_presence_policy_endpoint.policy_endpoint",
       "catches": [
@@ -586,6 +610,34 @@
     }
   ],
   "fail_closed": [
+    {
+      "family": "platform_observation.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py. The exact authenticated capture route guards return canonical retryable 503 without inventing worker membership; a later request performs a new capture.",
+      "sites": [
+        [
+          "control/src/vonk_control/operator_projection_api.py",
+          "ObservationCaptureUnavailable",
+          "install_operator_projection_routes.snapshot",
+          "database-capture",
+          1
+        ],
+        [
+          "control/src/vonk_control/platform_observation.py",
+          "ObservationCaptureUnavailable",
+          "PlatformObserver.capture",
+          "database-capture",
+          1
+        ],
+        [
+          "control/src/vonk_control/platform_observation.py",
+          "ObservationCaptureUnavailable",
+          "PlatformObserver.capture",
+          "stored-worker-validation",
+          1
+        ]
+      ]
+    },
     {
       "family": "agent.input-validation",
       "category": "input-validation",
@@ -1592,6 +1644,8 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "ProfileStopAuthorityError", "derive_runtime_plan_binding", "profile-stop-target-is-ambiguous", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "profile-jobrun-stop-authority-is-invalid", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_check_operation_target", "lifecycle-plan-node-identity-differs", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_job_run_authority", "artifact-jobrun-owner-is-invalid", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_service_run_authority", "service-start-owner-is-invalid", 1],

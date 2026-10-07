@@ -187,7 +187,7 @@ def scan_source(
         and imported.module == "operation_api"
         and imported.level == 1
         for alias in imported.names
-        if alias.name == "OperationResponseTooLarge"
+        if alias.name == "_OperationResponseTooLarge"
     }
     # An unrelated local class or assignment cannot borrow the owner's name.
     resource_errors -= (

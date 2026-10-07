@@ -19,7 +19,7 @@ from .fleet_events import (
     FleetEvent,
     FleetEventRepository,
     FleetReplayBatch,
-    FleetStoredEventUnavailable,
+    _FleetStoredEventGap,
 )
 from .fleet_projection import telemetry_point
 from .fleet_stream_contract import (
@@ -167,7 +167,7 @@ class FleetStream:
                 last_poll = self._monotonic()
                 try:
                     replay = self._events.replay_after(current_cursor, now, limit=128)
-                except FleetStoredEventUnavailable as error:
+                except _FleetStoredEventGap as error:
                     yield _event_frame(
                         error.event_cursor,
                         "fleet-refresh",
