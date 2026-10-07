@@ -3029,7 +3029,7 @@ class RecipeOperationService:
             existing is not None
             and not pending_service
             and not (
-                existing.state == "running"
+                existing.state == LifecycleState.RUNNING.value
                 and (
                     self._one_shot_stop_is_pending(request_id)
                     or self._profile_jobrun_stop_is_pending(request_id)
@@ -3168,7 +3168,7 @@ class RecipeOperationService:
                 continue
             except UnknownOutcomeError as error:
                 return self._defer_accepted_service_stop(accepted.id, error)
-            if job.state != "succeeded":
+            if job.state != LifecycleState.SUCCEEDED.value:
                 self._agent_jobs.notify_available()
             return job
         return self._defer_accepted_service_stop(
@@ -3257,7 +3257,10 @@ class RecipeOperationService:
                     "request key was already used differently",
                     reason=InvalidRequestReason.CONFLICT,
                 )
-            return job.state == "running" and review.stage != "dispatched"
+            return (
+                job.state == LifecycleState.RUNNING.value
+                and review.stage != "dispatched"
+            )
 
     def _check_service_stop(
         self,
@@ -3269,7 +3272,7 @@ class RecipeOperationService:
         if (
             review is None
             or review.stage == "dispatched"
-            or job.state != "running"
+            or job.state != LifecycleState.RUNNING.value
             or document.phases is not None
         ):
             raise RecipeStopAuthorityRefused(
@@ -3641,7 +3644,7 @@ class RecipeOperationService:
                 id=str(uuid.uuid4()),
                 request_id=request_id,
                 kind="recipe.stop",
-                state="running",
+                state=LifecycleState.RUNNING.value,
                 actor=actor,
                 authority_revision=admitted.authority_digest,
                 targets=list(admitted.target_node_ids),
@@ -3664,7 +3667,7 @@ class RecipeOperationService:
                     select(Job)
                     .where(
                         Job.kind == "recipe.stop",
-                        Job.state == "running",
+                        Job.state == LifecycleState.RUNNING.value,
                         Job.payload["service_stop_review"]["stage"]
                         .as_string()
                         .in_(["accepted", "withdrawal-claimed"]),
@@ -3682,7 +3685,7 @@ class RecipeOperationService:
                 claimed = session.get(Job, candidate.id, with_for_update=True)
                 if (
                     claimed is None
-                    or claimed.state != "running"
+                    or claimed.state != LifecycleState.RUNNING.value
                     or claimed.updated_at != candidate.updated_at
                 ):
                     continue
@@ -3712,7 +3715,10 @@ class RecipeOperationService:
             ) as error:
                 with self._sessions.begin() as session:
                     retained = session.get(Job, candidate.id, with_for_update=True)
-                    if retained is not None and retained.state == "running":
+                    if (
+                        retained is not None
+                        and retained.state == LifecycleState.RUNNING.value
+                    ):
                         retained.status_reason = (
                             f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
                         )[:1024]
@@ -3754,7 +3760,7 @@ class RecipeOperationService:
                 if (
                     review is None
                     or review.stage == "dispatched"
-                    or existing.state != "running"
+                    or existing.state != LifecycleState.RUNNING.value
                 ):
                     return self._view(existing, session=session)
                 document, admitted = self._check_service_stop(session, existing)
