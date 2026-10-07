@@ -1,9 +1,17 @@
 import {describe, expect, test, vi} from "vitest";
 import {LosslessNumber} from "lossless-json";
 import {ContractResponse, validateComponent, validateControlBody} from "./contract-json";
-import {UnsupportedContractRuntime, compareNumeric, contractEqual, contractType, numericMultiple, parseContractJson, stringifyContractJson} from "./contract-numeric";
+import {UnsupportedContractRuntime, displayRatio, compareNumeric, contractEqual, contractType, numericMultiple, parseContractJson, stringifyContractJson} from "./contract-numeric";
 
 describe("canonical numeric boundary", () => {
+  test("wide progress ratios have stable presentation without changing exact tokens", () => {
+    const completed = new LosslessNumber("9007199254740992");
+    const total = new LosslessNumber("18014398509481984");
+    expect(displayRatio(completed, total) * 100).toBe(50);
+    expect(displayRatio(total, completed)).toBe(2);
+    expect(displayRatio(completed, new LosslessNumber("27021597764222976"))).toBeCloseTo(1 / 3, 14);
+    expect(stringifyContractJson({completed, total})).toBe('{"completed":9007199254740992,"total":18014398509481984}');
+  });
   test("native parsing and normalization preserve own prototype keys", () => {
     const text = '{"__proto__":{"private":true},"value":9007199254740993}';
     const parsed = parseContractJson(text);
