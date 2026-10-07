@@ -120,6 +120,9 @@ Controller API image. On every start the API stages it into the
 restart with it. A pull and redeploy therefore rolls out configuration too; the
 installer only needs to run again when `.env`, secrets or the Compose graph
 itself change.
+The Caddy startup wrapper forwards an explicit Compose `command` after the
+runtime-asset wait and native secret checks. With no command, its native
+entrypoint selects `/run/vonk-runtime-assets/caddy/Caddyfile`.
 
 Development and production use this exact topology and configuration contract.
 They use development `:dev` or production `:latest` application images and channel-specific Spark package versions
