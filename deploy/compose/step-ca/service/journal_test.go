@@ -92,10 +92,12 @@ func TestJournalConcurrentEpochRejectsOldCommitAndOldResponse(t *testing.T) {
  <-entered
  f.now.Add(11)
  fresh,_,err:=f.j.Claim(f.binding); if err!=nil || fresh==nil {t.Fatalf("next epoch: %v",err)}
- winner:=&JournalCAS{Journal:f.j,Soft:f.c.Soft,Policy:f.c.Policy}
- response,err:=winner.CreateCertificateWithContext(withAttempt(context.Background(),*fresh),f.request()); if err!=nil {t.Fatalf("winning signer: %v",err)}
+ // Release the old computation before the new owner commits. This proves the
+ // epoch fence itself, rather than accidentally relying on an issued receipt.
  close(release)
  if err:=<-oldResult;err==nil {t.Fatal("old commit accepted")}
+ winner:=&JournalCAS{Journal:f.j,Soft:f.c.Soft,Policy:f.c.Policy}
+ response,err:=winner.CreateCertificateWithContext(withAttempt(context.Background(),*fresh),f.request()); if err!=nil {t.Fatalf("winning signer: %v",err)}
  if _,err:=f.j.ReadCommitted(*old);err==nil {t.Fatal("old response fence accepted winning epoch")}
  committed,err:=f.j.ReadCommitted(*fresh);if err!=nil || !bytes.Equal(committed[0].Raw,response.Certificate.Raw){t.Fatalf("winning receipt corrupted: %v",err)}
 }
