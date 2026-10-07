@@ -175,6 +175,11 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/cli_update_contract.py",
+      "kind": "controller-contract",
+      "reason": "Stable bounded authenticated CLI compatibility authority derived from one complete actual process observation; signed schema witness ships with the updater."
+    },
+    {
       "module": "control/src/vonk_control/cluster_mappings.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"

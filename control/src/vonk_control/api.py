@@ -538,6 +538,7 @@ def refresh_fleet_metrics(
 
 from .platform_observation import (
     PlatformObserver,
+    api_only_capture,
     api_only_observation,
 )
 
@@ -934,6 +935,16 @@ def create_app(
         operations=run_switch_operations,
     )
 
+    from .cli_update_contract import install_cli_update_contract_routes
+
+    install_cli_update_contract_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        capture=api_only_capture
+        if platform_observer is None
+        else platform_observer.capture,
+    )
+
     @app.get(
         "/api/platform",
         response_class=ObservationTransferResponse,
@@ -956,7 +967,7 @@ def create_app(
             )
         except ObservationCaptureUnavailable as error:
             return observation_capture_unavailable_response(
-                error, operation="platform observation", endpoint="/api/platform"
+                error, operation="getPlatformObservation", endpoint="/api/platform"
             )
         return observation_response(observation, resource="platform")
 
