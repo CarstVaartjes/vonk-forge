@@ -26,7 +26,11 @@ from pydantic import (
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import FailureCode, LifecycleState, StateAlias
-from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
+from vonk_agent_protocol.failure_evidence import (
+    FailureDiagnostics,
+    FailureLogTail,
+    add_known_dropped_bytes,
+)
 
 from . import agent_operation_states
 from .bounded_json import BoundedJSONError, require_integer, sequence
@@ -339,9 +343,9 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
         document[field]["text"] = cleaned
         if dropped:
             document[field]["truncated"] = True
-            document[field]["dropped_bytes"] = (
-                document[field]["dropped_bytes"] or 0
-            ) + dropped
+            document[field]["dropped_bytes"] = add_known_dropped_bytes(
+                document[field]["dropped_bytes"], dropped
+            )
     for field in ("versions", "sandbox", "storage", "preflight"):
         document[field] = [
             {

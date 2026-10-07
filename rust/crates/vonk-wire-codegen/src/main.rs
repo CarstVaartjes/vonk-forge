@@ -86,7 +86,19 @@ fn prepare(value: &mut Value) {
                         .and_then(Value::as_f64)
                         .is_some_and(|v| v >= 0.0)
                     || object.get("const").and_then(Value::as_u64).is_some();
-                let format = if object.get("format").and_then(Value::as_str) == Some("int64") {
+                let unbounded = ![
+                    "minimum",
+                    "maximum",
+                    "exclusiveMinimum",
+                    "exclusiveMaximum",
+                    "const",
+                    "enum",
+                ]
+                .iter()
+                .any(|key| object.contains_key(*key));
+                let format = if unbounded {
+                    "vonk-integer"
+                } else if object.get("format").and_then(Value::as_str) == Some("int64") {
                     "int64"
                 } else if object
                     .get("const")
@@ -640,6 +652,14 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut settings = typify::TypeSpaceSettings::default();
     settings.with_derive("PartialEq".into());
     settings.with_map_type("::std::collections::BTreeMap");
+    // A canonical unbounded integer cannot be represented by i64/u64 or f64.
+    // The owned scalar also rejects decimal/exponent lexemes, including when
+    // an anonymous generated union is deserialized without its parent model.
+    settings.with_conversion(
+        serde_json::from_value(json!({"type":"integer","format":"vonk-integer"}))?,
+        "crate::integer::Integer",
+        [typify::TypeSpaceImpl::Display].into_iter(),
+    );
     settings.with_conversion(
         serde_json::from_value(json!({"type":"string", "format":"date-time"}))?,
         "::chrono::DateTime<::chrono::FixedOffset>",
@@ -809,6 +829,19 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_unbounded_integer_schemas_use_the_lossless_scalar() {
+        let mut free = json!({"type":"integer"});
+        prepare(&mut free);
+        assert_eq!(free, json!({"type":"integer","format":"vonk-integer"}));
+        let mut counter = json!({"type":"integer","minimum":0,"maximum":u64::MAX});
+        prepare(&mut counter);
+        assert_eq!(counter, json!({"type":"integer","format":"uint64"}));
+        let mut scalar = json!({"type":"integer","minimum":i64::MIN,"maximum":i64::MAX});
+        prepare(&mut scalar);
+        assert_eq!(scalar, json!({"type":"integer","format":"int64"}));
+    }
 
     #[test]
     fn committed_generated_types_match_the_committed_wire_schema() {
