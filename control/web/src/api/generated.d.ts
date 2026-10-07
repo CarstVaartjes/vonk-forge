@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 181c6374cf4c9b43ecfe7a3a8167d36b54d47203d51afcd24e68a20751799382. Do not edit.
+// Generated from canonical OpenAPI SHA256 dfbe87285e279c0d21670f33516f21fab4b63a4668bdf853393753e89de7cd40. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5366,6 +5366,45 @@ export interface components {
             payload: components["schemas"]["RecipeJobRunRequest"];
         };
         /**
+         * JobRunStopScope
+         * @description The exact issued transient targets within an accepted run Stop.
+         */
+        JobRunStopScope: {
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Missing Node Ids */
+            missing_node_ids?: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Reachable Node Ids */
+            reachable_node_ids: string[];
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number | ExactNumber;
+            /** Run Id */
+            run_id: string;
+            /** Run Node Ids */
+            run_node_ids: string[];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: number | ExactNumber;
+            /** Stop Plan Digest */
+            stop_plan_digest: string;
+            /** Targets */
+            targets?: components["schemas"]["ProfileJobRunStopTarget"][];
+            /** Unissued Artifact Job Ids */
+            unissued_artifact_job_ids?: string[];
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal: number;
+        };
+        /**
          * LibraryAssessmentCode
          * @description Why a library entry is not assessed runnable on the current fleet.
          * @enum {string}
@@ -7383,7 +7422,7 @@ export interface components {
         };
         /**
          * ProfileJobRunStopAuthorization
-         * @description Current accepted profile Stop and exact older one-shot effect.
+         * @description Current accepted profile Stop owns this immutable JobRun scope.
          */
         ProfileJobRunStopAuthorization: {
             /** Installation Id */
@@ -7504,6 +7543,51 @@ export interface components {
          * @enum {string}
          */
         ProfileReasonCode: "profile.admission_busy" | "profile.admission_effect_busy" | "profile.application_intent.invalid" | "profile.choices_unreadable" | "profile.definition_unavailable" | "profile.cleanup_delegated" | "profile.distributed_cross_scope" | "profile.failure_repeated" | "profile.incomplete_multi_spark_model" | "profile.interruption_expected" | "profile.pending_cross_scope" | "profile.preparation_not_started" | "profile.preparation_scope_mismatch" | "profile.preparation_unavailable" | "profile.recipe_unavailable" | "profile.recovery_assignments_changed" | "profile.recovery_cache_pending" | "profile.recovery_scope_changed" | "profile.recovery_waiting" | "profile.resource_recheck_unavailable" | "profile.retry_conflict" | "profile.retry_executor_unavailable" | "profile.retry_intent_unavailable" | "profile.retry_review_unavailable" | "profile.review_stale" | "profile.runtime_image_rebuild_pending" | "profile.shared_installation_scope" | "profile.spark_removed" | "profile.spark_unavailable" | "profile.stale_plan" | "profile.switch_authority_unavailable" | "profile.switch_scope_unresolved" | "profile.topology_incomplete" | "profile.recovery_artifact_changed" | "profile.runtime-image-changed" | "profile.selection_lost" | "profile.asset_reservation_unavailable";
+        /**
+         * ProfileStopOwnerBinding
+         * @description The canonical accepted profile operation that owns this exact Stop.
+         */
+        ProfileStopOwnerBinding: {
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Missing Node Ids */
+            missing_node_ids?: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Profile Application Id */
+            profile_application_id: string;
+            /** Profile Digest */
+            profile_digest: string;
+            /** Profile Operation Id */
+            profile_operation_id: string;
+            /** Profile Plan Digest */
+            profile_plan_digest: string;
+            /** Profile Step */
+            profile_step: number | ExactNumber;
+            /** Reachable Node Ids */
+            reachable_node_ids: string[];
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number | ExactNumber;
+            /** Run Id */
+            run_id: string;
+            /** Run Node Ids */
+            run_node_ids: string[];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: number | ExactNumber;
+            /** Stop Plan Digest */
+            stop_plan_digest: string;
+            /** Workload Intent Ordinal */
+            workload_intent_ordinal: number;
+        };
         /**
          * ProgressPhase
          * @description What an operation is doing, as the measured progress names it.
@@ -9558,6 +9642,8 @@ export interface components {
              * @default null
              */
             execution_mode: "one-shot-jobs" | null;
+            /** @default null */
+            job_run_stop_authorization: components["schemas"]["JobRunStopScope"] | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -9581,6 +9667,8 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /** @default null */
+            service_stop_review: components["schemas"]["ServiceRunStopReview"] | null;
             /**
              * Workload Intent Ordinal
              * @default null
@@ -11821,6 +11909,48 @@ export interface components {
          * @enum {string}
          */
         SecurityRefusalReason: "401" | "403" | "agent.certificate.rotation.conflict" | "agent.enrollment.submit.rejected" | "agent.identity_mismatch" | "agent.tombstone_fenced" | "catalog.authentication_required" | "controller.authentication_required" | "controller.fleet.enrollment_denied" | "controller.request_rejected" | "digest_verification_failed" | "distribution.revoked" | "forbidden" | "grant_invalid" | "grant_node_mismatch" | "grant_unauthorized" | "helper.authorization_invalid" | "helper_grant_invalid" | "helper_grant_node_mismatch" | "helper_grant_unauthorized" | "helper_operation_invalid_artifact" | "helper_peer_identity_invalid" | "helper_request_installation_identity_invalid" | "helper_request_plan_binding_invalid" | "helper_request_replayed" | "helper_runtime_image_identity_invalid" | "host_helper.authority_denied" | "local.identity_expired" | "local.identity_failed" | "model_cache.credentials_denied" | "model_cache.credentials_invalid" | "model_cache.source_access_denied" | "operation_invalid_artifact" | "peer_identity_invalid" | "permission_denied" | "recipe_update.authority_denied" | "request_replayed" | "run-switch.artifact-digest-verification-failed" | "run-switch.cleanup-nas-eviction-forbidden" | "run-switch.cleanup-reclaimed-digest-not-planned" | "run-switch.runtime-image-preparation-digest-mismatch" | "runtime_image.authorization_invalid" | "runtime_image.authorization_revoked" | "runtime_image_identity_invalid" | "stale_fence" | "tuf.metadata_invalid" | "tuf.signature_invalid" | "unauthorized" | "unsafe_path";
+        /**
+         * ServiceRunStopReview
+         * @description The exact service Stop accepted before its route withdrawal claim.
+         */
+        ServiceRunStopReview: {
+            /**
+             * Exact Payloads
+             * @default null
+             */
+            exact_payloads: {
+                [key: string]: components["schemas"]["RecipeStopPayload"];
+            } | null;
+            /** Missing Node Ids */
+            missing_node_ids: string[];
+            /**
+             * Profile Application Id
+             * @default null
+             */
+            profile_application_id: string | null;
+            /** @default null */
+            profile_stop_owner: components["schemas"]["ProfileStopOwnerBinding"] | null;
+            /**
+             * Profile Target Node Ids
+             * @default null
+             */
+            profile_target_node_ids: string[] | null;
+            route_state: components["schemas"]["RouteState"];
+            /** Run Generation */
+            run_generation: number | ExactNumber;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "accepted" | "withdrawal-claimed" | "dispatched";
+            /**
+             * Stop Order
+             * @default null
+             */
+            stop_order: string[] | null;
+            /** Target Node Ids */
+            target_node_ids: string[];
+        };
         /**
          * SourceBundleCode
          * @description Recipe source bundle validation problems.

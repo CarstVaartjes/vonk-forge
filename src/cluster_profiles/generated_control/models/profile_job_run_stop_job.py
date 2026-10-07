@@ -35,8 +35,8 @@ class ProfileJobRunStopJob:
             plan_digest (str):
             profile_application_id (str):
             profile_operation_id (str):
-            profile_stop_authorization (ProfileJobRunStopAuthorization): Current accepted profile Stop and exact older one-
-                shot effect.
+            profile_stop_authorization (ProfileJobRunStopAuthorization): Current accepted profile Stop owns this immutable
+                JobRun scope.
             schema_version (Literal[1]):
             workload_intent_ordinal (int):
      """

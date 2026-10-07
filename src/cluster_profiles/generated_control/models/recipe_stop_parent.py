@@ -16,7 +16,9 @@ from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.distributed_recovery_marker import DistributedRecoveryMarker
+  from ..models.job_run_stop_scope import JobRunStopScope
   from ..models.profile_partial_stop import ProfilePartialStop
+  from ..models.service_run_stop_review import ServiceRunStopReview
   from ..models.stop_phase_operation import StopPhaseOperation
 
 
@@ -36,9 +38,11 @@ class RecipeStopParent:
             plan_digest (str):
             schema_version (Literal[1]):
             execution_mode (Literal['one-shot-jobs'] | None | Unset):
+            job_run_stop_authorization (JobRunStopScope | None | Unset):
             phases (list[list[StopPhaseOperation]] | None | Unset):
             profile_partial_stop (None | ProfilePartialStop | Unset):
             recovery (DistributedRecoveryMarker | None | Unset):
+            service_stop_review (None | ServiceRunStopReview | Unset):
             workload_intent_ordinal (int | None | Unset):
      """
 
@@ -47,9 +51,11 @@ class RecipeStopParent:
     plan_digest: str
     schema_version: Literal[1]
     execution_mode: Literal['one-shot-jobs'] | None | Unset = UNSET
+    job_run_stop_authorization: JobRunStopScope | None | Unset = UNSET
     phases: list[list[StopPhaseOperation]] | None | Unset = UNSET
     profile_partial_stop: None | ProfilePartialStop | Unset = UNSET
     recovery: DistributedRecoveryMarker | None | Unset = UNSET
+    service_stop_review: None | ServiceRunStopReview | Unset = UNSET
     workload_intent_ordinal: int | None | Unset = UNSET
 
 
@@ -58,7 +64,9 @@ class RecipeStopParent:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.distributed_recovery_marker import DistributedRecoveryMarker # noqa: PLC0415
+        from ..models.job_run_stop_scope import JobRunStopScope # noqa: PLC0415
         from ..models.profile_partial_stop import ProfilePartialStop # noqa: PLC0415
+        from ..models.service_run_stop_review import ServiceRunStopReview # noqa: PLC0415
         from ..models.stop_phase_operation import StopPhaseOperation # noqa: PLC0415
         owner_id = self.owner_id
 
@@ -73,6 +81,14 @@ class RecipeStopParent:
             execution_mode = UNSET
         else:
             execution_mode = self.execution_mode
+
+        job_run_stop_authorization: dict[str, Any] | None | Unset
+        if isinstance(self.job_run_stop_authorization, Unset):
+            job_run_stop_authorization = UNSET
+        elif isinstance(self.job_run_stop_authorization, JobRunStopScope):
+            job_run_stop_authorization = self.job_run_stop_authorization.to_dict()
+        else:
+            job_run_stop_authorization = self.job_run_stop_authorization
 
         phases: list[list[dict[str, Any]]] | None | Unset
         if isinstance(self.phases, Unset):
@@ -108,6 +124,14 @@ class RecipeStopParent:
         else:
             recovery = self.recovery
 
+        service_stop_review: dict[str, Any] | None | Unset
+        if isinstance(self.service_stop_review, Unset):
+            service_stop_review = UNSET
+        elif isinstance(self.service_stop_review, ServiceRunStopReview):
+            service_stop_review = self.service_stop_review.to_dict()
+        else:
+            service_stop_review = self.service_stop_review
+
         workload_intent_ordinal: int | None | Unset
         if isinstance(self.workload_intent_ordinal, Unset):
             workload_intent_ordinal = UNSET
@@ -125,12 +149,16 @@ class RecipeStopParent:
         })
         if execution_mode is not UNSET:
             field_dict["execution_mode"] = execution_mode
+        if job_run_stop_authorization is not UNSET:
+            field_dict["job_run_stop_authorization"] = job_run_stop_authorization
         if phases is not UNSET:
             field_dict["phases"] = phases
         if profile_partial_stop is not UNSET:
             field_dict["profile_partial_stop"] = profile_partial_stop
         if recovery is not UNSET:
             field_dict["recovery"] = recovery
+        if service_stop_review is not UNSET:
+            field_dict["service_stop_review"] = service_stop_review
         if workload_intent_ordinal is not UNSET:
             field_dict["workload_intent_ordinal"] = workload_intent_ordinal
 
@@ -141,7 +169,9 @@ class RecipeStopParent:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.distributed_recovery_marker import DistributedRecoveryMarker # noqa: PLC0415
+        from ..models.job_run_stop_scope import JobRunStopScope # noqa: PLC0415
         from ..models.profile_partial_stop import ProfilePartialStop # noqa: PLC0415
+        from ..models.service_run_stop_review import ServiceRunStopReview # noqa: PLC0415
         from ..models.stop_phase_operation import StopPhaseOperation # noqa: PLC0415
         d = dict(src_dict)
         owner_id = d.pop("owner_id")
@@ -169,6 +199,26 @@ class RecipeStopParent:
             return cast(Literal['one-shot-jobs'] | None | Unset, data)
 
         execution_mode = _parse_execution_mode(d.pop("execution_mode", UNSET))
+
+
+        def _parse_job_run_stop_authorization(data: object) -> JobRunStopScope | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                job_run_stop_authorization_type_0 = JobRunStopScope.from_dict(data)
+
+
+
+                return job_run_stop_authorization_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(JobRunStopScope | None | Unset, data)
+
+        job_run_stop_authorization = _parse_job_run_stop_authorization(d.pop("job_run_stop_authorization", UNSET))
 
 
         def _parse_phases(data: object) -> list[list[StopPhaseOperation]] | None | Unset:
@@ -241,6 +291,26 @@ class RecipeStopParent:
         recovery = _parse_recovery(d.pop("recovery", UNSET))
 
 
+        def _parse_service_stop_review(data: object) -> None | ServiceRunStopReview | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                service_stop_review_type_0 = ServiceRunStopReview.from_dict(data)
+
+
+
+                return service_stop_review_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | ServiceRunStopReview | Unset, data)
+
+        service_stop_review = _parse_service_stop_review(d.pop("service_stop_review", UNSET))
+
+
         def _parse_workload_intent_ordinal(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -257,9 +327,11 @@ class RecipeStopParent:
             plan_digest=plan_digest,
             schema_version=schema_version,
             execution_mode=execution_mode,
+            job_run_stop_authorization=job_run_stop_authorization,
             phases=phases,
             profile_partial_stop=profile_partial_stop,
             recovery=recovery,
+            service_stop_review=service_stop_review,
             workload_intent_ordinal=workload_intent_ordinal,
         )
 

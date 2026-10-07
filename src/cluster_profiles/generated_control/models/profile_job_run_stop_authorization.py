@@ -25,7 +25,7 @@ T = TypeVar("T", bound="ProfileJobRunStopAuthorization")
 
 @_attrs_define
 class ProfileJobRunStopAuthorization:
-    """ Current accepted profile Stop and exact older one-shot effect.
+    """ Current accepted profile Stop owns this immutable JobRun scope.
 
         Attributes:
             installation_id (str):
