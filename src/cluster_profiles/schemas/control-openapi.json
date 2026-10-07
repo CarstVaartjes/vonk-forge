@@ -6943,6 +6943,12 @@
           "change": {
             "$ref": "#/components/schemas/FleetChange"
           },
+          "event_cursor": {
+            "maximum": 9223372036854775807,
+            "minimum": 0,
+            "title": "Event Cursor",
+            "type": "integer"
+          },
           "projection_refresh_required": {
             "const": true,
             "default": true,
@@ -6951,6 +6957,7 @@
           }
         },
         "required": [
+          "event_cursor",
           "change"
         ],
         "title": "FleetChangeEvent",
@@ -6977,6 +6984,89 @@
           "request_key"
         ],
         "title": "FleetEnrollRequest",
+        "type": "object"
+      },
+      "FleetFrameIssue": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reason_code": {
+                  "enum": [
+                    "fleet.frame_encoding_unavailable",
+                    "fleet.stored_event_payload_unavailable"
+                  ]
+                }
+              },
+              "required": [
+                "reason_code"
+              ]
+            },
+            "then": {
+              "properties": {
+                "observed_bytes_at_least": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "reason_code": {
+                  "const": "fleet.frame_budget_exceeded"
+                }
+              },
+              "required": [
+                "reason_code"
+              ]
+            },
+            "then": {
+              "properties": {
+                "observed_bytes_at_least": {
+                  "minimum": 1048577,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        ],
+        "properties": {
+          "budget_bytes": {
+            "maximum": 1048576,
+            "minimum": 1048576,
+            "title": "Budget Bytes",
+            "type": "integer"
+          },
+          "observed_bytes_at_least": {
+            "anyOf": [
+              {
+                "minimum": 1048577,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Bytes At Least"
+          },
+          "reason_code": {
+            "enum": [
+              "fleet.frame_budget_exceeded",
+              "fleet.frame_encoding_unavailable",
+              "fleet.stored_event_payload_unavailable"
+            ],
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code",
+          "observed_bytes_at_least",
+          "budget_bytes"
+        ],
+        "title": "FleetFrameIssue",
         "type": "object"
       },
       "FleetLockHolder": {
@@ -7205,7 +7295,6 @@
                 }
               ]
             },
-            "maxItems": 512,
             "title": "Installed",
             "type": "array"
           },
@@ -7269,7 +7358,6 @@
                 }
               ]
             },
-            "maxItems": 512,
             "title": "Loaded",
             "type": "array"
           },
@@ -11006,6 +11094,44 @@
         "title": "FleetReenrollRequest",
         "type": "object"
       },
+      "FleetRefreshEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "event_cursor": {
+            "maximum": 9223372036854775807,
+            "minimum": 0,
+            "title": "Event Cursor",
+            "type": "integer"
+          },
+          "issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetFrameIssue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reset_reason": {
+            "enum": [
+              "initial",
+              "cursor-ahead",
+              "retention-gap",
+              "missing-telemetry-sample",
+              "frame-unavailable"
+            ],
+            "title": "Reset Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reset_reason",
+          "event_cursor"
+        ],
+        "title": "FleetRefreshEvent",
+        "type": "object"
+      },
       "FleetRenameRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11059,30 +11185,10 @@
         "title": "FleetSnapshot",
         "type": "object"
       },
-      "FleetSnapshotEvent": {
-        "additionalProperties": false,
-        "properties": {
-          "reset_reason": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Reset Reason",
-            "type": "string"
-          },
-          "snapshot": {
-            "$ref": "#/components/schemas/FleetSnapshot"
-          }
-        },
-        "required": [
-          "reset_reason",
-          "snapshot"
-        ],
-        "title": "FleetSnapshotEvent",
-        "type": "object"
-      },
       "FleetStreamEvent": {
         "anyOf": [
           {
-            "$ref": "#/components/schemas/FleetSnapshotEvent"
+            "$ref": "#/components/schemas/FleetRefreshEvent"
           },
           {
             "$ref": "#/components/schemas/FleetTelemetryEvent"
@@ -11097,6 +11203,12 @@
       "FleetTelemetryEvent": {
         "additionalProperties": false,
         "properties": {
+          "event_cursor": {
+            "maximum": 9223372036854775807,
+            "minimum": 0,
+            "title": "Event Cursor",
+            "type": "integer"
+          },
           "node_id": {
             "maxLength": 128,
             "minLength": 1,
@@ -11108,6 +11220,7 @@
           }
         },
         "required": [
+          "event_cursor",
           "node_id",
           "sample"
         ],
@@ -17200,6 +17313,195 @@
         ],
         "title": "ObservationCause",
         "type": "string"
+      },
+      "ObservationTransferChunk": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "maxLength": 1048576,
+            "minLength": 4,
+            "not": {
+              "pattern": "[^A-Za-z0-9+/=]"
+            },
+            "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)$",
+            "title": "Data",
+            "type": "string"
+          },
+          "ordinal": {
+            "minimum": 0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "transfer_id": {
+            "not": {
+              "pattern": "[^0-9a-f-]"
+            },
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Transfer Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "chunk",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "transfer_id",
+          "ordinal",
+          "data"
+        ],
+        "title": "ObservationTransferChunk",
+        "type": "object"
+      },
+      "ObservationTransferComplete": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "minimum": 1,
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "chunks": {
+            "minimum": 1,
+            "title": "Chunks",
+            "type": "integer"
+          },
+          "sha256": {
+            "not": {
+              "pattern": "[^0-9a-f]"
+            },
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "transfer_id": {
+            "not": {
+              "pattern": "[^0-9a-f-]"
+            },
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Transfer Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "complete",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "transfer_id",
+          "chunks",
+          "bytes",
+          "sha256"
+        ],
+        "title": "ObservationTransferComplete",
+        "type": "object"
+      },
+      "ObservationTransferError": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "reason_code": {
+            "const": "observation.transfer_unavailable",
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "transfer_id": {
+            "not": {
+              "pattern": "[^0-9a-f-]"
+            },
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Transfer Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "transfer_id",
+          "reason_code",
+          "detail"
+        ],
+        "title": "ObservationTransferError",
+        "type": "object"
+      },
+      "ObservationTransferRecord": {
+        "description": "One NDJSON record; EOF after a verified complete record is success.",
+        "discriminator": {
+          "mapping": {
+            "chunk": "#/components/schemas/ObservationTransferChunk",
+            "complete": "#/components/schemas/ObservationTransferComplete",
+            "error": "#/components/schemas/ObservationTransferError",
+            "start": "#/components/schemas/ObservationTransferStart"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ObservationTransferStart"
+          },
+          {
+            "$ref": "#/components/schemas/ObservationTransferChunk"
+          },
+          {
+            "$ref": "#/components/schemas/ObservationTransferComplete"
+          },
+          {
+            "$ref": "#/components/schemas/ObservationTransferError"
+          }
+        ],
+        "title": "ObservationTransferRecord"
+      },
+      "ObservationTransferStart": {
+        "additionalProperties": false,
+        "properties": {
+          "encoding": {
+            "const": "base64-canonical-json-utf8-v1",
+            "title": "Encoding",
+            "type": "string"
+          },
+          "resource": {
+            "enum": [
+              "fleet",
+              "platform"
+            ],
+            "title": "Resource",
+            "type": "string"
+          },
+          "transfer_id": {
+            "not": {
+              "pattern": "[^0-9a-f-]"
+            },
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Transfer Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "start",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "transfer_id",
+          "resource",
+          "encoding"
+        ],
+        "title": "ObservationTransferStart",
+        "type": "object"
       },
       "ObservedAssignmentState": {
         "description": "Where a fleet-profile assignment stands on the Sparks, as observed.",
@@ -35949,9 +36251,9 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "application/x-vonk-observation+ndjson": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetSnapshot"
+                  "$ref": "#/components/schemas/ObservationTransferRecord"
                 }
               }
             },
@@ -35996,7 +36298,12 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Fleet Status"
+        "summary": "Fleet Status",
+        "x-vonk-observation-payload": {
+          "$ref": "#/components/schemas/FleetSnapshot"
+        },
+        "x-vonk-response-record-max-bytes": 1048576,
+        "x-vonk-streaming-transport": true
       }
     },
     "/api/fleet/enroll": {
@@ -36366,16 +36673,15 @@
             "content": {
               "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetStreamEvent",
-                  "type": "string"
+                  "$ref": "#/components/schemas/FleetStreamEvent"
                 }
               }
             },
-            "description": "Durable Fleet event stream. The schema describes the JSON data in each snapshot, telemetry, or change SSE frame."
+            "description": "Durable Fleet event stream. The schema describes the JSON data in each refresh notice, telemetry, or change SSE frame. A refresh notice requires a verified complete Fleet read."
           },
           "400": {
             "content": {
-              "text/event-stream": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
@@ -36385,7 +36691,7 @@
           },
           "401": {
             "content": {
-              "text/event-stream": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
@@ -36395,7 +36701,7 @@
           },
           "422": {
             "content": {
-              "text/event-stream": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RequestValidationProblem"
                 }
@@ -36405,7 +36711,7 @@
           },
           "503": {
             "content": {
-              "text/event-stream": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
@@ -36423,6 +36729,24 @@
           }
         ],
         "summary": "Fleet Event Stream",
+        "x-vonk-response-frame-max-bytes": 1048576,
+        "x-vonk-sse-events": {
+          "fleet-refresh": {
+            "$ref": "#/components/schemas/FleetRefreshEvent"
+          },
+          "node-profile": {
+            "$ref": "#/components/schemas/FleetChangeEvent"
+          },
+          "node-telemetry": {
+            "$ref": "#/components/schemas/FleetTelemetryEvent"
+          },
+          "operation-state": {
+            "$ref": "#/components/schemas/FleetChangeEvent"
+          },
+          "recipe-state": {
+            "$ref": "#/components/schemas/FleetChangeEvent"
+          }
+        },
         "x-vonk-streaming-transport": true
       }
     },
@@ -38883,9 +39207,9 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "application/x-vonk-observation+ndjson": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlatformObservation"
+                  "$ref": "#/components/schemas/ObservationTransferRecord"
                 }
               }
             },
@@ -38930,7 +39254,12 @@
             "BrowserSession": []
           }
         ],
-        "summary": "Platform Observation"
+        "summary": "Platform Observation",
+        "x-vonk-observation-payload": {
+          "$ref": "#/components/schemas/PlatformObservation"
+        },
+        "x-vonk-response-record-max-bytes": 1048576,
+        "x-vonk-streaming-transport": true
       }
     },
     "/api/profile": {
