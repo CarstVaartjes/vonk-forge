@@ -3721,7 +3721,9 @@ class RecipeImageAvailabilityService:
                             )
                         ),
                         reason=reason,
-                        authorize=True,
+                        # Cleanup belongs to the accepted profile cancellation,
+                        # not the current permissions of its original author.
+                        authorize=False,
                     )
                     cancelled.append(job.id)
                     break

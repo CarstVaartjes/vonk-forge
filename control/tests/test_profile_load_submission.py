@@ -141,6 +141,73 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
         }
 
 
+def test_revoked_actor_cannot_submit_new_load(postgres_engine):
+    sessions, api, codec, headers, _preview = _profile_api(postgres_engine)
+    with sessions.begin() as session:
+        author = session.scalar(select(User).where(User.subject == "administrator"))
+        assert author is not None
+        author.role = "viewer"
+    response = api.post(
+        "/api/profile/1/load", headers=headers, json={"request_key": str(uuid4())}
+    )
+    assert response.status_code == 403, response.text
+    with sessions() as session:
+        assert session.scalar(select(FleetProfileApplication)) is None
+        assert session.get(FleetProfileSelection, 1) is None
+    # Refusal leaves no receipt or gate blocking a current administrator.
+    current_admin = {
+        "Authorization": "Bearer "
+        + codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
+    }
+    fresh = api.post(
+        "/api/profile/1/load",
+        headers=current_admin,
+        json={"request_key": str(uuid4())},
+    )
+    assert fresh.status_code == 202, fresh.text
+
+
+def test_accepted_profile_roster_maintenance_survives_actor_revocation(postgres_engine):
+    sessions, _api, _codec, _headers_unused, _preview = _profile_api(postgres_engine)
+    profiles = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    api, codec = _client(sessions, profiles=profiles)
+    accepted = api.post(
+        "/api/profile/1/load",
+        headers=_headers(codec, "administrator"),
+        json={"request_key": str(uuid4())},
+    )
+    assert accepted.status_code == 202, accepted.text
+    with sessions.begin() as session:
+        selection = session.get(FleetProfileSelection, 1)
+        assert selection is not None
+        generation = selection.generation
+        author = session.scalar(select(User).where(User.subject == "administrator"))
+        assert author is not None
+        author.role = "viewer"
+        session.add(
+            AgentNode(
+                node_id="spk_" + "3" * 32,
+                state="active",
+                protocol_version=2,
+                architecture="linux-arm64",
+                last_seen_at=NOW,
+            )
+        )
+    # The worker maintains the accepted snapshot without a new user decision.
+    assert profiles.tick()
+    with sessions() as session:
+        selection = session.get(FleetProfileSelection, 1)
+        assert selection is not None
+        assert selection.generation == generation + 1
+        assert selection.application_id != accepted.json()["id"]
+        maintained = session.get(FleetProfileApplication, selection.application_id)
+        assert maintained is not None
+        assert maintained.actor == "administrator"
+        assert maintained.progress["admission_pending"] is False
+
+
 def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
     postgres_engine, tmp_path, capsys
 ):

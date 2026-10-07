@@ -20,6 +20,7 @@ from vonk_control.fleet_profile_contract import (
 )
 from vonk_control.fleet_profiles import (
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
+    FleetProfilePermissionDenied,
     FleetProfileService,
     FleetProfileStalePlanConflict,
 )
@@ -983,11 +984,12 @@ def test_queued_admission_survives_submitter_death_before_first_attempt(
         assert row.current_operation_id is not None
 
 
-def test_pending_admission_refuses_revoked_actor_before_fencing_workloads(
-    tmp_path, postgres_engine
+@pytest.mark.parametrize("authority_change", ["disabled", "demoted", "removed"])
+def test_pending_admission_continues_under_platform_authority_after_actor_revocation(
+    tmp_path, postgres_engine, authority_change: str
 ) -> None:
-    """Restart recovery rechecks current authority before any workload effects."""
-    sessions, profiles, _, profile, _, _, _, nodes = _capacity_profile(
+    """Accepted recovery fences work; revocation only denies new user changes."""
+    sessions, profiles, planner, profile, api, headers, _, nodes = _capacity_profile(
         tmp_path, postgres_engine
     )
     review = profiles.preview(profile.id)
@@ -999,7 +1001,6 @@ def test_pending_admission_refuses_revoked_actor_before_fencing_workloads(
     )
     retry_at = pending.progress.admission_retry_at
     assert retry_at is not None
-    profiles._clock = lambda: retry_at
 
     with sessions() as session:
         before_ordinal = session.scalar(
@@ -1007,43 +1008,93 @@ def test_pending_admission_refuses_revoked_actor_before_fencing_workloads(
                 AgentNode.node_id == nodes[0]
             )
         )
-        before_jobs = tuple(
-            (row.id, row.state, row.result)
-            for row in session.scalars(select(Job).order_by(Job.id))
-        )
+        before_jobs = set(session.scalars(select(Job.id)))
         assert before_ordinal is not None
     with sessions.begin() as session:
-        administrator = session.scalar(
+        author = session.scalar(
             select(User).where(User.subject == "admin").with_for_update()
         )
-        assert administrator is not None
-        administrator.disabled_at = retry_at
+        assert author is not None
+        if authority_change == "removed":
+            session.delete(author)
+        elif authority_change == "disabled":
+            author.disabled_at = retry_at
+        else:
+            author.role = "viewer"
 
-    assert profiles.tick()
+    # Reconstruct the worker so admission cannot depend on cached user authority.
+    assert planner._lifecycle is not None
+    restarted, _ = _profile_service(sessions, planner._lifecycle)
+    restarted._clock = lambda: retry_at
+    assert restarted.tick()
 
     with sessions() as session:
         row = session.get(FleetProfileApplication, pending.id)
         assert row is not None
         assert row.request_key == pending.request_key
-        assert row.state == "failed"
+        assert row.plan_digest == pending.plan_digest
+        assert row.state == "running", row.status_reason
         assert row.progress["admission_pending"] is False
-        assert row.status_reason == "Current profile authority is unavailable"
+        ordinal = row.progress["workload_intent_ordinal"]
+        assert ordinal == before_ordinal + 1
+        assert dict(
+            session.execute(
+                select(AgentNode.node_id, AgentNode.workload_intent_ordinal).where(
+                    AgentNode.node_id.in_(nodes)
+                )
+            ).all()
+        ) == dict.fromkeys(nodes, ordinal)
+        assert row.current_operation_id is not None
+        switch_state = FleetProfileSwitchAdapterState.model_validate_json(
+            canonical_message(row.progress["switch_adapter"])
+        )
+        assert switch_state.pending_children
+        for pending_child in switch_state.pending_children:
+            item = switch_state.queue[pending_child.queue_index]
+            expected_request = profile_switch_child_request_key(
+                row.id, pending_child.queue_index, item.kind, item.id
+            )
+            child = session.get(Job, pending_child.operation_id)
+            assert child is not None
+            assert child.id not in before_jobs
+            assert child.request_id == expected_request
+            assert child.payload["workload_intent_ordinal"] == ordinal
+            assert set(child.targets) == set(nodes)
+        admitted_jobs = set(session.scalars(select(Job.id)))
+
+    # Platform maintenance does not grant the revoked non-admin new authority.
+    denied_request_key = str(uuid4())
+    with pytest.raises(
+        FleetProfilePermissionDenied, match="Current profile authority is unavailable"
+    ):
+        restarted.apply(profile.id, request_key=denied_request_key, actor="admin")
+    with sessions() as session:
         assert (
             session.scalar(
-                select(AgentNode.workload_intent_ordinal).where(
-                    AgentNode.node_id == nodes[0]
+                select(FleetProfileApplication).where(
+                    FleetProfileApplication.request_key == denied_request_key
                 )
             )
-            == before_ordinal
+            is None
         )
-        assert (
-            tuple(
-                (item.id, item.state, item.result)
-                for item in session.scalars(select(Job).order_by(Job.id))
-            )
-            == before_jobs
-        )
-        assert row.current_operation_id is None
+        assert set(session.scalars(select(Job.id))) == admitted_jobs
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None and node.workload_intent_ordinal == ordinal
+        row = session.get(FleetProfileApplication, pending.id)
+        assert row is not None and row.state == "running"
+
+    # The denial leaves no gate against a fresh change by a current administrator.
+    changed = api.put(
+        f"/api/profile/{profile.number}",
+        headers=headers,
+        json={
+            "name": "Fresh authorized change",
+            "assignments": [],
+            "expected_revision": profile.revision,
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["revision"] == profile.revision + 1
 
 
 def test_late_submitter_cleanup_preserves_superseded_receipt(
