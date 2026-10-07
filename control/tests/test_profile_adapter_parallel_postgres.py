@@ -177,7 +177,11 @@ def test_postgres_pending_lane_does_not_serialize_disjoint_work_after_restart(
         )
         issued.append((index, item.id, tuple(scope), request_key))
         child = _running_child(_uuid(18510 + index), scope[0])
-        child.state = pending_state if index == 0 else LifecycleState.RUNNING
+        child.state = (
+            LifecycleState.NEEDS_OPERATOR
+            if index == 0 and pending_state == LifecycleState.NEEDS_OPERATOR
+            else LifecycleState.RUNNING
+        )
         observed[child.operation_id] = child
         return child
 

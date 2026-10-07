@@ -287,8 +287,10 @@ def validate_profile_stop_owner(
     if (
         switch_adapter is None
         or switch_adapter.child_id != application.id
-        or switch_adapter.active_kind != "stop"
-        or switch_adapter.active_operation_id != profile_operation.id
+        or not any(
+            child.kind == "stop" and child.operation_id == profile_operation.id
+            for child in switch_adapter.pending_children
+        )
     ):
         raise ProfileStopAuthorityError("profile Stop is not the active reviewed child")
 

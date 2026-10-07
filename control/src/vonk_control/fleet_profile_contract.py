@@ -1331,6 +1331,14 @@ class FleetProfileApplicationCancelRequest(StrictModel):
     request_key: UuidId
 
 
+class FleetProfileApplicationProjectionIssue(StrictModel):
+    """Historical state is retained while its metadata cannot be verified."""
+
+    code: Literal[ProfileReasonCode.APPLICATION_INTENT_INVALID]
+    detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    observation: Literal["unknown"] = "unknown"
+
+
 class FleetProfileApplicationView(StrictModel):
     id: UuidId
     request_key: UuidId
@@ -1352,6 +1360,7 @@ class FleetProfileApplicationView(StrictModel):
     progress: FleetProfileApplicationProgress
     cancellation: FleetProfileApplicationCancellationView | None = None
     result: FleetProfileApplicationResult | None
+    projection_issue: FleetProfileApplicationProjectionIssue | None = None
     #: What a queued or failed application is waiting for; empty once it runs.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
     #: When the Controller will check again; an application that will retry is
@@ -1371,7 +1380,7 @@ class FleetProfileApplicationView(StrictModel):
             raise ValueError(
                 "application recovery identity disagrees with persisted progress"
             )
-        if self.state == "succeeded":
+        if self.state == "succeeded" and self.projection_issue is None:
             if self.result is None or self.status_reason is not None:
                 raise ValueError(
                     "successful application requires a result and no failure reason"
@@ -1389,7 +1398,7 @@ class FleetProfileApplicationView(StrictModel):
         ):
             raise ValueError("failed or waiting application requires a failure reason")
         if self.state == "superseded":
-            if self.reason_code is None:
+            if self.reason_code is None and self.projection_issue is None:
                 raise ValueError("superseded application requires a reason code")
             if (
                 self.reason_code == SupersedeCode.SUPERSEDED_BY_RETRY
@@ -1403,11 +1412,14 @@ class FleetProfileApplicationView(StrictModel):
 
 __all__ = [
     "FLEET_PROFILE_ENDED_STATES",
+    "FleetProfileAdoptedApplicationEffect",
+    "FleetProfileAdoptedStopEffect",
     "FleetProfileApplicationCancelRequest",
     "FleetProfileApplicationCancellationIntent",
     "FleetProfileApplicationCancellationView",
     "FleetProfileApplicationEffect",
     "FleetProfileApplicationProgress",
+    "FleetProfileApplicationProjectionIssue",
     "FleetProfileApplicationResult",
     "FleetProfileApplicationView",
     "FleetProfileAssignment",
@@ -1419,6 +1431,7 @@ __all__ = [
     "FleetProfileChildProgress",
     "FleetProfileChildResult",
     "FleetProfileCompatibilityDecision",
+    "FleetProfileEffectProgress",
     "FleetProfileEffects",
     "FleetProfileInput",
     "FleetProfileInstallationEffect",
@@ -1443,6 +1456,7 @@ __all__ = [
     "FleetProfileSwitchAdapterState",
     "FleetProfileSwitchChildResult",
     "FleetProfileSwitchChildState",
+    "FleetProfileSwitchPendingChild",
     "FleetProfileSwitchQueueItem",
     "FleetProfileVerificationResult",
     "FleetProfileView",
