@@ -35,6 +35,7 @@ from .test_agent_upgrades import (  # noqa: F401  (the autouse fixture pins the 
     NODE_B,
     OLD_IDENTITY,
     PACKAGE,
+    PACKAGE_MODEL,
     SOURCE,
     _rollout,
     _upgrade_node,
@@ -85,9 +86,9 @@ def test_a_package_or_targets_the_caller_sent_are_invalid_requests(tmp_path) -> 
     _sessions, upgrades = _service(tmp_path)
 
     with pytest.raises(AgentUpgradeInvalid, match="package is invalid"):
-        upgrades.preview(None, {**PACKAGE, "package_url": "http://example.test/x"})
+        upgrades._package({**PACKAGE, "package_url": "http://example.test/x"})
     with pytest.raises(AgentUpgradeInvalid, match="targets are invalid"):
-        upgrades.preview([NODE_A, NODE_A], PACKAGE)
+        upgrades.preview([NODE_A, NODE_A], PACKAGE_MODEL)
 
 
 def test_an_inconsistent_release_asks_the_caller_to_retry(tmp_path) -> None:

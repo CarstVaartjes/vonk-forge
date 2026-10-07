@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
+from .integer_domains import MAX_DATABASE_INTEGER
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .strict_json import StrictJSONModel
 
@@ -161,7 +162,7 @@ class RecipeUpdateResponse(StrictJSONModel):
     state: UpdateState
     #: Some children succeeded and the batch failed: the update is partly done.
     partial: bool = False
-    attempt: int = Field(ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     children: list[RecipeUpdateChild]
     cancellation: RecipeOperationCancellationResult | None = None
     progress: OperationProgress

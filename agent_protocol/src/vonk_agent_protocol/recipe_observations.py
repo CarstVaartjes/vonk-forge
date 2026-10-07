@@ -9,7 +9,7 @@ from pydantic import Field, field_validator, model_validator
 
 from .contracts import AgentProtocolError, canonical_message
 from .host_helper import Uuid4Text
-from .wire_model import WireModel
+from .wire_model import MAX_RUN_GENERATION, WireModel
 
 
 def _strict_datetime(value: object) -> object:
@@ -27,7 +27,7 @@ class RecipeRunObservationWire(WireModel):
     """What the agent saw of one local run generation."""
 
     run_id: Uuid4Text
-    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
+    run_generation: int = Field(ge=1, le=MAX_RUN_GENERATION, strict=True)
     process_running: bool = Field(strict=True)
     # Only the endpoint owner probes readiness; every other rank sends null.
     endpoint_ready: bool | None = Field(strict=True)

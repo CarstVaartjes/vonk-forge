@@ -15,10 +15,11 @@ from vonk_control.model_cache import CacheOperationView
 from vonk_control.model_cache_api import install_model_operator_routes
 from vonk_control.model_cache_contract import (
     ModelCacheCancellation,
+    ModelCacheCounters,
     ModelCacheOperatorResponse,
     ModelCacheRemovalResult,
 )
-from vonk_control.model_cache_progress import cache_progress
+from vonk_control.model_cache_progress import cache_progress, progress_document
 
 OPERATION_ID = "00000000-0000-4000-8000-000000000001"
 REQUEST_KEY = "00000000-0000-4000-8000-000000000002"
@@ -50,16 +51,20 @@ def test_remove_is_the_current_model_eviction_boundary():
     operation.model_content_sha256 = MODEL_CONTENT_SHA256
     operation.review_digest = REVIEW_DIGEST
     operation.state = "succeeded"
-    operation.progress = cache_progress(
-        {
-            "phase": "completed",
-            "completed_artifacts": 1,
-            "total_artifacts": 1,
-            "downloaded_bytes": 10,
-            "expected_bytes": 10,
-        },
-        previous=None,
-        now=datetime(2026, 9, 10, tzinfo=UTC),
+    operation.progress = progress_document(
+        cache_progress(
+            ModelCacheCounters.model_validate(
+                {
+                    "phase": "completed",
+                    "completed_artifacts": 1,
+                    "total_artifacts": 1,
+                    "downloaded_bytes": 10,
+                    "expected_bytes": 10,
+                }
+            ),
+            previous=None,
+            now=datetime(2026, 9, 10, tzinfo=UTC),
+        )
     )
     operation.result = ModelCacheRemovalResult(
         schema_version=2,
@@ -135,16 +140,20 @@ def test_model_operation_observation_is_readable_by_any_authenticated_actor():
     operation.model_content_sha256 = None
     operation.review_digest = None
     operation.state = "succeeded"
-    operation.progress = cache_progress(
-        {
-            "phase": "completed",
-            "completed_artifacts": 1,
-            "total_artifacts": 1,
-            "downloaded_bytes": 10,
-            "expected_bytes": 10,
-        },
-        previous=None,
-        now=datetime(2026, 9, 10, tzinfo=UTC),
+    operation.progress = progress_document(
+        cache_progress(
+            ModelCacheCounters.model_validate(
+                {
+                    "phase": "completed",
+                    "completed_artifacts": 1,
+                    "total_artifacts": 1,
+                    "downloaded_bytes": 10,
+                    "expected_bytes": 10,
+                }
+            ),
+            previous=None,
+            now=datetime(2026, 9, 10, tzinfo=UTC),
+        )
     )
     operation.result = ModelCacheRemovalResult(
         schema_version=2,
@@ -176,16 +185,20 @@ def test_cancel_route_requires_operator_and_returns_durable_intent():
     operation.model_content_sha256 = None
     operation.review_digest = None
     operation.state = LifecycleState.OBSERVING
-    operation.progress = cache_progress(
-        {
-            "phase": "cancelling",
-            "completed_artifacts": 0,
-            "total_artifacts": 1,
-            "downloaded_bytes": 12,
-            "expected_bytes": 20,
-        },
-        previous=None,
-        now=datetime(2026, 9, 10, tzinfo=UTC),
+    operation.progress = progress_document(
+        cache_progress(
+            ModelCacheCounters.model_validate(
+                {
+                    "phase": "cancelling",
+                    "completed_artifacts": 0,
+                    "total_artifacts": 1,
+                    "downloaded_bytes": 12,
+                    "expected_bytes": 20,
+                }
+            ),
+            previous=None,
+            now=datetime(2026, 9, 10, tzinfo=UTC),
+        )
     )
     operation.result = None
     operation.failure = None

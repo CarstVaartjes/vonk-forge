@@ -26,7 +26,7 @@ fn claim(attempt: u128, deadline: &str) -> AgentClaim {
     let run_id = Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap();
     let payload = RecipeStopPayload {
         cancel_pending_start: false,
-        rank: compiled_execution_plan.runtime.placement.rank,
+        rank: compiled_execution_plan.runtime.placement.rank.clone(),
         role: compiled_execution_plan.runtime.placement.role.clone(),
         recipe_content_sha256: compiled_execution_plan
             .identity
@@ -55,7 +55,7 @@ fn operation_progress(phase: &str) -> OperationProgress {
         activity: None,
         bytes_per_second: None,
         checkpoint: None,
-        completed_bytes: 0,
+        completed_bytes: 0_u64.into(),
         completed_items: None,
         elapsed_seconds: None,
         eta_seconds: None,

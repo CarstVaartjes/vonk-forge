@@ -157,7 +157,9 @@ jobs:
               labels: |
                 org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
                 org.opencontainers.image.revision=${{ github.sha }}
-              build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+              build-args: |
+                DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+                VONK_BUILD_SOURCE_SHA=${{ github.sha }}
               cache-from: type=gha,scope=vonk-forge-api
               cache-to: type=gha,mode=max,scope=vonk-forge-api
 
@@ -177,7 +179,9 @@ jobs:
               labels: |
                 org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
                 org.opencontainers.image.revision=${{ github.sha }}
-              build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+              build-args: |
+                DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+                VONK_BUILD_SOURCE_SHA=${{ github.sha }}
               cache-from: type=gha,scope=vonk-forge-worker
               cache-to: type=gha,mode=max,scope=vonk-forge-worker
 

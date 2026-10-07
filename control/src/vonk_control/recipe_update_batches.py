@@ -44,6 +44,8 @@ from .operation_api import (
     OperationQuery,
     _activity_keyset_filter,
 )
+from .operation_contract import AvailabilityOperationFailure
+from .operation_item_contract import OperationItem, OperationOwnerReference
 from .recipe_availability_intent import RecipeRevisionIntent
 from .recipe_image_availability import (
     RecipeImageAvailabilityInvalid,
@@ -637,60 +639,50 @@ class RecipeUpdateBatches:
             represented_job_kinds=frozenset({UPDATE_KIND}),
         )
 
-    def _activity_item(self, job: Job) -> dict[str, object]:
+    def _activity_item(self, job: Job) -> OperationItem:
         from .recipe_image_availability import RecipeImageAvailabilityError
 
+        owner = OperationOwnerReference(
+            kind="job", id=job.id, request_id=job.request_id
+        )
         try:
             view = self._view(job, self._document(job))
         except RecipeImageAvailabilityError as error:
-            return {
-                "id": job.id,
-                "parent_id": None,
-                "node_ids": [],
-                "owner": {
-                    "kind": "job",
-                    "id": job.id,
-                    "request_id": job.request_id,
-                },
-                "kind": UPDATE_KIND,
-                "state": job.state,
-                "attempt": job.current_attempt,
-                "progress": None,
-                "created_at": _now(job.created_at).isoformat(),
-                "updated_at": _now(job.updated_at).isoformat(),
-                "supported_actions": [],
-                "status_reason": error.detail,
-                "failure": {
-                    "code": error.code,
-                    "detail": error.detail,
-                    "retryable": False,
-                },
-            }
+            return OperationItem(
+                id=job.id,
+                owner=owner,
+                kind=UPDATE_KIND,
+                state=job.state,
+                attempt=job.current_attempt,
+                created_at=_now(job.created_at).isoformat(),
+                updated_at=_now(job.updated_at).isoformat(),
+                supported_actions=[],
+                status_reason=error.detail,
+                failure=AvailabilityOperationFailure(
+                    code=error.code, detail=error.detail, retryable=False
+                ),
+            )
         failures = sum(
             child.state in {"failed", "cancelled"} for child in view.children
         )
-        return {
-            "id": view.id,
-            "parent_id": None,
-            "node_ids": [],
-            "owner": {
-                "kind": "job",
-                "id": job.id,
-                "request_id": job.request_id,
-            },
-            "kind": UPDATE_KIND,
-            "state": view.state,
-            "attempt": view.attempt,
-            "progress": serialize_json_value(view.progress),
-            "created_at": view.created_at.isoformat(),
-            "updated_at": view.updated_at.isoformat(),
-            "supported_actions": [],
-            "status_reason": f"{failures} of {len(view.children)} recipes failed or were cancelled; inspect with vonkctl recipe progress {view.id}"
+        return OperationItem(
+            id=view.id,
+            owner=owner,
+            kind=UPDATE_KIND,
+            state=view.state,
+            attempt=view.attempt,
+            progress=OperationProgress.model_validate(
+                serialize_json_value(view.progress)
+            ),
+            created_at=view.created_at.isoformat(),
+            updated_at=view.updated_at.isoformat(),
+            supported_actions=[],
+            status_reason=f"{failures} of {len(view.children)} recipes failed or were cancelled; inspect with vonkctl recipe progress {view.id}"
             if failures
             else view.waiting_on,
-        }
+        )
 
-    def _activity_get(self, operation_id: str) -> dict[str, object]:
+    def _activity_get(self, operation_id: str) -> OperationItem:
         with self.sessions() as session:
             job = session.get(Job, operation_id)
             if job is None or job.kind != UPDATE_KIND:

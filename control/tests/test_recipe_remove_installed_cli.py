@@ -21,6 +21,9 @@ from vonk_control.models import (
     Job,
 )
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
+from vonk_control.recipe_image_availability_view_contract import (
+    RecipeCacheRemovalStatus,
+)
 from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,
@@ -161,7 +164,8 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         try:
             assert peer.response_accepted.wait(timeout=25), peer.calls
             accepted = service.get_operator_request(_REMOVE_KEY, actor=actor.subject)
-            assert isinstance(accepted, dict)
+            assert isinstance(accepted, RecipeCacheRemovalStatus)
+            accepted = accepted.model_dump(mode="json", exclude_none=True)
             assert accepted["action"] == "remove"
             assert accepted["request_key"] == _REMOVE_KEY
             assert accepted["selector"] == selector
@@ -255,7 +259,8 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
     for _ in range(4):
         service.advance_removals(limit=1)
         operation_view = service.get_operator_request(_REMOVE_KEY, actor=actor.subject)
-        assert isinstance(operation_view, dict)
+        assert isinstance(operation_view, RecipeCacheRemovalStatus)
+        operation_view = operation_view.model_dump(mode="json", exclude_none=True)
         settled = operation_view
         if settled["state"] == "succeeded":
             break

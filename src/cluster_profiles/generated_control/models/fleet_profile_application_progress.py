@@ -19,6 +19,7 @@ if TYPE_CHECKING:
   from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
   from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
   from ..models.fleet_profile_child_progress import FleetProfileChildProgress
+  from ..models.fleet_profile_effect_progress import FleetProfileEffectProgress
   from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
   from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
   from ..models.operation_blocker import OperationBlocker
@@ -46,6 +47,7 @@ class FleetProfileApplicationProgress:
             child_source (Literal['switch-adapter'] | None | Unset):
             completed_steps (int | Unset):  Default: 0.
             current_label (None | str | Unset):
+            effects (list[FleetProfileEffectProgress] | Unset):
             intended_profile (FleetProfileIntendedConfiguration | None | Unset):
             operation_kind (Literal['fleet-profile.apply'] | None | Unset):
             retry_due_at (datetime.datetime | None | Unset):
@@ -69,6 +71,7 @@ class FleetProfileApplicationProgress:
     child_source: Literal['switch-adapter'] | None | Unset = UNSET
     completed_steps: int | Unset = 0
     current_label: None | str | Unset = UNSET
+    effects: list[FleetProfileEffectProgress] | Unset = UNSET
     intended_profile: FleetProfileIntendedConfiguration | None | Unset = UNSET
     operation_kind: Literal['fleet-profile.apply'] | None | Unset = UNSET
     retry_due_at: datetime.datetime | None | Unset = UNSET
@@ -89,6 +92,7 @@ class FleetProfileApplicationProgress:
         from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent # noqa: PLC0415
         from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults # noqa: PLC0415
         from ..models.fleet_profile_child_progress import FleetProfileChildProgress # noqa: PLC0415
+        from ..models.fleet_profile_effect_progress import FleetProfileEffectProgress # noqa: PLC0415
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration # noqa: PLC0415
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState # noqa: PLC0415
         from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
@@ -144,6 +148,15 @@ class FleetProfileApplicationProgress:
             current_label = UNSET
         else:
             current_label = self.current_label
+
+        effects: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.effects, Unset):
+            effects = []
+            for effects_item_data in self.effects:
+                effects_item = effects_item_data.to_dict()
+                effects.append(effects_item)
+
+
 
         intended_profile: dict[str, Any] | None | Unset
         if isinstance(self.intended_profile, Unset):
@@ -240,6 +253,8 @@ class FleetProfileApplicationProgress:
             field_dict["completed_steps"] = completed_steps
         if current_label is not UNSET:
             field_dict["current_label"] = current_label
+        if effects is not UNSET:
+            field_dict["effects"] = effects
         if intended_profile is not UNSET:
             field_dict["intended_profile"] = intended_profile
         if operation_kind is not UNSET:
@@ -272,6 +287,7 @@ class FleetProfileApplicationProgress:
         from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent # noqa: PLC0415
         from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults # noqa: PLC0415
         from ..models.fleet_profile_child_progress import FleetProfileChildProgress # noqa: PLC0415
+        from ..models.fleet_profile_effect_progress import FleetProfileEffectProgress # noqa: PLC0415
         from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration # noqa: PLC0415
         from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState # noqa: PLC0415
         from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
@@ -378,6 +394,18 @@ class FleetProfileApplicationProgress:
             return cast(None | str | Unset, data)
 
         current_label = _parse_current_label(d.pop("current_label", UNSET))
+
+
+        _effects = d.pop("effects", UNSET)
+        effects: list[FleetProfileEffectProgress] | Unset = UNSET
+        if _effects is not UNSET:
+            effects = []
+            for effects_item_data in _effects:
+                effects_item = FleetProfileEffectProgress.from_dict(effects_item_data)
+
+
+
+                effects.append(effects_item)
 
 
         def _parse_intended_profile(data: object) -> FleetProfileIntendedConfiguration | None | Unset:
@@ -547,6 +575,7 @@ class FleetProfileApplicationProgress:
             child_source=child_source,
             completed_steps=completed_steps,
             current_label=current_label,
+            effects=effects,
             intended_profile=intended_profile,
             operation_kind=operation_kind,
             retry_due_at=retry_due_at,

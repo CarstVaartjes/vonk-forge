@@ -25,6 +25,7 @@ if TYPE_CHECKING:
   from ..models.recipe_retry_intent import RecipeRetryIntent
   from ..models.recipe_revision_intent import RecipeRevisionIntent
   from ..models.recipe_selector_intent import RecipeSelectorIntent
+  from ..models.residue import Residue
 
 
 
@@ -42,10 +43,10 @@ class RecipeImageAvailabilityResponse:
             created_at (str):
             id (str):
             kind (Literal['recipe.image.availability.v2']):
-            progress (OperationProgress): Canonical durable progress payload shared by Controller and agents.
-            recipe_content_sha256 (str):
-            recipe_revision_id (str):
-            request (RecipeRetryIntent | RecipeRevisionIntent | RecipeSelectorIntent):
+            progress (None | OperationProgress):
+            recipe_content_sha256 (None | str):
+            recipe_revision_id (None | str):
+            request (None | RecipeRetryIntent | RecipeRevisionIntent | RecipeSelectorIntent):
             request_id (str):
             state (RecipeImageAvailabilityResponseState):
             updated_at (str):
@@ -55,6 +56,7 @@ class RecipeImageAvailabilityResponse:
             children (list[RecipeImageAvailabilityChild] | Unset):
             failure (AvailabilityOperationFailure | None | Unset):
             next_attempt_at (None | str | Unset):
+            residue (None | Residue | Unset):
             result (None | RecipeImageAvailabilityResult | Unset):
      """
 
@@ -62,10 +64,10 @@ class RecipeImageAvailabilityResponse:
     created_at: str
     id: str
     kind: Literal['recipe.image.availability.v2']
-    progress: OperationProgress
-    recipe_content_sha256: str
-    recipe_revision_id: str
-    request: RecipeRetryIntent | RecipeRevisionIntent | RecipeSelectorIntent
+    progress: None | OperationProgress
+    recipe_content_sha256: None | str
+    recipe_revision_id: None | str
+    request: None | RecipeRetryIntent | RecipeRevisionIntent | RecipeSelectorIntent
     request_id: str
     state: RecipeImageAvailabilityResponseState
     updated_at: str
@@ -75,6 +77,7 @@ class RecipeImageAvailabilityResponse:
     children: list[RecipeImageAvailabilityChild] | Unset = UNSET
     failure: AvailabilityOperationFailure | None | Unset = UNSET
     next_attempt_at: None | str | Unset = UNSET
+    residue: None | Residue | Unset = UNSET
     result: None | RecipeImageAvailabilityResult | Unset = UNSET
 
 
@@ -92,6 +95,7 @@ class RecipeImageAvailabilityResponse:
         from ..models.recipe_retry_intent import RecipeRetryIntent # noqa: PLC0415
         from ..models.recipe_revision_intent import RecipeRevisionIntent # noqa: PLC0415
         from ..models.recipe_selector_intent import RecipeSelectorIntent # noqa: PLC0415
+        from ..models.residue import Residue # noqa: PLC0415
         attempt = self.attempt
 
         created_at = self.created_at
@@ -100,20 +104,27 @@ class RecipeImageAvailabilityResponse:
 
         kind = self.kind
 
-        progress = self.progress.to_dict()
+        progress: dict[str, Any] | None
+        if isinstance(self.progress, OperationProgress):
+            progress = self.progress.to_dict()
+        else:
+            progress = self.progress
 
+        recipe_content_sha256: None | str
         recipe_content_sha256 = self.recipe_content_sha256
 
+        recipe_revision_id: None | str
         recipe_revision_id = self.recipe_revision_id
 
-        request: dict[str, Any]
+        request: dict[str, Any] | None
         if isinstance(self.request, RecipeSelectorIntent):
             request = self.request.to_dict()
         elif isinstance(self.request, RecipeRevisionIntent):
             request = self.request.to_dict()
-        else:
+        elif isinstance(self.request, RecipeRetryIntent):
             request = self.request.to_dict()
-
+        else:
+            request = self.request
 
         request_id = self.request_id
 
@@ -170,6 +181,14 @@ class RecipeImageAvailabilityResponse:
         else:
             next_attempt_at = self.next_attempt_at
 
+        residue: dict[str, Any] | None | Unset
+        if isinstance(self.residue, Unset):
+            residue = UNSET
+        elif isinstance(self.residue, Residue):
+            residue = self.residue.to_dict()
+        else:
+            residue = self.residue
+
         result: dict[str, Any] | None | Unset
         if isinstance(self.result, Unset):
             result = UNSET
@@ -206,6 +225,8 @@ class RecipeImageAvailabilityResponse:
             field_dict["failure"] = failure
         if next_attempt_at is not UNSET:
             field_dict["next_attempt_at"] = next_attempt_at
+        if residue is not UNSET:
+            field_dict["residue"] = residue
         if result is not UNSET:
             field_dict["result"] = result
 
@@ -225,6 +246,7 @@ class RecipeImageAvailabilityResponse:
         from ..models.recipe_retry_intent import RecipeRetryIntent # noqa: PLC0415
         from ..models.recipe_revision_intent import RecipeRevisionIntent # noqa: PLC0415
         from ..models.recipe_selector_intent import RecipeSelectorIntent # noqa: PLC0415
+        from ..models.residue import Residue # noqa: PLC0415
         d = dict(src_dict)
         attempt = d.pop("attempt")
 
@@ -236,43 +258,74 @@ class RecipeImageAvailabilityResponse:
         if kind != 'recipe.image.availability.v2':
             raise ValueError(f"kind must match const 'recipe.image.availability.v2', got '{kind}'")
 
-        progress = OperationProgress.from_dict(d.pop("progress"))
-
-
-
-
-        recipe_content_sha256 = d.pop("recipe_content_sha256")
-
-        recipe_revision_id = d.pop("recipe_revision_id")
-
-        def _parse_request(data: object) -> RecipeRetryIntent | RecipeRevisionIntent | RecipeSelectorIntent:
+        def _parse_progress(data: object) -> None | OperationProgress:
+            if data is None:
+                return data
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                request_type_0 = RecipeSelectorIntent.from_dict(data)
+                progress_type_0 = OperationProgress.from_dict(data)
 
 
 
-                return request_type_0
+                return progress_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | OperationProgress, data)
+
+        progress = _parse_progress(d.pop("progress"))
+
+
+        def _parse_recipe_content_sha256(data: object) -> None | str:
+            if data is None:
+                return data
+            return cast(None | str, data)
+
+        recipe_content_sha256 = _parse_recipe_content_sha256(d.pop("recipe_content_sha256"))
+
+
+        def _parse_recipe_revision_id(data: object) -> None | str:
+            if data is None:
+                return data
+            return cast(None | str, data)
+
+        recipe_revision_id = _parse_recipe_revision_id(d.pop("recipe_revision_id"))
+
+
+        def _parse_request(data: object) -> None | RecipeRetryIntent | RecipeRevisionIntent | RecipeSelectorIntent:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                request_type_0_type_0 = RecipeSelectorIntent.from_dict(data)
+
+
+
+                return request_type_0_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                request_type_1 = RecipeRevisionIntent.from_dict(data)
+                request_type_0_type_1 = RecipeRevisionIntent.from_dict(data)
 
 
 
-                return request_type_1
+                return request_type_0_type_1
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            if not isinstance(data, dict):
-                raise TypeError()
-            request_type_2 = RecipeRetryIntent.from_dict(data)
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                request_type_0_type_2 = RecipeRetryIntent.from_dict(data)
 
 
 
-            return request_type_2
+                return request_type_0_type_2
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | RecipeRetryIntent | RecipeRevisionIntent | RecipeSelectorIntent, data)
 
         request = _parse_request(d.pop("request"))
 
@@ -372,6 +425,26 @@ class RecipeImageAvailabilityResponse:
         next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
 
 
+        def _parse_residue(data: object) -> None | Residue | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                residue_type_0 = Residue.from_dict(data)
+
+
+
+                return residue_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | Residue | Unset, data)
+
+        residue = _parse_residue(d.pop("residue", UNSET))
+
+
         def _parse_result(data: object) -> None | RecipeImageAvailabilityResult | Unset:
             if data is None:
                 return data
@@ -410,6 +483,7 @@ class RecipeImageAvailabilityResponse:
             children=children,
             failure=failure,
             next_attempt_at=next_attempt_at,
+            residue=residue,
             result=result,
         )
 

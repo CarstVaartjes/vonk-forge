@@ -28,7 +28,10 @@ import pytest
 from vonk_agent_protocol import LifecycleState
 from vonk_control import fleet_profile_states
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
-from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileSwitchChildState,
+)
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
     build_production_fleet_profile_service,
@@ -121,8 +124,8 @@ class _World:
 
     def child_id(self) -> str:
         document = self.service.application(self.id).progress.switch_adapter
-        assert document is not None and document.active_operation_id is not None
-        return document.active_operation_id
+        assert document is not None and document.pending_children
+        return document.pending_children[0].operation_id
 
     def cancel(self, key: int = 700):
         return self.service.cancel(
@@ -424,9 +427,9 @@ def test_a_child_record_that_is_gone_is_issued_again_not_failed(tmp_path) -> Non
     assert view.state != "failed"
     document = view.progress.switch_adapter
     assert document is not None
-    assert document.active_operation_id is not None
+    assert document.pending_children
     with world.sessions() as session:
-        assert session.get(Job, document.active_operation_id) is not None
+        assert session.get(Job, document.pending_children[0].operation_id) is not None
 
 
 # ---------------------------------------------------- state = aggregate(children)
@@ -444,10 +447,31 @@ def test_the_loads_state_is_the_aggregate_of_its_children(tmp_path) -> None:
     assert state in {State.QUEUED, State.RUNNING, State.OBSERVING, State.BACKOFF}
     # recorded children: the worst outcome wins; an empty record has no state
     assert adapter.recorded_aggregate([]) is None
-    done = {"state": "succeeded"}
-    assert adapter.recorded_aggregate([done, done]) is State.SUCCEEDED
-    assert adapter.recorded_aggregate([done, {"state": "failed"}]) is State.FAILED
-    assert adapter.recorded_aggregate([done, {"state": "cancelled"}]) is State.CANCELLED
+    done = FleetProfileSwitchChildState(
+        queue_index=0,
+        operation_id=world.child_id(),
+        kind="run",
+        state="succeeded",
+    )
+    other = FleetProfileSwitchChildState(
+        queue_index=1,
+        operation_id=str(uuid.uuid4()),
+        kind="run",
+        state="succeeded",
+    )
+    assert done.queue_index != other.queue_index
+    assert done.operation_id != other.operation_id
+    assert adapter.recorded_aggregate([done, other]) is State.SUCCEEDED
+    assert (
+        adapter.recorded_aggregate([done, other.model_copy(update={"state": "failed"})])
+        is State.FAILED
+    )
+    assert (
+        adapter.recorded_aggregate(
+            [done, other.model_copy(update={"state": "cancelled"})]
+        )
+        is State.CANCELLED
+    )
 
 
 def test_a_load_with_nothing_to_do_ends_by_its_children_not_by_a_label(

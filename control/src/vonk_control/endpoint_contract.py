@@ -6,6 +6,7 @@ import re
 
 from pydantic import ConfigDict, Field
 
+from .integer_domains import MAX_DATABASE_BIGINT
 from .strict_json import StrictJSONModel
 
 _IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
@@ -50,7 +51,7 @@ class EndpointResponse(StrictJSONModel):
     alias: str = Field(pattern=_IDENTIFIER_PATTERN, max_length=63)
     api_base: str = Field(min_length=1, max_length=512)
     backend_api_base: str = Field(min_length=1, max_length=512)
-    generation: int = Field(ge=1)
+    generation: int = Field(le=MAX_DATABASE_BIGINT, ge=1)
     node_id: str = Field(pattern=_NODE_PATTERN)
     observed_at: str = Field(min_length=1, max_length=64)
     plan_digest: str = Field(pattern=_DIGEST_PATTERN)

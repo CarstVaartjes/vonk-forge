@@ -23,7 +23,7 @@ from vonk_control.models import AgentCertificate, AgentNode, AgentOperation, Bas
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.operator_projection_api import FleetOperatorServices
 
-from .test_agent_upgrades import NODE_A, NODE_B, OLD_IDENTITY, PACKAGE, SOURCE
+from .test_agent_upgrades import NODE_A, NODE_B, OLD_IDENTITY, PACKAGE_MODEL, SOURCE
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
@@ -66,7 +66,7 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
     upgrades = AgentUpgradeService(sessions, operations, clock=lambda: now)
     # The external release publisher is outside this control-plane acceptance;
     # admission, sequential dispatch and failure reconciliation are actual owners.
-    monkeypatch.setattr(upgrades, "current_package", lambda: dict(PACKAGE))
+    monkeypatch.setattr(upgrades, "current_package", lambda: PACKAGE_MODEL)
     operations.set_result_consumer(upgrades.consume_agent_result)
     tokens = TokenCodec(b"installed-fleet-upgrade-test-key-32")
     projected = durable_operation_services(

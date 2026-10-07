@@ -11,6 +11,7 @@ import json
 
 import pytest
 from vonk_control.fleet_profiles import _effective_option_choices
+from vonk_forge_contracts import RecipeDefinition
 
 from cluster_profiles.control_client import (
     ControlClientError,
@@ -34,17 +35,15 @@ def test_every_library_recipe_replaces_stale_choices_with_its_defaults() -> None
     assert recipes
     optioned = 0
     for document in recipes:
-        declared = {
-            option["name"]: option
-            for option in document.get("options", [])  # type: ignore[attr-defined]
-        }
-        defaults, notes = _effective_option_choices(document, {})
+        recipe = RecipeDefinition.model_validate(document)
+        declared = {option.name: option for option in recipe.options}
+        defaults, notes = _effective_option_choices(recipe, {})
         assert notes == []
         assert set(defaults) == set(declared)
 
         stale = {name: "value-the-recipe-never-offered" for name in declared}
         stale["option-the-recipe-never-declared"] = "x"
-        effective, notes = _effective_option_choices(document, stale)
+        effective, notes = _effective_option_choices(recipe, stale)
 
         # Everything stale is replaced by the default, each replacement named.
         assert effective == defaults
@@ -52,11 +51,9 @@ def test_every_library_recipe_replaces_stale_choices_with_its_defaults() -> None
 
         # A choice the recipe still offers survives next to a stale one.
         for name, option in declared.items():
-            offered = [choice["value"] for choice in option["choices"]]
+            offered = [choice.value for choice in option.choices]
             kept = offered[-1]
-            effective, _notes = _effective_option_choices(
-                document, {**stale, name: kept}
-            )
+            effective, _notes = _effective_option_choices(recipe, {**stale, name: kept})
             assert effective[name] == kept
             optioned += 1
     assert optioned

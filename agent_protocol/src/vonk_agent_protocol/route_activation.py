@@ -37,8 +37,10 @@ class SupervisorAcknowledgement(BaseModel):
     schema_version: Literal[1]
     acknowledged_at: str
     activation_sha256: Digest
-    child_pid: Annotated[int, Field(gt=0)]
-    generation: Annotated[int, Field(gt=0)]
+    # Popen.pid is the native signed pid_t; route identities are stored in the
+    # Controller's PostgreSQL BIGINT route-generation column.
+    child_pid: Annotated[int, Field(gt=0, le=2**31 - 1)]
+    generation: Annotated[int, Field(gt=0, le=2**63 - 1)]
     litellm_sha256: Digest
     state: ActivationState
 
@@ -61,7 +63,7 @@ class ActivationManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
     schema_version: Literal[2]
-    generation: Annotated[int, Field(gt=0)]
+    generation: Annotated[int, Field(gt=0, le=2**63 - 1)]
     state: ActivationState
     authority_id: str
     plan_digest: Digest

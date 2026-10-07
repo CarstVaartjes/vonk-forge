@@ -1,3 +1,6 @@
+import {LosslessNumber} from "lossless-json";
+import {compareWire, type WireNumber} from "../api/contract-numeric";
+import {validateComponent} from "../api/contract-json";
 import {useCallback, useEffect, useReducer, useState} from "react";
 import type {
   ControlApi,
@@ -17,15 +20,15 @@ const SPARSE_RETRY_MAX_MS = 10_000;
 const STALE_AFTER_MS = 90_000;
 const MAX_ERROR_LENGTH = 512;
 
-function cursorFrom(event: MessageEvent<string>): number | null {
+function cursorFrom(event: MessageEvent<string>): WireNumber | null {
   if (!/^[0-9]+$/.test(event.lastEventId)) return null;
   const cursor = Number(event.lastEventId);
-  return Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : null;
+  return Number.isSafeInteger(cursor) ? cursor : new LosslessNumber(event.lastEventId);
 }
 
-function eventData(event: MessageEvent<string>): Record<string, unknown> | null {
+function eventData(event: MessageEvent<string>, component: string): Record<string, unknown> | null {
   try {
-    const value: unknown = JSON.parse(event.data);
+    const value: unknown = validateComponent(component, event.data);
     return typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
   } catch {
     return null;
@@ -58,8 +61,8 @@ export function useFleetStream(api: ControlApi) {
     let active = true;
     let requestInFlight = false;
     let refreshQueued = false;
-    let appliedCursor = -1;
-    let requiredRefreshCursor: number | null = null;
+    let appliedCursor: WireNumber = -1;
+    let requiredRefreshCursor: WireNumber | null = null;
     let refreshAttempt = 0;
     let timelineGeneration = 0;
     let sparseRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -97,11 +100,11 @@ export function useFleetStream(api: ControlApi) {
         const snapshot = await api.visualFleet(controller.signal);
         if (active && !controller.signal.aborted
             && requestTimelineGeneration === timelineGeneration
-            && snapshot.event_cursor >= appliedCursor) {
+            && compareWire(snapshot.event_cursor, appliedCursor) >= 0) {
           dispatch({type: "requested-snapshot", snapshot});
           setLastUpdatedAt(Date.now()); setRefreshError("");
           appliedCursor = snapshot.event_cursor;
-          if (requiredRefreshCursor !== null && snapshot.event_cursor >= requiredRefreshCursor) {
+          if (requiredRefreshCursor !== null && compareWire(snapshot.event_cursor, requiredRefreshCursor) >= 0) {
             requiredRefreshCursor = null;
             refreshAttempt = 0;
           }
@@ -167,11 +170,11 @@ export function useFleetStream(api: ControlApi) {
     function onSnapshot(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
-      const data = eventData(event) as FleetSnapshotEvent | null;
+      const data = eventData(event, "FleetSnapshotEvent") as FleetSnapshotEvent | null;
       if (cursor === null || !data
           || typeof data.reset_reason !== "string"
           || typeof data.snapshot !== "object" || data.snapshot === null
-          || data.snapshot.event_cursor !== cursor) return;
+          || compareWire(data.snapshot.event_cursor, cursor) !== 0) return;
       timelineGeneration += 1;
       appliedCursor = cursor;
       requiredRefreshCursor = null;
@@ -188,12 +191,12 @@ export function useFleetStream(api: ControlApi) {
     function onTelemetry(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
-      const data = eventData(event) as FleetTelemetryEvent | null;
+      const data = eventData(event, "FleetTelemetryEvent") as FleetTelemetryEvent | null;
       if (cursor === null || !data
           || typeof data.node_id !== "string"
           || typeof data.sample !== "object" || data.sample === null
           || data.sample.node_id !== data.node_id) return;
-      if (cursor <= appliedCursor) return;
+      if (compareWire(cursor, appliedCursor) <= 0) return;
       appliedCursor = cursor;
       dispatch({type: "node-telemetry", cursor, nodeId: data.node_id, sample: data.sample, receivedAt: new Date()});
       setLastUpdatedAt(Date.now()); setRefreshError("");
@@ -202,9 +205,9 @@ export function useFleetStream(api: ControlApi) {
     function onSparse(rawEvent: Event): void {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
-      const data = eventData(event) as FleetChangeEvent | null;
+      const data = eventData(event, "FleetChangeEvent") as FleetChangeEvent | null;
       if (cursor === null || data?.projection_refresh_required !== true) return;
-      if (cursor <= Math.max(appliedCursor, requiredRefreshCursor ?? -1)) return;
+      if ((compareWire(cursor, appliedCursor) <= 0 || compareWire(cursor, requiredRefreshCursor ?? -1) <= 0)) return;
       requiredRefreshCursor = cursor;
       dispatch({type: "projection-refresh", cursor});
       scheduleRefresh();

@@ -1,6 +1,7 @@
+import {formatWire, stringifyContractJson} from "../api/contract-numeric";
 import {act, render, screen} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {ControlApi, TelemetryPoint, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, FleetChangeEvent, TelemetryPoint, VisualFleetSnapshot} from "../api/types";
 import {useFleetStream} from "./use-fleet-stream";
 
 class FakeEventSource {
@@ -34,7 +35,7 @@ class FakeEventSource {
   emit(type: string, data: unknown = undefined, lastEventId = ""): void {
     const event = type === "open" || type === "error"
       ? new Event(type)
-      : new MessageEvent(type, {data: JSON.stringify(data), lastEventId});
+      : new MessageEvent(type, {data: stringifyContractJson(data), lastEventId});
     for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
 
@@ -43,10 +44,13 @@ class FakeEventSource {
   }
 }
 
-function point(gpu: number): TelemetryPoint {
+const NODE_A = "spk_" + "a".repeat(32);
+const NODE_B = "spk_" + "b".repeat(32);
+
+function point(gpu: number, nodeId = NODE_A): TelemetryPoint {
   return {
-    id: `sample-${gpu}`,
-    node_id: "node-a",
+    id: `00000000-0000-4000-8000-${gpu.toString(16).padStart(12, "0")}`,
+    node_id: nodeId,
     boot_id: "00000000-0000-0000-0000-000000000001",
     observed_at: "2026-08-15T11:59:58Z",
     received_at: "2026-08-15T11:59:59Z",
@@ -66,7 +70,7 @@ function snapshot(cursor: number, gpu = 10): VisualFleetSnapshot {
     generated_at: "2026-08-15T12:00:00Z",
     authority_revision: "a".repeat(64),
     nodes: [{
-      id: "node-a",
+      id: NODE_A,
       display_name: "Alpha",
       hostname: "alpha.internal",
       lifecycle: "managed",
@@ -82,6 +86,25 @@ function snapshot(cursor: number, gpu = 10): VisualFleetSnapshot {
   };
 }
 
+function change(type: "recipe-state" | "node-profile" | "operation-state"): FleetChangeEvent {
+  const occurred_at = "2026-08-15T12:00:00Z";
+  if (type === "node-profile") return {
+    projection_refresh_required: true,
+    change: {entity_kind: "node-profile", entity_id: NODE_A, node_id: NODE_A, occurred_at,
+      fields: {node_id: NODE_A, profile_changed: true}},
+  };
+  if (type === "recipe-state") return {
+    projection_refresh_required: true,
+    change: {entity_kind: "recipe-installation", entity_id: "installation-a", node_id: null, occurred_at,
+      fields: {entity_kind: "recipe-installation", entity_id: "installation-a", recipe_revision_id: "revision-a", mapping_id: "mapping-a", mapping_generation: 1, state: "installed"}},
+  };
+  return {
+    projection_refresh_required: true,
+    change: {entity_kind: "job", entity_id: "job-a", node_id: null, occurred_at,
+      fields: {entity_kind: "job", entity_id: "job-a", kind: "recipe.start", state: "queued", target_count: 1}},
+  };
+}
+
 function api(visualFleet: ControlApi["visualFleet"]): ControlApi {
   return {visualFleet} as ControlApi;
 }
@@ -90,7 +113,7 @@ function Probe({control}: {control: ControlApi}) {
   const fleet = useFleetStream(control);
   return <>
     <span data-testid="connection">{fleet.connection}</span>
-    <span data-testid="cursor">{fleet.snapshot?.event_cursor ?? "none"}</span>
+    <span data-testid="cursor">{fleet.snapshot ? formatWire(fleet.snapshot.event_cursor) : "none"}</span>
     <span data-testid="gpu">{fleet.snapshot?.nodes[0]?.telemetry?.sample.gpu_utilization_percent ?? "none"}</span>
     <span data-testid="error">{fleet.error}</span>
     <button type="button" onClick={fleet.retry}>Retry</button>
@@ -121,13 +144,14 @@ test("uses same-origin EventSource and reconciles increments and backward resets
   act(() => stream.emit("open"));
   expect(screen.getByTestId("connection")).toHaveTextContent("live");
 
-  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(73)}, "6"));
+  act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(73)}, "6"));
   expect(screen.getByTestId("gpu")).toHaveTextContent("73");
-  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(99)}, "6"));
+  act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(99)}, "6"));
   expect(screen.getByTestId("gpu")).toHaveTextContent("73");
-  act(() => stream.emit("node-telemetry", {node_id: "node-b", sample: point(88)}, "7"));
+  // Deliberately mismatched envelope/sample ownership must remain ignored.
+  act(() => stream.emit("node-telemetry", {node_id: NODE_B, sample: point(88)}, "7"));
   expect(screen.getByTestId("cursor")).toHaveTextContent("6");
-  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "7"));
+  act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7"));
   expect(screen.getByTestId("gpu")).toHaveTextContent("77");
 
   act(() => stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(2, 22)}, "2"));
@@ -142,14 +166,14 @@ test("keeps one native EventSource across browser-managed Last-Event-ID reconnec
 
   act(() => {
     stream.emit("open");
-    stream.emit("node-telemetry", {node_id: "node-a", sample: point(66)}, "6");
+    stream.emit("node-telemetry", {node_id: NODE_A, sample: point(66)}, "6");
     stream.emit("error");
   });
   expect(screen.getByTestId("connection")).toHaveTextContent("reconnecting");
 
   act(() => {
     stream.emit("open");
-    stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "7");
+    stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7");
   });
 
   expect(FakeEventSource.instances).toHaveLength(1);
@@ -169,8 +193,8 @@ test("coalesces sparse recipe, profile, and operation refresh signals", async ()
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("recipe-state", {projection_refresh_required: true}, "6");
-    stream.emit("node-profile", {projection_refresh_required: true}, "7");
+    stream.emit("recipe-state", change("recipe-state"), "6");
+    stream.emit("node-profile", change("node-profile"), "7");
     vi.advanceTimersByTime(100);
   });
   await flush();
@@ -190,9 +214,9 @@ test("authoritative cursor-ahead reset cancels old sparse retries and starts a n
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("recipe-state", {projection_refresh_required: true}, "100");
+    stream.emit("recipe-state", change("recipe-state"), "100");
     stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
-    stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "21");
+    stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "21");
     vi.advanceTimersByTime(10_000);
   });
   await flush();
@@ -215,15 +239,15 @@ test("ignores an old-timeline sparse response already in flight across an author
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("recipe-state", {projection_refresh_required: true}, "100");
+    stream.emit("recipe-state", change("recipe-state"), "100");
     vi.advanceTimersByTime(100);
   });
   expect(visualFleet).toHaveBeenCalledTimes(2);
 
   act(() => {
     stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
-    stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "21");
-    stream.emit("operation-state", {projection_refresh_required: true}, "22");
+    stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "21");
+    stream.emit("operation-state", change("operation-state"), "22");
   });
   await act(async () => resolveOldTimeline(snapshot(100, 100)));
   act(() => vi.advanceTimersByTime(100));
@@ -248,7 +272,7 @@ test("retries a failed sparse refresh until the required cursor is reconciled", 
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("recipe-state", {projection_refresh_required: true}, "6");
+    stream.emit("recipe-state", change("recipe-state"), "6");
     vi.advanceTimersByTime(100);
   });
   await flush();
@@ -276,11 +300,11 @@ test("retries when concurrent telemetry makes a sparse REST response stale", asy
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("operation-state", {projection_refresh_required: true}, "6");
+    stream.emit("operation-state", change("operation-state"), "6");
     vi.advanceTimersByTime(100);
   });
   expect(visualFleet).toHaveBeenCalledTimes(2);
-  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "7"));
+  act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7"));
   await act(async () => resolveRefresh(snapshot(6, 66)));
 
   expect(screen.getByTestId("cursor")).toHaveTextContent("7");
@@ -383,7 +407,7 @@ test("does not let an older in-flight poll overwrite a newer stream increment", 
     stream.emit("error");
     vi.advanceTimersByTime(10_000);
   });
-  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "7"));
+  act(() => stream.emit("node-telemetry", {node_id: NODE_A, sample: point(77)}, "7"));
   await act(async () => resolvePoll(snapshot(6, 66)));
 
   expect(screen.getByTestId("cursor")).toHaveTextContent("7");
