@@ -205,6 +205,7 @@ from .profile_capacity import (
 from .recipe_build_cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
+    needs_container_build,
 )
 from .recipe_builds import RecipeBuildAdmissionBusy, RecipeBuildPlan
 from .recipe_execution_contract import (
@@ -3649,12 +3650,56 @@ class RunSwitchOperationService:
         # The intent above is committed before a build lock, child observation
         # or Stop admission can fail. Repeated cancels retain that first intent.
         with self._sessions.begin() as session:
-            job = session.get(Job, operation_id, with_for_update=True)
+            # Read identities first, then acquire the build before its parent.
+            # Detachment and last-consumer cleanup must share this NOWAIT fence.
+            snapshot = session.get(Job, operation_id)
+            if snapshot is None:
+                return self.get(operation_id)
+            snapshot_plan = _stored_job_plan(snapshot)
+            snapshot_index = _read_progress(snapshot.result).phase_index
+            if snapshot_plan is not None:
+                try:
+                    lock_run_switch_build_dependency(
+                        session,
+                        snapshot_plan,
+                        phase_index=snapshot_index,
+                        allow_cancelling=True,
+                    )
+                except BuildConsumerError as error:
+                    raise RunSwitchRetryLater(
+                        f"{error.code}: {error}",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from error
+            try:
+                job = session.scalar(
+                    select(Job)
+                    .where(Job.id == operation_id)
+                    .with_for_update(nowait=True)
+                    .execution_options(populate_existing=True)
+                )
+            except DBAPIError as error:
+                if getattr(error.orig, "sqlstate", None) != "55P03":
+                    raise
+                raise RunSwitchRetryLater(
+                    "run-switch cancellation owner is busy",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
             if job is None:
                 return self.get(operation_id)
+            if job.state not in _LIVE_STATES:
+                return self._operation_view(job)
             progress = _read_progress(job.result)
+            if (
+                _stored_job_plan(job) != snapshot_plan
+                or progress.phase_index != snapshot_index
+            ):
+                # Replan in a fresh transaction; never append an earlier lock.
+                raise RunSwitchRetryLater(
+                    "run-switch cancellation boundary changed",
+                    reason=WaitReason.SCOPE_CHANGED,
+                )
             cancellation = progress.cancellation or cancellation
-            # A cancel always completes: a plan that cannot be read is unknown,
+            # A recorded cancel is retried: an unreadable plan is unknown,
             # so the cancel treats the operation as possibly started and Stops
             # through the child's run, without the plan's build-dependency lock.
             plan = _stored_job_plan(job)
@@ -7301,6 +7346,36 @@ class RunSwitchOperationService:
                 JournalRepairDisposition.REPAIRED,
                 JournalRepairDisposition.ENDED,
             }
+        # A deferred build detachment re-enters the same fenced cancel path,
+        # before child observation can end the parent through the lifecycle core.
+        # A busy boundary leaves only the durable intent and releases all locks;
+        # the worker's bounded polling retries it without a Stop of shared work.
+        with self._sessions() as session:
+            snapshot = session.get(Job, operation_id)
+            plan = _stored_job_plan(snapshot) if snapshot is not None else None
+            progress = _read_progress(snapshot.result) if snapshot is not None else None
+            cancellation = progress.cancellation if progress is not None else None
+            detach_build = (
+                snapshot is not None
+                and snapshot.state in _LIVE_STATES
+                and plan is not None
+                and progress is not None
+                and needs_container_build(plan, progress.phase_index)
+            )
+        if detach_build and cancellation is not None:
+            for _attempt in admission_attempts():
+                try:
+                    self.cancel(
+                        operation_id,
+                        actor=cancellation.actor,
+                        request_key=cancellation.request_key,
+                        reason=cancellation.reason,
+                    )
+                except RunSwitchRetryLater:
+                    # The failed transaction has closed before bounded backoff.
+                    continue
+                return True
+            return False
         if self._refresh_blocked_plan(operation_id, now):
             return True
         with self._sessions() as session:
