@@ -25,6 +25,7 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path, PurePosixPath
 from types import ModuleType
 
+sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 from check_environment import ensure_catalog
 
 ROOT = Path(__file__).resolve().parents[1]

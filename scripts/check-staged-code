@@ -9,6 +9,8 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import sys
+sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 from check_environment import ensure_web
 
 ROOT = Path(__file__).resolve().parents[1]

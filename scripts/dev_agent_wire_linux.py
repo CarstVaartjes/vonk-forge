@@ -30,6 +30,7 @@ import time
 import uuid
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 from check_environment import ensure_catalog
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
