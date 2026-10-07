@@ -152,10 +152,7 @@ services:
     entrypoint: [vonk-step-ca]
     command: [--config, /run/vonk-normalized-secrets/step-ca/ca.json, --password-file, /run/vonk-normalized-secrets/step-ca/password]
     user: "1000:1000"
-    # The pinned binary carries a NET_BIND_SERVICE file capability. Its exec
-    # requires that capability in the bounding set even on the high port 9000.
     cap_drop: [ALL]
-    cap_add: [NET_BIND_SERVICE]
     security_opt: [no-new-privileges:true]
     secrets: []
     volumes:
