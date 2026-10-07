@@ -25,6 +25,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from jwt.algorithms import ECAlgorithm
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
@@ -145,7 +146,7 @@ def https_journal(tmp_path: Path):
     counts: dict[str, int] = {}
     entered, release = threading.Event(), threading.Event()
     committed = threading.Event()
-    control = {"pause_node": None, "lose_node": None}
+    control: dict[str, str | None] = {"pause_node": None, "lose_node": None}
     jtis: list[str] = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -168,7 +169,7 @@ def https_journal(tmp_path: Path):
             binding = CertificateIssuanceBinding.model_validate(body["request"])
             claims = jwt.decode(
                 body["ott"],
-                jwt.algorithms.ECAlgorithm.from_jwk(json.dumps(material["public_jwk"])),
+                ECAlgorithm.from_jwk(json.dumps(material["public_jwk"])),
                 algorithms=["ES256"],
                 issuer="vonk-forge-agent",
                 audience=origin + "/1.0/sign",
@@ -340,7 +341,9 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
 
         def issue(owner):
             if purpose == "rotation":
+                assert source is not None
                 return owner.renew(NODE_ID, source.serial, request)
+            assert grant is not None
             return owner.submit(grant.token, request, evidence(request))
 
         control["pause_node"] = NODE_ID
@@ -385,13 +388,14 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
                 == 1
             )
             if source is not None:
-                assert session.get(AgentCertificate, source.serial).state == "active"
+                stored_source = session.get(AgentCertificate, source.serial)
+                assert stored_source is not None
+                assert stored_source.state == "active"
                 assert adopted.generation == source.generation + 1
             else:
-                assert (
-                    session.scalar(select(AgentEnrollment)).certificate_serial
-                    == adopted.serial
-                )
+                enrollment = session.scalar(select(AgentEnrollment))
+                assert enrollment is not None
+                assert enrollment.certificate_serial == adopted.serial
 
 
 _CHILD_SUBMIT = """
@@ -464,6 +468,7 @@ def test_postgres_controller_process_death_adopts_the_committed_https_leaf(
             assert entered.wait(5)
             with sessions() as session:
                 enrollment = session.scalar(select(AgentEnrollment))
+                assert enrollment is not None
                 assert enrollment.state == "issuing"
                 accepted = CertificateIssuanceBinding.model_validate(
                     enrollment.provider_request

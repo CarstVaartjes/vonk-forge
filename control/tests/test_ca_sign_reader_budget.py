@@ -15,6 +15,7 @@ from .test_step_ca import (
     _crl_response,
     _csr,
     _issue,
+    _Material,
     _provider,
     _success_response,
 )
@@ -26,9 +27,10 @@ def test_sign_reader_budget_is_checked_before_any_provider_http(
 ) -> None:
     """Catches creating a leaf before discovering its reader cannot accept it."""
     exchanges = []
-    material = None
+    material: _Material | None = None
 
     def transport(request: httpx2.Request) -> httpx2.Response:
+        assert material is not None
         return _success_response(request, material, exchanges)
 
     provider, material = _provider(tmp_path, transport, max_response_bytes=reader_bytes)
@@ -48,9 +50,10 @@ def test_sign_reader_budget_is_checked_before_any_provider_http(
 
 def test_crl_reader_keeps_its_independently_configured_limit(tmp_path: Path) -> None:
     """Catches accidentally forcing the issuance budget onto CRL observation."""
-    material = None
+    material: _Material | None = None
 
     def transport(_: httpx2.Request) -> httpx2.Response:
+        assert material is not None
         return _crl_response(
             material,
             last_update=NOW - timedelta(minutes=1),
