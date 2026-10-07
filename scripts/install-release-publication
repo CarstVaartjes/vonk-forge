@@ -661,18 +661,38 @@ def assemble(arguments: argparse.Namespace) -> str:
     ):
         raise PublicationError("CLI wheel filename is invalid")
     try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+        from cluster_profiles.runtime_identity import (
+            contract_fingerprint,
+            verified_wheel_identity,
+        )
+
         with zipfile.ZipFile(arguments.cli_wheel) as archive:
-            build_identity = json.loads(
-                archive.read("cluster_profiles/build-identity.json")
+            build_identity = verified_wheel_identity(
+                archive, source_sha=source_sha, version=version
             )
-            if build_identity != {
-                "schema_version": 1,
-                "source_sha": source_sha,
-                "release_version": version,
-            }:
-                raise PublicationError(
-                    "CLI wheel build identity does not match release source"
-                )
+        wire = json.loads(
+            (
+                Path(__file__).resolve().parents[1]
+                / "rust/crates/vonk-agent-protocol/schema/wire.json"
+            ).read_text()
+        )
+        control_schema = json.loads(
+            (
+                Path(__file__).resolve().parents[1]
+                / "src/cluster_profiles/schemas/control-openapi.json"
+            ).read_text()
+        )
+        if build_identity.control_contract_sha256 != contract_fingerprint(
+            control_schema
+        ):
+            raise PublicationError(
+                "CLI package API contract differs from release source"
+            )
+        if build_identity.worker_contract_sha256 != contract_fingerprint(wire):
+            raise PublicationError(
+                "CLI package worker contract differs from release source"
+            )
     except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
         raise PublicationError("CLI wheel is invalid") from error
     identity = {

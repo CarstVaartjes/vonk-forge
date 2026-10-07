@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Literal
 
 from vonk_agent_protocol import (
@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
     UninstallPlanCode,
     canonical_message,
 )
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 SharedCachePolicy = Literal["retain-shared-download-cache"]
 
@@ -34,6 +35,19 @@ class StopNodeImpact:
     state: str
     reserved_memory_bytes: int
     active_memory_reservation_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class StopReservationFact:
+    """One active memory reservation a stop plan binds into its digest."""
+
+    id: str
+    node_id: str
+    kind: str
+    resource_key: str
+    amount_bytes: int
+    plan_digest: str
+    state: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +117,7 @@ class UninstallPlan:
     recipe_id: str
     recipe_revision_id: str
     recipe_content_sha256: str
-    recipe_content: dict[str, object]
+    recipe_content: RecipeDefinition
     installation_authority_digest: str
     original_plan_digest: str
     installation_state: str
@@ -124,6 +138,22 @@ class UninstallPlan:
     plan_digest: str
 
 
+def _reservation_fact(
+    value: StopReservationFact | Mapping[str, str | int],
+) -> StopReservationFact:
+    if isinstance(value, StopReservationFact):
+        return value
+    return StopReservationFact(
+        id=str(value["id"]),
+        node_id=str(value["node_id"]),
+        kind=str(value["kind"]),
+        resource_key=str(value["resource_key"]),
+        amount_bytes=int(value["amount_bytes"]),
+        plan_digest=str(value["plan_digest"]),
+        state=str(value["state"]),
+    )
+
+
 def stop_plan(
     *,
     run_id: str,
@@ -140,10 +170,11 @@ def stop_plan(
     missing_node_ids: Sequence[str] = (),
     immutable_membership_exact: bool,
     reservation_membership_exact: bool,
-    reservation_facts: Sequence[Mapping[str, object]],
+    reservation_facts: Sequence[StopReservationFact | Mapping[str, str | int]],
 ) -> StopPlan:
     """Build one stop impact plan; human copy is excluded from its digest."""
 
+    facts = tuple(_reservation_fact(fact) for fact in reservation_facts)
     ordered_nodes = tuple(sorted(nodes, key=lambda item: (item.rank, item.node_id)))
     full_node_ids = tuple(sorted(node.node_id for node in ordered_nodes))
     target_ids = tuple(
@@ -223,7 +254,7 @@ def stop_plan(
         ],
         "target_node_ids": list(target_ids),
         "missing_node_ids": list(missing_ids),
-        "active_memory_reservations": list(reservation_facts),
+        "active_memory_reservations": [asdict(fact) for fact in facts],
         "immutable_membership_exact": immutable_membership_exact,
         "reservation_membership_exact": reservation_membership_exact,
     }
@@ -263,7 +294,7 @@ def uninstall_plan(
     recipe_id: str,
     recipe_revision_id: str,
     recipe_content_sha256: str,
-    recipe_content: Mapping[str, object],
+    recipe_content: object,
     original_plan_digest: str,
     installation_state: str,
     nodes: Sequence[UninstallNodeImpact],
@@ -459,7 +490,7 @@ def uninstall_plan(
         recipe_id=recipe_id,
         recipe_revision_id=recipe_revision_id,
         recipe_content_sha256=recipe_content_sha256,
-        recipe_content=canonical_content,
+        recipe_content=read_recipe(canonical_content),
         installation_authority_digest=recipe_content_sha256,
         original_plan_digest=original_plan_digest,
         installation_state=installation_state,

@@ -10,6 +10,7 @@ import vonk_control.recipe_image_availability as availability_module
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
 from vonk_control import fleet_profiles as profile_module
+from vonk_control.job_documents import AvailabilityRuntime
 from vonk_control.models import (
     AgentNode,
     FleetProfileApplication,
@@ -28,6 +29,7 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
+from vonk_control.recipe_runtime_specs import RUNTIME_INTERFACE
 from vonk_forge_contracts import RecipeDefinition
 
 from .test_build_cancellation_recovery import _active_claims, _issue, _services
@@ -46,11 +48,13 @@ def _availability(sessions, storage, now, revision, plan):
         storage=storage,
         authority=lambda *_args, **_kwargs: (
             recipe,
-            {
-                "recipe_revision_id": revision.id,
-                "build_input_sha256": plan.build_input_sha256,
-                "builder_node_id": plan.builder_node_id,
-            },
+            AvailabilityRuntime(
+                interface=RUNTIME_INTERFACE,
+                architecture="linux-arm64",
+                recipe_revision_id=revision.id,
+                build_input_sha256=plan.build_input_sha256,
+                builder_node_id=plan.builder_node_id,
+            ),
         ),
         builder=failed_builder,
         clock=lambda: now,
@@ -209,8 +213,7 @@ def test_accepted_profile_consumer_protects_build_until_its_intent_is_cancelled(
             assert isinstance(adapter, dict)
             progress["switch_adapter"] = {
                 **adapter,
-                "active_operation_id": None,
-                "active_kind": None,
+                "pending_children": [],
             }
             application.progress = progress
     lifecycle = planner._lifecycle

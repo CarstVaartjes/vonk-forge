@@ -16,6 +16,7 @@ function failureText(response: RecipeImageAvailabilityResponse): string {
 }
 
 function progressLabel(response: RecipeImageAvailabilityResponse): string {
+  if (!response.progress) return "Progress unavailable";
   const pending = (response.children ?? []).filter(child => child.state !== "succeeded").length;
   if (pending > 0) return `${response.progress.phase} · ${pending} model cache child${pending === 1 ? "" : "ren"}`;
   return response.progress.phase;
@@ -40,7 +41,7 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
   const requestKey = useRef("");
   const toast = useToast();
   const observer = useOperationObserver<RecipeImageAvailabilityResponse>({
-    isTerminal: operation => TERMINAL_STATES.has(operation.state),
+    isTerminal: operation => !operation.residue && TERMINAL_STATES.has(operation.state),
     // Terminal: refetch the library and cache state that depends on this download.
     onTerminal: operation => {
       if (operation.state === "succeeded") { toast.success("Recipe downloaded."); onDownloaded(); }
@@ -49,7 +50,8 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
   });
   const operation = observer.value;
   const running = Boolean(operation && !TERMINAL_STATES.has(operation.state));
-  const busy = submitting || running;
+  const observing = Boolean(operation && (operation.residue || running));
+  const busy = submitting || observing;
   const phase = operation && operation.state !== "succeeded" ? progressLabel(operation) : submitting ? "queued" : "";
   const error = submitError || observer.fatal
     || (operation?.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : operation?.state === "failed" ? failureText(operation) : "");
@@ -86,11 +88,12 @@ export function LibraryRecipeDownloadAction({api, selector, missingModels, onDow
 
   return <div className="library-cache-action">
     <button type="button" className="button secondary" disabled={busy} onClick={() => void download()}>
-      {busy ? "Downloading…" : label}
+      {operation?.residue ? "Observing…" : busy ? "Downloading…" : label}
     </button>
     {missingModels.length > 0 && <span className="library-cache-missing">Also caches {missingModels.join(", ")}</span>}
     {(busy || phase) && <span role="status">{phase}</span>}
-    {running && <ObservationNotice connection={observer.connection} lastSuccessAt={observer.lastSuccessAt} background={observer.background} subject="this download"/>}
+    {operation?.residue && <span role="status">Stored operation evidence is unavailable: {operation.residue.reason}. Observation continues.</span>}
+    {observing && <ObservationNotice connection={observer.connection} lastSuccessAt={observer.lastSuccessAt} background={observer.background} subject="this download"/>}
     {running && operation && <WaitingFor blockers={operation.blockers} nextAttemptAt={operation.next_attempt_at}/>}
     {running && operation && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." command={`vonkctl recipe cancel ${operation.id}`} cancel={key => api.cancelRecipeOperation(operation.id, key)}/>}
     {error && <span className="library-cache-error" role="alert">{error}</span>}

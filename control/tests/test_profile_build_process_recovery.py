@@ -47,7 +47,11 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recipe_routes import RecipeRouteService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.run_switch_operations import PhaseExecution, RunSwitchOperationService
+from vonk_control.run_switch_operations import (
+    PhaseExecution,
+    RunSwitchOperationService,
+    _phase_result,
+)
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImageReceipt,
@@ -89,15 +93,18 @@ class _PreparedArtifactExecutor(RecordingArtifactExecutor):
                     else plan.build
                 )
                 return PhaseExecution(
-                    result={
-                        "verified": True,
-                        "verified_digests": list(plan.storage.artifact_digests),
-                        "verified_build_id": plan.recipe_build_id,
-                        "verified_image_digest": image.image_digest,
-                        "verified_oci_layout_sha256": image.oci_layout_sha256,
-                    }
+                    result=_phase_result(
+                        {
+                            "verified": True,
+                            "verified_digests": list(plan.storage.artifact_digests),
+                            "verified_build_id": plan.recipe_build_id,
+                            "verified_image_digest": image.image_digest,
+                            "verified_oci_layout_sha256": image.oci_layout_sha256,
+                        },
+                        phase=phase,
+                    )
                 )
-            return PhaseExecution(result=evidence)
+            return PhaseExecution(result=_phase_result(evidence, phase=phase))
         return super().execute(plan, phase, **kwargs)
 
 

@@ -4,6 +4,7 @@
       "additionalProperties": false,
       "properties": {
         "generation": {
+          "maximum": 2147483647,
           "minimum": 1,
           "title": "Generation",
           "type": "integer"
@@ -36,6 +37,7 @@
         },
         "generation": {
           "exclusiveMinimum": 0,
+          "maximum": 9223372036854775807,
           "title": "Generation",
           "type": "integer"
         },
@@ -100,6 +102,7 @@
         },
         "generation": {
           "exclusiveMinimum": 0,
+          "maximum": 9223372036854775807,
           "title": "Generation",
           "type": "integer"
         },
@@ -2516,7 +2519,7 @@
         "run_generation": {
           "anyOf": [
             {
-              "maximum": 2147483647,
+              "maximum": 9223372036854775807,
               "minimum": 1,
               "type": "integer"
             },
@@ -2731,6 +2734,7 @@
         "dropped_bytes": {
           "anyOf": [
             {
+              "maximum": 18446744073709551615,
               "minimum": 0,
               "type": "integer"
             },
@@ -2743,6 +2747,7 @@
         "dropped_lines": {
           "anyOf": [
             {
+              "maximum": 18446744073709551615,
               "minimum": 0,
               "type": "integer"
             },
@@ -3410,7 +3415,7 @@
         "run_generation": {
           "anyOf": [
             {
-              "maximum": 2147483647,
+              "maximum": 9223372036854775807,
               "minimum": 1,
               "type": "integer"
             },
@@ -3597,7 +3602,7 @@
         "run_generation": {
           "anyOf": [
             {
-              "maximum": 2147483647,
+              "maximum": 9223372036854775807,
               "minimum": 1,
               "type": "integer"
             },
@@ -4544,6 +4549,7 @@
           "type": "string"
         },
         "generation": {
+          "maximum": 2147483647,
           "minimum": 1,
           "title": "Generation",
           "type": "integer"
@@ -5636,7 +5642,8 @@
       "description": "Error codes of a stored operation failure evidence record.",
       "enum": [
         "fleet_profile_application_failed",
-        "artifact_process_failed"
+        "artifact_process_failed",
+        "stored_operation_result_unreadable"
       ],
       "title": "OperationFailureCode",
       "type": "string"
@@ -7152,8 +7159,6 @@
               "type": "string"
             },
             {
-              "maximum": 9223372036854775807,
-              "minimum": -9223372036854775808,
               "type": "integer"
             },
             {
@@ -8022,7 +8027,7 @@
           "type": "string"
         },
         "run_generation": {
-          "maximum": 2147483647,
+          "maximum": 9223372036854775807,
           "minimum": 1,
           "title": "Run Generation",
           "type": "integer"
@@ -8115,7 +8120,8 @@
     "RecipeOperationCode": {
       "description": "Recipe operation conflicts.",
       "enum": [
-        "recipe.operation_conflict"
+        "recipe.operation_conflict",
+        "recipe.evidence_unproven"
       ],
       "title": "RecipeOperationCode",
       "type": "string"
@@ -8282,7 +8288,7 @@
           "type": "boolean"
         },
         "run_generation": {
-          "maximum": 2147483647,
+          "maximum": 9223372036854775807,
           "minimum": 1,
           "title": "Run Generation",
           "type": "integer"
@@ -8371,7 +8377,7 @@
           "type": "string"
         },
         "run_generation": {
-          "maximum": 2147483647,
+          "maximum": 9223372036854775807,
           "minimum": 1,
           "title": "Run Generation",
           "type": "integer"
@@ -8473,7 +8479,7 @@
           "type": "string"
         },
         "run_generation": {
-          "maximum": 2147483647,
+          "maximum": 9223372036854775807,
           "minimum": 1,
           "title": "Run Generation",
           "type": "integer"
@@ -8859,7 +8865,7 @@
         "run_generation": {
           "anyOf": [
             {
-              "maximum": 4294967295,
+              "maximum": 9223372036854775807,
               "minimum": 0,
               "type": "integer"
             },
@@ -9103,7 +9109,7 @@
           "type": "boolean"
         },
         "highest_generation": {
-          "maximum": 4294967295,
+          "maximum": 9223372036854775807,
           "minimum": 0,
           "title": "Highest Generation",
           "type": "integer"
@@ -10105,11 +10111,13 @@
         },
         "child_pid": {
           "exclusiveMinimum": 0,
+          "maximum": 2147483647,
           "title": "Child Pid",
           "type": "integer"
         },
         "generation": {
           "exclusiveMinimum": 0,
+          "maximum": 9223372036854775807,
           "title": "Generation",
           "type": "integer"
         },

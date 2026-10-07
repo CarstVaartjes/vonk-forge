@@ -398,7 +398,7 @@ pub fn build_exact_recipe_run_observations(
     let mut run_ids = std::collections::BTreeSet::new();
     for observation in observations {
         if observation.run_generation == 0
-            || observation.run_generation > i32::MAX as u32
+            || observation.run_generation > i64::MAX as u64
             || !run_ids.insert(observation.run_id)
         {
             return Err(ClientError::Protocol);
@@ -415,7 +415,7 @@ pub fn build_exact_recipe_run_observations(
 pub enum RecipeRunDisposition {
     /// The Controller has a record of the run; its integrity checks apply.
     /// `run_generation` is its accepted generation while the run is running.
-    Known { run_generation: Option<u32> },
+    Known { run_generation: Option<u64> },
     /// The Controller has no record of the run and never will accept it.
     Unowned,
 }
@@ -703,8 +703,8 @@ impl AgentHttpClient {
         {
             measured.phase = snapshot.phase.to_string();
             if let Some((bytes, total)) = snapshot.counters {
-                measured.completed_bytes = bytes;
-                measured.total_bytes = Some(total);
+                measured.completed_bytes = bytes.into();
+                measured.total_bytes = Some(total.into());
                 measured.total_bytes_known = true;
             }
         }
@@ -779,8 +779,8 @@ impl AgentHttpClient {
                     .headers()
                     .get(RECIPE_RUN_GENERATION_HEADER)
                     .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.parse::<u32>().ok())
-                    .filter(|generation| *generation > 0),
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .filter(|generation| (1..=i64::MAX as u64).contains(generation)),
             }),
             Some(value) if value.as_bytes() == RECIPE_RUN_UNOWNED.as_bytes() => {
                 Ok(RecipeRunDisposition::Unowned)
@@ -1709,7 +1709,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let request = ActivateRequest {
-            generation,
+            generation: generation.try_into().map_err(|_| ClientError::Protocol)?,
             node_id: self.node_id.clone(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
@@ -1771,7 +1771,7 @@ impl AgentHttpClient {
 struct HostRuntimePlanBinding {
     start_plan_sha256: Option<String>,
     stop_plan_sha256: Option<String>,
-    run_generation: Option<u32>,
+    run_generation: Option<u64>,
     runtime_run_id: Option<uuid::Uuid>,
     runtime_target_id: Option<uuid::Uuid>,
     runtime_installation_id: Option<uuid::Uuid>,
@@ -2026,11 +2026,23 @@ fn controller_rejection_digest(body: &[u8]) -> Option<String> {
 
 /// Render one reported location segment as bounded, sanitized text.
 fn render_rejection_location(segment: &RequestValidationIssueLocItem) -> String {
-    let text = segment.to_string();
-    sanitize_text(&text)
-        .chars()
-        .take(MAX_REJECTION_LOCATION_CHARS)
-        .collect()
+    match segment {
+        RequestValidationIssueLocItem::String(text) => sanitize_text(text)
+            .chars()
+            .take(MAX_REJECTION_LOCATION_CHARS)
+            .collect(),
+        RequestValidationIssueLocItem::VonkInteger(index) => {
+            // A validated integer is path authority, not an opaque credential.
+            // Brackets distinguish it from string members and retain the final
+            // digest sanitizer without hiding an otherwise valid wide index.
+            let bounded: String = index
+                .to_string()
+                .chars()
+                .take(MAX_REJECTION_LOCATION_CHARS - 2)
+                .collect();
+            format!("[{bounded}]")
+        }
+    }
 }
 
 fn controller_error(
@@ -2426,9 +2438,10 @@ mod tests {
 
     use super::{
         AgentHttpClient, AgentResult, ClientError, ControllerError, DISTRIBUTION_CONCURRENCY,
-        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, ObjectPlacement, StreamGovernor,
-        WriteBehind, clamp_inventory_request, controller_rejection_digest, is_rotation_conflict,
-        open_trusted_partial, partial_path, preallocate, range_end, valid_reported_hostname,
+        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, ObjectPlacement,
+        RecipeRunDisposition, StreamGovernor, WriteBehind, clamp_inventory_request,
+        controller_rejection_digest, is_rotation_conflict, open_trusted_partial, partial_path,
+        preallocate, range_end, valid_reported_hostname,
     };
     use crate::{
         oci::OciRuntime,
@@ -4079,11 +4092,11 @@ mod tests {
             fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
             progress: Some(OperationProgress {
                 phase: "executing".to_owned(),
-                completed_bytes: 21,
-                total_bytes: Some(42),
+                completed_bytes: 21_u64.into(),
+                total_bytes: Some(42_u64.into()),
                 total_bytes_known: true,
-                completed_items: Some(1),
-                total_items: Some(2),
+                completed_items: Some(1_u64.into()),
+                total_items: Some(2_u64.into()),
                 object_sha256: None,
                 kind: None,
                 activity: None,
@@ -4131,8 +4144,37 @@ mod tests {
                 .progress
                 .unwrap()
                 .total_bytes,
-            Some(42)
+            Some(42_u64.into())
         );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_preserves_lossless_progress_counters_on_the_network() {
+        for counter in ["18446744073709551616".to_owned(), "9".repeat(200)] {
+            let mut progress = progress();
+            let measured = progress.progress.as_mut().unwrap();
+            measured.completed_bytes = serde_json::from_str(&counter).unwrap();
+            measured.total_bytes = Some(serde_json::from_str(&counter).unwrap());
+            measured.completed_items = Some(serde_json::from_str(&counter).unwrap());
+            measured.total_items = Some(serde_json::from_str(&counter).unwrap());
+            let directive = AgentDirective {
+                cancel_requested: false,
+                deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
+                fence: progress.fence,
+            };
+            let (client, server) = heartbeat_client(directive.clone());
+            assert_eq!(client.heartbeat(&progress).await.unwrap(), directive);
+            let request = server.join().unwrap();
+            let start = request.windows(4).position(|v| v == b"\r\n\r\n").unwrap() + 4;
+            let observed =
+                vonk_agent_protocol::parse_strict::<AgentProgress>(&request[start..]).unwrap();
+            assert_eq!(observed, progress);
+            assert!(
+                std::str::from_utf8(&request[start..])
+                    .unwrap()
+                    .contains(&format!("\"completed_bytes\":{counter}"))
+            );
+        }
     }
 
     #[tokio::test]
@@ -4160,7 +4202,7 @@ mod tests {
             .unwrap();
         assert_eq!(received.phase, "uploading");
         assert_eq!(received.completed_bytes, 512);
-        assert_eq!(received.total_bytes, Some(1024));
+        assert_eq!(received.total_bytes, Some(1024_u64.into()));
     }
 
     #[tokio::test]
@@ -4407,7 +4449,7 @@ mod tests {
         let run_id = Uuid::new_v4();
         let observations = vec![ExactRecipeRunObservation {
             run_id,
-            run_generation: 3,
+            run_generation: i64::MAX as u64,
             process_running: false,
             endpoint_ready: None,
         }];
@@ -4427,7 +4469,36 @@ mod tests {
         assert_eq!(body["runs"][0]["run_id"], run_id.to_string());
         assert_eq!(body["runs"][0]["process_running"], false);
         assert_eq!(body["runs"][0]["endpoint_ready"], serde_json::Value::Null);
-        assert_eq!(body["runs"][0]["run_generation"], 3);
+        assert_eq!(body["runs"][0]["run_generation"], i64::MAX as u64);
+    }
+
+    #[tokio::test]
+    async fn disposition_retains_full_controller_generation_header() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            write!(stream, "HTTP/1.1 200 OK\r\nx-vonk-recipe-run-generation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", i64::MAX).unwrap();
+        });
+        let client = authenticated_test_client(
+            &format!("http://{address}/"),
+            "spk_0123456789abcdef0123456789abcdef",
+        );
+        let disposition = client.recipe_run_disposition(Uuid::new_v4()).await.unwrap();
+        assert_eq!(
+            disposition,
+            RecipeRunDisposition::Known {
+                run_generation: Some(i64::MAX as u64)
+            }
+        );
+        server.join().unwrap();
     }
 
     #[tokio::test]

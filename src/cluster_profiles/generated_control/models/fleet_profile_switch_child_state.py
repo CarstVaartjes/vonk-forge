@@ -33,13 +33,17 @@ class FleetProfileSwitchChildState:
         Attributes:
             kind (FleetProfileSwitchChildStateKind):
             operation_id (str):
+            queue_index (int):
             state (FleetProfileSwitchChildStateState):
+            original_operation_id (None | str | Unset):
             result (FleetProfileSwitchChildResult | None | Unset):
      """
 
     kind: FleetProfileSwitchChildStateKind
     operation_id: str
+    queue_index: int
     state: FleetProfileSwitchChildStateState
+    original_operation_id: None | str | Unset = UNSET
     result: FleetProfileSwitchChildResult | None | Unset = UNSET
 
 
@@ -52,7 +56,15 @@ class FleetProfileSwitchChildState:
 
         operation_id = self.operation_id
 
+        queue_index = self.queue_index
+
         state: str = self.state
+
+        original_operation_id: None | str | Unset
+        if isinstance(self.original_operation_id, Unset):
+            original_operation_id = UNSET
+        else:
+            original_operation_id = self.original_operation_id
 
         result: dict[str, Any] | None | Unset
         if isinstance(self.result, Unset):
@@ -68,8 +80,11 @@ class FleetProfileSwitchChildState:
         field_dict.update({
             "kind": kind,
             "operation_id": operation_id,
+            "queue_index": queue_index,
             "state": state,
         })
+        if original_operation_id is not UNSET:
+            field_dict["original_operation_id"] = original_operation_id
         if result is not UNSET:
             field_dict["result"] = result
 
@@ -88,9 +103,21 @@ class FleetProfileSwitchChildState:
 
         operation_id = d.pop("operation_id")
 
+        queue_index = d.pop("queue_index")
+
         state = check_fleet_profile_switch_child_state_state(d.pop("state"))
 
 
+
+
+        def _parse_original_operation_id(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        original_operation_id = _parse_original_operation_id(d.pop("original_operation_id", UNSET))
 
 
         def _parse_result(data: object) -> FleetProfileSwitchChildResult | None | Unset:
@@ -116,7 +143,9 @@ class FleetProfileSwitchChildState:
         fleet_profile_switch_child_state = cls(
             kind=kind,
             operation_id=operation_id,
+            queue_index=queue_index,
             state=state,
+            original_operation_id=original_operation_id,
             result=result,
         )
 

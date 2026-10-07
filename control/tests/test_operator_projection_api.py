@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
@@ -12,6 +11,10 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from vonk_control.agent_api import AgentApiServices, EnrollmentGrantResponse
+from vonk_control.agent_upgrade_contract import (
+    AgentUpgradePackage,
+    AgentUpgradeRequestIntent,
+)
 from vonk_control.agent_upgrades import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
@@ -26,6 +29,8 @@ from vonk_control.operator_projection_api import (
     install_operator_projection_routes,
 )
 from vonk_control.request_fault import RequestFault
+
+from .test_agent_upgrades import PACKAGE_MODEL
 
 _NODE = "spk_" + "a" * 32
 _GRANT = {
@@ -350,7 +355,7 @@ class _RefusingUpgrade:
     def __init__(self, error: Exception) -> None:
         self._error = error
 
-    def current_package(self) -> dict[str, object]:
+    def current_package(self) -> AgentUpgradePackage:
         raise self._error
 
     def get_request(self, *args: object, **kwargs: object) -> object | None:
@@ -465,9 +470,11 @@ def test_upgrade_request_replay_returns_the_same_durable_job() -> None:
             request_id: str,
             *,
             actor: str,
-            request_intent: Mapping[str, object],
+            request_intent: AgentUpgradeRequestIntent,
         ) -> object:
-            self.lookup_calls.append((request_id, actor, dict(request_intent)))
+            self.lookup_calls.append(
+                (request_id, actor, request_intent.model_dump(mode="json"))
+            )
             return SimpleNamespace(
                 id="existing-job",
                 state="running",
@@ -475,7 +482,7 @@ def test_upgrade_request_replay_returns_the_same_durable_job() -> None:
                 targets=[_NODE],
             )
 
-        def current_package(self) -> dict[str, object]:
+        def current_package(self) -> AgentUpgradePackage:
             raise AssertionError("a replay must not resolve a new package")
 
         def preview(self, *args: object, **kwargs: object) -> object:
@@ -573,8 +580,8 @@ def test_zero_target_upgrade_receipt_is_a_complete_succeeded_receipt() -> None:
         def get_request(self, *args: object, **kwargs: object) -> None:
             return None
 
-        def current_package(self) -> dict[str, object]:
-            return {}
+        def current_package(self) -> AgentUpgradePackage:
+            return PACKAGE_MODEL
 
         def preview(self, *args: object, **kwargs: object) -> object:
             return SimpleNamespace(plan_digest="d" * 64)

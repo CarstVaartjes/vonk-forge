@@ -7,12 +7,24 @@ from pydantic import Field, field_validator, model_validator
 
 from .wire_model import WireModel
 
+MAX_DROPPED_COUNT = 2**64 - 1
+
+
+def add_known_dropped_bytes(prior: int | None, additional: int) -> int | None:
+    """Retain unknown stream counts, including an unrepresentable sum."""
+    if prior is None:
+        return None
+    total = prior + additional
+    return total if total <= MAX_DROPPED_COUNT else None
+
 
 class FailureLogTail(WireModel):
     text: str = Field(max_length=2048)
     truncated: bool
-    dropped_bytes: int | None = Field(ge=0)
-    dropped_lines: int | None = Field(ge=0)
+    # The collectors count physical buffers with usize/Py_ssize_t, rather
+    # than accepting an arbitrary mathematical counter. Unknown remains null.
+    dropped_bytes: Annotated[int, Field(ge=0, le=MAX_DROPPED_COUNT)] | None
+    dropped_lines: Annotated[int, Field(ge=0, le=MAX_DROPPED_COUNT)] | None
 
 
 class FailureProperty(WireModel):

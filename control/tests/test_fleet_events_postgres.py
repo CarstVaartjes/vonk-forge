@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control.fleet_event_contract import JobPayload
 from vonk_control.fleet_events import FleetEventDraft, FleetEventRepository
 from vonk_control.models import Base, FleetEventCursor, FleetStreamEvent
 
@@ -21,13 +22,13 @@ def _draft(identifier: str) -> FleetEventDraft:
         node_id=None,
         entity_kind="job",
         entity_id=identifier,
-        payload={
-            "entity_kind": "job",
-            "entity_id": identifier,
-            "kind": "deploy",
-            "state": "queued",
-            "target_count": 1,
-        },
+        payload=JobPayload(
+            entity_kind="job",
+            entity_id=identifier,
+            kind="deploy",
+            state="queued",
+            target_count=1,
+        ),
     )
 
 

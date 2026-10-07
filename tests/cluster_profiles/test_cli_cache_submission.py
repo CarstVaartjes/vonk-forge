@@ -249,6 +249,30 @@ def test_observation_does_not_shorten_a_server_delay_to_poll_early(monkeypatch):
     assert len(client.calls) == 2 and elapsed == 60
 
 
+def test_recipe_observer_keeps_terminal_residue_until_the_same_snapshot_repairs(
+    monkeypatch,
+):
+    monkeypatch.setattr(controller_cli.time, "sleep", lambda seconds: None)
+    healthy = receipt("recipe") | {"state": "succeeded", "residue": None}
+    damaged = healthy | {
+        "progress": None,
+        "residue": {
+            "kind": "jobs.payload",
+            "subject": "original",
+            "reason": "persisted-state-damaged",
+        },
+    }
+    client = SubmissionClient(
+        {("GET", "/api/recipe/operations/original"): [damaged, healthy]}
+    )
+    status, result = run(
+        ("recipe", "progress", "original", "--follow", "--json"), client
+    )
+    assert status == 0
+    assert result["id"] == "original" and result["residue"] is None
+    assert len(client.calls) == 2
+
+
 @pytest.mark.parametrize("failure", ["lost", "malformed", "normal"])
 def test_received_403_remains_a_refusal_when_its_body_is_lost(
     tmp_path, capsys, failure

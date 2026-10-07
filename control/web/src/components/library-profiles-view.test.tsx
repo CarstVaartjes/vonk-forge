@@ -1,6 +1,7 @@
 import {act, render, screen, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {vi} from "vitest";
+import {LosslessNumber} from "lossless-json";
 import {ApiError} from "../api/client";
 import type {ControlApi, FleetProfile, FleetProfileApplicationView, FleetProfilePreview} from "../api/types";
 import {forgetUnsavedProfileDrafts, LibraryProfilesView} from "./library-profiles-view";
@@ -244,4 +245,72 @@ test("an unreadable saved definition stays visible without becoming an editable 
   expect(screen.queryByRole("button", {name: /Profile 1/})).not.toBeInTheDocument();
   expect((await screen.findAllByText("Profile 2 · Coding"))[0]).toBeVisible();
   expect(api.autosaveProfile).not.toHaveBeenCalled();
+});
+
+
+test("selects the maximum canonical URL profile and loads that identity", async () => {
+  const user = userEvent.setup();
+  const lower = 2147483646;
+  const upper = 2147483647;
+  const originalUrl = location.href;
+  history.replaceState(null, "", "?profile=2147483647");
+  try {
+    const api = apiFor({profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [{...profile, number: upper, name: "Upper"}, {...profile, number: lower, name: "Lower"}]}))});
+    render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+    const selected = await screen.findByRole("region", {name: "Profile 2147483647 saved profile"});
+    const list = screen.getByRole("complementary", {name: "Saved profiles"});
+    const buttons = within(list).getAllByRole("button");
+    expect(buttons[0]).toHaveTextContent("Profile 2147483646 · Lower");
+    expect(buttons[1]).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(selected).getByRole("button", {name: "Apply profile"}));
+    expect(api.previewProfile).toHaveBeenCalledWith(upper, expect.any(AbortSignal));
+    expect(api.loadProfile).toHaveBeenCalledWith(upper, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  } finally {
+    history.replaceState(null, "", originalUrl);
+  }
+});
+
+test("editing a maximum canonical profile preserves its identity and revision", async () => {
+  const user = userEvent.setup();
+  const number = 2147483647;
+  const revision = 2147483647;
+  const exact = {...profile, number, revision};
+  const autosaveProfile = vi.fn(async () => exact);
+  const api = apiFor({profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [exact]})), autosaveProfile});
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+  const saved = await screen.findByRole("region", {name: "Profile 2147483647 saved profile"});
+  await user.click(within(saved).getByRole("button", {name: "Edit profile"}));
+  await user.clear(screen.getByLabelText("Profile name"));
+  await user.type(screen.getByLabelText("Profile name"), "Exact saved");
+  await user.click(screen.getByRole("button", {name: "Save profile"}));
+  expect(autosaveProfile).toHaveBeenCalledWith(number, expect.objectContaining({expected_revision: revision, name: "Exact saved"}));
+});
+
+
+test("refuses an out-of-domain URL profile through the canonical path contract", async () => {
+  const originalUrl = location.href;
+  history.replaceState(null, "", "?profile=2147483648");
+  try {
+    const api = apiFor();
+    render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(api.previewProfile).not.toHaveBeenCalled();
+    expect(api.loadProfile).not.toHaveBeenCalled();
+  } finally {
+    history.replaceState(null, "", originalUrl);
+  }
+});
+
+
+test("preserves legitimate wide byte progress while presenting its ratio", async () => {
+  const user = userEvent.setup();
+  const completed = new LosslessNumber("9007199254740992");
+  const total = new LosslessNumber("18014398509481984");
+  const wide = {...application, progress: {child_progress: {phase: "copy", node_ids: [nodeA], bytes: completed, total_bytes: total}}} as unknown as FleetProfileApplicationView;
+  const api = apiFor({loadProfile: vi.fn(async () => wide), profileProgress: vi.fn(async () => wide)});
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+  await user.click(await screen.findByRole("button", {name: "Apply profile"}));
+  expect(await screen.findByRole("progressbar", {name: "Profile load progress"})).toHaveAttribute("aria-valuenow", "50");
+  expect(completed.value).toBe("9007199254740992");
+  expect(total.value).toBe("18014398509481984");
 });

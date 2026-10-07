@@ -52,6 +52,7 @@ from .controller_cli import (
     add_controller_commands,
     run_controller,
 )
+from .runtime_identity import packaged_runtime_identity
 
 _MAX_TEXT_CHARS = 1_024
 _SENSITIVE_ASSIGNMENT = re.compile(
@@ -689,6 +690,9 @@ def _main(
 
     if args.version:
         identity = current_build()
+        identity["control_contract_sha256"] = (
+            packaged_runtime_identity().control_contract_sha256
+        )
         if args.global_json:
             print(_json_text(identity))
         else:

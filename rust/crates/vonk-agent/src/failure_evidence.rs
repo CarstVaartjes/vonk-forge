@@ -268,7 +268,9 @@ pub fn sanitize_tail(tail: &FailureLogTail) -> FailureLogTail {
     FailureLogTail {
         text: safe,
         truncated: tail.truncated || dropped > 0,
-        dropped_bytes: Some(tail.dropped_bytes.unwrap_or_default() + dropped as u64),
+        dropped_bytes: tail
+            .dropped_bytes
+            .and_then(|known| known.checked_add(dropped as u64)),
         dropped_lines: tail.dropped_lines,
     }
 }
@@ -839,6 +841,26 @@ mod tests {
         assert!(sanitized.truncated);
         assert!(sanitized.dropped_bytes.unwrap_or_default() >= 9000);
         assert_eq!(sanitized.dropped_lines, Some(300));
+    }
+
+    #[test]
+    fn sanitizing_a_helper_tail_preserves_unknown_and_overflowed_counts() {
+        // A bounded helper observation can expand during secret redaction.
+        // Neither an absent original count nor an overflowing sum is a known
+        // physical count; reporting zero or u64::MAX would invent evidence.
+        for prior in [None, Some(u64::MAX)] {
+            let tail = FailureLogTail {
+                text: "token=x\n".repeat(200),
+                truncated: false,
+                dropped_bytes: prior,
+                dropped_lines: None,
+            };
+            let sanitized = sanitize_tail(&tail);
+            assert!(sanitized.truncated);
+            assert!(sanitized.text.len() <= LOG_BYTES);
+            assert_eq!(sanitized.dropped_bytes, None);
+            assert_eq!(sanitized.dropped_lines, None);
+        }
     }
 
     #[test]

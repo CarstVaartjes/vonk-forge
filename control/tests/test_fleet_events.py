@@ -16,10 +16,16 @@ from vonk_control import fleet_events as fleet_event_module
 from vonk_control import models
 from vonk_control.auth import TokenCodec
 from vonk_control.db import session_factory
+from vonk_control.fleet_event_contract import (
+    FleetEventPayload,
+    JobPayload,
+    _FleetEventModel,
+)
 from vonk_control.fleet_events import (
     FleetEventDraft,
     FleetEventRecorder,
     FleetEventRepository,
+    _walk_payload,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.operation_api import durable_operation_services
@@ -53,7 +59,7 @@ def _draft(
     *,
     event_type: str = "operation-state",
     entity_id: str = "job-1",
-    payload: dict[str, object] | None = None,
+    payload: FleetEventPayload | None = None,
 ) -> FleetEventDraft:
     return FleetEventDraft(
         event_type=event_type,
@@ -61,13 +67,13 @@ def _draft(
         entity_kind="job",
         entity_id=entity_id,
         payload=payload
-        or {
-            "entity_kind": "job",
-            "entity_id": entity_id,
-            "kind": "deploy",
-            "state": "queued",
-            "target_count": 1,
-        },
+        or JobPayload(
+            entity_kind="job",
+            entity_id=entity_id,
+            kind="deploy",
+            state="queued",
+            target_count=1,
+        ),
     )
 
 
@@ -385,11 +391,17 @@ def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -
     "draft",
     [
         _draft(event_type="fleet-snapshot"),
-        _draft(payload={"secret_token": "do-not-store"}),
-        _draft(payload={"value": "x" * 8192}),
-        _draft(payload={"value": object()}),
+        _draft(
+            payload=JobPayload(
+                entity_kind="job",
+                entity_id="job-1",
+                kind="x" * 8192,
+                state="queued",
+                target_count=1,
+            )
+        ),
     ],
-    ids=["event-vocabulary", "secret-field", "payload-size", "json-type"],
+    ids=["event-vocabulary", "payload-size"],
 )
 def test_invalid_draft_fails_the_source_transaction(sessions, draft) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
@@ -407,25 +419,30 @@ def test_invalid_draft_fails_the_source_transaction(sessions, draft) -> None:
         assert session.get(models.FleetEventCursor, 1).last_id == 0
 
 
-def test_repository_rejects_unknown_fields_in_a_typed_change_payload(sessions) -> None:
-    repository = FleetEventRepository(sessions, clock=lambda: NOW)
-    payload = {
-        "entity_kind": "job",
-        "entity_id": "job-typed",
-        "kind": "deploy",
-        "state": "queued",
-        "target_count": 1,
-        "unexpected": "must not become wire data",
-    }
-
-    with (
-        pytest.raises(ValueError, match="extra_forbidden"),
-        sessions.begin() as session,
-    ):
-        repository.append_in_session(
-            session,
-            _draft(entity_id="job-typed", payload=payload),
+def test_a_typed_change_payload_rejects_unknown_fields() -> None:
+    with pytest.raises(ValueError, match="extra_forbidden"):
+        JobPayload.model_validate(
+            {
+                "entity_kind": "job",
+                "entity_id": "job-typed",
+                "kind": "deploy",
+                "state": "queued",
+                "target_count": 1,
+                "unexpected": "must not become wire data",
+            }
         )
+
+
+def test_no_payload_contract_can_carry_a_forbidden_field() -> None:
+    """The secret-field guard holds for the whole payload vocabulary.
+
+    A payload is a typed model, so a forbidden field can only enter by being
+    declared; none of the contract fields may be one the guard would refuse.
+    """
+
+    for model in _FleetEventModel.__subclasses__():
+        for field in model.model_fields:
+            _walk_payload({field: None})
 
 
 def test_repository_reads_are_bounded_ordered_and_semantically_unexpired(

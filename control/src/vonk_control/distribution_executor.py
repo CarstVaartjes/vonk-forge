@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -33,7 +33,7 @@ from .distribution import DistributionService
 from .distribution_assignment import NodeDistributionAssignment
 from .lifecycle.job import JobAdapter
 from .logging import redact_text
-from .model_cache import ModelCacheNotFound
+from .model_cache import CacheOperationView, ModelCacheNotFound
 from .model_cache_contract import ModelCacheDownloadResult
 from .models import (
     AgentOperation,
@@ -46,15 +46,23 @@ from .oci_image_store import StoreUnknown
 from .operation_progress import aggregate_progress, project_progress
 from .run_switch_contract import (
     ArtifactVerificationEvidence,
-    ArtifactVerificationResult,
+    RunSwitchCachedTransferResult,
+    RunSwitchChildProgress,
     RunSwitchDistributionChildResult,
+    RunSwitchOperationResult,
     RunSwitchPhase,
     RunSwitchPhaseResult,
     RunSwitchPlan,
+    RunSwitchRuntimeImageResult,
+    RunSwitchRuntimePlanResult,
+    RunSwitchTargetTransferEvidenceResult,
+    RunSwitchTargetTransferResult,
+    RunSwitchVerifyResult,
 )
 from .run_switch_operations import (
     PhaseExecution,
     _persist_run_switch_runtime_image_reference,
+    effective_build_receipt,
 )
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
@@ -81,25 +89,33 @@ class _ChildView:
     """Small child projection consumed by RunSwitchOperationService."""
 
     state: str
-    result: Mapping[str, object]
+    result: RunSwitchDistributionChildResult | RunSwitchPhaseResult
 
     @property
-    def progress(self) -> Mapping[str, object]:
-        value = self.result.get("progress")
-        return value if isinstance(value, Mapping) else {}
+    def progress(self) -> RunSwitchChildProgress | None:
+        return getattr(self.result, "progress", None)
 
 
 _PHASE_RECEIPT_ADAPTER = TypeAdapter(RunSwitchPhaseResult)
 
 
 def _phase_receipt(
-    value: Mapping[str, object],
+    value: Mapping[str, object] | RunSwitchPhaseResult,
     *,
     phase: RunSwitchPhase | None = None,
-) -> dict[str, object]:
+) -> RunSwitchPhaseResult:
     """Validate the closed phase receipt before returning or persisting it."""
 
     try:
+        if isinstance(value, BaseModel):
+            receipt = _PHASE_RECEIPT_ADAPTER.validate_python(value, strict=True)
+            if phase is not None:
+                expected_subphase = phase.subphase
+                if expected_subphase is None and phase.kind in {"transfer", "verify"}:
+                    expected_subphase = "target-copy"
+                if receipt.phase != phase.kind or receipt.subphase != expected_subphase:
+                    raise ValueError("phase receipt belongs to a different phase")
+            return receipt
         normalized = dict(value)
         if phase is not None:
             if "phase" in normalized and normalized["phase"] != phase.kind:
@@ -122,14 +138,14 @@ def _phase_receipt(
         receipt = _PHASE_RECEIPT_ADAPTER.validate_python(normalized, strict=True)
     except (TypeError, ValueError) as error:
         raise RuntimeError("run-switch phase receipt is invalid") from error
-    return receipt.model_dump(mode="json", exclude_unset=True)
+    return receipt
 
 
 def _child_receipt(
     value: Mapping[str, object],
     *,
     phase: RunSwitchPhase | None = None,
-) -> dict[str, object]:
+) -> RunSwitchDistributionChildResult:
     """Validate the persisted projection for a target-copy child Job."""
 
     normalized = dict(value)
@@ -145,7 +161,7 @@ def _child_receipt(
         )
     except (TypeError, ValueError) as error:
         raise RuntimeError("distribution child receipt is invalid") from error
-    return receipt.model_dump(mode="json", exclude_unset=True)
+    return receipt
 
 
 _FAILURE_TEXT = re.compile(r"^[a-z][a-z0-9._-]{0,127}$")
@@ -214,7 +230,7 @@ class DurableDistributionPhaseExecutor:
         item_index: int,
         actor: str,
         request_key: str,
-        progress: Mapping[str, object],
+        progress: RunSwitchOperationResult,
     ) -> PhaseExecution:
         if phase.kind not in {"transfer", "verify"}:
             return PhaseExecution(
@@ -257,7 +273,7 @@ class DurableDistributionPhaseExecutor:
                 )
             )
         targets = tuple(phase.node_ids)
-        intent_ordinal = progress.get("workload_intent_ordinal")
+        intent_ordinal = progress.workload_intent_ordinal
         if type(intent_ordinal) is int and intent_ordinal > 0:
             adopted = self._adopt_child(
                 plan,
@@ -364,7 +380,7 @@ class DurableDistributionPhaseExecutor:
             return False
         return abandon_idempotent_job_in_session(session, child.id, now, reason=reason)
 
-    def get(self, operation_id: str) -> Any:
+    def get(self, operation_id: str) -> _ChildView:
         with self._sessions() as session:
             child = session.get(Job, operation_id)
             if child is None or child.kind != "artifact-distribution":
@@ -597,7 +613,7 @@ class DurableDistributionPhaseExecutor:
             if state != child.state:
                 JobAdapter.amend_ended(child, payload.get("reason"), self._clock())
             payload = _child_receipt(payload)
-            child.result = payload
+            child.result = payload.model_dump(mode="json", exclude_unset=True)
             child.updated_at = self._clock()
             session.commit()
             return _ChildView(state=state, result=payload)
@@ -605,19 +621,21 @@ class DurableDistributionPhaseExecutor:
     @staticmethod
     def _verification_result(
         plan: RunSwitchPlan,
-        progress: Mapping[str, object],
+        progress: RunSwitchOperationResult,
         *,
         skipped: bool = False,
         cached_nodes: Sequence[str] = (),
         cached_target_totals: Mapping[str, int] | None = None,
         verified_image_digest: str | None = None,
         verified_oci_layout_sha256: str | None = None,
-        evidence: Sequence[Mapping[str, object]] = (),
-    ) -> dict[str, object]:
+        evidence: Sequence[ArtifactVerificationEvidence] = (),
+    ) -> RunSwitchVerifyResult:
         resolved_image_digest, resolved_layout_digest, _image_bytes, build_id = (
             DurableDistributionPhaseExecutor._runtime_identity(plan, progress)
         )
-        result = ArtifactVerificationResult(
+        result = RunSwitchVerifyResult(
+            phase="verify",
+            subphase="target-copy",
             skipped=skipped,
             verified=True,
             verified_digests=list(plan.storage.artifact_digests),
@@ -634,13 +652,9 @@ class DurableDistributionPhaseExecutor:
             ),
             cached_nodes=list(cached_nodes),
             cached_target_totals=dict(cached_target_totals or {}),
-            evidence=[
-                _evidence_projection(str(item["node_id"]), item)
-                for item in evidence
-                if isinstance(item, Mapping) and isinstance(item.get("node_id"), str)
-            ],
+            evidence=list(evidence),
         )
-        return result.model_dump(mode="json")
+        return result
 
     def _adopt_child(
         self,
@@ -799,7 +813,7 @@ class DurableDistributionPhaseExecutor:
                         "members": progress["members"],
                         "evidence": [],
                     }
-                ),
+                ).model_dump(mode="json", exclude_unset=True),
                 created_at=now,
                 updated_at=now,
             )
@@ -820,7 +834,7 @@ class DurableDistributionPhaseExecutor:
     def _model_objects(
         self,
         plan: RunSwitchPlan,
-        progress: Mapping[str, object],
+        progress: RunSwitchOperationResult,
     ) -> tuple[tuple[DistributionObject, ...], str, int]:
         preparation = plan.preparation
         model_set_digest = (
@@ -830,18 +844,14 @@ class DurableDistributionPhaseExecutor:
             preparation.model.artifact_set_bytes if preparation is not None else None
         )
         if model_set_digest is None:
-            phase_results = progress.get("phase_results")
-            if isinstance(phase_results, list):
-                for raw in reversed(phase_results):
-                    if not isinstance(raw, Mapping):
-                        continue
-                    value = raw.get("model_artifact_set_sha256")
-                    if isinstance(value, str):
-                        model_set_digest = value
-                        candidate_bytes = raw.get("model_artifact_set_bytes")
-                        if type(candidate_bytes) is int and candidate_bytes > 0:
-                            model_set_bytes = candidate_bytes
-                        break
+            for receipt in reversed(progress.phase_results):
+                if (
+                    isinstance(receipt, RunSwitchRuntimePlanResult)
+                    and receipt.model_artifact_set_sha256 is not None
+                ):
+                    model_set_digest = receipt.model_artifact_set_sha256
+                    model_set_bytes = receipt.model_artifact_set_bytes
+                    break
         if not isinstance(model_set_digest, str):
             raise TypeError("exact model preparation identity is unavailable")
         source = getattr(
@@ -865,7 +875,7 @@ class DurableDistributionPhaseExecutor:
 
     @staticmethod
     def _runtime_identity(
-        plan: RunSwitchPlan, progress: Mapping[str, object]
+        plan: RunSwitchPlan, progress: RunSwitchOperationResult
     ) -> tuple[str, str, int, str | None]:
         image_digest = plan.image_digest
         layout_digest = plan.build.oci_layout_sha256
@@ -874,31 +884,46 @@ class DurableDistributionPhaseExecutor:
         preparation = plan.preparation
         if preparation is not None:
             runtime = preparation.runtime_image
-            image_digest = image_digest or getattr(runtime, "image_digest", None)
-            layout_digest = layout_digest or getattr(runtime, "oci_layout_sha256", None)
-            image_bytes = image_bytes or getattr(runtime, "image_bytes", None)
-            build_id = build_id or getattr(runtime, "build_id", None)
-        phase_results = progress.get("phase_results", [])
-        if isinstance(phase_results, list):
-            for raw in reversed(phase_results):
-                if not isinstance(raw, Mapping):
-                    continue
-                candidate = (
-                    raw.get("result") if isinstance(raw.get("result"), Mapping) else raw
-                )
-                if not isinstance(candidate, Mapping):
-                    continue
-                runtime_receipt = candidate.get("runtime_image")
-                if isinstance(runtime_receipt, Mapping):
-                    candidate = {**candidate, **runtime_receipt}
-                image_digest = image_digest or candidate.get("image_digest")
-                layout_digest = layout_digest or candidate.get(
-                    "oci_layout_sha256", candidate.get("oci_archive_sha256")
-                )
-                image_bytes = image_bytes or candidate.get("image_bytes")
-                build_id = build_id or candidate.get("build_id")
-                if image_digest and layout_digest and image_bytes is not None:
-                    break
+            image_digest = image_digest or runtime.image_digest
+            layout_digest = layout_digest or runtime.oci_layout_sha256
+            image_bytes = image_bytes or runtime.image_bytes
+            build_id = build_id or runtime.build_id
+        build = (
+            effective_build_receipt(plan, progress)
+            if image_digest is None or layout_digest is None or image_bytes is None
+            else None
+        )
+        if build is not None:
+            image_digest = image_digest or build.image_digest
+            layout_digest = layout_digest or build.oci_layout_sha256
+            image_bytes = image_bytes or build.image_bytes
+            build_id = build_id or build.build_id
+        for receipt in reversed(progress.phase_results):
+            if isinstance(receipt, RunSwitchRuntimeImageResult):
+                if image_digest is not None and receipt.image_digest != image_digest:
+                    raise RuntimeError(
+                        "runtime image receipt differs from the exact build"
+                    )
+                if (
+                    layout_digest is not None
+                    and receipt.oci_layout_sha256 != layout_digest
+                ):
+                    raise RuntimeError(
+                        "runtime image layout differs from the exact build"
+                    )
+                if image_bytes is not None and receipt.image_bytes != image_bytes:
+                    raise RuntimeError(
+                        "runtime image bytes differ from the exact build"
+                    )
+                if build_id is not None and receipt.build_id != build_id:
+                    raise RuntimeError(
+                        "runtime image build differs from the exact build"
+                    )
+                image_digest = image_digest or receipt.image_digest
+                layout_digest = layout_digest or receipt.oci_layout_sha256
+                image_bytes = image_bytes or receipt.image_bytes
+                build_id = build_id or receipt.build_id
+                break
         if (
             (build_id is not None and not isinstance(build_id, str))
             or not isinstance(image_digest, str)
@@ -1051,111 +1076,68 @@ class DurableDistributionPhaseExecutor:
     def _verify_evidence(
         self,
         plan: RunSwitchPlan,
-        progress: Mapping[str, object],
+        progress: RunSwitchOperationResult,
         targets: tuple[str, ...],
         cached: tuple[str, ...],
-    ) -> Mapping[str, object]:
+    ) -> RunSwitchVerifyResult:
         """Require a terminal agent result from every non-cached target."""
-        preparation = plan.preparation
-        expected_image = plan.image_digest or (
-            preparation.runtime_image.image_digest if preparation is not None else None
+        expected_image, expected_layout, _bytes, _build_id = self._runtime_identity(
+            plan, progress
         )
-        expected_layout = plan.build.oci_layout_sha256 or (
-            preparation.runtime_image.oci_layout_sha256
-            if preparation is not None
-            else None
-        )
-        phase_results = progress.get("phase_results", [])
-        if not isinstance(phase_results, list):
-            phase_results = []
-        for raw in reversed(phase_results):
-            if not isinstance(raw, Mapping):
-                continue
-            runtime_receipt = raw.get("runtime_image")
-            if not isinstance(runtime_receipt, Mapping):
-                continue
-            candidate_image = runtime_receipt.get("image_digest")
-            candidate_layout = runtime_receipt.get(
-                "oci_layout_sha256", runtime_receipt.get("oci_archive_sha256")
-            )
-            if isinstance(candidate_image, str) and isinstance(candidate_layout, str):
-                expected_image = candidate_image
-                expected_layout = candidate_layout
-                break
-        # A preview may have planned the build and left plan image fields
-        # empty. Only a strict assignment emitted by this executor can supply
-        # the effective post-build identity for verification.
-        for raw in reversed(phase_results):
-            if not isinstance(raw, Mapping):
-                continue
-            assignments = raw.get("assignments")
-            if not isinstance(assignments, Mapping):
-                continue
-            for node_id, assignment_raw in assignments.items():
-                if not isinstance(node_id, str) or not isinstance(
-                    assignment_raw, Mapping
-                ):
-                    continue
-                try:
-                    assignment = NodeDistributionAssignment.parse(assignment_raw)
-                except (TypeError, ValueError):
-                    continue
-                if (
-                    assignment.plan_digest == plan.plan_digest
-                    and assignment.node_id in targets
-                    and assignment.model_artifact_set_sha256
-                    == (
-                        preparation.model.artifact_set_sha256
-                        if preparation is not None
-                        else None
-                    )
-                ):
-                    expected_image = assignment.oci_image_digest
-                    expected_layout = assignment.oci_archive_sha256
-                    break
-            if expected_image is not None and expected_layout is not None:
-                break
-        candidates: list[object] = list(phase_results)
-        prior_evidence = progress.get("evidence", [])
-        if isinstance(prior_evidence, list):
-            candidates.extend(prior_evidence)
-        receipts: dict[str, Mapping[str, object]] = {}
-        for candidate in candidates:
-            if not isinstance(candidate, Mapping):
-                continue
-            node_id = candidate.get("node_id")
-            evidence = candidate.get("evidence", candidate)
-            if isinstance(evidence, Mapping):
-                if isinstance(node_id, str) and node_id in targets:
-                    receipts[node_id] = evidence
-            elif isinstance(evidence, Sequence) and not isinstance(
-                evidence, (str, bytes, bytearray)
-            ):
-                for item in evidence:
-                    if not isinstance(item, Mapping):
-                        continue
-                    item_node_id = item.get("node_id")
-                    if isinstance(item_node_id, str) and item_node_id in targets:
-                        receipts[item_node_id] = item
+        receipts: dict[str, ArtifactVerificationEvidence] = {}
         cached_nodes = set(cached)
-        cached_nodes.update(
-            {
-                value
-                for value in sequence(progress.get("cached_nodes")) or ()
-                if isinstance(value, str)
-            }
-        )
-        for candidate in phase_results:
-            if isinstance(candidate, Mapping):
-                raw_cached = candidate.get("cached_nodes")
-                if isinstance(raw_cached, list):
-                    cached_nodes.update(
-                        value for value in raw_cached if isinstance(value, str)
+        for receipt in progress.phase_results:
+            if isinstance(receipt, RunSwitchTargetTransferResult):
+                for node_id, assignment in receipt.assignments.items():
+                    if (
+                        node_id != assignment.node_id
+                        or assignment.plan_digest != plan.plan_digest
+                        or assignment.oci_image_digest != expected_image
+                        or assignment.oci_archive_sha256 != expected_layout
+                        or (
+                            plan.preparation is not None
+                            and assignment.model_artifact_set_sha256
+                            != plan.preparation.model.artifact_set_sha256
+                        )
+                    ):
+                        raise RuntimeError(
+                            "retained distribution assignment differs from the exact plan"
+                        )
+                cached_nodes.update(receipt.cached_nodes)
+            elif isinstance(
+                receipt, (RunSwitchCachedTransferResult, RunSwitchVerifyResult)
+            ):
+                if (
+                    receipt.verified_image_digest != expected_image
+                    or receipt.verified_oci_layout_sha256 != expected_layout
+                ):
+                    raise RuntimeError(
+                        "retained verification identity differs from the exact plan"
                     )
+                cached_nodes.update(receipt.cached_nodes)
+            if isinstance(receipt, RunSwitchVerifyResult):
+                for evidence in receipt.evidence:
+                    if evidence.node_id in targets:
+                        receipts[evidence.node_id] = evidence
+            elif (
+                isinstance(receipt, RunSwitchTargetTransferEvidenceResult)
+                and receipt.node_id in targets
+            ):
+                receipts[receipt.node_id] = receipt
         missing = set(targets) - cached_nodes
         if missing - receipts.keys():
             raise RuntimeError(
                 "verification requires terminal evidence from every target"
+            )
+        if any(
+            receipts[node_id].uncertain
+            or receipts[node_id].error is not None
+            or receipts[node_id].failure_kind is not None
+            or receipts[node_id].error_code is not None
+            for node_id in missing
+        ):
+            raise RuntimeError(
+                "verification requires successful terminal target evidence"
             )
         return self._verification_result(
             plan,
@@ -1163,7 +1145,7 @@ class DurableDistributionPhaseExecutor:
             cached_nodes=sorted(cached_nodes),
             verified_image_digest=expected_image,
             verified_oci_layout_sha256=expected_layout,
-            evidence=[dict(receipts[node_id]) for node_id in sorted(receipts)],
+            evidence=[receipts[node_id] for node_id in sorted(receipts)],
         )
 
     @staticmethod
@@ -1203,7 +1185,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             max_workers=1, thread_name_prefix="runtime-image-preparation"
         )
         self._runtime_image_futures: dict[
-            tuple[str, int, int], tuple[Future[Mapping[str, object] | None], str]
+            tuple[str, int, int], tuple[Future[RunSwitchRuntimeImageResult | None], str]
         ] = {}
 
     def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
@@ -1226,7 +1208,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         item_index: int,
         actor: str,
         request_key: str,
-        progress: Mapping[str, object],
+        progress: RunSwitchOperationResult,
     ) -> PhaseExecution:
         if phase.kind == "prepare" and phase.subphase == "runtime-image":
             # This is the only mutating image boundary.  It runs as its own
@@ -1444,9 +1426,9 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         item_index: int,
         actor: str,
         request_key: str,
-        progress: Mapping[str, object],
+        progress: RunSwitchOperationResult,
         wait_for_busy_owner: bool = False,
-    ) -> Mapping[str, object] | None:
+    ) -> RunSwitchRuntimeImageResult | None:
         """Prepare one Controller image and authorize every target execution.
 
         This callback is deliberately supplied only to the durable worker
@@ -1562,7 +1544,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 clock=self._clock,
             )
 
-        raw = None
+        prepared: RuntimeImageReceipt | None = None
         for runtime_spec in runtime_specs.values():
             receipt = self._runtime_image_preparer(
                 revision.document,
@@ -1570,38 +1552,30 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 build,
                 before_publish=before_publish,
             )
-            to_mapping = getattr(receipt, "to_mapping", None)
-            prepared = to_mapping() if callable(to_mapping) else receipt
-            if not isinstance(prepared, Mapping):
-                raise TypeError("runtime image preparation returned invalid evidence")
-            if raw is not None and prepared != raw:
+            current = (
+                receipt
+                if isinstance(receipt, RuntimeImageReceipt)
+                else read_stored_model(RuntimeImageReceipt, receipt, strict=True)
+            )
+            if prepared is not None and current != prepared:
                 raise RuntimeError(
                     "runtime image preparation returned different images for the group"
                 )
-            raw = prepared
-        if raw is None:
+            prepared = current
+        if prepared is None:
             raise RuntimeError("runtime image preparation returned no evidence")
-        effective_execution_key = next(iter(runtime_specs))
-        image_digest = raw.get("image_digest")
-        layout_digest = raw.get("oci_layout_sha256", raw.get("oci_archive_sha256"))
-        image_bytes = raw.get("image_bytes")
-        if (
-            not isinstance(image_digest, str)
-            or not isinstance(layout_digest, str)
-            or type(image_bytes) is not int
-            or image_bytes < 1
-        ):
-            raise RuntimeError("runtime image preparation returned incomplete evidence")
-        return {
-            "runtime_image": dict(raw),
-            "effective_execution_key": effective_execution_key,
-            "image_digest": image_digest,
-            "oci_layout_sha256": layout_digest,
-            "image_bytes": image_bytes,
-            "build_id": raw.get("build_id"),
-        }
+        return RunSwitchRuntimeImageResult(
+            phase="prepare",
+            subphase="runtime-image",
+            runtime_image=prepared,
+            effective_execution_key=next(iter(runtime_specs)),
+            image_digest=prepared.image_digest,
+            oci_layout_sha256=prepared.oci_archive_sha256,
+            image_bytes=prepared.image_bytes,
+            build_id=prepared.build_id,
+        )
 
-    def get(self, operation_id: str) -> Any:
+    def get(self, operation_id: str) -> _ChildView:
         getter = getattr(self._model_cache, "get_operation", None)
         if isinstance(getter, Callable):
             try:
@@ -1627,7 +1601,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         return "unknown"
 
     @staticmethod
-    def _cache_result(view: Any) -> Mapping[str, object]:
+    def _cache_result(view: CacheOperationView) -> Mapping[str, object]:
         from .model_cache_contract import ModelCacheOperationProgress
         from .model_cache_progress import project_cache_progress
 
@@ -1652,14 +1626,9 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         if view.last_error:
             result["reason"] = view.last_error
         if view.result is not None:
-            if isinstance(view.result, Mapping):
-                evidence = dict(view.result)
-            else:
-                dump = getattr(view.result, "model_dump", None)
-                evidence = dump(mode="json") if callable(dump) else {}
-            parsed_evidence = read_stored_model(
-                ModelCacheDownloadResult, evidence, strict=True
-            )
+            if not isinstance(view.result, ModelCacheDownloadResult):
+                raise RuntimeError("model-cache completion is not download evidence")
+            parsed_evidence = view.result
             if parsed_evidence.artifact_set_sha256 != view.artifact_set_sha256:
                 raise RuntimeError("model-cache completion identity is not exact")
             if parsed_evidence.coverage == "complete":

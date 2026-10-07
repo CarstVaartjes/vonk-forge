@@ -16,6 +16,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
+    OperationProgress,
     RecipeJobFile,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
@@ -1372,7 +1373,7 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
         reason="operator requested stop",
     )
     assert _cancelling(cancelling)
-    directive = agent_jobs.heartbeat(claim, {"phase": "running"}, 30)
+    directive = agent_jobs.heartbeat(claim, OperationProgress(phase="running"), 30)
     assert directive.cancel_requested is True
     stop_plan = recipe_operations.preview_stop(run_id)
     assert stop_plan.allowed

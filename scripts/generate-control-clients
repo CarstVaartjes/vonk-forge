@@ -5,8 +5,8 @@ Generator provenance:
 - openapi-python-client==0.29.1 from control/uv.lock
 - openapi-typescript==7.13.0 from tools/openapi-client/package-lock.json
 
-The TypeScript client transport is intentionally supplied by the separately
-pinned openapi-fetch dependency; this task generates its schema types only.
+The TypeScript transport uses pinned openapi-fetch. Its DTOs and standalone
+runtime validators are generated together from this same canonical document.
 """
 
 from __future__ import annotations
@@ -105,12 +105,8 @@ def typescript_vocabulary() -> str:
     )
     lines.append("} as const;")
     lines.append("")
-    lines.append(
-        "/** Retired wait spelling, adopted only when reading old rows. */"
-    )
-    lines.append(
-        'export const LEGACY_WAIT_STATE = "waiting-for-operator";'
-    )
+    lines.append("/** Retired wait spelling, adopted only when reading old rows. */")
+    lines.append('export const LEGACY_WAIT_STATE = "waiting-for-operator";')
     return "\n".join(lines) + "\n"
 
 
@@ -207,6 +203,12 @@ def main() -> None:
         help="regenerate only the tracked OpenAPI document without Node tooling",
     )
     arguments = parser.parse_args()
+    from vonk_control.cli_update_contract import cli_update_contract_schema
+
+    _write_openapi(
+        cli_update_contract_schema(),
+        path=ROOT / "src/cluster_profiles/schemas/cli-update-contract.schema.json",
+    )
 
     if arguments.schema_only:
         _write_openapi(_schema(include_browser_auth=True))
@@ -251,10 +253,9 @@ def main() -> None:
         TYPESCRIPT_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
         _run(
             [
-                str(ROOT / "tools/openapi-client/node_modules/.bin/openapi-typescript"),
-                str(client_openapi),
-                "--output",
-                str(TYPESCRIPT_OUTPUT),
+                "node",
+                str(ROOT / "tools/openapi-client/generate-runtime.mjs"),
+                str(OPENAPI),
             ],
         )
         _normalize_generated_text(TYPESCRIPT_OUTPUT)

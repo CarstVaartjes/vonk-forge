@@ -269,17 +269,23 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         adapter = current.progress.switch_adapter
         if (
             adapter is not None
-            and adapter.position == 1
-            and adapter.active_kind == "install"
-            and adapter.active_operation_id is not None
+            and any(child.queue_index == 0 for child in adapter.children)
+            and any(child.kind == "install" for child in adapter.pending_children)
+            and adapter.pending_children
         ):
             break
     current = profiles.application(application.id)
     adapter = current.progress.switch_adapter
-    active_child = (
-        planner.get(adapter.active_operation_id)
-        if adapter is not None and adapter.active_operation_id is not None
+    pending_install = (
+        next(
+            (child for child in adapter.pending_children if child.kind == "install"),
+            None,
+        )
+        if adapter is not None
         else None
+    )
+    active_child = (
+        planner.get(pending_install.operation_id) if pending_install else None
     )
     child_status = (
         (
@@ -296,8 +302,11 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
     assert (
         current.state == "running"
         and adapter is not None
-        and adapter.position == 1
-        and adapter.active_kind == "install"
+        and any(child.queue_index == 0 for child in adapter.children)
+        and any(child.kind == "install" for child in adapter.pending_children)
+        and pending_install is not None
+        and pending_install.queue_index == 1
+        and adapter.queue[pending_install.queue_index].kind == pending_install.kind
         and active_child is not None
         and active_child.action == "install"
         and active_child.state in {"queued", "running"}
@@ -306,7 +315,9 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         current.state,
         current.status_reason,
         adapter.position if adapter is not None else None,
-        adapter.active_kind if adapter is not None else None,
+        [child.kind for child in adapter.pending_children]
+        if adapter is not None
+        else None,
         child_status,
     )
     with sessions() as session:

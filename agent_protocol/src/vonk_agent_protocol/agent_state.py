@@ -19,7 +19,7 @@ from .compiled_execution_plan import CompiledPlacement
 from .helper_response import HostHelperProcessLogs
 from .host_helper import RecipeReconciliationIdentity, Uuid4Text
 from .package_upgrade import PackageActivationPhase, PackageRollbackAuthority
-from .wire_model import Digest, WireModel, strict_json_datetime
+from .wire_model import MAX_RUN_GENERATION, Digest, WireModel, strict_json_datetime
 
 U32 = Annotated[int, Field(ge=0, le=2**32 - 1)]
 U64 = Annotated[int, Field(ge=0, le=2**64 - 1)]
@@ -102,7 +102,7 @@ class RunLifecycleRecord(WireModel):
 
     installation_id: str
     placement: CompiledPlacement
-    run_generation: U32 | None = None
+    run_generation: Annotated[int, Field(ge=0, le=MAX_RUN_GENERATION)] | None = None
 
 
 class HostOperationOutcome(WireModel):
@@ -180,7 +180,7 @@ class RuntimeGenerationFence(WireModel):
     schema_version: Literal[2]
     installation_id: Uuid4Text
     runtime_id: Uuid4Text
-    highest_generation: U32
+    highest_generation: Annotated[int, Field(ge=0, le=MAX_RUN_GENERATION)]
     cancelled: bool
 
 

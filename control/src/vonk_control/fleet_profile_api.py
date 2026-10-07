@@ -24,6 +24,7 @@ from .fleet_profiles import (
     FleetProfilePermissionDenied,
     FleetProfileStalePlanConflict,
 )
+from .integer_domains import MAX_DATABASE_INTEGER
 from .operation_api import bounded_error_responses
 
 #: The canonical lowercase UUID shape every durable identity in this API uses.
@@ -89,7 +90,8 @@ def install_fleet_profile_routes(
         operation_id="getProfile",
     )
     def get_profile(
-        number: Annotated[int, Path(ge=1)], _actor: Actor = authenticated
+        number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
+        _actor: Actor = authenticated,
     ) -> FleetProfileReadView:
         try:
             return service().read_number(number)
@@ -105,7 +107,8 @@ def install_fleet_profile_routes(
         operation_id="getProfileDefinition",
     )
     def get_profile_definition(
-        number: Annotated[int, Path(ge=1)], _actor: Actor = authenticated
+        number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
+        _actor: Actor = authenticated,
     ) -> FleetProfileDefinitionView:
         try:
             return service().definition_number(number)
@@ -124,7 +127,7 @@ def install_fleet_profile_routes(
     )
     def profile_endpoints(
         request: Request,
-        number: Annotated[int, Path(ge=1)],
+        number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
         alias: str | None = Query(
             default=None,
             pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$",
@@ -159,7 +162,7 @@ def install_fleet_profile_routes(
         operation_id="autosaveProfile",
     )
     def autosave_profile(
-        number: Annotated[int, Path(ge=1)],
+        number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
         body: FleetProfileInput,
         actor: Actor = authenticated,
     ) -> FleetProfileView:
@@ -185,7 +188,8 @@ def install_fleet_profile_routes(
         operation_id="previewProfile",
     )
     def preview_profile(
-        number: Annotated[int, Path(ge=1)], actor: Actor = authenticated
+        number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
+        actor: Actor = authenticated,
     ) -> FleetProfilePreview:
         require_mutation(actor, "POST", "/api/profile/{number}/preview")
         try:
@@ -208,7 +212,7 @@ def install_fleet_profile_routes(
         operation_id="loadProfile",
     )
     def load_profile(
-        number: Annotated[int, Path(ge=1)],
+        number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
         body: FleetProfileLoadRequest,
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
@@ -270,7 +274,7 @@ def install_fleet_profile_routes(
         operation_id="getProfileApplicationByRequest",
     )
     def profile_application_by_request(
-        number: Annotated[int, Path(ge=1)],
+        number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
         request_key: str = Path(pattern=_UUID),
         actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
@@ -296,7 +300,8 @@ def install_fleet_profile_routes(
         operation_id="getProfileProgress",
     )
     def profile_progress(
-        number: Annotated[int, Path(ge=1)], _actor: Actor = authenticated
+        number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
+        _actor: Actor = authenticated,
     ) -> FleetProfileApplicationView:
         try:
             return service().progress_number(number)

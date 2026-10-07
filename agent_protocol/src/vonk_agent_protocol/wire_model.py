@@ -19,6 +19,11 @@ from pydantic import (
 )
 from pydantic_core import CoreSchema, core_schema
 
+# RecipeRun owns generations in a PostgreSQL BIGINT column. The helper and
+# agent carry that exact identity; their storage/argv representations must not
+# impose a smaller integer domain.
+MAX_RUN_GENERATION = 2**63 - 1
+
 
 def _check_literal_type(value: object, expected: tuple[Any, ...]) -> object:
     if any(type(item) in (bool, int, float) for item in expected) and not any(
