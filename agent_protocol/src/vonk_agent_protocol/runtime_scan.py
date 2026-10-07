@@ -58,7 +58,7 @@ class RecipeRunObservationCheckpoint(WireModel):
     root: str
     runs_stamp: RecipeRunObservationDirectoryStamp
     metadata_stamp: RecipeRunObservationDirectoryStamp | None
-    started_at: str = Field(json_schema_extra={"format": "date-time"})
+    started_at: str = Field(pattern="^" + _CUTOFF.pattern + r"$(?![\s\S])")
     witness: RecipeRunObservationCursorWitness | None
     had_plans: bool
     had_failures: bool
