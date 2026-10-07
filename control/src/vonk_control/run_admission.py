@@ -565,32 +565,34 @@ class RunAdmissionService:
                         Job.payload["owner_id"]
                         .as_string()
                         .in_(
-                            select(RecipeRun.id).where(RecipeRun.state == RunState.LOST)
+                            select(RecipeRun.id).where(
+                                RecipeRun.state.in_([RunState.LOST, RunState.STOPPING])
+                            )
                         ),
                     )
                 )
                 for node_id in deferred_stop_nodes(job)
             }
-            unreconciled_lost_ranks: dict[str, list[tuple[str, str]]] = {}
-            for node_id, run_id, run_alias in session.execute(
-                select(RunNode.node_id, RecipeRun.id, RecipeRun.alias)
+            unreconciled_ranks: dict[str, list[tuple[str, str, RunState]]] = {}
+            for node_id, run_id, run_alias, run_state in session.execute(
+                select(RunNode.node_id, RecipeRun.id, RecipeRun.alias, RecipeRun.state)
                 .join(RecipeRun, RecipeRun.id == RunNode.run_id)
                 .where(
                     RunNode.node_id.in_(
                         [mapping_node.node_id for mapping_node in mapping_nodes]
                     ),
                     RunNode.state != RunState.STOPPED,
-                    RecipeRun.state == RunState.LOST,
+                    RecipeRun.state.in_([RunState.LOST, RunState.STOPPING]),
                 )
                 .order_by(RunNode.node_id, RecipeRun.id)
             ):
-                if (
-                    run_id in released_run_ids
-                    and (run_id, node_id) not in deferred_ranks
-                ):
+                deferred = (run_id, node_id) in deferred_ranks
+                if run_state == RunState.STOPPING and not deferred:
                     continue
-                unreconciled_lost_ranks.setdefault(node_id, []).append(
-                    (run_id, run_alias)
+                if run_id in released_run_ids and not deferred:
+                    continue
+                unreconciled_ranks.setdefault(node_id, []).append(
+                    (run_id, run_alias, RunState(run_state))
                 )
             installed_nodes = {
                 (row.node_id, row.rank, row.role)
@@ -644,12 +646,16 @@ class RunAdmissionService:
         for placement in ordered:
             blockers = [] if topology_reason is None else [topology_reason]
             warnings: list[AdmissionReason] = []
-            for run_id, run_alias in unreconciled_lost_ranks.get(placement.node_id, ()):
+            for run_id, run_alias, run_state in unreconciled_ranks.get(
+                placement.node_id, ()
+            ):
                 blockers.append(
                     AdmissionReason(
-                        RunAdmissionCode.UNRECONCILED_LOST_RANK,
-                        f"Spark {placement.node_id} still has rank state for lost "
-                        f"model {run_alias} ({run_id}); reconcile it before placing work.",
+                        ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN
+                        if run_state == RunState.STOPPING
+                        else RunAdmissionCode.UNRECONCILED_LOST_RANK,
+                        f"Spark {placement.node_id} has unreconciled rank effects for "
+                        f"model {run_alias} ({run_id}); exact Stop confirmation pending.",
                     )
                 )
             if legal_admission.warning is not None:

@@ -7,9 +7,14 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
+    LifecycleState,
     OutcomeDone,
     OutcomeKind,
+    ProjectionCode,
     RecipeStopResult,
+    ReservationState,
+    ResourceBlockerCode,
+    RunState,
     canonical_message,
 )
 from vonk_control.agent_jobs import AgentJobService
@@ -127,20 +132,20 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
             fresh=fresh,
             request_key=request_key,
         )
-    assert ended.state == "succeeded"
+    assert ended.state == LifecycleState.SUCCEEDED
     assert isinstance(admitted, RunSwitchOperation)
     assert admitted.node_ids == [nodes[1]]
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.state == "succeeded"
+        assert stop is not None and stop.state == LifecycleState.SUCCEEDED
         parent = RecipeStopParent.model_validate_json(canonical_message(stop.payload))
         assert parent.offline_stop_intent is not None
-        assert parent.offline_stop_intent.code == "node.offline"
+        assert parent.offline_stop_intent.code == ProjectionCode.NODE_OFFLINE
         assert parent.offline_stop_intent.node_ids == [nodes[0]]
         pending = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
         )
-        assert pending is not None and pending.state == "queued"
+        assert pending is not None and pending.state == LifecycleState.QUEUED
         assert is_deferred_stop(stop, pending)
         exact_payload = pending.payload
         pending.payload = {**exact_payload, "run_id": _uuid(19199)}
@@ -149,18 +154,35 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
         pending_id = pending.id
         stored = session.get(RecipeRun, run.owner_id)
         assert (
-            stored is not None and stored.state == "lost" and stored.stopped_at is None
+            stored is not None
+            and stored.state == RunState.STOPPING
+            and stored.stopped_at is None
         )
         assert (
             session.scalar(
                 select(ResourceReservation.id).where(
                     ResourceReservation.owner_id == run.owner_id,
                     ResourceReservation.node_id == nodes[0],
-                    ResourceReservation.state == "active",
+                    ResourceReservation.state == ReservationState.ACTIVE,
                 )
             )
             is not None
         )
+    # A reviewed replacement must not discount the retained offline claim,
+    # even if it explicitly plans to stop this run. Healthy-node work above is
+    # already admitted, so this is a per-rank capacity fence, not a fleet gate.
+    replacement = lifecycle.preview_run(
+        installation.owner_id,
+        alias="offline replacement",
+        released_run_ids=(run.owner_id,),
+    )
+    assert not replacement.allowed
+    assert any(
+        blocker.code == ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN
+        and run.owner_id in blocker.detail
+        for node in replacement.nodes
+        for blocker in node.blockers
+    )
     # A new service instance receives the normal authenticated poll, issues the
     # production exact-plan grant, and consumes its fenced Stop receipt.
     claim, payload, _grant = _issue_exact_stop_grant(
@@ -180,12 +202,12 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
     )
     with sessions() as session:
         stored = session.get(RecipeRun, run.owner_id)
-        assert stored is not None and stored.state == "stopped"
+        assert stored is not None and stored.state == RunState.STOPPED
         assert (
             session.scalar(
                 select(ResourceReservation.id).where(
                     ResourceReservation.owner_id == run.owner_id,
-                    ResourceReservation.state == "active",
+                    ResourceReservation.state == ReservationState.ACTIVE,
                 )
             )
             is None

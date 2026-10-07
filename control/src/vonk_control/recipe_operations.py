@@ -3894,7 +3894,7 @@ class RecipeOperationService:
         )
         self._release_node_reservations(session, run.id, stopped, now)
         complete = bool(nodes) and len(stopped) == len(nodes)
-        run.state = RunState.STOPPED if complete else RunState.LOST
+        run.state = RunState.STOPPED if complete else RunState.STOPPING
         run.stopped_at = now if complete else None
         run.updated_at = now
         run.route_error = (

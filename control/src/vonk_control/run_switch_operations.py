@@ -1334,7 +1334,7 @@ class RecipeLifecyclePhaseExecutor:
                     session.scalars(select(RunNode).where(RunNode.run_id == run.id))
                 )
                 reachable_complete = (
-                    run.state == RunState.LOST
+                    run.state == RunState.STOPPING
                     and bool(pending_offline)
                     and not (members & expected_pools.keys() & pending_offline)
                     and all(
@@ -2228,7 +2228,7 @@ class RecipeLifecyclePhaseExecutor:
                 verified = (
                     (
                         status.state == RunState.STOPPED
-                        or (status.state == RunState.LOST and bool(pending_offline))
+                        or (status.state == RunState.STOPPING and bool(pending_offline))
                     )
                     and status.route_state == RouteState.WITHDRAWN
                     and all(
