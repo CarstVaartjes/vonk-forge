@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 984b9196a059d06b9faa4d19ed63f62631bdec19f0aeb99f44c9348eaf2731d2. Do not edit.
+// Generated from canonical OpenAPI SHA256 84c9a3c6d7ef63a40d4638c3518b2cc185c4d03651ec618db4671c9f821a972d. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -6832,6 +6832,8 @@ export interface components {
             /** Parent Id */
             parent_id?: string | null;
             progress?: components["schemas"]["OperationProgress"] | null;
+            /** Projection Issues */
+            projection_issues?: components["schemas"]["OperationProjectionIssue"][] | null;
             recovery?: components["schemas"]["OperationRecovery"] | null;
             /** State */
             state: string;
@@ -6976,6 +6978,27 @@ export interface components {
             total_bytes_known: boolean;
             /** Total Items */
             total_items?: (number | ExactNumber) | null;
+        };
+        /**
+         * OperationProjectionIssue
+         * @description One optional fact unavailable within this response's reader allocation.
+         */
+        OperationProjectionIssue: {
+            /** Budget Bytes */
+            budget_bytes: number | ExactNumber;
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "progress" | "cancellation";
+            /** Observed Bytes */
+            observed_bytes: number | ExactNumber;
+            /**
+             * Reason
+             * @default response-budget-exceeded
+             * @constant
+             */
+            reason: "response-budget-exceeded";
         };
         /** OperationRecovery */
         OperationRecovery: {

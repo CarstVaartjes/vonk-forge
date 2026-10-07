@@ -456,6 +456,8 @@ from .operation_member_progress_activity_type_0 import OperationMemberProgressAc
 from .operation_owner_reference import OperationOwnerReference
 from .operation_progress import OperationProgress
 from .operation_progress_activity_type_0 import OperationProgressActivityType0
+from .operation_projection_issue import OperationProjectionIssue
+from .operation_projection_issue_field import OperationProjectionIssueField
 from .operation_recovery import OperationRecovery
 from .operation_recovery_action import OperationRecoveryAction
 from .operations_response import OperationsResponse
@@ -1312,6 +1314,8 @@ __all__ = (
     "OperationOwnerReference",
     "OperationProgress",
     "OperationProgressActivityType0",
+    "OperationProjectionIssue",
+    "OperationProjectionIssueField",
     "OperationRecovery",
     "OperationRecoveryAction",
     "OperationsResponse",

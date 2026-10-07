@@ -28,6 +28,7 @@ REASONS = frozenset(
         "input-validation",
         "service-absent",
         "dependency-unavailable",
+        "resource-bound",
     }
 )
 ALLOWLISTS = {
@@ -177,11 +178,36 @@ def scan_source(
         elif isinstance(imported, ast.Import):
             aliases.update({a.asname: a.name for a in imported.names if a.asname})
 
+    resource_errors = {
+        alias.asname or alias.name
+        for imported in tree.body
+        if isinstance(imported, ast.ImportFrom)
+        and imported.module == "operation_api"
+        and imported.level == 1
+        for alias in imported.names
+        if alias.name == "OperationResponseTooLarge"
+    }
+    # An unrelated local class or assignment cannot borrow the owner's name.
+    resource_errors -= (
+        {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+        }
+        | {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        | {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    )
+
     class Collector(ast.NodeVisitor):
         def __init__(self):
             self.scope: list[str] = []
             self.get = False
             self.context = ""
+            self.resource_refusal = False
 
         def add(self, node: ast.AST, kind: str):
             sites.append(
@@ -269,6 +295,14 @@ def scan_source(
             self.get, self.context = old_get, old_context
 
         visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ExceptHandler(self, node: ast.ExceptHandler):
+            old = self.resource_refusal
+            self.resource_refusal = (
+                isinstance(node.type, ast.Name) and node.type.id in resource_errors
+            )
+            self.generic_visit(node)
+            self.resource_refusal = old
 
         def visit_Raise(self, node: ast.Raise):
             if (
@@ -369,7 +403,12 @@ def scan_source(
                     and 400 <= code <= 599
                     and code not in {401, 403, 404}
                 ):
-                    self.add(node, "get-refusal")
+                    self.add(
+                        node,
+                        "get-resource-refusal"
+                        if self.resource_refusal and code == 503
+                        else "get-refusal",
+                    )
             self.generic_visit(node)
 
         def visit_Constant(self, node: ast.Constant):

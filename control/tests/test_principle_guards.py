@@ -290,3 +290,47 @@ def test_builtin_raise_inventory_is_report_only_and_excludes_custom_classes():
     assert not scan_source(
         "raise PermissionDenied('revoked')", path="owner.py", mode="raises"
     )
+
+
+def test_resource_read_refusal_requires_canonical_owner_handler():
+    """A resource exception cannot hide a generic damaged-row refusal."""
+    source = (
+        "from .operation_api import OperationResponseTooLarge as TooLarge\n"
+        "@router.get('/operations')\n"
+        "def observe():\n"
+        "    try:\n        project()\n"
+        "    except TooLarge:\n        raise HTTPException(status_code=503)\n"
+    )
+    sites = scan_source(source, path="api.py", mode="reads")
+    assert [site.kind for site in sites] == ["get-resource-refusal"]
+    for changed in (
+        source.replace(".operation_api", ".unrelated"),
+        source.replace("except TooLarge:", "except ValueError:"),
+        source.replace("@router", "class TooLarge(Exception): pass\n@router"),
+    ):
+        assert [
+            site.kind for site in scan_source(changed, path="api.py", mode="reads")
+        ] == ["get-refusal"]
+    doc = {
+        "schema": 1,
+        "debt": [],
+        "exceptions": [
+            {
+                "path": "api.py",
+                "function": "observe",
+                "kind": "get-resource-refusal",
+                "count": 1,
+                "reason": "resource-bound",
+                "justification": "Exact owning reader byte allocation after optional projections are exhausted.",
+            }
+        ],
+    }
+    assert not evaluate_gate(sites, doc)
+    assert evaluate_gate(
+        scan_source(
+            source.replace("except TooLarge:", "except ValueError:"),
+            path="api.py",
+            mode="reads",
+        ),
+        doc,
+    )

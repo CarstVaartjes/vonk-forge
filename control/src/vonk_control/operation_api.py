@@ -34,6 +34,8 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
 from . import agent_operation_states, job_states
 from .agent_jobs import (
     AgentJobService,
@@ -101,6 +103,7 @@ from .state_filters import state_filter
 from .strict_json import (
     StrictModel,
     read_stored_model,
+    serialize_json_value,
     warn_unreadable_once,
 )
 
@@ -298,7 +301,20 @@ class JobOperationResponse(StrictModel):
         return document
 
 
+class OperationProjectionIssue(StrictModel):
+    """One optional fact unavailable within this response's reader allocation."""
+
+    field: Literal["progress", "cancellation"]
+    reason: Literal["response-budget-exceeded"] = "response-budget-exceeded"
+    observed_bytes: int = Field(ge=1)
+    budget_bytes: int = Field(ge=1)
+
+
 class OperationDetailResponse(StrictModel):
+    # One issue per optional fact: progress and cancellation are the two owners.
+    projection_issues: list[OperationProjectionIssue] | None = Field(
+        default=None, max_length=2
+    )
     id: str = Field(min_length=1, max_length=128)
     parent_id: str | None = Field(default=None, max_length=128)
     node_ids: list[NodeIdentifier] = Field(max_length=1024)
@@ -326,6 +342,7 @@ class OperationDetailResponse(StrictModel):
     def _serialize_without_unset_evidence(self, handler):
         document = handler(self)
         for key in (
+            "projection_issues",
             "failure",
             "evidence_download",
             "cancellation",
@@ -1156,6 +1173,134 @@ def operation_detail_response(
         owner=item.owner,
         blockers=item.blockers or [],
         next_attempt_at=item.next_attempt_at,
+    )
+
+
+def _response_bytes(response: StrictModel) -> int:
+    # JSONResponse emits compact UTF-8; key ordering does not affect byte size.
+    return len(canonical_message(serialize_json_value(response)))
+
+
+class OperationResponseTooLarge(RuntimeError):
+    """A genuinely indivisible observation cannot fit the owning reader."""
+
+    def __init__(self, observed_bytes: int) -> None:
+        super().__init__(
+            f"Operation observation requires {observed_bytes} bytes; "
+            f"reader budget is {MAX_CONTROL_DOCUMENT_BYTES} bytes. "
+            "Durable operation state is unchanged."
+        )
+
+
+def bounded_operation_detail(
+    detail: OperationDetailResponse, *, envelope_bytes: int = 0
+) -> OperationDetailResponse:
+    """Keep known durable facts; identify an optional decoration that cannot fit.
+
+    This is an observation projection, never an admission or execution rewrite.
+    The exact outer envelope is included when a detail is the first list item.
+    """
+    observed = _response_bytes(detail) + envelope_bytes
+    if observed <= MAX_CONTROL_DOCUMENT_BYTES:
+        return detail
+    issues = list(detail.projection_issues or [])
+    optional_facts: list[
+        tuple[
+            Literal["progress", "cancellation"],
+            OperationProgress | FleetProfileApplicationCancellationView | None,
+        ]
+    ] = [("progress", detail.progress), ("cancellation", detail.cancellation)]
+    decorations = sorted(
+        optional_facts,
+        key=lambda pair: len(canonical_message(pair[1])) if pair[1] is not None else 0,
+        reverse=True,
+    )
+    for field, value in decorations:
+        if value is None:
+            continue
+        issues.append(
+            OperationProjectionIssue(
+                field=field,
+                observed_bytes=observed,
+                budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+            )
+        )
+        detail = detail.model_copy(update={field: None, "projection_issues": issues})
+        if _response_bytes(detail) + envelope_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
+            return detail
+    # Never truncate identity or authority to manufacture a fitting observation.
+    raise OperationResponseTooLarge(_response_bytes(detail) + envelope_bytes)
+
+
+def bounded_operations_response(
+    page: OperationListPage,
+    details: Sequence[OperationDetailResponse],
+    *,
+    cursors: CursorCodec,
+    state: str | None,
+    node_id: str | None,
+    request_id: str | None,
+) -> OperationsResponse:
+    """Largest contiguous byte-sized page, with true total and signed boundary."""
+    context = {"state": state, "node_id": node_id, "request_id": request_id}
+
+    def continuation(index: int) -> str | None:
+        if index == len(details) - 1:
+            return page.next_cursor
+        created_at, operation_id = _operation_boundary(
+            operation_item(page.items[index])
+        )
+        return cursors.encode(
+            resource="operations",
+            order="created-at-desc/id-desc/v1",
+            context=context,
+            boundary=[created_at.isoformat(), operation_id],
+        )
+
+    projected: list[OperationDetailResponse] = []
+    prefix_bytes = 0
+    best_count = 0
+    best_cursor = None
+    cursorless_envelope = _response_bytes(
+        OperationsResponse(operations=[], total=page.total, next_cursor=None)
+    )
+    for index, detail in enumerate(details):
+        cursor = continuation(index)
+        single = OperationsResponse(
+            operations=[detail], total=page.total, next_cursor=cursor
+        )
+        envelope = _response_bytes(single) - _response_bytes(detail)
+        try:
+            projected_detail = bounded_operation_detail(detail, envelope_bytes=envelope)
+        except OperationResponseTooLarge:
+            if not projected:
+                raise
+            # This row remains the first boundary of a later page. It cannot
+            # poison an earlier fitting contiguous prefix or be skipped.
+            break
+        projected.append(projected_detail)
+        prefix_bytes += _response_bytes(projected_detail)
+        comma_bytes = len(projected) - 1
+        exact_envelope = _response_bytes(
+            OperationsResponse(operations=[], total=page.total, next_cursor=cursor)
+        )
+        if exact_envelope + prefix_bytes + comma_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
+            best_count = len(projected)
+            best_cursor = cursor
+        if (
+            cursorless_envelope + prefix_bytes + comma_bytes
+            > MAX_CONTROL_DOCUMENT_BYTES
+        ):
+            # Even removing the cursor cannot make this or a longer prefix fit.
+            break
+    if not details:
+        return OperationsResponse(
+            operations=[], total=page.total, next_cursor=page.next_cursor
+        )
+    if best_count == 0:
+        raise OperationResponseTooLarge(cursorless_envelope + prefix_bytes)
+    return OperationsResponse(
+        operations=projected[:best_count], total=page.total, next_cursor=best_cursor
     )
 
 

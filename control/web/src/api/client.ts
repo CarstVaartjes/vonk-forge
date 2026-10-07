@@ -1,7 +1,7 @@
 import {FleetEventConnection} from "./fleet-event-connection";
 import {readObservationTransfer} from "./observation-transfer";
 import createClient, {createQuerySerializer} from "openapi-fetch";
-import {ContractResponse, readControlResponse, serializeControlBody, validateControlBody, validateControlParameters} from "./contract-json";
+import {ContractResponse, readControlResponse, readControlResponseText, serializeControlBody, validateControlBody, validateControlParameters} from "./contract-json";
 import {stringifyContractJson, parseContractJson, isWireNumber, formatWire} from "./contract-numeric";
 import {AuthenticationRequired} from "../auth";
 import type {components, paths} from "./generated";
@@ -168,9 +168,12 @@ export class ApiClient implements ControlApi {
         return request;
       },
       onResponse: async ({request, response}) => {
-        const text = await response.text();
+        let text: string;
         let value: unknown;
-        try { value = validateControlBody(request.method, request.url, response.status, response.headers.get("content-type") ?? "", text); }
+        try {
+          text = await readControlResponseText(response, request.method, request.url);
+          value = validateControlBody(request.method, request.url, response.status, response.headers.get("content-type") ?? "", text);
+        }
         catch (cause) { this.requireAuthentication(response, cause); throw cause; }
         this.requireAuthentication(response);
         if (!response.ok) {

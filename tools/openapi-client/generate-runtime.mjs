@@ -156,7 +156,16 @@ for (const [route, item] of Object.entries(document.paths)) {
         return [event, ref.slice(21)];
       }));
     }
-    routes.push({route, method: method.toUpperCase(), responses, requests, parameters, ...metadata});
+    const declaredResponseMaxBytes = operation["x-vonk-response-max-bytes"];
+    let responseMaxBytes;
+    if (declaredResponseMaxBytes !== undefined) {
+      const budgetToken = declaredResponseMaxBytes instanceof LosslessNumber ? declaredResponseMaxBytes.value : "";
+      if (!/^[1-9][0-9]*$/.test(budgetToken) || BigInt(budgetToken) > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error(`Invalid producer response byte budget: ${method} ${route}`);
+      }
+      responseMaxBytes = Number(budgetToken);
+    }
+    routes.push({route, method: method.toUpperCase(), responses, requests, parameters, responseMaxBytes, ...metadata});
   }
 }
 const shapes = Object.create(null);
@@ -188,7 +197,7 @@ if (schemaOnly) {
 }
 // Ajv's generated code is JavaScript. Keep it JavaScript instead of inventing
 // annotations or suppressing TypeScript errors in a generated .ts file.
-fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>; recordMaxBytes?: number; observationPayload?: string; frameMaxBytes?: number; sseEvents?: Readonly<Record<string, string>>}[];\n');
+fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>; responseMaxBytes?: number; recordMaxBytes?: number; observationPayload?: string; frameMaxBytes?: number; sseEvents?: Readonly<Record<string, string>>}[];\n');
 // Route tables refer to the actual exported functions, never string names.
 const routeCode = JSON.stringify(routes).replace(/"(contract[0-9]+)"/g, "$1");
 const destination = path.join(out, "runtime.generated.js");
