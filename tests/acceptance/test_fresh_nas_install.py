@@ -418,7 +418,7 @@ def run(
     command: list[str],
     *,
     cwd: Path,
-    timeout: int = 300,
+    timeout: float = 300,
     allow_output: bool = True,
     environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -717,6 +717,16 @@ def compose_services(bundle: Path) -> set[str]:
     return {line for line in output.stdout.splitlines() if line}
 
 
+def assert_running_package_identity(role: str, identity: dict[str, object]) -> None:
+    source = identity["source_sha"]
+    if not isinstance(source, str) or re.fullmatch(r"[0-9a-f]{40}", source) is None:
+        raise AcceptanceError(f"running {role} package has unknown source")
+    for field in ("control_contract_sha256", "worker_contract_sha256"):
+        digest = identity[field]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise AcceptanceError(f"running {role} package has unknown {field}")
+
+
 def verify_deployed_controller_identity(bundle: Path) -> None:
     source = required_environment("VONK_ACCEPTANCE_SOURCE_SHA")
     if re.fullmatch(r"[0-9a-f]{40}", source) is None:
@@ -750,14 +760,44 @@ with response:
     observation = receive_observation(response, resource="platform", record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES, deadline=deadline, validate_record=validate_record, validate_payload=validate_payload)
 print(json.dumps({"package": asdict(identity), "observation": observation}))
 """
-    result = run(
-        [*reference_compose(), "exec", "-T", "control-api", "python", "-c", script],
-        cwd=bundle,
-        timeout=20,
-    )
-    document = json.loads(result.stdout)
-    package = document["package"]
-    observation = document["observation"]
+    # Compose health can precede the worker's first completed loop, especially
+    # after restart. Re-observe within the existing capture subprocess budget;
+    # never reuse a pre-restart receipt or extend the Controller freshness window.
+    deadline = time.monotonic() + 20
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceError(
+                "worker provenance is not available from a fresh completed loop"
+            )
+        result = run(
+            [*reference_compose(), "exec", "-T", "control-api", "python", "-c", script],
+            cwd=bundle,
+            timeout=remaining,
+        )
+        document = json.loads(result.stdout)
+        package = document["package"]
+        observation = document["observation"]
+        assert_running_package_identity("API", package)
+        if observation["api"]["source_sha"] != package["source_sha"]:
+            raise AcceptanceError(
+                "running API observation differs from its installed package source"
+            )
+        if (
+            observation["api"]["control_contract_sha256"]
+            != package["control_contract_sha256"]
+        ):
+            raise AcceptanceError(
+                "running API contract differs from its installed package"
+            )
+        if observation["worker_issue"] != "worker-observation-unavailable":
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceError(
+                "worker provenance is not available from a fresh completed loop"
+            )
+        time.sleep(min(1, remaining))
     worker_script = """
 import json
 from dataclasses import asdict
@@ -778,27 +818,7 @@ print(json.dumps(asdict(packaged_runtime_identity())))
         timeout=20,
     )
     worker_package = json.loads(worker_result.stdout)
-    for role, identity in (("API", package), ("worker", worker_package)):
-        if (
-            not isinstance(identity["source_sha"], str)
-            or re.fullmatch(r"[0-9a-f]{40}", identity["source_sha"]) is None
-        ):
-            raise AcceptanceError(f"running {role} package has unknown source")
-        for field in ("control_contract_sha256", "worker_contract_sha256"):
-            if (
-                not isinstance(identity[field], str)
-                or re.fullmatch(r"[0-9a-f]{64}", identity[field]) is None
-            ):
-                raise AcceptanceError(f"running {role} package has unknown {field}")
-    if observation["api"]["source_sha"] != package["source_sha"]:
-        raise AcceptanceError(
-            "running API observation differs from its installed package source"
-        )
-    if (
-        observation["api"]["control_contract_sha256"]
-        != package["control_contract_sha256"]
-    ):
-        raise AcceptanceError("running API contract differs from its installed package")
+    assert_running_package_identity("worker", worker_package)
     workers = observation["workers"]
     if not workers or observation["worker_issue"] is not None:
         raise AcceptanceError(
